@@ -78,3 +78,5 @@ The browser regression runs the real app-server against a local model-response f
 ## Tool output
 
 Expand a completed command row to inspect its combined output, exit code, and duration. Failed commands retain their output too. `pnpm bdb timeline AGENT_ID --all --json` exposes the same `item.result`. Results appear when the native tool item completes; incremental command output is not currently streamed. Long output is a bounded preview with an explicit truncation notice.
+
+New sessions use Codex paginated history to preserve tool output across process restarts. Imported legacy sessions may lack historical command records in `thread/read`; create a new session when validating durable tool results.

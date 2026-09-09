@@ -112,6 +112,7 @@ export class CodexAppServerSession implements AgentSession {
     const session = new CodexAppServerSession(transport, stored);
     await session.initialize();
     const response = await transport.request('thread/start', {
+      historyMode: 'paginated',
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),

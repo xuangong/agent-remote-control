@@ -9,14 +9,17 @@ import { describe, expect, it } from 'vitest';
 
 import { CodexAppServerProvider } from './provider.js';
 
-function responseSse(): string {
+function responseSse(toolCompleted: boolean): string {
   const events = [
     { type: 'response.created', response: { id: 'response-1' } },
     {
       type: 'response.output_item.done',
-      item: {
+      item: toolCompleted ? {
         type: 'message', role: 'assistant', id: 'message-1',
         content: [{ type: 'output_text', text: 'LOCAL_PROCESS_OK' }],
+      } : {
+        type: 'function_call', id: 'function-1', call_id: 'command-1', name: 'exec_command',
+        arguments: JSON.stringify({ cmd: 'printf TOOL_HISTORY_OK', max_output_tokens: 1000 }),
       },
     },
     {
@@ -32,7 +35,8 @@ function responseSse(): string {
 
 async function startResponsesServer(): Promise<{ url: string; close(): Promise<void> }> {
   const server = createServer((request, response) => {
-    request.resume();
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
     request.on('end', () => {
       if (request.method !== 'POST' || request.url !== '/v1/responses') {
         response.statusCode = 404;
@@ -41,7 +45,8 @@ async function startResponsesServer(): Promise<{ url: string; close(): Promise<v
       }
       response.statusCode = 200;
       response.setHeader('content-type', 'text/event-stream');
-      response.end(responseSse());
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { input?: Array<{ type?: string; call_id?: string }> };
+      response.end(responseSse(body.input?.some((item) => item.type === 'function_call_output' && item.call_id === 'command-1') ?? false));
     });
   });
   server.listen(0, '127.0.0.1');
@@ -101,6 +106,13 @@ stream_max_retries = 0
       expect(liveEvents).toContainEqual(expect.objectContaining({
         type: 'timeline', item: expect.objectContaining({ type: 'assistant_message', text: 'LOCAL_PROCESS_OK' }),
       }));
+      const expectedTool = expect.objectContaining({
+        type: 'timeline', item: expect.objectContaining({
+          type: 'tool_call', callId: 'command-1', status: 'completed',
+          result: expect.objectContaining({ content: [{ type: 'text', stream: 'combined', text: 'TOOL_HISTORY_OK' }], exitCode: 0 }),
+        }),
+      });
+      expect(liveEvents).toContainEqual(expectedTool);
       const persistence = (await created.runtimeInfo()).persistence!;
       await created.dispose();
 
@@ -113,6 +125,7 @@ stream_max_retries = 0
       expect(history).toContainEqual(expect.objectContaining({
         type: 'timeline', item: expect.objectContaining({ type: 'assistant_message', text: 'LOCAL_PROCESS_OK' }),
       }));
+      expect(history).toContainEqual(expectedTool);
       await resumed.dispose();
     } finally {
       await responses.close();

@@ -4,12 +4,15 @@ import type { AgentPersistenceHandle } from '@borgee/agent-provider-sdk';
 
 export type ProviderCatalogStatus = 'loading' | 'ready' | 'empty' | 'error';
 
+export interface ProviderSessionChoice extends AgentProviderDescriptor { selectionId?: string }
+
 export interface ProviderSessionControlsProps {
-  providers: readonly AgentProviderDescriptor[];
+  providers: readonly ProviderSessionChoice[];
   selectedProviderId: string;
   catalogStatus: ProviderCatalogStatus;
   catalogError?: string;
   creating: boolean;
+  unavailableReason?: string;
   children?: ReactNode;
   configurationLocked?: boolean;
   planning?: boolean;
@@ -21,14 +24,15 @@ export interface ProviderSessionControlsProps {
   onResumeSession?(): void;
 }
 
-export function ProviderSessionControls({ providers, selectedProviderId, catalogStatus, catalogError, creating, persistence, children, configurationLocked, planning = false, onPlanningChange, onSelectedProviderChange, onRetryProviders, onCreateSession, onResumeSession }: ProviderSessionControlsProps) {
-  const canCreate = providers.some((provider) => provider.providerId === selectedProviderId) && !creating;
+export function ProviderSessionControls({ providers, selectedProviderId, catalogStatus, catalogError, creating, unavailableReason, persistence, children, configurationLocked, planning = false, onPlanningChange, onSelectedProviderChange, onRetryProviders, onCreateSession, onResumeSession }: ProviderSessionControlsProps) {
+  const canCreate = providers.some((provider) => (provider.selectionId ?? provider.providerId) === selectedProviderId) && !creating && !unavailableReason;
   const canResume = persistence !== undefined && onResumeSession !== undefined && !creating;
   return <section className="lab-panel lab-provider-controls" aria-label="Provider and session controls">
     <p className="lab-eyebrow">Session intake</p>
     <label htmlFor="provider-select">Provider</label>
     <select id="provider-select" data-testid="provider-select" value={selectedProviderId} onChange={(event) => onSelectedProviderChange(event.target.value)} disabled={providers.length === 0 || creating || configurationLocked}>
-      {providers.length === 0 ? <option value="">No provider registered</option> : providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}
+      {!selectedProviderId && providers.length > 0 ? <option value="" disabled>Select a Provider</option> : null}
+      {providers.length === 0 ? <option value="">No provider registered</option> : providers.map((provider) => <option key={provider.selectionId ?? provider.providerId} value={provider.selectionId ?? provider.providerId}>{provider.displayName}</option>)}
     </select>
     {onPlanningChange ? <>
       <label htmlFor="session-mode">New session mode</label>
@@ -42,7 +46,7 @@ export function ProviderSessionControls({ providers, selectedProviderId, catalog
     {catalogStatus === 'loading' ? <p className="lab-control-note" role="status" aria-live="polite">Loading providers</p> : null}
     {catalogStatus === 'empty' ? <p id="session-create-note" className="lab-control-note">No Provider is registered in this lab server.</p> : null}
     {catalogStatus === 'error' ? <p id="session-create-note" className="lab-control-note" role="alert">{catalogError}<button type="button" data-testid="provider-retry" onClick={onRetryProviders}>Retry providers</button></p> : null}
-    {catalogStatus !== 'empty' && catalogStatus !== 'error' ? <p id="session-create-note" className="lab-control-note">Creates a session through the relay.</p> : null}
+    {catalogStatus !== 'empty' && catalogStatus !== 'error' ? <p id="session-create-note" className="lab-control-note">{unavailableReason ?? 'Creates a session through the relay.'}</p> : null}
     <button type="button" data-testid="session-resume" onClick={onResumeSession} disabled={!canResume} aria-describedby="session-resume-note">Resume session</button>
     <p id="session-resume-note" className="lab-control-note" role="status" aria-live="polite">{creating ? 'A session transition is in progress.' : persistence ? `Resume is available for ${persistence.sessionId}.` : 'No resumable session is active.'}</p>
   </section>;

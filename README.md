@@ -41,7 +41,7 @@ export AGENT_REMOTE_INSTANCE_NAME="My DSH"
 dsh --profile web --host 127.0.0.1 --port 3081
 ```
 
-The plugin also accepts Cordis configuration fields `serverUrl`, `remoteKey`, and `instanceName`. Select the registered Host in the workbench, choose an existing session or create one in a native workspace, then connect. The native DSH installation continues to own model selection, credentials, persistence, and approval services.
+The plugin also accepts Cordis configuration fields `serverUrl`, `remoteKey`, and `instanceName`. Each paired Host appears in the workbench's Provider selector as `DSH · <Host name> · Online/Offline`, alongside local Providers. Selecting it switches session discovery and workspace selection to that installation. Choose a workspace and click **Open session**, or select an existing session from the directory. Offline Hosts remain visible, with creation disabled; another Provider can still be selected. The native DSH installation continues to own model selection, credentials, persistence, and approval services.
 
 Keys are valid for new connections for 24 hours and bind to one installation. Established connections remain active after key expiry until they disconnect. Restarting the workbench clears temporary keys and host bindings, so generate a new key and reconnect the plugin. Host reconnection within the same workbench process restores session bindings on demand without replaying message submissions or uncertain creation requests.
 

@@ -105,7 +105,8 @@ export function App({
   const compactLayoutRef = useRef(isCompactLayout());
   const focusTimelineAfterAttachRef = useRef(false);
   const [providers, setProviders] = useState<readonly AgentProviderDescriptor[]>([]);
-  const [providerId, setProviderId] = useState('');
+  const [localProviderId, setLocalProviderId] = useState('');
+  const providerId = selectedHost.id === 'local' ? localProviderId : selectedHost.providerId ?? 'dsh';
   const [createPlanning, setCreatePlanning] = useState(false);
   const [questionDrafts, setQuestionDrafts] = useState<Readonly<Record<string, Readonly<Record<string, QuestionDraft>>>>>({});
   const [providerName, setProviderName] = useState(initialProviderName);
@@ -130,7 +131,7 @@ export function App({
       const available = await transport.listProviders();
       if (providerRequestGenerationRef.current !== generation) return;
       setProviders(available);
-      setProviderId((selected) => available.some((provider) => provider.providerId === selected)
+      setLocalProviderId((selected) => available.some((provider) => provider.providerId === selected)
         ? selected
         : (available[0]?.providerId ?? ''));
       setCatalogStatus(available.length > 0 ? 'ready' : 'empty');
@@ -140,6 +141,33 @@ export function App({
       setCatalogError(message(error, 'Provider list could not be loaded.'));
     }
   }, [transport]);
+
+  const providerChoices = [
+    ...providers.map((provider) => ({ ...provider, hostId: 'local', selectionId: provider.providerId })),
+    ...remoteHosts.filter((host) => host.id !== 'local').map((host) => ({
+      providerId: host.providerId ?? 'dsh', hostId: host.id,
+      selectionId: JSON.stringify([host.id, host.providerId ?? 'dsh']),
+      displayName: `DSH · ${host.name} · ${host.online ? 'Online' : 'Offline'}`,
+    })),
+  ];
+  const selectedProviderChoice = providerChoices.find((choice) => choice.hostId === selectedHost.id && choice.providerId === providerId);
+  const selectedHostOffline = selectedHost.id !== 'local' && remoteHosts.find((host) => host.id === selectedHost.id)?.online !== true;
+
+  function selectHost(host: RemoteHost): void {
+    if (creationLocked || transitionRef.current) return;
+    setSelectedHost(host);
+    setSessionOptions({});
+    setCreatePlanning(false);
+  }
+
+  function selectProvider(selectionId: string): void {
+    if (creationLocked || transitionRef.current) return;
+    const choice = providerChoices.find((item) => item.selectionId === selectionId);
+    if (!choice) return;
+    const host = remoteHosts.find((item) => item.id === choice.hostId);
+    selectHost(host ?? { id: 'local', name: 'Local runtime', online: true });
+    if (choice.hostId === 'local') setLocalProviderId(choice.providerId);
+  }
 
   const attach = useCallback((agentId: string): void => {
     clientRef.current?.stop();
@@ -244,7 +272,7 @@ export function App({
   }
 
   async function createAgent(): Promise<void> {
-    if (!providerId || transitionRef.current) return;
+    if (!providerId || selectedHostOffline || transitionRef.current) return;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined);
@@ -264,7 +292,7 @@ export function App({
         const response = await transport.createAgent(agentId, providerId, { sessionId: agentId, ...(createPlanning ? { planning: true } : {}) });
         attach(response.payload.agentId);
       }
-      setProviderName(providers.find((provider) => provider.providerId === providerId)?.displayName ?? providerId);
+      setProviderName(selectedHost.id === 'local' ? selectedProviderChoice?.displayName ?? providerId : `DSH · ${selectedHost.name}`);
     } catch (error) {
       const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found'].includes(error.code ?? '');
       if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
@@ -322,6 +350,7 @@ export function App({
   const activeAgentId = state?.agent?.id ?? attachingAgentId;
   const connectionAgentId = state?.agent?.id ?? attachingAgentId ?? 'standby';
   const activeOpened = openedSessions.find((item) => item.agentId === activeAgentId);
+  const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);
   const hostOffline = activeHost?.online === false;
   const connectionProviderName = providerName ?? state?.agent?.providerId ?? 'No active Agent';
@@ -347,7 +376,7 @@ export function App({
     setPlanning: async (active) => runMutation(() => activeClient().setPlanning(active)),
     respondToInteraction: async (requestId, response) => runMutation(() => activeClient().respondToInteraction(requestId, response)),
     requestResource: async (binding) => { await activeClient().requestResource(binding.resourceId); },
-    ...(fixtureAction && activeAgentId ? {
+    ...(fixtureAction && activeAgentId && !activeRemoteSession ? {
       advanceFixture: () => fixtureAction(activeAgentId, 'advance'),
       rehydrateFixture: () => fixtureAction(activeAgentId, 'rehydrate'),
       stopReader: () => fixtureAction(activeAgentId, 'stop-reader'),
@@ -435,26 +464,24 @@ export function App({
         <p className="lab-eyebrow">Context</p>
         <span title={baseUrl}>Connected runtime · {new URL(baseUrl, window.location.origin).host}</span>
       </div>
-      {directory ? <HostPairing service={hostClient} selectedHostId={selectedHost.id} onNewSession={() => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError} onRetryHosts={retryHosts} onSelect={(host) => {
-        if (creationLocked) return;
-        setSelectedHost(host); setProviderId(host.id === 'local' ? providers[0]?.providerId ?? '' : 'dsh'); setSessionOptions({}); setCreatePlanning(false);
-      }} /> : null}
+      {directory ? <HostPairing service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={() => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {directory ? <SessionDirectory directory={directory} providerId={providerId} activeAgentId={activeAgentId} opened={openedSessions} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       <ProviderSessionControls
-        providers={selectedHost.id === 'local' ? providers : [{ providerId: 'dsh', displayName: 'DSH' }]}
-        selectedProviderId={providerId}
-        catalogStatus={catalogStatus}
+        providers={providerChoices}
+        selectedProviderId={selectedProviderChoice?.selectionId ?? ''}
+        catalogStatus={selectedHost.id !== 'local' || (catalogStatus === 'empty' && providerChoices.length > 0) ? 'ready' : catalogStatus}
         catalogError={catalogError}
-        creating={transitioning || remoteHosts.find((host) => host.id === selectedHost.id)?.online === false}
+        creating={transitioning}
+        unavailableReason={selectedHostOffline ? 'This Host is offline. Reconnect it or select another Provider.' : undefined}
         planning={createPlanning}
         configurationLocked={creationLocked}
         onPlanningChange={providerId !== 'dsh' && !creationLocked ? setCreatePlanning : undefined}
         onRetryProviders={() => void loadProviders()}
         persistence={state?.agent?.persistence}
-        onSelectedProviderChange={(value) => { if (creationLocked) return; setProviderId(value); setSessionOptions({}); setCreatePlanning(false); }}
+        onSelectedProviderChange={selectProvider}
         onCreateSession={() => void createAgent()}
-        onResumeSession={() => void resumeAgent()}
-      >{directory ? <SessionConfiguration directory={directory} providerId={providerId} value={sessionOptions} disabled={transitioning || creationLocked} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
+        onResumeSession={activeRemoteSession ? undefined : () => void resumeAgent()}
+      >{directory ? <SessionConfiguration directory={directory} providerId={providerId} value={sessionOptions} disabled={transitioning || creationLocked || selectedHostOffline} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
       {clientActions.advanceFixture || clientActions.rehydrateFixture || clientActions.stopReader ? <RecordedPlaybackControls
         onAdvance={clientActions.advanceFixture}
         onRehydrate={clientActions.rehydrateFixture}

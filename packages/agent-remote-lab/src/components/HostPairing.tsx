@@ -8,8 +8,8 @@ export interface HostPairingService {
   pair(): Promise<PairingInvitation>;
 }
 
-export function HostPairing({ service, selectedHostId, onSelect, hosts, hostError, onRetryHosts, onNewSession }: {
-  service: HostPairingService; selectedHostId: string; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
+export function HostPairing({ service, selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession }: {
+  service: HostPairingService; selectedHostId: string; selectionLocked?: boolean; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
 }) {
   const [failure, setFailure] = useState<string>();
   const [invitation, setInvitation] = useState<PairingInvitation | undefined>(service.invitation);
@@ -37,7 +37,7 @@ export function HostPairing({ service, selectedHostId, onSelect, hosts, hostErro
   return <section className="lab-host-pairing" aria-label="Remote Hosts">
     <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
     <label htmlFor="remote-host">Connected Host</label>
-    <select id="remote-host" value={selectedHostId} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
+    <select id="remote-host" value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
       {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}</option>) : <option value="local">Local runtime</option>}
     </select>
     {onNewSession ? <button type="button" onClick={onNewSession}>New session</button> : null}

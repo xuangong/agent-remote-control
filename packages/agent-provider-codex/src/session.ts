@@ -18,14 +18,15 @@ import { collectCodexThreadHistoryItems, projectCodexThreadHistory } from './his
 import { isRecord, readItem, readItemId, readString } from './native.js';
 import { CodexEventProjector } from './projector.js';
 import { readCodexPlanningModes, type CodexPlanningModes } from './planning.js';
+import { initializeCodexTransport } from './initialize.js';
 
 const PROVIDER_ID = 'codex';
 
 export const CODEX_CAPABILITIES: AgentCapabilities = {
   history: true,
   sendMessage: true,
-  steer: false,
-  cancel: false,
+  steer: true,
+  cancel: true,
   readResource: false,
   planning: false,
   interactions: {
@@ -88,6 +89,7 @@ export class CodexAppServerSession implements AgentSession {
   private planningModes: CodexPlanningModes | undefined;
   private latestPlan: { id: string; text: string } | undefined;
   private startingTurn = false;
+  private activeTurnId: string | undefined;
 
   private constructor(
     private readonly transport: CodexAppServerTransport,
@@ -132,12 +134,13 @@ export class CodexAppServerSession implements AgentSession {
     session.threadId = handle.sessionId;
     session.projector = new CodexEventProjector(handle.sessionId);
     await session.initialize();
-    await transport.request('thread/resume', {
+    const resumed = await transport.request('thread/resume', {
       threadId: handle.sessionId,
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),
     });
+    session.setThreadFromResponse(resumed, 'thread/resume');
     const history = await transport.request('thread/read', {
       threadId: handle.sessionId,
       includeTurns: true,
@@ -168,6 +171,22 @@ export class CodexAppServerSession implements AgentSession {
     await this.startTurn(text);
   }
 
+  async steer(text: string): Promise<void> {
+    this.assertOpen();
+    if (!this.activeTurnId) throw new Error('Codex has no active turn.');
+    if (!text.trim()) throw new Error('Codex message must not be empty.');
+    await this.transport.request('turn/steer', {
+      threadId: this.threadId, expectedTurnId: this.activeTurnId,
+      input: [{ type: 'text', text, text_elements: [] }],
+    });
+  }
+
+  async cancel(): Promise<void> {
+    this.assertOpen();
+    if (!this.activeTurnId) throw new Error('Codex has no active turn.');
+    await this.transport.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId });
+  }
+
   private async startTurn(text: string): Promise<void> {
     this.assertOpen();
     if (!this.threadId) throw new Error('Codex session has no thread');
@@ -186,6 +205,7 @@ export class CodexAppServerSession implements AgentSession {
       });
       if (statusRevision === this.statusRevision && isRecord(result) && isRecord(result.turn) && readString(result.turn.id)) {
         this.runtimeStatus = 'running';
+        this.activeTurnId = readString(result.turn.id);
       }
     } finally {
       this.startingTurn = false;
@@ -272,19 +292,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private async initialize(): Promise<void> {
-    await this.transport.request('initialize', {
-      clientInfo: {
-        name: 'codex_app_server_daemon',
-        title: 'Codex App Server Daemon',
-        version: '0.0.0',
-      },
-      capabilities: {
-        experimentalApi: true,
-        requestAttestation: false,
-        mcpServerOpenaiFormElicitation: true,
-      },
-    });
-    this.transport.notify('initialized', {});
+    await initializeCodexTransport(this.transport);
     let modes: unknown;
     try {
       modes = await this.transport.request('collaborationMode/list', {});
@@ -372,6 +380,7 @@ export class CodexAppServerSession implements AgentSession {
       this.nativeTurnRevision += 1;
     }
     if (observation.event.type === 'turn_started') {
+      this.activeTurnId = observation.event.turnId;
       this.statusRevision += 1;
       this.runtimeStatus = 'running';
     }
@@ -382,6 +391,7 @@ export class CodexAppServerSession implements AgentSession {
     ) {
       this.statusRevision += 1;
       this.runtimeStatus = observation.event.type === 'turn_failed' ? 'failed' : 'idle';
+      this.activeTurnId = undefined;
     }
     this.emit(observation);
     if (observation.event.type === 'turn_completed' && this.config.collaborationMode === 'plan' && this.latestPlan) {

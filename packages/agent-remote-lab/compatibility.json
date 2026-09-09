@@ -65,7 +65,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:ee8c934b25c9d82838349025a2a86badc4cebe2e7459416a63f0d65e5736ffc5"
+      "digest": "sha256:0d282fd7d31f4f3d5cbe0fbae8335668d3de0c23808bc39e2d3041d0d2ceb50e"
     }
   },
   "providers": [
@@ -97,16 +97,6 @@
         "revision": null
       },
       "degradations": [
-        {
-          "capability": "steer",
-          "status": "unsupported",
-          "reason": "The Codex adapter does not expose steering."
-        },
-        {
-          "capability": "cancel",
-          "status": "unsupported",
-          "reason": "The Codex adapter does not expose cancellation."
-        },
         {
           "capability": "readResource",
           "status": "unsupported",

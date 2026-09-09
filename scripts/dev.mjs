@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 
-const mode = process.argv[2] ?? 'recorded';
-if (!['recorded', 'codex', 'web'].includes(mode)) throw new Error('Usage: pnpm dev [recorded|codex|web]');
+const mode = process.argv[2] ?? 'local';
+if (!['local', 'recorded', 'codex', 'codex-fixture', 'web'].includes(mode)) throw new Error('Usage: pnpm dev [local|codex|recorded|codex-fixture|web]');
 const host = '127.0.0.1';
 const relayPort = Number(process.env.AGENT_REMOTE_PORT ?? 5910);
 const webPort = Number(process.env.AGENT_REMOTE_WEB_PORT ?? 6175);
@@ -29,7 +29,7 @@ function shutdown(code = 0) {
 function start(args) {
   const child = spawn('pnpm', ['--filter', 'agent-remote-lab', 'exec', ...args], {
     stdio: 'inherit', detached: process.platform !== 'win32',
-    env: { ...process.env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_ORIGIN: `http://${host}:${webPort}`, VITE_AGENT_REMOTE_RELAY_TARGET: `http://${host}:${relayPort}`, ...(mode === 'recorded' ? { VITE_AGENT_REMOTE_FIXTURE_ENDPOINT: '/v1/lab/recorded' } : {}) },
+    env: { ...process.env, AGENT_REMOTE_WORKSPACE: process.env.AGENT_REMOTE_WORKSPACE ?? process.cwd(), AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_ORIGIN: `http://${host}:${webPort}`, VITE_AGENT_REMOTE_RELAY_TARGET: `http://${host}:${relayPort}`, ...(['local', 'codex', 'recorded'].includes(mode) ? { VITE_AGENT_REMOTE_FIXTURE_ENDPOINT: '/v1/lab/recorded' } : {}) },
   });
   children.add(child);
   child.once('error', (error) => { console.error(error); shutdown(1); });
@@ -37,6 +37,6 @@ function start(args) {
 }
 process.once('SIGINT', () => shutdown());
 process.once('SIGTERM', () => shutdown());
-if (mode !== 'web') start(['tsx', `src/server/${mode}.ts`]);
+if (mode !== 'web') start(['tsx', `src/server/${mode === 'codex' ? 'local' : mode === 'codex-fixture' ? 'codex' : mode}.ts`]);
 start(['vite', '--host', host, '--port', String(webPort), '--strictPort']);
 console.log(`Agent Remote Control: http://${host}:${webPort}`);

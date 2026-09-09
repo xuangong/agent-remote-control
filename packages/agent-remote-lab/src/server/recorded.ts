@@ -412,7 +412,7 @@ export function createRecordedValidationServer(options: RecordedLabProviderOptio
   return { ...server, recorded: controller };
 }
 
-function attachFixtureControls(
+export function attachFixtureControls(
   server: ReturnType<typeof createProtocolValidationServer>,
   controller: RecordedLabController,
 ): void {

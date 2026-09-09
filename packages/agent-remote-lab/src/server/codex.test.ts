@@ -114,8 +114,6 @@ describe('Codex Lab composition', () => {
           providerId: 'codex',
           native: { name: 'codex-cli', version: overrides.codexVersion ?? '0.148.0', revision: null },
           degradations: [
-            { capability: 'steer', status: 'unsupported', reason: 'Not exposed by the adapter.' },
-            { capability: 'cancel', status: 'unsupported', reason: 'Not exposed by the adapter.' },
             { capability: 'readResource', status: 'unsupported', reason: 'Not exposed by the adapter.' },
             {
               capability: 'events.thread/name', status: 'degraded',

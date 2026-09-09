@@ -3,6 +3,12 @@ import { PassThrough } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 export interface FakeChildProcess extends ChildProcessWithoutNullStreams {
+  stdin: PassThrough;
+  stdout: PassThrough;
+  stderr: PassThrough;
+  killed: boolean;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
   emitExit(code?: number | null, signal?: NodeJS.Signals | null): void;
 }
 

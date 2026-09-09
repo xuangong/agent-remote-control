@@ -29,7 +29,7 @@ export function createProtocolValidationServer(options: ProtocolValidationServer
       await broker.close();
       await http.close();
       await relay.close();
-      directory.close();
+      await directory.close();
     },
   };
 }

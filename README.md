@@ -14,9 +14,19 @@ pnpm build
 pnpm dev
 ```
 
-Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` includes recorded sessions and the DSH pairing broker. It requires neither a Borgee checkout nor a Go server. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed.
+Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` includes the real Codex CLI Provider, recorded sessions, and the DSH pairing broker. Codex starts on demand when its native directory or a session is opened. It requires neither a Borgee checkout nor a Go server. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed.
 
 The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.148.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-remote-lab/compatibility.json).
+
+## Connect a real Codex CLI
+
+Select **Codex** in Session intake. The workbench manages `codex app-server` processes over stdio, discovers native threads, and resumes the selected thread with its history. It uses the CLI's native login and configuration; no plugin or pairing key is needed for this local Provider.
+
+```bash
+AGENT_REMOTE_CODEX_EXECUTABLE=/absolute/path/to/codex pnpm dev
+```
+
+The verified CLI version is `0.148.0`; older versions are rejected with an actionable message. Set `AGENT_REMOTE_CODEX_HOME` for an explicit native profile and `AGENT_REMOTE_WORKSPACE` for the default working directory. See [Codex installation and debugging](docs/runbooks/codex-debug.md) for an isolated Tencent-registry install and the process/session boundaries.
 
 ## Connect a real DSH installation
 
@@ -67,7 +77,7 @@ pnpm lint:docs
 
 Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing. Run `pnpm compatibility:update` after source changes, then `pnpm compatibility:check` to verify the declared implementation digest.
 
-`pnpm dev codex` runs the explicit Codex fixture. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md); these controlled fixtures are separate from the native Host connection above.
+`pnpm dev codex` runs the real local workbench. `pnpm dev codex-fixture` runs the deterministic Codex model fixture; `pnpm dev recorded` runs only Recorded and the DSH broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
 
 ## Package boundaries
 

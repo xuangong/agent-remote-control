@@ -376,7 +376,7 @@ export function App({
     setPlanning: async (active) => runMutation(() => activeClient().setPlanning(active)),
     respondToInteraction: async (requestId, response) => runMutation(() => activeClient().respondToInteraction(requestId, response)),
     requestResource: async (binding) => { await activeClient().requestResource(binding.resourceId); },
-    ...(fixtureAction && activeAgentId && !activeRemoteSession ? {
+    ...(fixtureAction && activeAgentId && state?.agent?.providerId === 'recorded' && !activeRemoteSession ? {
       advanceFixture: () => fixtureAction(activeAgentId, 'advance'),
       rehydrateFixture: () => fixtureAction(activeAgentId, 'rehydrate'),
       stopReader: () => fixtureAction(activeAgentId, 'stop-reader'),

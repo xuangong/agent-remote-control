@@ -133,6 +133,21 @@ describe('App', () => {
     expect(container.querySelector('[aria-label="Lab scenario controls"]')).toBeNull();
   });
 
+  it.each(['recorded', 'codex', 'dsh'])('offers recorded playback only for a recorded session with %s active', async (providerId) => {
+    const state = { ...replicaState, agent: { ...replicaState.agent!, providerId } };
+    const fixtureAction = vi.fn().mockResolvedValue(undefined);
+    const container = await render(<App initialState={state} initialSessionStatus="ready" fixtureAction={fixtureAction} />);
+    const advance = container.querySelector<HTMLButtonElement>('[data-testid="playback-advance"]');
+    if (providerId === 'recorded') {
+      expect(advance).not.toBeNull();
+      await act(async () => advance!.click());
+      expect(fixtureAction).toHaveBeenCalledWith(state.agent.id, 'advance');
+    } else {
+      expect(advance).toBeNull();
+      expect(fixtureAction).not.toHaveBeenCalled();
+    }
+  });
+
   it('composes Snapshot, Timeline, interactions, resources, and fixture controls without Provider branches', async () => {
     const state = {
       ...replicaState,

@@ -12,7 +12,7 @@ test('answers a Codex question and renders consecutive turns through the visible
   await expect(page.getByRole('heading', { name: 'Agent conversations' })).toBeVisible();
   await page.getByTestId('provider-select').selectOption({ label: 'Codex (fixture)' });
   await page.getByTestId('session-create').click();
-  await expect(page.getByTestId('connection-status')).toHaveText('ready', { timeout: 30_000 });
+  await expectReady(page);
 
   await page.getByTestId('prompt-input').fill(prompt);
   await page.getByTestId('prompt-submit').click();
@@ -21,28 +21,41 @@ test('answers a Codex question and renders consecutive turns through the visible
   await page.getByLabel('Yes (Recommended)').check();
   await page.getByRole('button', { name: 'Submit response' }).click();
   await expectAssistantTranscript(page, completion);
-  await expect(page.getByTestId('session-status')).toHaveText('idle', { timeout: 30_000 });
+  await expectIdle(page);
 
   await sendMessage(page, 'First message after the interaction.');
   await expect.poll(() => assistantOccurrenceCount(page, completion), { timeout: 60_000 }).toBe(2);
-  await expect(page.getByTestId('session-status')).toHaveText('idle', { timeout: 30_000 });
+  await expectIdle(page);
 
   await sendMessage(page, 'Second message after the interaction.');
   await expect.poll(() => assistantOccurrenceCount(page, completion), { timeout: 60_000 }).toBe(3);
-  await expect(page.getByTestId('session-status')).toHaveText('idle', { timeout: 30_000 });
+  await expectIdle(page);
 
   await page.reload();
-  await expect(page.getByTestId('connection-status')).toHaveText('ready', { timeout: 30_000 });
+  await expectReady(page);
   await expect(page.getByRole('article', { name: 'User message' })
     .filter({ hasText: 'Second message after the interaction.' })).toBeVisible();
   await page.getByRole('button', { name: 'Load earlier activity' }).click();
   await expect.poll(() => assistantOccurrenceCount(page, completion), { timeout: 30_000 }).toBe(3);
+  await page.getByRole('button', { name: 'Load earlier activity' }).click();
   await expect(page.getByRole('article', { name: 'User message' }).filter({ hasText: prompt })).toHaveCount(1);
-  await expect(page.getByTestId('session-status')).not.toHaveText('failed');
+  await expect(page.getByRole('button', { name: 'Load earlier activity' })).toHaveCount(0);
+  expect(await assistantOccurrenceCount(page, completion)).toBe(3);
+  await expectIdle(page);
   expect(browserErrors.console).toEqual([]);
   expect(browserErrors.page).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('codex-visible.png'), fullPage: true });
 });
+
+async function expectReady(page: Page): Promise<void> {
+  await expect(page.getByTestId('connection-summary')).toContainText('Ready', { timeout: 30_000 });
+  await expect(page.getByTestId('prompt-input')).toBeEnabled();
+}
+
+async function expectIdle(page: Page): Promise<void> {
+  await expectReady(page);
+  await expect(page.getByTestId('cancel-submit')).toBeDisabled({ timeout: 30_000 });
+}
 
 async function sendMessage(page: Page, text: string): Promise<void> {
   await page.getByTestId('prompt-input').fill(text);

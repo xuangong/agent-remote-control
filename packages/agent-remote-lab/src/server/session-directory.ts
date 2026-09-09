@@ -12,6 +12,7 @@ export interface SessionDirectorySource {
   models?(): unknown;
   create(input: Partial<AgentSessionConfig> & { workspaceId?: string }): Promise<string>;
   open(nativeSessionId: string): Promise<AgentSession>;
+  close?(): Promise<void>;
 }
 
 export function createSessionDirectory(providers: readonly AgentProviderAdapter[], sources: readonly SessionDirectorySource[] = []) {
@@ -63,7 +64,10 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
   };
   return {
     providers: adapters,
-    close() { for (const entry of entries.values()) entry.catalog.dispose(); },
+    async close() {
+      for (const entry of entries.values()) entry.catalog.dispose();
+      await Promise.all([...entries.values()].map((entry) => entry.source.close?.()));
+    },
     install(server: Server, relay: AgentRemoteRelay, origin: string) {
       const handlers = server.listeners('request');
       server.removeAllListeners('request');

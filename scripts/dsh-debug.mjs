@@ -195,7 +195,7 @@ async function main() {
       if (!relayReady) await freePort(relayPort);
       await freePort(webPort);
       console.log(relayReady ? 'Starting the workbench UI; reusing the running Relay...' : 'Starting the workbench and Relay...');
-      const workbench = start(pnpm, ['dev', relayReady ? 'web' : 'recorded'], { env: { ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_WEB_PORT: String(webPort) } });
+      const workbench = start(pnpm, ['dev', relayReady ? 'web' : 'local'], { env: { ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_WEB_PORT: String(webPort) } });
       await waitFor(async () => {
         if (!workbench.running) throw new Error('Workbench startup failed. Inspect the log above.');
         return await probe(options.serverUrl) && await probe(options.consoleUrl);

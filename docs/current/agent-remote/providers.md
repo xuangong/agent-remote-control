@@ -48,6 +48,10 @@ flowchart LR
 
 Relay delays readiness until it observes the single history boundary, buffers earlier live observations, and rejects history after that boundary; adapters therefore provide the history/live distinction rather than requiring Relay to identify native records (`packages/agent-remote-relay/src/agent-manager.ts:250-279`).
 
+## Codex process and native directory
+
+The default local workbench composes the real Codex Provider, Recorded, and the DSH Host broker. Codex owns one app-server child per open session, receives JSONL events over stdio, and retains a bounded stderr tail for exit diagnostics. It uses the selected native home and login. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in memory until attached, and server shutdown disposes those children. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-remote-lab/src/server/codex-directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
+
 ## Invariants
 
 - A native event unknown to an adapter cannot silently become a public wire value; supported meaning is normalized or a visible diagnostic is emitted, while known DSH bookkeeping and Codex transport, metadata, telemetry, or side-channel notifications without independent Timeline meaning are consumed before the public boundary (`packages/agent-provider-codex/src/projector.ts:25-140`, `packages/agent-provider-dsh/src/projector.ts:79-106`).
@@ -69,7 +73,7 @@ Relay delays readiness until it observes the single history boundary, buffers ea
 
 - The SDK is not a universal native-event ontology or a public wire schema; its Timeline values are event-specific strings and typed tool or task structures (`packages/agent-provider-sdk/src/observation.ts:3-76`).
 - The adapter layer does not own public-wire encoding or browser projection; its session contract stays above the Relay and Web package boundaries (`packages/agent-provider-sdk/src/provider.ts:4-58`, `packages/agent-remote-relay/src/agent-manager.ts:71-180`, `packages/agent-remote-web/src/headless.ts:1-7`).
-- An injected-message representation, plus Codex steer, cancel, and generated-resource reading, are not claimed. Codex thread names remain native metadata, and terminal-interaction activity remains a command side channel until the common Snapshot and tool detail gain matching state; the exact limitations are declared in the compatibility manifest (`packages/agent-remote-lab/compatibility.json:28-94`).
+- An injected-message representation and Codex generated-resource reading are not claimed. Codex thread names remain native metadata, and terminal-interaction activity remains a command side channel until the common Snapshot and tool detail gain matching state; the exact limitations are declared in the compatibility manifest (`packages/agent-remote-lab/compatibility.json:28-94`).
 
 ## Current vs Target
 

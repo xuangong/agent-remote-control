@@ -15,8 +15,6 @@ const requiredDegradations: Record<
     { capability: 'events.user-message.unknown-source', status: 'degraded' },
   ],
   codex: [
-    { capability: 'steer', status: 'unsupported' },
-    { capability: 'cancel', status: 'unsupported' },
     { capability: 'readResource', status: 'unsupported' },
     { capability: 'events.thread/name', status: 'degraded' },
     { capability: 'events.commandExecution/terminalInteraction', status: 'degraded' },

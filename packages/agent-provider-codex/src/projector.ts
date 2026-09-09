@@ -87,6 +87,19 @@ export class CodexEventProjector {
     if (nativeThreadId && nativeThreadId !== this.threadId) return null;
     const turnId = readTurnId(params);
 
+    if (method === 'mcpServer/startupStatus/updated' || method === 'hook/started' || method === 'hook/completed') {
+      if (!isRecord(params)) return this.invalidNotification(method, params, turnId);
+      const status = method === 'mcpServer/startupStatus/updated' ? params.status : isRecord(params.run) ? params.run.status : undefined;
+      if (typeof status !== 'string') return this.invalidNotification(method, params, turnId);
+      if (status !== 'failed') return null;
+      const name = readString(params.name) ?? (isRecord(params.run) ? readString(params.run.eventName) : undefined) ?? method;
+      const detail = readErrorMessage(params.error) ?? readString(params.failureReason) ?? (isRecord(params.run) ? readString(params.run.statusMessage) : undefined);
+      return this.observation(`runtime:${method}:${name}:failed`, {
+        type: 'timeline', provider: PROVIDER_ID, turnId,
+        item: { type: 'error', message: `${name} failed${detail ? `: ${detail}` : '.'}` },
+      });
+    }
+
     if (
       method === 'item/agentMessage/delta'
       || method === 'item/reasoning/summaryTextDelta'

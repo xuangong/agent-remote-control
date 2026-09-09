@@ -77,7 +77,7 @@ describe('Agent Remote compatibility manifest', () => {
   });
 
   it('requires the evidenced status for each degradation', () => {
-    process.env[manifestEnvironment] = writeManifest(validManifest({ codexSteerStatus: 'degraded' }));
+    process.env[manifestEnvironment] = writeManifest(validManifest({ codexResourceStatus: 'degraded' }));
 
     expect(() => loadCompatibilityManifest()).toThrow('Codex degradation');
   });
@@ -122,7 +122,7 @@ function validManifest(overrides: {
   omitDshUnknownSource?: boolean;
   omitCodexThreadName?: boolean;
   omitCodexTerminalInteraction?: boolean;
-  codexSteerStatus?: 'unsupported' | 'degraded';
+  codexResourceStatus?: 'unsupported' | 'degraded';
   duplicateDshTitle?: boolean;
   extraCodexDegradation?: boolean;
 } = {}): object {
@@ -140,12 +140,7 @@ function validManifest(overrides: {
     }] : []),
   ];
   const codexDegradations = overrides.emptyCodexDegradations ? [] : [
-    {
-      capability: 'steer', status: overrides.codexSteerStatus ?? 'unsupported',
-      reason: 'The adapter does not expose steering.',
-    },
-    { capability: 'cancel', status: 'unsupported', reason: 'The adapter does not expose cancellation.' },
-    { capability: 'readResource', status: 'unsupported', reason: 'The adapter does not expose resources.' },
+    { capability: 'readResource', status: overrides.codexResourceStatus ?? 'unsupported', reason: 'The adapter does not expose resources.' },
     ...(!overrides.omitCodexThreadName ? [{
       capability: 'events.thread/name', status: 'degraded',
       reason: 'Thread names remain native session metadata because the Agent Snapshot has no title field.',

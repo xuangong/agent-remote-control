@@ -6,11 +6,13 @@
   "description": "Independent agent session control and protocol workbench.",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "debug:dsh": "node scripts/dsh-debug.mjs",
     "build": "pnpm compatibility:update && pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "node scripts/run-tests.mjs unit",
     "test:e2e": "node scripts/run-tests.mjs e2e",
     "test:conformance": "node scripts/run-tests.mjs conformance",
+    "test:setup": "node scripts/run-tests.mjs setup",
     "compatibility:update": "node scripts/compatibility.mjs",
     "compatibility:check": "node scripts/compatibility.mjs --check",
     "lint:docs": "bash scripts/lint-mermaid.sh docs",

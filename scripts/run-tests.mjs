@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 
 const mode = process.argv[2] ?? 'unit';
 const commands = {
+  setup: ['exec', 'node', '--test', '--test-timeout=15000', 'scripts/dsh-debug.test.mjs'],
   unit: ['-r', 'run', 'test', '--hookTimeout=30000'],
   e2e: ['--filter', 'agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
   conformance: ['--filter', 'agent-remote-lab', 'run', 'test:conformance'],

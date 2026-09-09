@@ -20,6 +20,16 @@ The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages 
 
 ## Connect a real DSH installation
 
+Run the guided setup from the repository root. It installs the Host plugin, generates a temporary key, starts DSH, and checks Host registration and Web readiness:
+
+```bash
+node scripts/dsh-debug.mjs
+```
+
+For a source installation, pass `--dsh-repo /path/to/deepseek-harness`. Add `--build-dsh` to install its dependencies and build its official runtime artifacts. An installed CLI can be selected with `--dsh /path/to/dsh`. The default DSH home is isolated under `.runtime/dsh-debug/home`. See the [guided DSH debugging runbook](docs/runbooks/dsh-debug.md) for first-run setup, repeatable commands, ports, and troubleshooting.
+
+For manual installation:
+
 Build the independent outbound Host plugin:
 
 ```bash

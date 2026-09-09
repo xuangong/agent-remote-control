@@ -362,3 +362,19 @@
 .agent-tool-result-block { min-width: 0; margin-top: 8px; }
 .agent-tool-result-block pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; padding: 10px; background: var(--agent-code-bg, #f3f6f9); border-radius: 6px; font-size: 12px; line-height: 1.5; }
 .agent-tool-result-note { font-size: 12px; }
+
+.agent-form fieldset { display: grid; gap: 14px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.agent-form-field { display: grid; gap: 6px; min-width: 0; }
+.agent-form-field > span { font-weight: 600; }
+.agent-form-field small, .agent-external-action > small { color: var(--agent-muted); font-weight: 400; }
+.agent-form-field input, .agent-form-field select { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--agent-rule); border-radius: 4px; background: var(--agent-canvas); color: var(--agent-ink); font: inherit; }
+.agent-form-field input:focus-visible, .agent-form-field select:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+.agent-permission-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.agent-permission-list li { display: grid; gap: 3px; }
+.agent-permission-list code, .agent-approval-context dd { overflow-wrap: anywhere; white-space: pre-wrap; }
+.agent-permission-list strong { font-size: 11px; text-transform: uppercase; color: var(--agent-muted); }
+.agent-external-link { align-self: start; color: var(--agent-signal); overflow-wrap: anywhere; }
+.agent-form-receipt, .agent-approval-context { display: grid; gap: 9px; margin: 0; }
+.agent-form-receipt dt, .agent-approval-context dt { color: var(--agent-muted); font-size: 11px; }
+.agent-form-receipt dd, .agent-approval-context dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.agent-answer-hidden { color: var(--agent-muted); font-style: italic; }

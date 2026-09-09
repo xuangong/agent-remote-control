@@ -5,7 +5,7 @@ delete process.env.NO_COLOR;
 const relayPort = Number(process.env.AGENT_REMOTE_TEST_RELAY_PORT ?? 5910);
 const webPort = Number(process.env.AGENT_REMOTE_TEST_WEB_PORT ?? 6175);
 const browserExecutable = process.env.AGENT_REMOTE_TEST_BROWSER;
-const mode = process.env.DSH_REPO !== undefined
+const mode = process.env.AGENT_REMOTE_TEST_INTERACTIONS === '1' ? 'interactions' : process.env.DSH_REPO !== undefined
   ? 'dsh'
   : process.env.BORGEE_CODEX_TEST_EXECUTABLE !== undefined ? 'codex' : 'recorded';
 const runtimeEnvironment = `AGENT_REMOTE_PORT=${relayPort} AGENT_REMOTE_ORIGIN=http://127.0.0.1:${webPort}`;
@@ -17,6 +17,7 @@ const viteCommand = `${scenarioEndpoint ? `VITE_AGENT_REMOTE_FIXTURE_ENDPOINT=${
 
 export default defineConfig({
   testDir: './e2e',
+  ...(mode === 'interactions' ? { testMatch: 'interaction-capabilities.spec.ts' } : {}),
   fullyParallel: false,
   workers: 1,
   use: {
@@ -31,7 +32,7 @@ export default defineConfig({
   webServer: [
     {
       command: relayCommand,
-      url: `http://127.0.0.1:${relayPort}/v1/providers?protocolVersion=1.2.0`,
+      url: `http://127.0.0.1:${relayPort}/v1/providers?protocolVersion=1.3.0`,
       reuseExistingServer: false,
       timeout: 120_000,
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },

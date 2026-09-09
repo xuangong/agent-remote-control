@@ -169,7 +169,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     ]);
     const snapshot = manager.snapshot();
     expect(snapshot).toMatchObject({
-      protocolVersion: '1.2.0', type: 'agent_snapshot',
+      protocolVersion: '1.3.0', type: 'agent_snapshot',
       payload: { id: 'agent-1', providerId: 'codex', pendingInteractions: [] },
     });
     expect(snapshot.payload).not.toHaveProperty('timeline');
@@ -328,10 +328,10 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const output: Array<Record<string, unknown>> = [];
     const freshClient = createSessionWire(manager, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await freshClient.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await freshClient.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
     await freshClient.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'resource_request',
+      protocolVersion: '1.3.0', type: 'resource_request',
       payload: { requestId: 'resource-read', agentId: 'agent-1', resourceId },
     }));
 
@@ -418,9 +418,9 @@ describe('AgentManager Timeline and Snapshot', () => {
     });
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_subscription',
+      protocolVersion: '1.3.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resource', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -456,7 +456,7 @@ describe('AgentManager Timeline and Snapshot', () => {
       state: { status: 'unavailable', reason: 'The generated file expired.' },
     })]);
     expect(wireOutput.slice(1)).toEqual([expect.objectContaining({
-      protocolVersion: '1.2.0',
+      protocolVersion: '1.3.0',
       type: 'resource_update',
       payload: expect.objectContaining({
         agentId: 'agent-1', resourceId: pendingBinding!.resourceId,
@@ -494,9 +494,9 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_subscription',
+      protocolVersion: '1.3.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resources', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -533,7 +533,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     secondRead.resolve({ status: 'available', mediaType: 'image/png', bytes: pngBytes });
     await nextEventLoopTurn();
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_request',
+      protocolVersion: '1.3.0', type: 'timeline_request',
       payload: { requestId: 'tail-after-settlement', agentId: 'agent-1', direction: 'tail', limit: 10 },
     }));
 
@@ -826,6 +826,32 @@ describe('AgentManager interactions', () => {
 });
 
 describe('AgentManager observation lifecycle', () => {
+  it('redacts provider answers before resolution broadcasts and history storage', async () => {
+    const stream = new ManualProviderStream();
+    const request = { kind: 'form' as const, requestId: 'secret-form', title: 'Login', message: '', fields: [{ type: 'text' as const, fieldId: 'token', label: 'Token', required: true, sensitive: true }] };
+    const response = { kind: 'form' as const, action: 'submit' as const, values: { token: 'provider-private-value' } };
+    stream.push({ type: 'observation', sourceKey: 'request', occurredAt: 1, delivery: 'history', event: { type: 'interaction_requested', provider: 'codex', request } });
+    stream.push({ type: 'history_boundary' });
+    const session = sessionFor(stream);
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    await manager.ready;
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event));
+    await expect(manager.respondToInteraction(request.requestId, { ...response, redactedFields: ['token'] })).rejects.toMatchObject({ code: 'invalid_interaction_response' });
+    await manager.respondToInteraction(request.requestId, response);
+    expect(session.interactionResponses).toEqual([{ requestId: request.requestId, response }]);
+    stream.push({ type: 'observation', sourceKey: 'resolved', occurredAt: 2, delivery: 'live', event: { type: 'interaction_resolved', provider: 'codex', requestId: request.requestId, response } });
+    stream.push({ type: 'observation', sourceKey: 'provider-receipt', occurredAt: 3, delivery: 'live', event: { type: 'timeline', provider: 'codex', item: { type: 'interaction', request, response } } });
+    await nextEventLoopTurn();
+    const history = manager.fetchTimeline({ requestId: 'history', agentId: 'agent-1', direction: 'tail', limit: 10 });
+    expect(history.payload.entries).toHaveLength(2);
+    expect(JSON.stringify(events)).not.toContain('provider-private-value');
+    expect(JSON.stringify(history)).not.toContain('provider-private-value');
+    expect(history.payload.entries[0]?.item).toMatchObject({ response: { values: {}, redactedFields: ['token'] } });
+    expect(response.values.token).toBe('provider-private-value');
+    await manager.close();
+  });
+
   it('turns a post-boundary observation failure into visible failed state without rejecting settlement', async () => {
     const providerStream = new ManualProviderStream();
     const manager = await AgentManager.attach({
@@ -1008,3 +1034,38 @@ class ManualProviderStream implements AsyncIterable<ProviderStreamItem> {
     };
   }
 }
+
+describe('AgentManager sensitive request defaults', () => {
+  it('removes private defaults from pending snapshots, live events and hydrated history without consuming the native request', async () => {
+    const stream = new ManualProviderStream();
+    const request = { kind: 'form' as const, requestId: 'pending-form', title: 'Login', message: '', fields: [
+      { type: 'text' as const, fieldId: 'token', label: 'Token', required: true, sensitive: true, defaultValue: 'PRIVATE_NATIVE_DEFAULT' },
+      { type: 'text' as const, fieldId: 'region', label: 'Region', required: false, defaultValue: 'west' },
+    ] };
+    const response = { kind: 'form' as const, action: 'submit' as const, values: { token: 'PRIVATE_NATIVE_ANSWER', region: 'west' } };
+    stream.push({ type: 'observation', sourceKey: 'old-receipt', occurredAt: 1, delivery: 'history', event: { type: 'timeline', provider: 'codex', item: { type: 'interaction', request: { ...request, requestId: 'old-form' }, response } } });
+    stream.push({ type: 'observation', sourceKey: 'pending', occurredAt: 2, delivery: 'history', event: { type: 'interaction_requested', provider: 'codex', request } });
+    stream.push({ type: 'history_boundary' });
+    const session = sessionFor(stream);
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    await manager.ready;
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event));
+    stream.push({ type: 'observation', sourceKey: 'live', occurredAt: 3, delivery: 'live', event: { type: 'interaction_requested', provider: 'codex', request: { ...request, requestId: 'live-form' } } });
+    await nextEventLoopTurn();
+    const snapshot = manager.snapshot();
+    const history = manager.fetchTimeline({ requestId: 'history', agentId: 'agent-1', direction: 'tail', limit: 10 });
+    expect(snapshot.payload.pendingInteractions).toHaveLength(2);
+    const publicValues = JSON.stringify([snapshot, history, events]);
+    expect(publicValues).not.toContain('PRIVATE_NATIVE_DEFAULT');
+    expect(publicValues).not.toContain('PRIVATE_NATIVE_ANSWER');
+    expect(publicValues).toContain('west');
+    await manager.respondToInteraction(request.requestId, response);
+    expect(session.interactionResponses).toEqual([{ requestId: request.requestId, response }]);
+    expect(request.fields[0]!.defaultValue).toBe('PRIVATE_NATIVE_DEFAULT');
+    stream.push({ type: 'observation', sourceKey: 'resolved', occurredAt: 4, delivery: 'live', event: { type: 'interaction_resolved', provider: 'codex', requestId: request.requestId, response } });
+    await nextEventLoopTurn();
+    expect(JSON.stringify(manager.fetchTimeline({ requestId: 'after', agentId: 'agent-1', direction: 'tail', limit: 10 }))).not.toContain('PRIVATE_NATIVE_DEFAULT');
+    await manager.close();
+  });
+});

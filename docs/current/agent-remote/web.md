@@ -117,3 +117,9 @@ flowchart LR
 ## Tool result disclosure
 
 The existing tool row remains compact. Expanding it shows the call details followed by result text/JSON, available exit code and duration, and a truncation notice when needed. Result bodies render as escaped plain text rather than HTML, inside a bounded scroll area. The disclosure state survives updates to the same tool call. A completed tool result is also retained in the headless replica used by the terminal debugger (`packages/agent-remote-web/src/react/items/ToolResultView.tsx`, `packages/agent-remote-web/src/react/items/ToolCallItem.tsx`).
+
+## Extended interaction controls
+
+The interaction panel renders typed forms, permission approvals, and external actions alongside questions, plans, and tool approvals. Form submissions preserve typed numbers, booleans, and selections; a rejected submission retains the draft, and offline forms stay mounted with disabled controls. Sensitive text fields use password inputs and completed receipts hide sensitive values defensively. Permission scope and tool policy buttons come only from the request. External links require explicit navigation, and opening a link does not complete the request (`packages/agent-remote-web/src/react/interactions`, `packages/agent-remote-web/src/react/items/InteractionReceipt.tsx`).
+
+The session client rejects responses to requests no longer in the replica's pending list, preventing a delayed resolution from acknowledging a new stale submission. Relay validation remains authoritative for competing clients. Outbound protocol observation redacts free-form interaction answers while the real command retains its payload; observers receive a detached copy marked `redacted` (`packages/agent-remote-web/src/client/remote-session-client.ts`, `packages/agent-remote-web/src/client/http-websocket-transport.ts`).

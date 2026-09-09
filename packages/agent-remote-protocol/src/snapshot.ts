@@ -27,6 +27,9 @@ export const AgentCapabilities = Strict({
     question: Type.Boolean(),
     planApproval: Type.Boolean(),
     toolApproval: Type.Boolean(),
+    form: Type.Optional(Type.Boolean()),
+    permissionApproval: Type.Optional(Type.Boolean()),
+    externalAction: Type.Optional(Type.Boolean()),
   }),
 });
 export type AgentCapabilities = Static<typeof AgentCapabilities>;

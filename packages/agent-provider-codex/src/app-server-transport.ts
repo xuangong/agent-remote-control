@@ -21,6 +21,8 @@ export interface CodexAppServerTransportOptions {
   onDiagnostic?: (line: string) => void;
 }
 
+export class CodexServerRequestCanceled extends Error {}
+
 export class CodexAppServerRpcError extends Error {
   constructor(
     message: string,
@@ -216,6 +218,7 @@ export class CodexAppServerTransport {
     try {
       this.write({ id, result: await handler(message.params, id) });
     } catch (error) {
+      if (error instanceof CodexServerRequestCanceled) return;
       this.write({ id, error: {
         code: -32603,
         message: error instanceof Error ? error.message : String(error),

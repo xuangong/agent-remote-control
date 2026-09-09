@@ -113,3 +113,7 @@ flowchart LR
 - `packages/agent-remote-relay/src/transport/remote-host-plugin.ts:20-184`
 - `packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts:14-145`
 - `packages/agent-remote-relay/src/transport/uplink-writer.ts:12-78`
+
+## Interaction response boundaries
+
+Before invoking a Provider, the manager validates each response against the pending request and claims that request for a single responder. Native failure releases the claim for deliberate retry. Native resolutions and hydrated completed interaction rows pass through request-aware redaction before reaching public events or history, including records supplied by a Provider that did not redact its own receipt (`packages/agent-remote-relay/src/agent-manager.ts`, `packages/agent-provider-sdk/src/interactions.ts`).

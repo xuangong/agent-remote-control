@@ -4,6 +4,9 @@ import type {
   AgentInteractionResponse,
 } from '@borgee/agent-remote-protocol';
 
+import { FormCard } from './interactions/FormCard.js';
+import { PermissionApprovalCard } from './interactions/PermissionApprovalCard.js';
+import { ExternalActionCard } from './interactions/ExternalActionCard.js';
 import { PlanApprovalCard } from './interactions/PlanApprovalCard.js';
 import { QuestionCard, type QuestionDraft } from './interactions/QuestionCard.js';
 import { ToolApprovalCard } from './interactions/ToolApprovalCard.js';
@@ -34,6 +37,10 @@ export function InteractionPanel({ request, onResponse, questionDraft, onQuestio
     }
   }
 
+  if (request.kind === 'form') {
+    return <FormCard request={request} onResponse={respond} pending={pending} disabled={!onResponse} failure={onResponse ? failure : 'Interaction unavailable. Reconnect to respond.'} />;
+  }
+
   if (!onResponse) {
     return <section className="agent-interaction agent-interaction-unavailable" role="status">
       <strong>Interaction unavailable</strong>
@@ -53,6 +60,10 @@ export function InteractionPanel({ request, onResponse, questionDraft, onQuestio
   }
 
   switch (request.kind) {
+    case 'permission_approval':
+      return <PermissionApprovalCard request={request} onResponse={respond} pending={pending} failure={failure} />;
+    case 'external_action':
+      return <ExternalActionCard request={request} onResponse={respond} pending={pending} failure={failure} />;
     case 'question':
       return <QuestionCard request={request} onResponse={respond} pending={pending} failure={failure} draft={questionDraft} onDraftChange={onQuestionDraftChange} />;
     case 'plan_approval':
@@ -71,6 +82,9 @@ export function InteractionPanel({ request, onResponse, questionDraft, onQuestio
 
 function interactionKindLabel(kind: AgentInteractionRequest['kind']): string {
   switch (kind) {
+    case 'form': return 'form';
+    case 'permission_approval': return 'permission approval';
+    case 'external_action': return 'external action';
     case 'question': return 'question';
     case 'plan_approval': return 'plan approval';
     case 'tool_approval': return 'tool approval';

@@ -8,12 +8,16 @@ This package adapts the native `codex app-server` JSON-RPC protocol to `@borgee/
 | Assistant and reasoning streaming | Supported |
 | Command, file-change, MCP, and Web-search timeline items | Supported |
 | Todo, lifecycle, and usage updates | Supported |
-| Questions | Supported with strict question IDs and explicit answers |
-| Command and file-change approval | Supported |
+| Questions | Supported with strict question IDs, explicit answers, and sensitive receipts |
+| Command and file-change approval | Native decisions, cancellation, session scopes, and explicit policy amendments |
+| MCP form and URL elicitation | Flat typed forms and explicit HTTP(S) action acknowledgment |
+| Granular permission approval | Whole-request filesystem/network grants, with turn or session scope |
+| Parent-session subagent activity | Passive tool rows with bounded results |
 | Planning and plan approval | Supported when native collaboration modes are available |
 | Steer and cancel | Supported with the active native turn ID |
 | Native session discovery | Supported through paged `thread/list` metadata |
-| Resource reads | Unsupported; `readResource` is not advertised or implemented |
+| Native image viewing and generation | Assistant Markdown backed by opaque session resource references |
+| Resource reads | Only local files or embedded raster bytes explicitly referenced by native image items |
 
 The compatibility target verified by local process tests is `codex-cli 0.148.0`. Native `item/started` and `item/completed` notifications are authoritative; deprecated `codex/event/item_started` and `codex/event/item_completed` mirrors are intentionally ignored to avoid duplicate Timeline meaning.
 
@@ -22,3 +26,13 @@ Set `BORGEE_CODEX_TEST_EXECUTABLE` to select the exact Codex executable used by 
 The default standalone workbench registers this Provider alongside Recorded and paired DSH Hosts. See the [Codex runbook](../../docs/runbooks/codex-debug.md) for a real CLI installation, native login, session import, and process ownership.
 
 Each open session owns one `codex app-server` child. JSONL on stdin/stdout carries commands, notifications, and approval responses. A bounded stderr tail is included in unexpected-process-exit diagnostics. History comes from `thread/read`; no terminal scraping or file-log polling is required. Closing the session disposes its owned child without terminating other Codex installations.
+
+Native `imageView` and `imageGeneration` completions share one image registry across history and live projection. The adapter preserves native `path`, `savedPath`, and result-file references, resolves relative paths against the session working directory, and supports embedded base64 or raster data URLs. Public Markdown contains opaque `codex-image` locators; the reader rejects arbitrary path requests and never fetches remote URLs. PNG, JPEG, GIF, and WebP signatures are checked before serving bytes. Each image is limited to 16 MiB, with separate 64 MiB budgets for registered embedded data and materialized bytes. The first read result is retained until disposal, including unavailable outcomes, so changing a file cannot change an already materialized replay resource. Missing, failed, unsupported, or oversized images remain explicit unavailable references or diagnostics.
+
+MCP `form` and `openai/form` schemas accept a bounded flat object: text, finite numbers and integers, booleans, single-select enums, and multiselect enums. String length/format, numeric bounds, array bounds, defaults, and titled/legacy enum labels are preserved. Nested objects, arbitrary schema constraints, invalid defaults, and unsafe URLs are declined with a visible diagnostic. Sensitive defaults are declined instead of publishing them. Form responses and secret question text reach only the native request; resolved observations redact sensitive values.
+
+Permission approval shows every native read, write, deny, and network grant, including glob scan depth and symbolic paths. The adapter retains the native permission object privately and returns only that request after explicit approval; clients cannot supply a replacement grant. Unsupported permission structures receive an empty grant and a visible diagnostic. Command choices follow `availableDecisions`; opaque policy IDs identify exact native amendment objects.
+
+Pending RPC interactions recover while this Provider session remains alive. Native request resolution, interrupted turns, process termination, and disposal clear transient requests without synthesizing input or sending duplicate native responses. A native resolution notification does not include another client's answer: its remote receipt records dismissal/cancellation, and permission closure explicitly states that this remote client granted nothing.
+
+Plan review is synthesized from completed plan items and is process-local. Persistence handles store session configuration, not reviewed-plan decisions; restarting the Provider restores native conversation history but does not reconstruct a pending plan review or distinguish an already reviewed plan. No durable plan-review parity is claimed.

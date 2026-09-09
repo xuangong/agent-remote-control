@@ -30,8 +30,8 @@ describe('CodexAppServerProvider contract', () => {
       providerId: 'codex', sessionId: 'thread-1', status: 'running',
       persistence: { providerId: 'codex', sessionId: 'thread-1' },
     });
-    expect(session.capabilities.readResource).toBe(false);
-    expect('readResource' in session).toBe(false);
+    expect(session.capabilities.readResource).toBe(true);
+    await expect(session.readResource!('/workspace/arbitrary.png')).resolves.toMatchObject({ status: 'unavailable' });
     await session.dispose();
   });
 

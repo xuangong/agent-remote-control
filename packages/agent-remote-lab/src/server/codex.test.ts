@@ -56,7 +56,7 @@ describe('Codex Lab composition', () => {
     );
     if ('server' in attempt) await attempt.server.close();
     expect(attempt).toMatchObject({ error: expect.objectContaining({
-      message: expect.stringContaining('protocolVersion 1.2.0'),
+      message: expect.stringContaining('protocolVersion 1.3.0'),
     }) });
   });
 
@@ -86,7 +86,7 @@ describe('Codex Lab composition', () => {
     const manifest = join(root, 'compatibility.json');
     writeFileSync(manifest, JSON.stringify({
       schemaVersion: 1,
-      protocolVersion: overrides.protocolVersion ?? '1.2.0',
+      protocolVersion: overrides.protocolVersion ?? '1.3.0',
       borgee: {
         release: 'unreleased', sourceState: 'working_tree',
         baseRevision: '9e21c2ad9a0ba55413960a1681d34675c5d6e026',
@@ -114,7 +114,9 @@ describe('Codex Lab composition', () => {
           providerId: 'codex',
           native: { name: 'codex-cli', version: overrides.codexVersion ?? '0.148.0', revision: null },
           degradations: [
-            { capability: 'readResource', status: 'unsupported', reason: 'Not exposed by the adapter.' },
+            { capability: 'interactions.form.schema', status: 'degraded', reason: 'Bounded flat schemas only.' },
+            { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Native requests are process-local.' },
+            { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Parent summary only.' },
             {
               capability: 'events.thread/name', status: 'degraded',
               reason: 'Thread names are not represented in the Agent Snapshot.',

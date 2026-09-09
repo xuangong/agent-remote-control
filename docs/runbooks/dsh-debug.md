@@ -82,4 +82,4 @@ Run `pnpm test:setup` for bounded helper and CLI workflow tests. The CLI workflo
 
 ## Tool output protocol compatibility
 
-Tool results use public protocol `1.2.0`. After updating the repository, rerun the guided setup to rebuild and reinstall the DSH Host bundle, and use a Relay and workbench from the same version. Existing processes keep their loaded version until restarted. Expand a tool row in the workbench, or inspect `item.result` with `pnpm bdb timeline AGENT_ID --all --json`, to view the native result body. DSH output is retained as emitted; exit codes embedded in text are not inferred as structured metadata.
+The current public protocol is `1.3.0`, including tool results. After updating the repository, rerun the guided setup to rebuild and reinstall the DSH Host bundle, and use a Relay and workbench from the same version. Existing processes keep their loaded version until restarted. Expand a tool row in the workbench, or inspect `item.result` with `pnpm bdb timeline AGENT_ID --all --json`, to view the native result body. DSH output is retained as emitted; exit codes embedded in text are not inferred as structured metadata.

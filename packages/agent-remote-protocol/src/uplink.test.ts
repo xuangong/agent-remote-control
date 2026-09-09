@@ -30,7 +30,7 @@ describe('Agent Remote uplink codecs', () => {
       type: 'rpc_request',
       requestId: 'providers-one',
       method: 'GET',
-      path: '/v1/providers?protocolVersion=1.2.0',
+      path: '/v1/providers?protocolVersion=1.3.0',
       sessionId: 'remote-session-one',
     } as const;
 

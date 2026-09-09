@@ -14,9 +14,10 @@ export function ToolApprovalCard({ request, onResponse, pending, failure }: Tool
     <header><span className="agent-item-kicker">TOOL AUTHORIZATION</span><h3 id={`${request.requestId}-title`}>{request.toolName}</h3></header>
     <p>{request.summary}</p>
     <ToolCallDetails detail={request.detail} />
+    {request.context?.length ? <dl className="agent-approval-context">{request.context.map(({ label, value }, index) => <div key={index}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : null}
     <div className="agent-interaction-actions">
       {request.allowedDecisions.includes('allow')
-        ? request.allowScopes.map((scope) => <button
+        ? request.allowScopes.filter((scope) => scope !== 'policy').map((scope) => <button
             key={scope}
             type="button"
             data-decision="allow"
@@ -25,6 +26,8 @@ export function ToolApprovalCard({ request, onResponse, pending, failure }: Tool
             onClick={async () => { await onResponse({ kind: 'tool_approval', decision: 'allow', scope }); }}
           >{pending ? 'Submitting…' : `Allow ${scope === 'once' ? 'once' : 'for session'}`}</button>)
         : null}
+      {request.allowedDecisions.includes('allow') && request.allowScopes.includes('policy') ? request.policies?.map((policy) => <button key={policy.policyId} type="button" disabled={pending} data-policy-id={policy.policyId} onClick={() => void onResponse({ kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: policy.policyId })}>{policy.description}</button>) : null}
+      {request.allowedDecisions.includes('cancel') ? <button type="button" disabled={pending} data-decision="cancel" onClick={() => void onResponse({ kind: 'tool_approval', decision: 'cancel' })}>Cancel</button> : null}
       {request.allowedDecisions.includes('deny') ? <button
         type="button"
         data-decision="deny"

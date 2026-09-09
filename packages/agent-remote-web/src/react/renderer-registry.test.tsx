@@ -35,7 +35,7 @@ function stateWithItems(items: readonly AgentTimelineItem[]) {
 
 function stream(seq: number, item: AgentTimelineItem): AgentStreamMessage {
   return {
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     type: 'agent_stream',
     payload: {
       agentId: 'agent-one', epoch: 'epoch-one', seq,
@@ -48,7 +48,7 @@ function stream(seq: number, item: AgentTimelineItem): AgentStreamMessage {
 function page(entries: ProjectedTimelineEntry[], direction: HistoryPage['payload']['direction'] = 'tail'): HistoryPage {
   const end = entries.at(-1)?.seqEnd ?? 0;
   return {
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     type: 'timeline_page',
     payload: {
       requestId: 'timeline-request', agentId: 'agent-one', direction, epoch: 'epoch-one',

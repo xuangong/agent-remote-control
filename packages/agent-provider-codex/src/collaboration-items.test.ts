@@ -1,0 +1,31 @@
+import { describe, expect, it } from 'vitest';
+import { CodexEventProjector } from './projector.js';
+
+describe('Codex parent-session collaboration observations', () => {
+  it('projects a completed delegated tool call with bounded native results', () => {
+    const projector = new CodexEventProjector('parent');
+    const event = projector.projectNotification('item/completed', { threadId: 'parent', turnId: 'turn', item: {
+      type: 'collabAgentToolCall', id: 'delegate', tool: 'spawnAgent', status: 'completed', senderThreadId: 'parent', receiverThreadIds: ['child'], prompt: 'Check results', model: null, reasoningEffort: null,
+      agentsStates: { child: { status: 'completed', message: 'All checks passed' } },
+    } });
+    expect(event).toMatchObject({ event: { type: 'timeline', item: { type: 'tool_call', callId: 'delegate', name: 'agent.spawnAgent', status: 'completed', result: { content: [{ type: 'json', value: { receiverThreadIds: ['child'], agentsStates: { child: { status: 'completed', message: 'All checks passed' } } } }] } } } });
+  });
+  it('projects activity passively in its parent thread and ignores other threads', () => {
+    const projector = new CodexEventProjector('parent');
+    const item = { type: 'subAgentActivity', id: 'activity', kind: 'interacted', agentThreadId: 'child', agentPath: '/review' };
+    expect(projector.projectNotification('item/started', { threadId: 'parent', item })).toMatchObject({ event: { item: { type: 'tool_call', callId: 'activity', status: 'running', detail: { type: 'other', description: 'Agent /review: interacted' } } } });
+    expect(projector.projectNotification('item/completed', { threadId: 'other', item })).toBeNull();
+  });
+  it('does not treat known goal and discovery notifications as agent errors', () => {
+    const projector = new CodexEventProjector('parent');
+    for (const method of ['thread/goal/cleared', 'thread/goal/updated', 'skills/changed', 'thread/queue/changed', 'item/mcpToolCall/progress']) expect(projector.projectNotification(method, { threadId: 'parent' })).toBeNull();
+    expect(projector.projectNotification('unknown/new', { threadId: 'parent' })).toMatchObject({ event: { item: { type: 'error', message: expect.stringContaining('Unsupported') } } });
+  });
+});
+
+describe('Codex raw response envelopes', () => {
+  it.each(['rawResponseItem/completed', 'rawResponse/completed'])('does not publish private provider payloads from %s as timeline errors', (method) => {
+    const projector = new CodexEventProjector('parent');
+    expect(projector.projectNotification(method, { threadId: 'parent', item: { type: 'function_call_output', output: 'PRIVATE_ANSWER_SENTINEL' } })).toBeNull();
+  });
+});

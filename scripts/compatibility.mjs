@@ -10,7 +10,7 @@ const scope = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts
 for (const name of readdirSync(resolve(root, 'packages')).sort()) {
   const prefix = `packages/${name}`;
   for (const entry of readdirSync(resolve(root, prefix)).sort()) {
-    if (['node_modules', 'dist', 'coverage', 'test-results', 'playwright-report', 'compatibility.json'].includes(entry)) continue;
+    if (['node_modules', 'dist', '.tmp', 'coverage', 'test-results', 'playwright-report', 'compatibility.json'].includes(entry)) continue;
     if (entry.endsWith('.tsbuildinfo') || entry === '.DS_Store') continue;
     scope.push(`${prefix}/${entry}`);
   }

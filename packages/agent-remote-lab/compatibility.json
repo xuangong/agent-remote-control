@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "1.2.0",
+  "protocolVersion": "1.3.0",
   "borgee": {
     "release": "unreleased",
     "sourceState": "working_tree",
@@ -65,7 +65,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:1ad69c3668c8a078326e32262f05b6e727e0847c07462a351caee57156418526"
+      "digest": "sha256:bd0c99b48061db1d2b63b42a6e2cc91b447036ecacd4bd5946afce80d8621183"
     }
   },
   "providers": [
@@ -98,11 +98,6 @@
       },
       "degradations": [
         {
-          "capability": "readResource",
-          "status": "unsupported",
-          "reason": "The Codex adapter does not expose generated resources."
-        },
-        {
           "capability": "events.thread/name",
           "status": "degraded",
           "reason": "Codex thread names remain native session metadata because the Agent Snapshot has no title field."
@@ -111,6 +106,21 @@
           "capability": "events.commandExecution/terminalInteraction",
           "status": "degraded",
           "reason": "Codex terminal interactions remain native command side-channel activity because normalized tool detail has no process ID, stdin, or progress fields."
+        },
+        {
+          "capability": "interactions.form.schema",
+          "status": "degraded",
+          "reason": "Only flat losslessly representable primitive forms are supported. Unsupported constraints, nested schemas, and sensitive defaults are explicitly declined."
+        },
+        {
+          "capability": "interactions.restart-recovery",
+          "status": "degraded",
+          "reason": "Pending native RPCs and synthesized plan approvals are process-local. Native cold resume does not reconstruct interaction receipts or resurrect resolved requests."
+        },
+        {
+          "capability": "events.subagent.navigation",
+          "status": "degraded",
+          "reason": "Parent tool lifecycle and result summaries are normalized; child session navigation and orchestration are not exposed."
         }
       ]
     }

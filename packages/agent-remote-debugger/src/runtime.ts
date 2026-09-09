@@ -15,6 +15,7 @@ import {
 import { DebuggerError } from './errors.js';
 import { resolveOrigin, resolveRelayUrl } from './input.js';
 import { stableJsonValue } from './structural.js';
+import { redactDebuggerValue } from './redaction.js';
 
 export type WaitCondition = 'idle' | 'interaction' | 'failed';
 export type CapabilityName = Exclude<keyof AgentCapabilities, 'interactions'> | `interactions.${keyof AgentCapabilities['interactions']}`;
@@ -193,7 +194,7 @@ export function createProtocolTraceRecord(agentId: string, observation: RemotePr
     channel: observation.channel,
     messageType: observation.message.type,
     ...(requestId ? { requestId } : {}),
-    message: traceSafeMessage(observation.message),
+    message: redactDebuggerValue(traceSafeMessage(observation.message)),
   };
 }
 

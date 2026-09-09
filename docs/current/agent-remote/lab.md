@@ -152,3 +152,7 @@ The Node host owns temporary pairing keys, installation discovery, catalog forwa
 A reconnect advances the host connection generation and restores native bindings on demand before reading or streaming. Creation request identities remain in memory and uncertain creation outcomes are not replayed (`packages/agent-remote-lab/src/server/remote-host-broker.ts:118`).
 
 The workbench presents host pairing, provider session discovery, workspace selection, creation, and connection alongside conversation and protocol inspection (`packages/agent-remote-lab/src/App.tsx:1`, `packages/agent-remote-lab/src/server/session-directory.ts:16`).
+
+## Interaction acceptance fixture
+
+The opt-in `AGENT_REMOTE_TEST_INTERACTIONS=1` Playwright mode launches a deterministic Provider for typed forms, permissions, external actions, policy approvals, and sensitive form answers. Desktop and mobile tests use the real HTTP/WebSocket workbench pipeline, verify history and reconnect, and save screenshots under the ignored package `.tmp/interaction-capabilities` directory. This is fixture-backed acceptance; native Codex mapping and real CLI transport have separate tests (`packages/agent-remote-lab/src/server/interactions.ts`, `packages/agent-remote-lab/e2e/interaction-capabilities.spec.ts`).

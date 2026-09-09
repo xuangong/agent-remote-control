@@ -65,7 +65,7 @@ describe('createProtocolValidationServer', () => {
 });
 
 const createBody = JSON.stringify({
-  protocolVersion: '1.2.0',
+  protocolVersion: '1.3.0',
   type: 'create_agent',
   payload: {
     requestId: 'create-1', agentId: 'agent-1', providerId: 'missing',

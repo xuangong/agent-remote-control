@@ -9,6 +9,7 @@ import { parseExactJson, readTextInput, resolveOrigin, resolveRelayUrl } from '.
 import type { DebuggerIo } from './output.js';
 import { writeBinary, writeFileAtomically, writeJson, writeJsonToStderr, writeText } from './output.js';
 import { observeReplica } from './records.js';
+import { redactDebuggerValue } from './redaction.js';
 import { createDebuggerRuntime, createProtocolTraceRecord, type DebuggerRuntime, type DebuggerRuntimeOptions, type WaitCondition } from './runtime.js';
 
 export type OutputFormat = 'text' | 'json' | 'jsonl';
@@ -430,11 +431,13 @@ class CommandContext {
   }
 
   private result(value: unknown): void {
+    value = redactDebuggerValue(value);
     if (this.invocation.format === 'json') return writeJson(this.io, value);
     writeText(this.io, `${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`);
   }
 
   private stream(value: unknown): void {
+    value = redactDebuggerValue(value);
     if (this.invocation.format === 'jsonl') return writeJson(this.io, value);
     writeText(this.io, `${JSON.stringify(value)}\n`);
   }
@@ -588,8 +591,14 @@ function isInteractionResponse(value: unknown): value is AgentInteractionRespons
   }).status === 'ok';
 }
 
-function interactionCapability(kind: 'question' | 'plan_approval' | 'tool_approval'): 'question' | 'planApproval' | 'toolApproval' {
-  return kind === 'plan_approval' ? 'planApproval' : kind === 'tool_approval' ? 'toolApproval' : 'question';
+function interactionCapability(kind: AgentInteractionResponse['kind']): 'question' | 'planApproval' | 'toolApproval' | 'form' | 'permissionApproval' | 'externalAction' {
+  switch (kind) {
+    case 'plan_approval': return 'planApproval';
+    case 'tool_approval': return 'toolApproval';
+    case 'permission_approval': return 'permissionApproval';
+    case 'external_action': return 'externalAction';
+    default: return kind;
+  }
 }
 
 function resourceError(state: Exclude<ResourceResponse['payload']['state'], { status: 'pending' } | { status: 'available' }>): DebuggerError {

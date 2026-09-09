@@ -24,6 +24,11 @@ export function codexToolResult(item: JsonObject): AgentToolResult | undefined {
     if (item.error !== undefined && item.error !== null) content.push({ type: 'json', value: item.error as AgentToolResultJson });
     return content.length ? boundToolResult({ content }) : undefined;
   }
+  if (item.type === 'collabAgentToolCall' || item.type === 'subAgentActivity') {
+    const names = item.type === 'collabAgentToolCall' ? ['receiverThreadIds', 'agentsStates'] : ['kind', 'agentThreadId', 'agentPath'];
+    const value = Object.fromEntries(names.filter((key) => item[key] !== undefined).map((key) => [key, item[key]])) as AgentToolResultJson;
+    return boundToolResult({ content: [{ type: 'json', value }] });
+  }
   if (item.type === 'webSearch') {
     const value: Record<string, AgentToolResultJson> = {};
     if (item.action !== undefined && item.action !== null) value.action = item.action as AgentToolResultJson;

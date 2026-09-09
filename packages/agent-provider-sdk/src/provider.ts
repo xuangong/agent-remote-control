@@ -12,6 +12,9 @@ export interface AgentCapabilities {
     question: boolean;
     planApproval: boolean;
     toolApproval: boolean;
+    form?: boolean;
+    permissionApproval?: boolean;
+    externalAction?: boolean;
   };
 }
 

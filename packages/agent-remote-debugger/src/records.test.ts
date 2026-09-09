@@ -11,7 +11,7 @@ const capabilities = {
 
 function snapshot(status: 'idle' | 'running' = 'idle'): AgentSnapshot {
   return {
-    protocolVersion: '1.2.0', type: 'agent_snapshot',
+    protocolVersion: '1.3.0', type: 'agent_snapshot',
     payload: {
       id: 'agent-one', providerId: 'provider-one', createdAt: '2026-09-03T00:00:00.000Z',
       updatedAt: '2026-09-03T00:00:01.000Z', status, activeTurn: null, capabilities,
@@ -30,7 +30,7 @@ function entry(seq: number, text: string): ProjectedTimelineEntry {
 
 function page(entries: ProjectedTimelineEntry[], epoch = 'epoch-one'): HistoryPage {
   return {
-    protocolVersion: '1.2.0', type: 'timeline_page',
+    protocolVersion: '1.3.0', type: 'timeline_page',
     payload: {
       requestId: 'page-one', agentId: 'agent-one', direction: 'tail', epoch, reset: false, staleCursor: false, gap: false,
       window: { minSeq: entries[0]?.seqStart ?? 0, maxSeq: entries.at(-1)?.seqEnd ?? 0, nextSeq: (entries.at(-1)?.seqEnd ?? 0) + 1 },
@@ -58,6 +58,26 @@ class StatusSource {
 }
 
 describe('observeReplica', () => {
+  it('redacts sensitive receipts even when a replica contains an unredacted historical row', () => {
+    const replica = new AgentReplica();
+    const status = new StatusSource();
+    const records: DebuggerRecord[] = [];
+    replica.applySnapshot(snapshot());
+    const receipt: ProjectedTimelineEntry = { ...entry(1, ''), item: {
+      type: 'interaction',
+      request: { kind: 'form', requestId: 'secret', title: 'Login', message: '', fields: [{ type: 'text', fieldId: 'token', label: 'Token', required: true, sensitive: true, defaultValue: 'PRIVATE_RECORD_DEFAULT' }] },
+      response: { kind: 'form', action: 'submit', values: { token: 'debugger-private-token' } },
+    } };
+    replica.applyHistory(page([receipt]));
+    const stop = observeReplica('agent-one', replica, status, (record) => records.push(record));
+    status.set('ready');
+    expect(records.some((record) => record.kind === 'timeline_upsert')).toBe(true);
+    expect(JSON.stringify(records)).not.toContain('debugger-private-token');
+    expect(JSON.stringify(records)).not.toContain('PRIVATE_RECORD_DEFAULT');
+    expect(records.find((record) => record.kind === 'timeline_upsert')).toMatchObject({ entry: { item: { response: { values: {}, redactedFields: ['token'] } } } });
+    stop();
+  });
+
   it('emits the ready baseline in its stable record order', () => {
     const replica = new AgentReplica();
     const status = new StatusSource();
@@ -118,17 +138,17 @@ describe('observeReplica', () => {
     status.set('ready');
     records.length = 0;
     const request: InteractionRequestedMessage = {
-      protocolVersion: '1.2.0', type: 'interaction_requested',
+      protocolVersion: '1.3.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'approval-one', plan: 'A plan', allowedActions: ['approve'] } },
     };
     const resource: ResourceResponse = {
-      protocolVersion: '1.2.0', type: 'resource_response',
+      protocolVersion: '1.3.0', type: 'resource_response',
       payload: { requestId: 'resource-request', agentId: 'agent-one', resourceId: 'resource-one', state: {
         status: 'available', mediaType: 'text/plain', byteLength: 3, sha256: 'digest', contentBase64: 'YWJj',
       } },
     };
     const resolved: InteractionResolvedMessage = {
-      protocolVersion: '1.2.0', type: 'interaction_resolved',
+      protocolVersion: '1.3.0', type: 'interaction_resolved',
       payload: { agentId: 'agent-one', requestId: 'approval-one', response: { kind: 'plan_approval', action: 'approve' } },
     };
 
@@ -150,11 +170,11 @@ describe('observeReplica', () => {
     const status = new StatusSource();
     const records: DebuggerRecord[] = [];
     const request: InteractionRequestedMessage = {
-      protocolVersion: '1.2.0', type: 'interaction_requested',
+      protocolVersion: '1.3.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'approval-one', plan: 'A plan', allowedActions: ['approve'] } },
     };
     const resource: ResourceResponse = {
-      protocolVersion: '1.2.0', type: 'resource_response',
+      protocolVersion: '1.3.0', type: 'resource_response',
       payload: { requestId: 'resource-request', agentId: 'agent-one', resourceId: 'resource-one', state: {
         status: 'available', mediaType: 'text/plain', byteLength: 3, sha256: 'digest', contentBase64: 'YWJj',
       } },
@@ -199,7 +219,7 @@ describe('observeReplica', () => {
     const original = snapshot();
     const reordered: AgentSnapshot = {
       type: 'agent_snapshot',
-      protocolVersion: '1.2.0',
+      protocolVersion: '1.3.0',
       payload: {
         runtimeInfo: {
           status: original.payload.runtimeInfo.status,

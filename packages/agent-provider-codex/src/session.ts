@@ -5,7 +5,7 @@ import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
   AgentPersistenceHandle,
-  AgentQuestion,
+  AgentResourceReadResult,
   AgentRuntimeInfo,
   AgentSession,
   AgentSessionConfig,
@@ -13,8 +13,14 @@ import type {
   ProviderStreamItem,
 } from '@borgee/agent-provider-sdk';
 
-import { CodexAppServerRpcError, CodexAppServerTransport } from './app-server-transport.js';
+import { validateInteractionResponse, redactInteractionResponse } from '@borgee/agent-provider-sdk';
+import { mapCodexQuestion, mapCodexQuestionResponse } from './questions.js';
+import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.js';
+import { mapCodexPermissions } from './permissions.js';
+import { mapCodexToolApproval } from './tool-approval.js';
+import { CodexAppServerRpcError, CodexAppServerTransport, CodexServerRequestCanceled } from './app-server-transport.js';
 import { collectCodexThreadHistoryItems, projectCodexThreadHistory } from './history.js';
+import { CodexImageRegistry } from './images.js';
 import { isRecord, readItem, readItemId, readString } from './native.js';
 import { CodexEventProjector } from './projector.js';
 import { readCodexPlanningModes, type CodexPlanningModes } from './planning.js';
@@ -27,12 +33,15 @@ export const CODEX_CAPABILITIES: AgentCapabilities = {
   sendMessage: true,
   steer: true,
   cancel: true,
-  readResource: false,
+  readResource: true,
   planning: false,
   interactions: {
     question: true,
     planApproval: false,
     toolApproval: true,
+    form: true,
+    permissionApproval: true,
+    externalAction: true,
   },
 };
 
@@ -44,23 +53,14 @@ interface StoredSessionConfig {
   collaborationMode?: 'plan';
 }
 
-type NativePendingInteraction =
-  | {
-      kind: 'plan_approval';
-      request: Extract<AgentInteractionRequest, { kind: 'plan_approval' }>;
-      resolve(value: unknown): void;
-    }
-  | {
-      kind: 'question';
-      request: Extract<AgentInteractionRequest, { kind: 'question' }>;
-      resolve(value: unknown): void;
-    }
-  | {
-      kind: 'tool_approval';
-      request: Extract<AgentInteractionRequest, { kind: 'tool_approval' }>;
-      nativeKind: 'command' | 'file';
-      resolve(value: unknown): void;
-    };
+interface NativePendingInteraction {
+  kind: AgentInteractionRequest['kind'];
+  request: AgentInteractionRequest;
+  turnId?: string;
+  resolve(value: unknown): void;
+  reject(error: Error): void;
+  respond(response: AgentInteractionResponse): unknown;
+}
 
 interface RawNotification {
   method: string;
@@ -72,6 +72,7 @@ export class CodexAppServerSession implements AgentSession {
 
   private threadId: string | undefined;
   private projector: CodexEventProjector | undefined;
+  private images: CodexImageRegistry | undefined;
   private initialItems: ProviderStreamItem[] = [];
   private readonly bufferedNotifications: RawNotification[] = [];
   private readonly preReadyEvents: ProviderObservation[] = [];
@@ -101,6 +102,8 @@ export class CodexAppServerSession implements AgentSession {
     transport.setRequestHandler('tool/requestUserInput', (params, id) => this.handleQuestionRequest(params, id));
     transport.setRequestHandler('item/commandExecution/requestApproval', (params, id) => this.handleToolRequest('command', params, id));
     transport.setRequestHandler('item/fileChange/requestApproval', (params, id) => this.handleToolRequest('file', params, id));
+    transport.setRequestHandler('mcpServer/elicitation/request', (params, id) => this.handleElicitationRequest(params, id));
+    transport.setRequestHandler('item/permissions/requestApproval', (params, id) => this.handlePermissionRequest(params, id));
   }
 
   static async create(
@@ -133,7 +136,6 @@ export class CodexAppServerSession implements AgentSession {
     const stored = { ...parseStoredConfig(handle.opaque), ...(collaborationMode ? { collaborationMode } : {}) };
     const session = new CodexAppServerSession(transport, stored);
     session.threadId = handle.sessionId;
-    session.projector = new CodexEventProjector(handle.sessionId);
     await session.initialize();
     const resumed = await transport.request('thread/resume', {
       threadId: handle.sessionId,
@@ -147,7 +149,7 @@ export class CodexAppServerSession implements AgentSession {
       includeTurns: true,
     });
     session.finishBootstrap(
-      projectCodexThreadHistory(history, handle.sessionId),
+      projectCodexThreadHistory(history, handle.sessionId, { images: session.images, cwd: session.config.cwd }),
       collectCodexThreadHistoryItems(history, handle.sessionId),
     );
     return session;
@@ -245,21 +247,16 @@ export class CodexAppServerSession implements AgentSession {
     if (pending.kind !== response.kind) {
       throw new Error(`Codex interaction ${requestId} requires a ${pending.kind} response`);
     }
-    if (pending.kind === 'plan_approval' && response.kind === 'plan_approval') {
+    if (response.kind === 'plan_approval' && response.action !== 'reject' && 'feedback' in response) throw new Error('Codex approval cannot contain revision feedback.');
+    validateInteractionResponse(pending.request, response);
+    if (pending.request.kind === 'plan_approval' && response.kind === 'plan_approval') {
       await this.respondToPlan(pending.request, response);
       return;
     }
-    let nativeResponse: unknown;
-    if (pending.kind === 'question' && response.kind === 'question') {
-      nativeResponse = this.mapQuestionResponse(pending.request, response);
-    } else if (pending.kind === 'tool_approval' && response.kind === 'tool_approval') {
-      nativeResponse = this.mapToolResponse(pending, response);
-    } else {
-      throw new Error(`Unsupported Codex interaction response for ${requestId}`);
-    }
+    const nativeResponse = pending.respond(response);
     this.pendingInteractions.delete(requestId);
     pending.resolve(nativeResponse);
-    this.emitInteractionResolved(requestId, response);
+    this.emitInteractionResolved(requestId, redactInteractionResponse(pending.request, response));
   }
 
   async runtimeInfo(): Promise<AgentRuntimeInfo> {
@@ -283,9 +280,14 @@ export class CodexAppServerSession implements AgentSession {
     };
   }
 
+  async readResource(locator: string): Promise<AgentResourceReadResult> {
+    return this.images?.readResource(locator) ?? { status: 'unavailable', reason: 'Codex image reader is unavailable.' };
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.images?.stop();
     this.runtimeStatus = 'closed';
     this.resolvePendingInteractions();
     this.liveQueue.close();
@@ -316,10 +318,11 @@ export class CodexAppServerSession implements AgentSession {
     const threadId = readString(response.thread.id);
     if (!threadId) throw new Error(`Codex ${method} returned no thread id`);
     this.threadId = threadId;
-    this.projector = new CodexEventProjector(threadId);
     if (!this.config.model) this.config.model = readString(response.model);
-    if (!this.config.cwd) this.config.cwd = readString(response.cwd);
+    if (!this.config.cwd) this.config.cwd = readString(response.cwd) ?? readString(response.thread.cwd);
     if (!this.config.reasoningEffort) this.config.reasoningEffort = readString(response.reasoningEffort);
+    this.images = new CodexImageRegistry(threadId);
+    this.projector = new CodexEventProjector(threadId, { images: this.images, cwd: this.config.cwd });
   }
 
   private finishBootstrap(
@@ -395,6 +398,9 @@ export class CodexAppServerSession implements AgentSession {
       this.activeTurnId = undefined;
     }
     this.emit(observation);
+    if ((observation.event.type === 'turn_canceled' || observation.event.type === 'turn_failed') && observation.event.turnId) {
+      this.resolvePendingInteractions(observation.event.turnId);
+    }
     if (observation.event.type === 'turn_completed' && this.config.collaborationMode === 'plan' && this.latestPlan) {
       const plan = this.latestPlan;
       this.latestPlan = undefined;
@@ -402,7 +408,7 @@ export class CodexAppServerSession implements AgentSession {
         kind: 'plan_approval', requestId: `plan:${this.threadId}:${plan.id}`,
         plan: plan.text, allowedActions: ['approve_and_resume', 'reject'],
       };
-      this.pendingInteractions.set(request.requestId, { kind: 'plan_approval', request, resolve: () => undefined });
+      this.pendingInteractions.set(request.requestId, { kind: 'plan_approval', request, turnId: observation.event.turnId, resolve: () => undefined, reject: () => undefined, respond: () => undefined });
       this.emitInteractionRequested(request);
     }
   }
@@ -491,20 +497,14 @@ export class CodexAppServerSession implements AgentSession {
     if (method !== 'serverRequest/resolved') return false;
     if (!isRecord(params)) return true;
     const nativeThreadId = readString(params.threadId);
-    if (this.threadId && nativeThreadId && nativeThreadId !== this.threadId) return true;
+    if (!this.threadId || nativeThreadId !== this.threadId) return true;
     const nativeRequestId = params.requestId;
     if (typeof nativeRequestId !== 'string' && typeof nativeRequestId !== 'number') return true;
     const suffix = String(nativeRequestId);
-    const requestId = [`question:${suffix}`, `tool:${suffix}`]
+    const requestId = [`question:${suffix}`, `tool:${suffix}`, `elicitation:${suffix}`, `permissions:${suffix}`]
       .find((candidate) => this.pendingInteractions.has(candidate));
     if (!requestId) return true;
-    const pending = this.pendingInteractions.get(requestId)!;
-    this.pendingInteractions.delete(requestId);
-    pending.resolve(pending.kind === 'question' ? { answers: {} } : { decision: 'cancel' });
-    const response: AgentInteractionResponse = pending.kind === 'question'
-      ? { kind: 'question', answers: [], dismissed: true }
-      : { kind: 'tool_approval', decision: 'deny' };
-    this.emitInteractionResolved(requestId, response);
+    this.cancelInteraction(requestId);
     return true;
   }
 
@@ -540,20 +540,34 @@ export class CodexAppServerSession implements AgentSession {
     this.liveQueue.fail(error);
   }
 
-  private resolvePendingInteractions(): void {
-    for (const pending of this.pendingInteractions.values()) {
-      pending.resolve(pending.kind === 'question'
-        ? { answers: {} }
-        : { decision: 'cancel' });
+  private resolvePendingInteractions(turnId?: string): void {
+    for (const [requestId, pending] of this.pendingInteractions) {
+      if (turnId === undefined || pending.turnId === turnId) this.cancelInteraction(requestId);
     }
-    this.pendingInteractions.clear();
+  }
+
+  private cancelInteraction(requestId: string): void {
+    const pending = this.pendingInteractions.get(requestId);
+    if (!pending) return;
+    this.pendingInteractions.delete(requestId);
+    pending.reject(new CodexServerRequestCanceled('Codex native request is no longer pending'));
+    const response: AgentInteractionResponse = pending.kind === 'question'
+      ? { kind: 'question', answers: [], dismissed: true }
+      : pending.kind === 'form' ? { kind: 'form', action: 'cancel' }
+      : pending.kind === 'external_action' ? { kind: 'external_action', action: 'cancel' }
+      : pending.kind === 'permission_approval' ? { kind: 'permission_approval', decision: 'deny' }
+      : pending.kind === 'plan_approval' ? { kind: 'plan_approval', action: 'reject' }
+      : { kind: 'tool_approval', decision: 'cancel' };
+    this.emitInteractionResolved(requestId, response);
+    if (pending.kind === 'permission_approval') this.emitUnavailable(requestId, 'Codex permission request closed by the native session; the remote client granted no permissions.');
   }
 
   private handleQuestionRequest(params: unknown, nativeRequestId: string | number): Promise<unknown> {
+    this.assertRequestThread(params);
     if (!isRecord(params) || !Array.isArray(params.questions)) {
       return Promise.reject(new Error('Codex question request has no questions'));
     }
-    const questions = params.questions.map((value, index) => this.mapQuestion(value, index));
+    const questions = params.questions.map((value, index) => mapCodexQuestion(value, index));
     if (questions.length === 0) {
       return Promise.reject(new Error('Codex question request has no valid questions'));
     }
@@ -561,72 +575,66 @@ export class CodexAppServerSession implements AgentSession {
     const request: Extract<AgentInteractionRequest, { kind: 'question' }> = {
       kind: 'question', requestId, questions,
     };
-    return new Promise((resolve) => {
-      this.pendingInteractions.set(requestId, { kind: 'question', request, resolve });
-      this.emitInteractionRequested(request);
-    });
+    return this.queueInteraction(request, (response) => {
+      if (response.kind !== 'question') throw new Error('Invalid question response');
+      return mapCodexQuestionResponse(request, response);
+    }, readString(params.turnId));
   }
 
-  private mapQuestion(value: unknown, index: number): AgentQuestion {
-    if (!isRecord(value)) throw new Error(`Codex question ${index + 1} is invalid`);
-    const questionId = readString(value.id);
-    const header = readString(value.header);
-    const prompt = readString(value.question);
-    if (!questionId || !header || !prompt) {
-      throw new Error(`Codex question ${index + 1} is missing id, header, or prompt`);
+  private handleToolRequest(nativeKind: 'command' | 'file', params: unknown, id: string | number): Promise<unknown> {
+    this.assertRequestThread(params);
+    const mapped = mapCodexToolApproval(nativeKind, params, `tool:${id}`);
+    return this.queueInteraction(mapped.request, mapped.respond, readString(params.turnId));
+  }
+
+  private handleElicitationRequest(params: unknown, id: string | number): Promise<unknown> {
+    this.assertRequestThread(params);
+    try {
+      const request = mapCodexElicitation(params, `elicitation:${id}`);
+      return this.queueInteraction(request, mapCodexElicitationResponse, readString(params.turnId));
+    } catch (error) {
+      this.emitUnavailable(`elicitation:${id}`, 'Codex elicitation unavailable: unsupported or invalid form schema or external action.');
+      return Promise.resolve({ action: 'decline', content: null, _meta: null });
     }
-    const options = Array.isArray(value.options) ? value.options.map((option, optionIndex) => {
-      if (!isRecord(option) || !readString(option.label)) {
-        throw new Error(`Codex question ${questionId} option ${optionIndex + 1} is invalid`);
-      }
-      const label = readString(option.label)!;
-      const description = readString(option.description);
-      return { value: label, label, ...(description ? { description } : {}) };
-    }) : [];
-    return {
-      questionId,
-      header,
-      prompt,
-      required: true,
-      selection: value.multiSelect === true ? 'multiple' : 'single',
-      options,
-      allowCustomText: value.isOther === true || options.length === 0,
-      allowDismiss: true,
-    };
   }
 
-  private handleToolRequest(
-    nativeKind: 'command' | 'file',
-    params: unknown,
-    nativeRequestId: string | number,
-  ): Promise<unknown> {
-    if (!isRecord(params)) return Promise.reject(new Error('Codex tool approval request is invalid'));
-    const itemId = readString(params.itemId);
-    if (!itemId) return Promise.reject(new Error('Codex tool approval request has no item id'));
-    const requestId = `tool:${String(nativeRequestId)}`;
-    const command = readString(params.command);
-    const cwd = readString(params.cwd);
-    const reason = readString(params.reason);
-    const request: Extract<AgentInteractionRequest, { kind: 'tool_approval' }> = {
-      kind: 'tool_approval',
-      requestId,
-      toolCallId: itemId,
-      toolName: nativeKind === 'command' ? 'command' : 'file_change',
-      summary: reason ?? (nativeKind === 'command'
-        ? `Run ${command ?? 'a command'}`
-        : 'Apply file changes'),
-      detail: nativeKind === 'command' && command
-        ? { type: 'shell', command, ...(cwd ? { cwd } : {}) }
-        : { type: 'other', description: nativeKind === 'command' ? reason || 'Run a command' : 'Apply Codex file changes' },
-      allowedDecisions: ['allow', 'deny'],
-      allowScopes: ['once', 'session'],
-    };
-    return new Promise((resolve) => {
-      this.pendingInteractions.set(requestId, {
-        kind: 'tool_approval', request, nativeKind, resolve,
-      });
+  private handlePermissionRequest(params: unknown, id: string | number): Promise<unknown> {
+    this.assertRequestThread(params);
+    try {
+      const { permissions, grant } = mapCodexPermissions(params.permissions);
+      const cwd = readString(params.cwd);
+      const environment = readString(params.environmentId);
+      const request: Extract<AgentInteractionRequest, { kind: 'permission_approval' }> = {
+        kind: 'permission_approval', requestId: `permissions:${id}`,
+        summary: `${readString(params.reason) || 'Grant additional permissions'}${cwd ? ` (working directory: ${cwd})` : ''}${environment ? ` [environment: ${environment}]` : ''}`,
+        permissions, allowScopes: ['turn', 'session'],
+      };
+      return this.queueInteraction(request, (response) => {
+        if (response.kind !== 'permission_approval') throw new Error('Invalid permission response');
+        return { permissions: response.decision === 'allow' ? grant : {}, scope: response.decision === 'allow' ? response.scope : 'turn' };
+      }, readString(params.turnId));
+    } catch {
+      this.emitUnavailable(`permissions:${id}`, 'Codex permission approval unavailable: unsupported or invalid permission scope; no permissions granted.');
+      return Promise.resolve({ permissions: {}, scope: 'turn' });
+    }
+  }
+
+  private queueInteraction(request: AgentInteractionRequest, respond: NativePendingInteraction['respond'], turnId?: string): Promise<unknown> {
+    if (this.pendingInteractions.has(request.requestId)) return Promise.reject(new Error('Duplicate native request'));
+    return new Promise((resolve, reject) => {
+      this.pendingInteractions.set(request.requestId, { kind: request.kind, request, turnId, resolve, reject, respond });
       this.emitInteractionRequested(request);
     });
+  }
+
+  private assertRequestThread(params: unknown): asserts params is Record<string, unknown> {
+    this.assertOpen();
+    if (!isRecord(params) || !this.threadId || params.threadId !== this.threadId) throw new Error('Codex request belongs to an unknown thread');
+  }
+
+  private emitUnavailable(requestId: string, message: string): void {
+    this.emit({ type: 'observation', sourceKey: `interaction:${requestId}:unavailable`, occurredAt: Date.now(), delivery: 'live',
+      event: { type: 'timeline', provider: PROVIDER_ID, item: { type: 'error', message } } });
   }
 
   private emitInteractionRequested(request: AgentInteractionRequest): void {
@@ -639,59 +647,6 @@ export class CodexAppServerSession implements AgentSession {
         type: 'interaction_requested', provider: PROVIDER_ID, request,
       },
     });
-  }
-
-  private mapQuestionResponse(
-    request: Extract<AgentInteractionRequest, { kind: 'question' }>,
-    response: Extract<AgentInteractionResponse, { kind: 'question' }>,
-  ): unknown {
-    if (response.dismissed) {
-      if (response.answers.length > 0) throw new Error('A dismissed Codex question cannot contain answers');
-      return { answers: {} };
-    }
-    const submitted = new Map(response.answers.map((answer) => [answer.questionId, answer]));
-    const answers: Record<string, { answers: string[] }> = {};
-    for (const question of request.questions) {
-      const answer = submitted.get(question.questionId);
-      if (!answer) {
-        if (question.required) throw new Error(`Codex question ${question.questionId} requires an answer`);
-        continue;
-      }
-      const allowed = new Set(question.options.map((option) => option.value));
-      if (answer.selectedValues.some((value) => !allowed.has(value))) {
-        throw new Error(`Codex question ${question.questionId} contains an unknown option`);
-      }
-      if (question.selection === 'single' && answer.selectedValues.length > 1) {
-        throw new Error(`Codex question ${question.questionId} accepts one option`);
-      }
-      if (answer.customText && !question.allowCustomText) {
-        throw new Error(`Codex question ${question.questionId} does not accept custom text`);
-      }
-      const values = [
-        ...answer.selectedValues,
-        ...(answer.customText?.trim() ? [answer.customText.trim()] : []),
-      ];
-      if (values.length === 0 && question.required) {
-        throw new Error(`Codex question ${question.questionId} requires an answer`);
-      }
-      answers[question.questionId] = { answers: values };
-      submitted.delete(question.questionId);
-    }
-    if (submitted.size > 0) {
-      throw new Error(`Codex question response contains unknown question ${submitted.keys().next().value}`);
-    }
-    return { answers };
-  }
-
-  private mapToolResponse(
-    pending: Extract<NativePendingInteraction, { kind: 'tool_approval' }>,
-    response: Extract<AgentInteractionResponse, { kind: 'tool_approval' }>,
-  ): unknown {
-    if (response.decision === 'deny') return { decision: 'decline' };
-    if (!pending.request.allowScopes.includes(response.scope)) {
-      throw new Error(`Codex tool approval does not allow ${response.scope} scope`);
-    }
-    return { decision: response.scope === 'session' ? 'acceptForSession' : 'accept' };
   }
 
   private assertOpen(): void {

@@ -2,6 +2,7 @@ import type { AgentInteractionRequest, AgentSnapshotPayload, ProjectedTimelineEn
 import type { AgentReplica, ReplicaDiagnostic, RemoteSessionStatus } from '@borgee/agent-remote-web/headless';
 
 import { stableJsonValue } from './structural.js';
+import { redactDebuggerValue } from './redaction.js';
 
 export type DebuggerResourceState = ResourceState | Omit<Extract<ResourceResponseState, { status: 'available' }>, 'contentBase64'>;
 
@@ -39,7 +40,8 @@ export function observeReplica(
   let emittedConnectionStatus: RemoteSessionStatus | undefined;
   let previous: ReplicaState | undefined;
   const makeRecord = <T extends DebuggerRecord['kind']>(kind: T, fields: Omit<Extract<DebuggerRecord, { kind: T }>, keyof DebuggerRecordBase | 'kind'>): void => {
-    emit({ schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId, kind, ...fields } as Extract<DebuggerRecord, { kind: T }>);
+    const record = { schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId, kind, ...fields } as Extract<DebuggerRecord, { kind: T }>;
+    emit(redactDebuggerValue(record) as DebuggerRecord);
   };
   const project = () => {
     const current = replica.getState();

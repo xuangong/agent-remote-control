@@ -324,6 +324,15 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   }
 
   private observe(observation: RemoteProtocolObservation): void {
+    if (observation.direction === 'outbound' && observation.message.type === 'interaction_response') {
+      const message = observation.message;
+      let response = message.payload.response;
+      if (response.kind === 'question') response = { ...response, answers: response.answers.map(({ questionId }) => ({ questionId, selectedValues: [], redacted: true })) };
+      else if (response.kind === 'form' && response.action === 'submit') response = { ...response, values: {}, redactedFields: Object.keys(response.values) };
+      else if (response.kind === 'plan_approval' && response.action === 'reject' && response.feedback !== undefined) response = { ...response, feedback: '[redacted]' };
+      else if (response.kind === 'tool_approval' && response.decision !== 'allow' && response.message !== undefined) response = { ...response, message: '[redacted]' };
+      observation = { ...observation, redacted: true, message: { ...message, payload: { ...message.payload, response } } };
+    }
     for (const listener of this.protocolListeners) {
       try {
         listener(observation);

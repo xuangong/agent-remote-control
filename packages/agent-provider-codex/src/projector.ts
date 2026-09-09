@@ -1,4 +1,5 @@
 import { codexToolResult } from './tool-result.js';
+import { CodexImageRegistry } from './images.js';
 import type {
   AgentStreamEvent,
   AgentTaskItem,
@@ -25,6 +26,13 @@ const PROVIDER_ID = 'codex';
 const MAX_UNSUPPORTED_MESSAGE_LENGTH = 640;
 const NON_TIMELINE_NOTIFICATION_METHODS = new Set([
   'account/rateLimits/updated',
+  'rawResponseItem/completed',
+  'rawResponse/completed',
+  'thread/goal/cleared',
+  'thread/goal/updated',
+  'thread/queue/changed',
+  'skills/changed',
+  'item/mcpToolCall/progress',
   'item/commandExecution/outputDelta',
   'item/commandExecution/terminalInteraction',
   'item/fileChange/patchUpdated',
@@ -42,6 +50,8 @@ const NON_TIMELINE_NOTIFICATION_METHODS = new Set([
 export interface CodexEventProjectorOptions {
   now?: () => number;
   delivery?: 'history' | 'live';
+  images?: CodexImageRegistry;
+  cwd?: string;
 }
 
 export class CodexEventProjector {
@@ -51,6 +61,8 @@ export class CodexEventProjector {
   private readonly emittedUserItems = new Set<string>();
   private readonly now: () => number;
   private readonly delivery: 'history' | 'live';
+  private readonly images: CodexImageRegistry;
+  private readonly cwd: string | undefined;
 
   constructor(
     private readonly threadId: string,
@@ -58,6 +70,8 @@ export class CodexEventProjector {
   ) {
     this.now = options.now ?? Date.now;
     this.delivery = options.delivery ?? 'live';
+    this.images = options.images ?? new CodexImageRegistry(threadId);
+    this.cwd = options.cwd;
   }
 
   seedHistoryItem(item: unknown): void {
@@ -157,6 +171,9 @@ export class CodexEventProjector {
   projectHistoryItem(item: unknown, turnId?: string, occurredAt?: number): ProviderObservation | null {
     if (!isRecord(item)) return null;
     const id = readString(item.id);
+    if (id && (item.type === 'imageView' || item.type === 'imageGeneration')) {
+      return this.projectImage(item, id, turnId, occurredAt);
+    }
     const timelineItem = this.mapItem(item, 'completed');
     if (!timelineItem || !id) return null;
     return this.observation(`item:${id}:completed`, {
@@ -199,6 +216,9 @@ export class CodexEventProjector {
     if (!item || !itemId) return null;
     const lifecycle = method === 'item/started' ? 'started' : 'completed';
     const itemType = readString(item.type);
+    if (itemType === 'imageView' || itemType === 'imageGeneration') {
+      return lifecycle === 'completed' ? this.projectImage(item, itemId, turnId) : null;
+    }
     if (itemType === 'agentMessage' || itemType === 'reasoning' || itemType === 'plan') {
       if (lifecycle === 'started') return null;
       return this.projectCompletedTextItem(item, itemId, turnId);
@@ -217,6 +237,17 @@ export class CodexEventProjector {
     return this.observation(`item:${itemId}:${lifecycle}`, {
       type: 'timeline', provider: PROVIDER_ID, turnId, item: mapped,
     });
+  }
+
+  private projectImage(item: JsonObject, itemId: string, turnId?: string, occurredAt?: number): ProviderObservation | null {
+    const projected = this.images.project(item, this.cwd);
+    if (!projected) return null;
+    return {
+      ...this.observation(`item:${itemId}:completed`, {
+        type: 'timeline', provider: PROVIDER_ID, turnId, item: projected.item,
+      }, occurredAt),
+      resourceReferences: projected.resourceReferences,
+    };
   }
 
   private projectCompletedTextItem(
@@ -366,6 +397,7 @@ export class CodexEventProjector {
     if (type === 'fileChange') return this.mapFileChange(item, lifecycle);
     if (type === 'mcpToolCall') return this.mapMcpTool(item, lifecycle);
     if (type === 'webSearch') return this.mapWebSearch(item, lifecycle);
+    if (type === 'collabAgentToolCall' || type === 'subAgentActivity') return this.mapAgentActivity(item, lifecycle);
     if (type === 'plan') {
       const text = readString(item.text);
       return text ? { type: 'assistant_message', text, messageId: id } : null;
@@ -406,6 +438,17 @@ export class CodexEventProjector {
     return this.toolItem(callId, `${server}.${tool}`, status, {
       type: 'other', description: `MCP tool ${server}.${tool}`,
     }, readErrorMessage(item.error), codexToolResult(item));
+  }
+
+  private mapAgentActivity(item: JsonObject, lifecycle: 'started' | 'completed'): AgentToolCallTimelineItem {
+    const activity = item.type === 'subAgentActivity';
+    const name = activity ? 'agent.activity' : `agent.${readString(item.tool) || 'collaboration'}`;
+    const description = activity
+      ? `Agent ${readString(item.agentPath) || readString(item.agentThreadId) || 'activity'}: ${readString(item.kind) || 'activity'}`
+      : readString(item.prompt) || `Agent ${readString(item.tool) || 'collaboration'}`;
+    return this.toolItem(readString(item.id)!, name, normalizeStatus(item.status, lifecycle),
+      { type: 'other', description }, readErrorMessage(item.error),
+      lifecycle === 'completed' ? codexToolResult(item) : undefined);
   }
 
   private mapWebSearch(item: JsonObject, lifecycle: 'started' | 'completed'): AgentToolCallTimelineItem {

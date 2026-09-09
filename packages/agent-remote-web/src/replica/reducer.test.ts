@@ -34,7 +34,7 @@ function snapshot(
   pendingInteractions: AgentInteractionRequest[] = [],
 ): AgentSnapshot {
   return {
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     type: 'agent_snapshot',
     payload: {
       id: 'agent-one',
@@ -61,7 +61,7 @@ function stream(
   resources: ResourceBinding[] = [],
 ): AgentStreamMessage {
   return {
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     type: 'agent_stream',
     payload: {
       agentId: 'agent-one',
@@ -94,7 +94,7 @@ function page(
   const start = entries[0]?.seqStart ?? 0;
   const end = entries.at(-1)?.seqEnd ?? 0;
   return {
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     type: 'timeline_page',
     payload: {
       requestId: 'timeline-request',
@@ -340,7 +340,7 @@ describe('agent replica reducer', () => {
     ).state;
 
     liveState = applyTimelineResourceBindingReplacement(liveState, {
-      protocolVersion: '1.2.0',
+      protocolVersion: '1.3.0',
       type: 'timeline_resource_binding_replaced',
       payload: {
         agentId: 'agent-one', epoch: 'epoch-one', seq: 1,
@@ -348,7 +348,7 @@ describe('agent replica reducer', () => {
       },
     });
     liveState = applyResourceUpdate(liveState, {
-      protocolVersion: '1.2.0',
+      protocolVersion: '1.3.0',
       type: 'resource_update',
       payload: { agentId: 'agent-one', resourceId: replacement.resourceId, state: terminal },
     });

@@ -1,14 +1,15 @@
 import type { ProviderObservation } from '@borgee/agent-provider-sdk';
 
 import { isRecord, readNumber, readString, type JsonObject } from './native.js';
-import { CodexEventProjector } from './projector.js';
+import { CodexEventProjector, type CodexEventProjectorOptions } from './projector.js';
 
 export function projectCodexThreadHistory(
   response: unknown,
   threadId: string,
+  options: Pick<CodexEventProjectorOptions, 'images' | 'cwd'> = {},
 ): ProviderObservation[] {
   const thread = readThread(response, threadId);
-  const projector = new CodexEventProjector(threadId, { delivery: 'history' });
+  const projector = new CodexEventProjector(threadId, { ...options, cwd: options.cwd ?? readString(thread.cwd), delivery: 'history' });
   const observations: ProviderObservation[] = [];
   const turns = Array.isArray(thread.turns) ? thread.turns : [];
   for (const value of turns) {

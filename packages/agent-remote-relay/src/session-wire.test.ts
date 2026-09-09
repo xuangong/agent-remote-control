@@ -11,15 +11,15 @@ describe('session wire negotiation', () => {
     agent.setPlanning = async (active) => { selected.push(active); await new Promise<void>((resolve) => { finish = resolve; }); };
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
-    const submitted = wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'set_planning', payload: { requestId: 'planning-1', agentId: 'agent-1', active: true } }));
+    const submitted = wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'set_planning', payload: { requestId: 'planning-1', agentId: 'agent-1', active: true } }));
     await Promise.resolve();
     expect(selected).toEqual([true]);
     expect(output).toEqual([]);
     finish();
     await submitted;
-    expect(output).toEqual([{ protocolVersion: '1.2.0', type: 'command_acknowledged', payload: { requestId: 'planning-1', agentId: 'agent-1', command: 'set_planning' } }]);
+    expect(output).toEqual([{ protocolVersion: '1.3.0', type: 'command_acknowledged', payload: { requestId: 'planning-1', agentId: 'agent-1', command: 'set_planning' } }]);
     wire.close();
   });
 
@@ -40,7 +40,7 @@ describe('session wire negotiation', () => {
     expect(output.map(({ type }) => type)).toEqual(['protocol_error']);
 
     output.length = 0;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
 
     expect(resolveAgent).toHaveBeenCalledOnce();
     expect(subscribe).toHaveBeenCalledOnce();
@@ -75,7 +75,7 @@ describe('session wire negotiation', () => {
       onFailure: (error) => failures.push(error),
     });
 
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
 
     expect(failures).toEqual([{
       kind: 'manager_event_buffer_overflow',
@@ -97,11 +97,11 @@ describe('session wire negotiation', () => {
       maxBufferedManagerEvents: 2,
       onFailure: (error) => failures.push(error),
     });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_subscription',
+      protocolVersion: '1.3.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-overflow', agentIds: ['agent-1'] },
     }));
 
@@ -121,7 +121,7 @@ describe('session wire negotiation', () => {
 
     expect(output).toEqual([
       expect.objectContaining({
-        protocolVersion: '1.2.0', type: 'protocol_error',
+        protocolVersion: '1.3.0', type: 'protocol_error',
         payload: expect.objectContaining({ code: 'incompatible_protocol_version', recoverable: false }),
       }),
     ]);
@@ -132,7 +132,7 @@ describe('session wire negotiation', () => {
     const output: unknown[] = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)));
 
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
 
     expect(output.map((message) => (message as { type: string }).type)).toEqual(['negotiated', 'agent_snapshot']);
     expect(output[1]).toMatchObject({ payload: { id: 'agent-1', pendingInteractions: [] } });
@@ -147,7 +147,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>), {
       onFailure: (error) => failures.push(error),
     });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
 
     emit({
@@ -156,7 +156,7 @@ describe('session wire Timeline and manager-event projection', () => {
     } as AgentManagerEvent);
     emit({ type: 'agent_state', agentId: 'agent-1', snapshot: agent.snapshot() });
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'send_message',
+      protocolVersion: '1.3.0', type: 'send_message',
       payload: { requestId: 'message-after-failure', agentId: 'agent-1', text: 'Continue.' },
     }));
 
@@ -171,7 +171,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
 
     emit({
@@ -182,7 +182,7 @@ describe('session wire Timeline and manager-event projection', () => {
     });
 
     expect(output).toEqual([{
-      protocolVersion: '1.2.0',
+      protocolVersion: '1.3.0',
       type: 'resource_update',
       payload: {
         agentId: 'agent-1',
@@ -197,7 +197,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
     const replacement: AgentManagerEvent = {
       type: 'timeline_resource_binding_replaced',
@@ -212,14 +212,14 @@ describe('session wire Timeline and manager-event projection', () => {
     expect(output).toEqual([]);
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_subscription',
+      protocolVersion: '1.3.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resource-replacement', agentIds: ['agent-1'] },
     }));
     output.length = 0;
     emit(replacement);
 
     expect(output).toEqual([{
-      protocolVersion: '1.2.0',
+      protocolVersion: '1.3.0',
       type: 'timeline_resource_binding_replaced',
       payload: {
         agentId: 'agent-1',
@@ -236,25 +236,25 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
 
     emit(timelineManagerEvent(1, 'before subscription'));
     expect(output).toEqual([]);
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_subscription',
+      protocolVersion: '1.3.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-1', agentIds: ['agent-1'] },
     }));
     emit(timelineManagerEvent(2, 'live after acknowledgement'));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_request',
+      protocolVersion: '1.3.0', type: 'timeline_request',
       payload: { requestId: 'tail-1', agentId: 'agent-1', direction: 'tail', limit: 10 },
     }));
 
     expect(output.map(({ type }) => type)).toEqual(['timeline_subscribed', 'agent_stream', 'timeline_page']);
     expect(output[1]).toEqual({
-      protocolVersion: '1.2.0', type: 'agent_stream',
+      protocolVersion: '1.3.0', type: 'agent_stream',
       payload: {
         agentId: 'agent-1', epoch: 'epoch-1', seq: 2, timestamp: '2026-09-02T00:00:02.000Z',
         event: {
@@ -271,16 +271,16 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'send_message',
+      protocolVersion: '1.3.0', type: 'send_message',
       payload: { requestId: 'message-1', agentId: 'agent-1', text: 'Continue.' },
     }));
 
     expect(output).toEqual([{
-      protocolVersion: '1.2.0', type: 'command_acknowledged',
+      protocolVersion: '1.3.0', type: 'command_acknowledged',
       payload: { requestId: 'message-1', agentId: 'agent-1', command: 'send_message' },
     }]);
   });
@@ -292,16 +292,16 @@ describe('session wire Timeline and manager-event projection', () => {
     };
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'send_message',
+      protocolVersion: '1.3.0', type: 'send_message',
       payload: { requestId: 'message-unsupported', agentId: 'agent-1', text: 'Continue.' },
     }));
 
     expect(output).toEqual([{
-      protocolVersion: '1.2.0', type: 'protocol_error',
+      protocolVersion: '1.3.0', type: 'protocol_error',
       payload: {
         requestId: 'message-unsupported', code: 'unsupported_command',
         message: 'send_message is not supported by this Agent.', recoverable: true,
@@ -313,7 +313,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     output.length = 0;
 
     const request = {
@@ -341,7 +341,7 @@ describe('session wire Timeline and manager-event projection', () => {
 function fakeAgent(): { agent: SessionWireAgent; emit: (event: AgentManagerEvent) => void } {
   let listener: ((event: AgentManagerEvent) => void) | undefined;
   const snapshot = {
-    protocolVersion: '1.2.0' as const,
+    protocolVersion: '1.3.0' as const,
     type: 'agent_snapshot' as const,
     payload: {
       id: 'agent-1', providerId: 'codex', createdAt: '2026-09-02T00:00:00.000Z',
@@ -361,7 +361,7 @@ function fakeAgent(): { agent: SessionWireAgent; emit: (event: AgentManagerEvent
       subscribe(next) { listener = next; return () => { listener = undefined; }; },
       fetchTimeline(request) {
         return {
-          protocolVersion: '1.2.0', type: 'timeline_page',
+          protocolVersion: '1.3.0', type: 'timeline_page',
           payload: {
             requestId: request.requestId, agentId: 'agent-1', direction: request.direction,
             epoch: 'epoch-1', reset: false, staleCursor: false, gap: false,

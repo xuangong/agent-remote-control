@@ -1,3 +1,4 @@
+import { validateInteractionResponse } from '@borgee/agent-provider-sdk';
 import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
@@ -731,6 +732,7 @@ export function validateDshInteractionResponse(
       if (request.questions.some(({ allowDismiss }) => !allowDismiss)) {
         throw new Error('DSH question does not allow dismissal');
       }
+      validateInteractionResponse(request, response);
       return;
     }
     for (const question of request.questions) {
@@ -738,11 +740,13 @@ export function validateDshInteractionResponse(
         throw new Error(`DSH question ${question.questionId} requires an answer`);
       }
     }
+    validateInteractionResponse(request, response);
     return;
   }
   if (request.kind === 'plan_approval' && response.kind === 'plan_approval') {
     if (!request.allowedActions.includes(response.action)) throw new Error(`Unsupported DSH plan action ${response.action}`);
     if (response.action !== 'reject' && 'feedback' in response) throw new Error('DSH plan approval cannot include revision feedback.');
+    validateInteractionResponse(request, response);
     return;
   }
   if (request.kind === 'tool_approval' && response.kind === 'tool_approval') {
@@ -750,6 +754,7 @@ export function validateDshInteractionResponse(
     if (response.decision === 'allow' && !request.allowScopes.includes(response.scope)) {
       throw new Error(`Unsupported DSH tool approval scope ${response.scope}`);
     }
+    validateInteractionResponse(request, response);
     return;
   }
   throw new Error(`DSH interaction ${request.requestId} requires a ${request.kind} response`);

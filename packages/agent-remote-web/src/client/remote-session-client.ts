@@ -172,6 +172,11 @@ export class RemoteSessionClient {
   }
 
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<InteractionResolvedMessage> {
+    if (!this.replica.getState().pendingInteractions.some((request) => request.requestId === requestId)) {
+      return this.observeRejection(Promise.reject(new RemoteOperationError(
+        'stale_interaction', 'This interaction is no longer pending.', false, requestId,
+      )));
+    }
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'interaction_response',

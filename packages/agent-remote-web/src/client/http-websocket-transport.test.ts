@@ -83,8 +83,8 @@ describe('HttpWebSocketTransport', () => {
       .resolves.toEqual(history);
 
     expect(calls).toEqual([
-      'http://relay.test/base/v1/sessions/agent%20one/snapshot?protocolVersion=1.2.0',
-      'http://relay.test/base/v1/sessions/agent%20one/timeline?protocolVersion=1.2.0&requestId=history-one&direction=after&limit=50&epoch=epoch-one&seq=1',
+      'http://relay.test/base/v1/sessions/agent%20one/snapshot?protocolVersion=1.3.0',
+      'http://relay.test/base/v1/sessions/agent%20one/timeline?protocolVersion=1.3.0&requestId=history-one&direction=after&limit=50&epoch=epoch-one&seq=1',
     ]);
   });
 
@@ -279,6 +279,21 @@ describe('HttpWebSocketTransport', () => {
       { direction: 'inbound', channel: 'websocket', message: { protocolVersion: PROTOCOL_VERSION, type: 'negotiated' } },
     ]);
     expect(diagnostics).toEqual([expect.objectContaining({ source: 'websocket', code: 'invalid_wire_body' })]);
+  });
+
+  it('redacts question and form answers before protocol observers without changing native delivery', () => {
+    const socket = new FakeWebSocket('ws://relay.test');
+    const transport = new HttpWebSocketTransport('http://relay.test', { webSocketFactory: () => socket });
+    const observations: RemoteProtocolObservation[] = [];
+    transport.onProtocolMessage((observation) => observations.push(observation));
+    const connection = transport.connect('agent', { onOpen() {}, onMessage() {}, onDisconnect() {} });
+    connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'interaction_response', payload: { agentId: 'agent', requestId: 'secret', response: { kind: 'question', answers: [{ questionId: 'token', selectedValues: [], customText: 'do-not-log' }] } } });
+    expect(socket.sent[0]).toContain('do-not-log');
+    expect(JSON.stringify(observations)).not.toContain('do-not-log');
+    expect(observations[0]).toHaveProperty('redacted', true);
+    connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'interaction_response', payload: { agentId: 'agent', requestId: 'form', response: { kind: 'form', action: 'submit', values: { token: 'do-not-log' } } } });
+    expect(socket.sent[1]).toContain('do-not-log');
+    expect(JSON.stringify(observations)).not.toContain('do-not-log');
   });
 
   it('isolates throwing protocol observers from WebSocket send and receive', () => {

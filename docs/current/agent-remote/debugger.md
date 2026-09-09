@@ -79,3 +79,7 @@ flowchart LR
 - `packages/agent-remote-debugger/src/output.ts:9-93`
 
 The standalone connection resolves explicit options before `AGENT_REMOTE_URL` and `AGENT_REMOTE_ORIGIN`, then the compatible `BORGEE_REMOTE_*` environment names, then local defaults (`packages/agent-remote-debugger/src/input.ts:10`).
+
+## Sensitive interaction output
+
+Debugger records, inspect/timeline results, response command receipts, and public protocol trace redact sensitive question answers and form values. Protocol observers do not see the actual outbound answer body; the command still delivers the original response to the Provider. A redacted recording is an inspection artifact and must not be reused as a native answer (`packages/agent-remote-debugger/src/redaction.ts`, `packages/agent-remote-debugger/src/records.ts`, `packages/agent-remote-debugger/src/runtime.ts`, `packages/agent-remote-debugger/src/commands.ts`).

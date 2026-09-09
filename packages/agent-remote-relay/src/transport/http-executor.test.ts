@@ -12,8 +12,8 @@ describe('transport-neutral HTTP execution', () => {
     const address = await server.listen(0, '127.0.0.1');
     closeables.push(() => server.close());
     expect(remote.executeAgentRemoteHttpRequest).toBeTypeOf('function');
-    for (const path of ['/v1/providers?protocolVersion=1.2.0', '/v1/providers',
-      '/v1/sessions/missing/snapshot?protocolVersion=1.2.0', '/v1/sessions/%ZZ/timeline?protocolVersion=1.2.0']) {
+    for (const path of ['/v1/providers?protocolVersion=1.3.0', '/v1/providers',
+      '/v1/sessions/missing/snapshot?protocolVersion=1.3.0', '/v1/sessions/%ZZ/timeline?protocolVersion=1.3.0']) {
       const executed = await remote.executeAgentRemoteHttpRequest(relay, { method: 'GET', path });
       const response = await fetch(`${address.url}${path}`);
       expect(executed).toEqual({ status: response.status, body: await response.text() });

@@ -7,7 +7,7 @@ import type { DebuggerRuntime } from './runtime.js';
 
 import { runCli, type CliEnvironment } from './cli.js';
 
-const protocolVersion = '1.2.0' as const;
+const protocolVersion = '1.3.0' as const;
 
 function agentSnapshot(capabilities = fullCapabilities): AgentSnapshot {
   return {
@@ -211,6 +211,16 @@ function json(output: string): unknown {
 }
 
 describe('bdb command surface', () => {
+  it('submits typed forms using their capability without printing private answers', async () => {
+    const h = harness();
+    h.transport.snapshot.payload.capabilities = { ...h.transport.snapshot.payload.capabilities, interactions: { ...h.transport.snapshot.payload.capabilities.interactions, form: true, question: false } };
+    h.transport.snapshot.payload.pendingInteractions = [{ kind: 'form', requestId: 'form-one', title: 'Login', message: '', fields: [{ type: 'text', fieldId: 'token', label: 'Token', required: true, sensitive: true }] }];
+    h.setStdin('{"kind":"form","action":"submit","values":{"token":"cli-private-token"}}');
+    expect(await runCli(['interaction', 'respond', 'agent-one', 'form-one', '--response-file', '-', '--json'], h.io, h.environment)).toBe(0);
+    expect(h.transport.sent).toContainEqual(expect.objectContaining({ type: 'interaction_response', payload: expect.objectContaining({ response: { kind: 'form', action: 'submit', values: { token: 'cli-private-token' } } }) }));
+    expect(h.stdout()).not.toContain('cli-private-token');
+  });
+
   it('submits planning controls through the shared client and rejects missing capability', async () => {
     const h = harness();
     expect(await runCli(['planning', 'agent-one', 'on', '--json'], h.io, h.environment)).toBe(0);
@@ -813,4 +823,18 @@ describe('bdb command surface', () => {
       expect(h.writes).toEqual([]);
     }
   });
+});
+
+it.each(['inspect', 'timeline'] as const)('does not print sensitive request defaults in %s output from a custom transport', async (command) => {
+  const h = harness();
+  const request = { kind: 'form' as const, requestId: 'form', title: 'Login', message: '', fields: [
+    { type: 'text' as const, fieldId: 'token', label: 'Token', required: true, sensitive: true, defaultValue: 'PRIVATE_CLI_DEFAULT' },
+    { type: 'text' as const, fieldId: 'region', label: 'Region', required: false, defaultValue: 'west' },
+  ] };
+  h.transport.snapshot.payload.pendingInteractions = [request];
+  h.transport.timelineEntries = [{ ...timelineEntry, item: { type: 'interaction', request, response: { kind: 'form', action: 'cancel' } } }];
+  expect(await runCli([command, 'agent-one', '--json'], h.io, h.environment)).toBe(0);
+  expect(h.stdout()).not.toContain('PRIVATE_CLI_DEFAULT');
+  expect(h.stdout()).toContain('west');
+  expect(request.fields[0]!.defaultValue).toBe('PRIVATE_CLI_DEFAULT');
 });

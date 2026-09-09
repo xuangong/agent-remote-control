@@ -92,6 +92,30 @@ const interactionCases: Array<{
   },
 ];
 
+interactionCases.push(
+  {
+    kind: 'form',
+    request: { kind: 'form', requestId: 'form-one', title: 'Count', message: '', fields: [{ type: 'number', fieldId: 'count', label: 'Count', required: true, integer: true, minimum: 1, maximum: 3 }] },
+    response: { kind: 'form', action: 'submit', values: { count: 2 } },
+    invalid: { kind: 'form', action: 'submit', values: { count: 4 } },
+    malformed: { kind: 'form', action: 'submit', values: { count: { nested: true } } },
+  },
+  {
+    kind: 'permission_approval',
+    request: { kind: 'permission_approval', requestId: 'permission-one', summary: 'Read project', permissions: [{ resource: 'filesystem', access: 'read', target: '/workspace' }], allowScopes: ['turn'] },
+    response: { kind: 'permission_approval', decision: 'allow', scope: 'turn' },
+    invalid: { kind: 'permission_approval', decision: 'allow', scope: 'session' },
+    malformed: { kind: 'permission_approval', decision: 'allow' },
+  },
+  {
+    kind: 'external_action',
+    request: { kind: 'external_action', requestId: 'external-one', title: 'Authenticate', message: 'Complete authentication', url: 'https://example.com/auth' },
+    response: { kind: 'external_action', action: 'completed' },
+    invalid: { kind: 'form', action: 'cancel' },
+    malformed: { kind: 'external_action', action: 'navigate' },
+  },
+);
+
 afterEach(async () => {
   await Promise.all(closeables.splice(0).map((close) => close()));
 });
@@ -99,14 +123,14 @@ afterEach(async () => {
 describe('Agent Remote HTTP transport', () => {
   it('serves the strict protocol Provider list response', async () => {
     const { url } = await start();
-    const response = await fetch(`${url}/v1/providers?protocolVersion=1.2.0`);
+    const response = await fetch(`${url}/v1/providers?protocolVersion=1.3.0`);
     const json = await response.text();
 
     expect(response.status).toBe(200);
     expect(decodeProviderListResponse(json)).toEqual({
       status: 'ok',
       value: {
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         type: 'provider_list',
         payload: { providers: [{ providerId: 'fake', displayName: 'Fake Agent' }] },
       },
@@ -121,7 +145,7 @@ describe('Agent Remote HTTP transport', () => {
   it('creates an Agent and serves its independent Snapshot by relay agentId', async () => {
     const { url } = await start();
     const body = encodeCreateAgentRequest({
-      protocolVersion: '1.2.0', type: 'create_agent',
+      protocolVersion: '1.3.0', type: 'create_agent',
       payload: {
         requestId: 'create-1', agentId: 'agent-http', providerId: 'fake',
         config: { sessionId: 'provider-session-http', cwd: '/workspace' },
@@ -133,7 +157,7 @@ describe('Agent Remote HTTP transport', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: body.json,
     });
     const created = decodeAgentSessionResponse(await createResponse.text());
-    const snapshotResponse = await fetch(`${url}/v1/sessions/agent-http/snapshot?protocolVersion=1.2.0`);
+    const snapshotResponse = await fetch(`${url}/v1/sessions/agent-http/snapshot?protocolVersion=1.3.0`);
     const snapshot = decodeAgentSnapshot(await snapshotResponse.text());
 
     expect(createResponse.status).toBe(201);
@@ -162,7 +186,7 @@ describe('Agent Remote HTTP transport', () => {
     const history = [timelineObservation('history-1', 'Recovered output.', 1, 'history')];
     const { url } = await start(history);
     const body = encodeResumeAgentRequest({
-      protocolVersion: '1.2.0', type: 'resume_agent',
+      protocolVersion: '1.3.0', type: 'resume_agent',
       payload: {
         requestId: 'resume-1', agentId: 'agent-resumed',
         persistence: { providerId: 'fake', sessionId: 'provider-session-resumed', opaque: 'resume-token' },
@@ -175,7 +199,7 @@ describe('Agent Remote HTTP transport', () => {
     });
     const resumeJson = await resumeResponse.text();
     const timelineResponse = await fetch(
-      `${url}/v1/sessions/agent-resumed/timeline?protocolVersion=1.2.0&requestId=tail-1&direction=tail&limit=10`,
+      `${url}/v1/sessions/agent-resumed/timeline?protocolVersion=1.3.0&requestId=tail-1&direction=tail&limit=10`,
     );
     const timeline = decodeHistoryPage(await timelineResponse.text());
 
@@ -217,7 +241,7 @@ describe('Agent Remote HTTP transport', () => {
 
   it('classifies invalid path escapes and oversized bodies without disabling later requests', async () => {
     const { url } = await start();
-    const escaped = await fetch(`${url}/v1/sessions/%/snapshot?protocolVersion=1.2.0`);
+    const escaped = await fetch(`${url}/v1/sessions/%/snapshot?protocolVersion=1.3.0`);
     const oversized = await fetch(`${url}/v1/sessions`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: 'x'.repeat(1_048_577),
     });
@@ -250,7 +274,7 @@ describe('Agent Remote WebSocket transport', () => {
     expect(subscribe).not.toHaveBeenCalled();
 
     const negotiated = collectMessages(socket, 2);
-    socket.send(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     const messages = (await negotiated).map((json) => decodeServerMessage(json));
 
     expect(requireAgent).toHaveBeenCalledOnce();
@@ -284,12 +308,12 @@ describe('Agent Remote WebSocket transport', () => {
     const readResource = vi.spyOn(relay.requireAgent('agent-protected'), 'readResource');
     const socket = await openSocket(`${url.replace('http:', 'ws:')}/v1/sessions/agent-protected/events`);
     const negotiated = collectMessages(socket, 2);
-    socket.send(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     await negotiated;
 
     const rejected = collectMessages(socket, 1);
     socket.send(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'resource_request',
+      protocolVersion: '1.3.0', type: 'resource_request',
       payload: { requestId: 'resource-denied', agentId: 'agent-protected', resourceId: 'resource-1' },
     }));
 
@@ -315,7 +339,7 @@ describe('Agent Remote WebSocket transport', () => {
 
     const negotiationRequired = collectMessages(socket, 1);
     socket.send(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_subscription',
+      protocolVersion: '1.3.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-early', agentIds: ['agent-ws'] },
     }));
     expect(decodeServerMessage((await negotiationRequired)[0] as string)).toMatchObject({
@@ -330,7 +354,7 @@ describe('Agent Remote WebSocket transport', () => {
     });
 
     const accepted = collectMessages(socket, 2);
-    socket.send(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     const messages = (await accepted).map((json) => decodeServerMessage(json));
     expect(messages).toMatchObject([
       { status: 'ok', value: { type: 'negotiated' } },
@@ -345,12 +369,12 @@ describe('Agent Remote WebSocket transport', () => {
     const socket = await openSocket(`${url.replace('http:', 'ws:')}/v1/sessions/agent-live/events`);
 
     const negotiated = collectMessages(socket, 2);
-    socket.send(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     await negotiated;
 
     const subscribed = collectMessages(socket, 1);
     socket.send(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_subscription',
+      protocolVersion: '1.3.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-1', agentIds: ['agent-live'] },
     }));
     expect(decodeServerMessage((await subscribed)[0] as string)).toMatchObject({
@@ -372,7 +396,7 @@ describe('Agent Remote WebSocket transport', () => {
 
     const recovery = collectMessages(socket, 1);
     socket.send(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'timeline_request',
+      protocolVersion: '1.3.0', type: 'timeline_request',
       payload: {
         requestId: 'recover-1', agentId: 'agent-live', direction: 'after',
         cursor: { epoch: 'epoch-http', seq: 99 }, limit: 10,
@@ -390,7 +414,7 @@ describe('Agent Remote WebSocket transport', () => {
     await relay.createAgent(createRequest('agent-interaction', 'provider-session-interaction'));
     const socket = await openSocket(`${url.replace('http:', 'ws:')}/v1/sessions/agent-interaction/events`);
     const negotiated = collectMessages(socket, 2);
-    socket.send(JSON.stringify({ protocolVersion: '1.2.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
     await negotiated;
 
     const projected = collectMessages(socket, 2);
@@ -425,7 +449,7 @@ describe('Agent Remote WebSocket transport', () => {
 
     await relay.createAgent(createRequest('agent-after-attack', 'provider-session-after-attack'));
     const snapshot = await fetch(
-      `${url}/v1/sessions/agent-after-attack/snapshot?protocolVersion=1.2.0`,
+      `${url}/v1/sessions/agent-after-attack/snapshot?protocolVersion=1.3.0`,
     );
     expect(snapshot.status).toBe(200);
     const socket = await openSocket(`${url.replace('http:', 'ws:')}/v1/sessions/agent-after-attack/events`);
@@ -477,7 +501,7 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
       .rejects.toMatchObject({ code: 'invalid_interaction_response', requestId: request.requestId });
 
     connected.socket().send(JSON.stringify({
-      protocolVersion: '1.2.0', type: 'interaction_response',
+      protocolVersion: '1.3.0', type: 'interaction_response',
       payload: { agentId: 'agent-interaction', requestId: request.requestId, response: malformed },
     }));
     await vi.waitFor(() => expect(connected.observations).toContainEqual(expect.objectContaining({
@@ -605,6 +629,29 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
   });
 });
 
+describe('Serialized sensitive interaction recovery', () => {
+  it('delivers a secret only to the provider and preserves redacted receipts through HTTP and reconnect', async () => {
+    const request: AgentInteractionRequest = { kind: 'form', requestId: 'secret-form', title: 'Login', message: '', fields: [{ type: 'text', fieldId: 'token', label: 'Token', required: true, sensitive: true }] };
+    const response: AgentInteractionResponse = { kind: 'form', action: 'submit', values: { token: 'transport-private-token' } };
+    const redacted: AgentInteractionResponse = { kind: 'form', action: 'submit', values: {}, redactedFields: ['token'] };
+    const context = await startInteraction(request);
+    const connected = await connectInteractionClient(context.url);
+    const accepted = connected.client.respondToInteraction(request.requestId, response);
+    await vi.waitFor(() => expect(context.session.interactionResponses).toEqual([{ requestId: request.requestId, response }]));
+    context.resolve(response);
+    await expect(accepted).resolves.toMatchObject({ payload: { response: redacted } });
+    expectCompleted(connected.replica, request, redacted);
+    const history = await connected.transport.fetchTimeline('agent-interaction', 'tail');
+    expect(JSON.stringify(history)).not.toContain('transport-private-token');
+    const incoming = connected.observations.filter(({ direction }) => direction === 'inbound');
+    expect(JSON.stringify(incoming)).not.toContain('transport-private-token');
+    connected.socket().terminate();
+    await connected.reconnect();
+    await connected.ready();
+    expectCompleted(connected.replica, request, redacted);
+  });
+});
+
 async function startInteraction(request: AgentInteractionRequest) {
   const context = await start([{
     type: 'observation', sourceKey: 'request-one', occurredAt: 1, delivery: 'history',
@@ -673,7 +720,7 @@ function deferred() {
 
 function createRequest(agentId: string, sessionId: string) {
   return {
-    protocolVersion: '1.2.0' as const,
+    protocolVersion: '1.3.0' as const,
     type: 'create_agent' as const,
     payload: { requestId: `create-${agentId}`, agentId, providerId: 'fake', config: { sessionId } },
   };

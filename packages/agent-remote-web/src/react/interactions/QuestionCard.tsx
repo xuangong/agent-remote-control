@@ -72,9 +72,9 @@ export function QuestionCard({ request, onResponse, pending, failure, draft: con
       return;
     }
     setError(undefined);
-    const answers = request.questions.map(({ questionId }) => {
+    const answers = request.questions.map(({ questionId, sensitive }) => {
       const answer = draft.answers[questionId];
-      const customText = answer?.customText?.trim();
+      const customText = sensitive ? answer?.customText : answer?.customText?.trim();
       return { questionId, selectedValues: [...(answer?.selectedValues ?? [])], ...(customText ? { customText } : {}) };
     });
     await onResponse({ kind: 'question', answers });
@@ -130,7 +130,7 @@ export function QuestionCard({ request, onResponse, pending, failure, draft: con
           </label>)}
           {question.allowCustomText ? <label className="agent-question-custom">
             <span>Custom response</span>
-            <input name={`${question.questionId}-custom`} type="text" value={answer.customText ?? ''} onChange={(event) => changeAnswer(question.questionId, { ...answer, customText: event.target.value })} />
+            <input name={`${question.questionId}-custom`} type={question.sensitive ? 'password' : 'text'} autoComplete={question.sensitive ? 'off' : undefined} value={answer.customText ?? ''} onChange={(event) => changeAnswer(question.questionId, { ...answer, customText: event.target.value })} />
           </label> : null}
         </div>
       </fieldset>;

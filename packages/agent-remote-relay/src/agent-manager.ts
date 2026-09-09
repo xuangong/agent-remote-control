@@ -1,5 +1,5 @@
+import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@borgee/agent-provider-sdk';
 import type {
-  AgentInteractionRequest,
   AgentInteractionResponse,
   AgentPersistenceHandle,
   AgentProviderAdapter,
@@ -253,7 +253,9 @@ export class AgentManager {
     if (!pending || this.claimedInteractionIds.has(requestId)) {
       throw new InteractionResponseError('stale_interaction', 'Interaction request is no longer pending.');
     }
-    if (!validInteractionResponse(pending, response)) {
+    try {
+      validateInteractionResponse(pending, response);
+    } catch {
       throw new InteractionResponseError(
         'invalid_interaction_response',
         'Interaction response does not satisfy the pending request.',
@@ -350,7 +352,17 @@ export class AgentManager {
 
   private async applyObservation(observation: ProviderObservation): Promise<void> {
     if (this.isDuplicate(observation)) return;
-    const event = observation.event;
+    let event = observation.event;
+    if (event.type === 'timeline' && event.item.type === 'interaction') {
+      event = { ...event, item: { ...event.item, request: redactInteractionRequest(event.item.request), response: redactInteractionResponse(event.item.request, event.item.response) } };
+    } else if (event.type === 'interaction_requested') {
+      event = { ...event, request: redactInteractionRequest(event.request) };
+    } else if (event.type === 'interaction_resolved') {
+      const resolvedRequestId = event.requestId;
+      const request = this.state.payload.pendingInteractions.find(({ requestId }) => requestId === resolvedRequestId);
+      // Orphan resolutions have no trusted sensitivity metadata, so retain no answer values.
+      event = { ...event, response: redactInteractionResponse(request ?? { kind: 'question', requestId: event.requestId, questions: [] }, event.response) };
+    }
     if (event.type === 'timeline') {
       const timeline = this.timeline;
       const result = timeline.append({
@@ -544,34 +556,4 @@ function providerReadLocator(observation: ProviderObservation, normalizedLocator
     return reference.readLocator;
   }
   return undefined;
-}
-
-function validInteractionResponse(
-  request: AgentInteractionRequest,
-  response: AgentInteractionResponse,
-): boolean {
-  if (request.kind !== response.kind) return false;
-  if (request.kind === 'plan_approval' && response.kind === 'plan_approval') {
-    return request.allowedActions.includes(response.action) && (response.action === 'reject' || !('feedback' in response));
-  }
-  if (request.kind === 'tool_approval' && response.kind === 'tool_approval') {
-    if (!request.allowedDecisions.includes(response.decision)) return false;
-    return response.decision === 'deny' || request.allowScopes.includes(response.scope);
-  }
-  if (request.kind !== 'question' || response.kind !== 'question') return false;
-  if (response.dismissed === true) return request.questions.every(({ allowDismiss }) => allowDismiss);
-
-  const questions = new Map(request.questions.map((question) => [question.questionId, question]));
-  const seenAnswers = new Set<string>();
-  for (const answer of response.answers) {
-    const question = questions.get(answer.questionId);
-    if (!question || seenAnswers.has(answer.questionId)) return false;
-    seenAnswers.add(answer.questionId);
-    if (question.selection === 'single' && answer.selectedValues.length > 1) return false;
-    const options = new Set(question.options.map(({ value }) => value));
-    if (answer.selectedValues.some((value) => !options.has(value))) return false;
-    if (answer.customText !== undefined && !question.allowCustomText) return false;
-    if (question.required && answer.selectedValues.length === 0 && !answer.customText) return false;
-  }
-  return request.questions.every((question) => !question.required || seenAnswers.has(question.questionId));
 }

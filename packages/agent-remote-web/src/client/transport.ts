@@ -22,6 +22,7 @@ export interface RemoteTransportDiagnostic {
 }
 
 export interface RemoteProtocolObservation {
+  readonly redacted?: boolean;
   readonly direction: 'inbound' | 'outbound';
   readonly channel: 'http' | 'websocket';
   readonly message: ClientMessage | RemoteServerMessage;

@@ -58,7 +58,7 @@ For non-default ports, add `--relay http://127.0.0.1:6013 --origin http://127.0.
 - An old PATH executable: set `AGENT_REMOTE_CODEX_EXECUTABLE` to the isolated installation above. The live launcher accepts 0.148.0 or newer; only the recorded compatibility target is guaranteed by the pinned tests.
 - Authentication or model errors: use the same native Codex home to configure/login, then retry deliberately. The workbench retains the native failure.
 - Process exit: the Provider fails the observation stream and includes a bounded stderr tail in diagnostics. Other local Codex processes remain running.
-- Generated-resource reads are not supported by this adapter. Native logs stay native; public Trace shows normalized events and `bdb protocol trace` shows public Remote frames.
+- Native image-view and generated-image resources are supported; general filesystem reads and remote image URL fetching are unavailable. Native logs stay native; public Trace shows normalized events and `bdb protocol trace` shows public Remote frames.
 
 The implementation follows the process and history approach used by Paseo's `codex-app-server-agent.ts` and `codex/app-server-transport.ts`. Runtime code has no dependency on a Paseo checkout.
 
@@ -80,3 +80,9 @@ The browser regression runs the real app-server against a local model-response f
 Expand a completed command row to inspect its combined output, exit code, and duration. Failed commands retain their output too. `pnpm bdb timeline AGENT_ID --all --json` exposes the same `item.result`. Results appear when the native tool item completes; incremental command output is not currently streamed. Long output is a bounded preview with an explicit truncation notice.
 
 New sessions use Codex paginated history to preserve tool output across process restarts. Imported legacy sessions may lack historical command records in `thread/read`; create a new session when validating durable tool results.
+
+## Forms, approvals, and images
+
+Use a Host, Relay, debugger, and workbench built from protocol `1.3.0`. MCP requests can display flat typed forms, explicit browser actions, and exact filesystem/network approvals. Tool approvals expose only decisions advertised by Codex. Unsupported form schemas are declined with a visible diagnostic. Sensitive text is hidden in completed history and public traces, but still reaches the requesting native service when submitted.
+
+Native completed images appear through the normal resource renderer. File-backed images require the referenced native file to exist on first read. Parent subagent calls appear as tool summaries; child-session navigation is not available. Browser reload preserves pending interactions while the Host lives, but restarting it does not recover pending native RPCs or synthesized plan approvals. Do not use historical receipts as answers to new requests.

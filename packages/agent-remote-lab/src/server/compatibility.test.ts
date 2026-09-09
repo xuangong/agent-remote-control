@@ -77,7 +77,7 @@ describe('Agent Remote compatibility manifest', () => {
   });
 
   it('requires the evidenced status for each degradation', () => {
-    process.env[manifestEnvironment] = writeManifest(validManifest({ codexResourceStatus: 'degraded' }));
+    process.env[manifestEnvironment] = writeManifest(validManifest({ codexFormStatus: 'unsupported' }));
 
     expect(() => loadCompatibilityManifest()).toThrow('Codex degradation');
   });
@@ -122,7 +122,7 @@ function validManifest(overrides: {
   omitDshUnknownSource?: boolean;
   omitCodexThreadName?: boolean;
   omitCodexTerminalInteraction?: boolean;
-  codexResourceStatus?: 'unsupported' | 'degraded';
+  codexFormStatus?: 'unsupported' | 'degraded';
   duplicateDshTitle?: boolean;
   extraCodexDegradation?: boolean;
 } = {}): object {
@@ -140,7 +140,9 @@ function validManifest(overrides: {
     }] : []),
   ];
   const codexDegradations = overrides.emptyCodexDegradations ? [] : [
-    { capability: 'readResource', status: overrides.codexResourceStatus ?? 'unsupported', reason: 'The adapter does not expose resources.' },
+    { capability: 'interactions.form.schema', status: overrides.codexFormStatus ?? 'degraded', reason: 'Bounded flat schemas only.' },
+    { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Native requests are process-local.' },
+    { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Parent summary only.' },
     ...(!overrides.omitCodexThreadName ? [{
       capability: 'events.thread/name', status: 'degraded',
       reason: 'Thread names remain native session metadata because the Agent Snapshot has no title field.',
@@ -170,7 +172,7 @@ function validManifest(overrides: {
   ];
   return {
     schemaVersion: 1,
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     borgee: {
       release: 'unreleased',
       sourceState: 'working_tree',

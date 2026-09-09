@@ -1,5 +1,6 @@
 import type { AgentTimelineItem } from '@borgee/agent-remote-protocol';
 
+import { InteractionReceipt } from './InteractionReceipt.js';
 import { MarkdownContent } from '../MarkdownContent.js';
 import { CompletedQuestionItem } from './CompletedQuestionItem.js';
 import { ToolDetail } from './ToolCallItem.js';
@@ -21,10 +22,10 @@ export function InteractionItem({ item: { request, response } }: InteractionItem
   }
   if (request.kind === 'tool_approval' && response.kind === 'tool_approval') {
     return <article className="agent-item agent-interaction-completed agent-tool-approval-completed">
-      <header><span className="agent-item-kicker">TOOL APPROVAL</span><span className="agent-state-label">{response.decision === 'allow' ? `Allowed · ${response.scope}` : 'Denied'}</span></header>
+      <header><span className="agent-item-kicker">TOOL APPROVAL</span><span className="agent-state-label">{response.decision === 'allow' ? `Allowed · ${response.scope}` : response.decision === 'cancel' ? 'Canceled' : 'Denied'}</span></header>
       <h3>{request.toolName}</h3><p>{request.summary}</p><ToolDetail detail={request.detail} />
       {response.decision === 'deny' && response.message ? <p>{response.message}</p> : null}
     </article>;
   }
-  return <article className="agent-item agent-interaction-completed" role="status">The recorded interaction response does not match its request.</article>;
+  return <InteractionReceipt request={request} response={response} />;
 }

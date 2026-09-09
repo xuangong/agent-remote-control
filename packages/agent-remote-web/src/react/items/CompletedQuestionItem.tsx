@@ -13,7 +13,7 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
   const answersId = useId();
   const rows = request.questions.map((question) => {
     const answer = response.answers.find(({ questionId }) => questionId === question.questionId);
-    return { question, answer, answered: Boolean(answer?.selectedValues.length || answer?.customText) };
+    return { question, answer, answered: Boolean(answer?.redacted || answer?.selectedValues.length || answer?.customText) };
   });
   const answeredCount = rows.filter(({ answered }) => answered).length;
   const status = response.dismissed ? 'Dismissed' : answeredCount === rows.length ? 'Answered' : answeredCount ? 'Partially answered' : 'No answers';
@@ -40,8 +40,9 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
       {rows.map(({ question, answer, answered }) => <div className="agent-completed-answer" key={question.questionId}>
         <dt>{question.header}</dt>
         <dd>
-          {answer?.selectedValues.length ? <ul>{answer.selectedValues.map((value) => <li key={value}>{question.options.find((option) => option.value === value)?.label ?? value}</li>)}</ul> : null}
-          {answer?.customText ? <p className="agent-answer-custom">{answer.customText}</p> : null}
+          {answered && (question.sensitive || answer?.redacted) ? <span className="agent-answer-hidden">Hidden answer</span> : null}
+          {!question.sensitive && !answer?.redacted && answer?.selectedValues.length ? <ul>{answer.selectedValues.map((value) => <li key={value}>{question.options.find((option) => option.value === value)?.label ?? value}</li>)}</ul> : null}
+          {!question.sensitive && !answer?.redacted && answer?.customText ? <p className="agent-answer-custom">{answer.customText}</p> : null}
           {!answered ? <span className="agent-answer-empty">{response.dismissed ? 'Dismissed' : 'No answer provided'}</span> : null}
           <div className="agent-completed-question-context" hidden={!showQuestions}>
             <MarkdownContent markdown={question.prompt} />

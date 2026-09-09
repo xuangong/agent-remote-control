@@ -1,0 +1,159 @@
+import { WebSocket } from 'ws';
+
+import {
+  decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
+} from '@borgee/agent-remote-protocol';
+
+import type { AgentRemoteRelay } from '../relay.js';
+import { createRemoteHostPluginHost, type RemoteHostPluginHostOptions } from './remote-host-plugin.js';
+import { createUplinkWriter } from './uplink-writer.js';
+
+export interface RemoteHostUplinkClientOptions {
+  readonly relay: AgentRemoteRelay;
+  readonly installationId: string;
+  readonly name: string;
+  readonly remoteKey: string;
+  readonly url: string;
+  readonly resolveSession: RemoteHostPluginHostOptions['resolveSession'];
+  readonly control: RemoteHostPluginHostOptions['control'];
+  readonly registrationTimeoutMs?: number;
+  readonly writeTimeoutMs?: number;
+  readonly maxQueuedMessages?: number;
+  readonly maxQueuedBytes?: number;
+  readonly reconnectBaseDelayMs?: number;
+  readonly reconnectMaxDelayMs?: number;
+}
+
+export interface RemoteHostUplinkClient {
+  readonly ready: Promise<{ hostId: string }>;
+  close(): Promise<void>;
+}
+
+export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOptions): RemoteHostUplinkClient {
+  validateConfiguration(options);
+  const registrationTimeout = positive(options.registrationTimeoutMs ?? 5000);
+  const writeTimeout = positive(options.writeTimeoutMs ?? 10000);
+  const maxQueuedMessages = positive(options.maxQueuedMessages ?? 256);
+  const maxQueuedBytes = positive(options.maxQueuedBytes ?? 64 * 1024 * 1024);
+  const reconnectBaseDelay = positive(options.reconnectBaseDelayMs ?? 1000);
+  const reconnectMaxDelay = positive(options.reconnectMaxDelayMs ?? 30000);
+  if (reconnectMaxDelay < reconnectBaseDelay) throw new RangeError('Remote Host reconnect maximum must not precede its base delay.');
+  let resolveReady!: (value: { hostId: string }) => void;
+  let rejectReady!: (error: Error) => void;
+  const ready = new Promise<{ hostId: string }>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  void ready.catch(() => undefined);
+  let closed = false;
+  let terminal = false;
+  let attempts = 0;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let retireConnection: (() => void) | undefined;
+  let connectionClosed: Promise<void> = Promise.resolve();
+  let closePromise: Promise<void> | undefined;
+
+  function scheduleReconnect(): void {
+    if (closed || terminal) return;
+    const upper = Math.min(reconnectMaxDelay, reconnectBaseDelay * 2 ** Math.min(attempts, 20));
+    attempts += 1;
+    retry = setTimeout(connect, Math.floor(upper * (0.5 + Math.random() * 0.5)));
+  }
+
+  function connect(): void {
+    if (closed || terminal) return;
+    const socket = new WebSocket(options.url, {
+      headers: { authorization: `Bearer ${options.remoteKey}` },
+      maxPayload: UPLINK_MAX_FRAME_BYTES,
+      handshakeTimeout: registrationTimeout,
+      perMessageDeflate: false,
+      followRedirects: false,
+    });
+    let registered = false;
+    let retired = false;
+    let registrationDeadline: ReturnType<typeof setTimeout> | undefined;
+    const writer = createUplinkWriter(socket, {
+      maxMessages: maxQueuedMessages, maxBytes: maxQueuedBytes, writeTimeoutMs: writeTimeout, onFailure: () => retire(),
+    });
+    const host = createRemoteHostPluginHost(options.relay, {
+      resolveSession: options.resolveSession, control: options.control, send: (json) => writer.send(json), onFailure: () => retire(),
+    });
+    function retire(): void {
+      if (retired) return;
+      retired = true;
+      clearTimeout(registrationDeadline);
+      host.close();
+      writer.close();
+      socket.terminate();
+    }
+    retireConnection = retire;
+    connectionClosed = new Promise<void>((resolve) => {
+      socket.once('close', (code) => {
+        if (code === 1008) {
+          terminal = true;
+          if (!registered) rejectReady(new Error('Remote Host uplink authorization was rejected.'));
+        }
+        retire();
+        resolve();
+        scheduleReconnect();
+      });
+    });
+    socket.on('error', () => retire());
+    socket.on('unexpected-response', (_request, response) => {
+      if (response.statusCode === 401 || response.statusCode === 403) terminal = true;
+      retire();
+    });
+    socket.once('open', () => {
+      if (closed || terminal || retired) { retire(); return; }
+      registrationDeadline = setTimeout(retire, registrationTimeout);
+      writer.send(JSON.stringify({
+        uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'register', installationId: options.installationId,
+        name: options.name, providerId: 'dsh',
+      }));
+    });
+    socket.on('message', (data, isBinary) => {
+      if (closed || retired) return;
+      if (isBinary) { retire(); return; }
+      const decoded = decodeRemoteHostUplinkMessage(data.toString());
+      if (decoded.status !== 'ok') { retire(); return; }
+      if (!registered) {
+        if (decoded.value.type !== 'registered') { retire(); return; }
+        clearTimeout(registrationDeadline);
+        registered = true;
+        attempts = 0;
+        resolveReady({ hostId: decoded.value.hostId });
+        return;
+      }
+      host.receive(data.toString());
+    });
+  }
+
+  connect();
+  return {
+    ready,
+    close(): Promise<void> {
+      if (closePromise) return closePromise;
+      closed = true;
+      clearTimeout(retry);
+      rejectReady(new Error('Remote Host uplink closed before registration.'));
+      retireConnection?.();
+      closePromise = connectionClosed;
+      return closePromise;
+    },
+  };
+}
+
+function validateConfiguration(options: RemoteHostUplinkClientOptions): void {
+  const url = new URL(options.url);
+  if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.hash || url.search || url.pathname !== '/ws/remote-host') {
+    throw new Error('Remote Host uplink requires a WebSocket /ws/remote-host URL.');
+  }
+  for (const [name, value] of [['installation identity', options.installationId], ['instance name', options.name]] as const) {
+    if (!value.trim() || value.length > 512) throw new Error(`Remote Host uplink requires a valid ${name}.`);
+  }
+  if (!options.remoteKey || options.remoteKey.length > 512 || !/^[!-~]+$/.test(options.remoteKey)) {
+    throw new Error('Remote Host uplink requires a valid Remote Access Key.');
+  }
+}
+
+function positive(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) throw new RangeError('Remote Host uplink limits and deadlines must be positive integers.');
+  return value;
+}

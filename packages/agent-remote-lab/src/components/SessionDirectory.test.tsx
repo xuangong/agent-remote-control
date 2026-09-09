@@ -1,0 +1,44 @@
+import { act } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import { DirectoryError, SessionDirectoryClient, type SessionSummary } from '../directory-client.js';
+import { render } from '../test/setup.js';
+import { SessionDirectory } from './SessionDirectory.js';
+
+const summary = (nativeSessionId: string): SessionSummary => ({ nativeSessionId, providerId: 'recorded', title: nativeSessionId, state: 'idle', createdAt: '2026-09-09T00:00:00Z', updatedAt: '2026-09-09T00:00:00Z' });
+function button(container: HTMLElement, label: string): HTMLButtonElement { return [...container.querySelectorAll('button')].find((item) => item.textContent === label)!; }
+
+describe('SessionDirectory', () => {
+  it('appends unique pages, keeps expired rows, and refreshes only on request', async () => {
+    const directory = new SessionDirectoryClient('http://localhost');
+    const list = vi.spyOn(directory, 'list').mockResolvedValueOnce({ items: [summary('first')], hasMore: true, nextCursor: 'next', revision: '1' })
+      .mockRejectedValueOnce(new DirectoryError('Expired', 'cursor_expired'))
+      .mockResolvedValueOnce({ items: [summary('new')], hasMore: true, nextCursor: 'more', revision: '2' })
+      .mockResolvedValueOnce({ items: [summary('new'), summary('older')], hasMore: false, revision: '2' });
+    const onOpen = vi.fn();
+    const container = await render(<SessionDirectory directory={directory} providerId="recorded" opened={[]} busy={false} revision={0} onOpen={onOpen} onSelect={() => undefined} onClose={() => undefined} />);
+    await act(async () => button(container, 'Load more sessions').click());
+    expect(container.textContent).toContain('This session list expired');
+    expect(container.textContent).toContain('first');
+    expect(button(container, 'Load more sessions').disabled).toBe(true);
+    expect(list).toHaveBeenCalledTimes(2);
+    await act(async () => button(container, 'Refresh').click());
+    expect(container.querySelectorAll('.lab-session-row')).toHaveLength(1);
+    await act(async () => button(container, 'Load more sessions').click());
+    expect(container.querySelectorAll('.lab-session-row')).toHaveLength(2);
+    await act(async () => (container.querySelector('.lab-session-row') as HTMLButtonElement).click());
+    expect(onOpen).toHaveBeenCalledWith(summary('new'));
+  });
+
+  it('switches and closes opened sessions without deleting native sessions', async () => {
+    const directory = new SessionDirectoryClient('http://localhost');
+    vi.spyOn(directory, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
+    const onSelect = vi.fn(); const onClose = vi.fn();
+    const opened = { agentId: 'agent-1', nativeSessionId: 'native-1', providerId: 'recorded', title: 'Research' };
+    const container = await render(<SessionDirectory directory={directory} providerId="recorded" opened={[opened]} activeAgentId="agent-1" busy={false} revision={0} onOpen={() => undefined} onSelect={onSelect} onClose={onClose} />);
+    const selected = container.querySelector('[aria-current="page"]') as HTMLButtonElement;
+    await act(async () => selected.click());
+    expect(onSelect).toHaveBeenCalledWith(opened);
+    await act(async () => (container.querySelector('[aria-label="Close Research"]') as HTMLButtonElement).click());
+    expect(onClose).toHaveBeenCalledWith('agent-1');
+  });
+});

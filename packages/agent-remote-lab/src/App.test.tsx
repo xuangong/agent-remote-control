@@ -1,0 +1,490 @@
+import { act, useState } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  PROTOCOL_VERSION,
+  type AgentProviderDescriptor,
+  type AgentSessionResponse,
+} from '@borgee/agent-remote-protocol';
+import type { RemoteTransportListener } from '@borgee/agent-remote-web';
+
+import { App, type LabTransport } from './App.js';
+import { render } from './test/setup.js';
+import { replicaState } from './test/fixtures.js';
+
+describe('App', () => {
+  it('requests planning explicitly at creation and shows an unsupported error without attaching an ordinary session', async () => {
+    const createAgent = vi.fn().mockRejectedValue(new Error('Planning is not supported by this Provider.'));
+    const connect = vi.fn();
+    const container = await render(<App transport={labTransport({ createAgent, connect })} />);
+    const mode = container.querySelector<HTMLSelectElement>('#session-mode')!;
+    await act(async () => { mode.value = 'planning'; mode.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-create"]')!.click());
+    expect(createAgent).toHaveBeenCalledWith(expect.any(String), 'recorded', expect.objectContaining({ planning: true }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Planning is not supported');
+    expect(connect).not.toHaveBeenCalled();
+    expect(mode.value).toBe('planning');
+  });
+
+  it('omits a planning request for ordinary session creation', async () => {
+    const createAgent = vi.fn().mockRejectedValue(new Error('Unavailable'));
+    const container = await render(<App transport={labTransport({ createAgent })} />);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-create"]')!.click());
+    expect(createAgent.mock.calls[0]?.[2]).toEqual({ sessionId: expect.any(String) });
+  });
+
+  it('retains question choices and custom answers while switching between conversation and trace', async () => {
+    const state = { ...replicaState, pendingInteractions: [{
+      kind: 'question' as const, requestId: 'questions', questions: [
+        { questionId: 'one', header: 'First', prompt: 'Choose one', selection: 'single' as const, required: true, options: [{ value: 'web', label: 'Web' }], allowCustomText: false, allowDismiss: false },
+        { questionId: 'two', header: 'Second', prompt: 'Add details', selection: 'multiple' as const, required: true, options: [{ value: 'test', label: 'Test' }], allowCustomText: true, allowDismiss: false },
+      ],
+    }] };
+    const respond = vi.fn().mockResolvedValue(undefined);
+    const container = await render(<App initialState={state} initialSessionStatus="ready" actions={{ respondToInteraction: respond }} />);
+    await act(async () => container.querySelector<HTMLInputElement>('input[value="web"]')!.click());
+    await act(async () => container.querySelector<HTMLInputElement>('input[value="test"]')!.click());
+    const custom = container.querySelector<HTMLInputElement>('input[name="two-custom"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(custom, 'Keep details');
+      custom.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => tab(container, 'Trace').click());
+    await act(async () => tab(container, 'Workbench').click());
+    expect(custom.value).toBe('Keep details');
+    expect(container.querySelector<HTMLInputElement>('input[value="web"]')?.checked).toBe(true);
+    expect(container.querySelector<HTMLInputElement>('input[value="test"]')?.checked).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>('.agent-question button[type="submit"]')!.click());
+    expect(respond).toHaveBeenCalledExactlyOnceWith('questions', { kind: 'question', answers: [
+      { questionId: 'one', selectedValues: ['web'] }, { questionId: 'two', selectedValues: ['test'], customText: 'Keep details' },
+    ] });
+  });
+
+  it('names the Provider catalog request while it is pending', async () => {
+    const providers = deferred<readonly AgentProviderDescriptor[]>();
+    const container = await render(<App transport={labTransport({ listProviders: () => providers.promise })} />);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('Loading providers');
+    expect((container.querySelector('[data-testid="session-create"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('distinguishes an empty Provider catalog from a failed request', async () => {
+    const container = await render(<App transport={labTransport({ listProviders: async () => [] })} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('No Provider is registered');
+    expect(container.querySelector('[data-testid="provider-retry"]')).toBeNull();
+  });
+
+  it('retries a failed Provider catalog request', async () => {
+    let attempts = 0;
+    const transport = labTransport({
+      listProviders: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('Catalog unavailable.');
+        return [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }];
+      },
+    });
+    const container = await render(<App transport={transport} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Catalog unavailable.');
+    await act(async () => (container.querySelector('[data-testid="provider-retry"]') as HTMLButtonElement).click());
+    expect((container.querySelector('[data-testid="provider-select"]') as HTMLSelectElement).value).toBe('recorded');
+  });
+
+  it('keeps the Timeline work surface while a remembered Agent connects', async () => {
+    window.history.replaceState(null, '', '/?agent=remembered-agent');
+    try {
+      const container = await render(<App transport={labTransport()} />);
+      expect(container.querySelector('[data-testid="workbench"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Connecting');
+      expect(container.textContent).toContain('Connecting to remembered-agent');
+      expect(container.textContent).not.toContain('Start with a Provider');
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
+  it.each([
+    ['catching_up', 'Synchronizing'],
+    ['disconnected', 'Reconnecting'],
+  ] as const)('presents %s as %s without discarding the last replica', async (sessionStatus, label) => {
+    const container = await render(<App initialState={replicaState} initialSessionStatus={sessionStatus} actions={{}} />);
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain(label);
+    expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
+  });
+
+  it('presents a failed Agent instead of shadowing it with connection readiness', async () => {
+    const agent = replicaState.agent;
+    if (!agent) throw new Error('The App fixture requires an Agent Snapshot.');
+    const state = {
+      ...replicaState,
+      agent: { ...agent, status: 'failed' as const, lastError: 'Provider observation stream failed.' },
+    };
+    const container = await render(<App initialState={state} initialSessionStatus="ready" actions={{}} />);
+    const summary = container.querySelector('[data-testid="connection-summary"]') as HTMLElement;
+
+    expect(summary.textContent).toContain('Agent failed');
+    expect(summary.textContent).not.toContain('Ready');
+    expect(summary.getAttribute('aria-label')).toContain('Agent failed');
+    expect(summary.getAttribute('aria-label')).not.toContain('Ready');
+  });
+
+  it('hides Lab scenario controls when fixture callbacks are unavailable', async () => {
+    const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
+
+    expect(container.querySelector('[aria-label="Lab scenario controls"]')).toBeNull();
+  });
+
+  it('composes Snapshot, Timeline, interactions, resources, and fixture controls without Provider branches', async () => {
+    const state = {
+      ...replicaState,
+      timeline: {
+        ...replicaState.timeline,
+        entries: [{
+          providerId: 'recorded', seqStart: 6, seqEnd: 6,
+          timestamp: '2026-09-02T00:00:05.000Z',
+          sourceSeqRanges: [{ startSeq: 6, endSeq: 6 }], collapsed: [],
+          item: { type: 'assistant_message' as const, text: 'Visible tail.', messageId: 'tail' },
+          resources: [],
+        }],
+      },
+    };
+    const loadOlder = vi.fn();
+    const container = await render(<App
+      initialState={state}
+      initialSessionStatus="ready"
+      initialProviderName="Recorded semantic Provider"
+      actions={{ loadOlder }}
+    />);
+
+    expect(container.querySelector('[aria-label="Agent timeline"]')?.textContent).toContain('Visible tail.');
+    await act(async () => (container.querySelector('[aria-controls="lab-inspector"]') as HTMLButtonElement).click());
+    expect(container.querySelector('[aria-label="Replica Inspector"]')?.textContent).toContain('Recorded semantic Provider');
+    expect(container.querySelector('[data-testid="timeline-epoch"]')?.textContent).toBe('epoch-1');
+    (container.querySelector('.agent-load-older') as HTMLButtonElement).click();
+    expect(loadOlder).toHaveBeenCalledOnce();
+  });
+
+  it('opens in Workbench and preserves mounted work while switching to the public replica trace', async () => {
+    const container = await render(<App
+      initialState={replicaState}
+      initialSessionStatus="ready"
+      actions={{ sendMessage: vi.fn() }}
+    />);
+    const workbenchTab = tab(container, 'Workbench');
+    const traceTab = tab(container, 'Trace');
+    const workbench = container.querySelector('[data-testid="workbench"]') as HTMLElement;
+    const trace = container.querySelector('[data-testid="trace-view"]') as HTMLElement;
+    const prompt = container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement;
+
+    expect(workbenchTab.getAttribute('aria-selected')).toBe('true');
+    expect(traceTab.getAttribute('aria-selected')).toBe('false');
+    expect(workbench.hidden).toBe(false);
+    expect(trace.hidden).toBe(true);
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(prompt, 'Keep this draft');
+      prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(prompt.value).toBe('Keep this draft');
+    await act(async () => traceTab.click());
+
+    expect(traceTab.getAttribute('aria-selected')).toBe('true');
+    expect(workbench.hidden).toBe(true);
+    expect(trace.hidden).toBe(false);
+    expect(trace.textContent).toContain('epoch-1');
+
+    await act(async () => workbenchTab.click());
+    expect((container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement).value).toBe('Keep this draft');
+  });
+
+  it('uses one tab stop and standard arrow, Home, and End navigation for observatory views', async () => {
+    const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
+    const workbench = tab(container, 'Workbench');
+    const trace = tab(container, 'Trace');
+
+    expect(workbench.tabIndex).toBe(0);
+    expect(trace.tabIndex).toBe(-1);
+
+    workbench.focus();
+    await act(async () => workbench.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    expect(trace.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(trace);
+    expect(workbench.tabIndex).toBe(-1);
+    expect(trace.tabIndex).toBe(0);
+
+    await act(async () => trace.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
+    expect(document.activeElement).toBe(workbench);
+    await act(async () => workbench.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
+    expect(document.activeElement).toBe(trace);
+    await act(async () => trace.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    expect(document.activeElement).toBe(workbench);
+  });
+
+  it('keeps pending interaction actions in the Workbench directly before the composer', async () => {
+    const respondToInteraction = vi.fn();
+    const state = {
+      ...replicaState,
+      pendingInteractions: [{
+        kind: 'plan_approval' as const,
+        requestId: 'plan-1',
+        plan: 'Inspect the provider trace.',
+        allowedActions: ['approve' as const, 'reject' as const],
+      }],
+    };
+    const container = await render(<App
+      initialState={state}
+      initialSessionStatus="ready"
+      actions={{ respondToInteraction, sendMessage: vi.fn() }}
+    />);
+    const workbench = container.querySelector('[data-testid="workbench"]') as HTMLElement;
+    const interaction = workbench.querySelector('.agent-plan') as HTMLElement;
+    const composer = workbench.querySelector('[aria-label="Live provider controls"]') as HTMLElement;
+
+    expect(interaction).not.toBeNull();
+    expect(composer).not.toBeNull();
+    expect(interaction.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+
+    await act(async () => (interaction.querySelector('[data-action="approve"]') as HTMLButtonElement).click());
+    expect(respondToInteraction).toHaveBeenCalledWith('plan-1', { kind: 'plan_approval', action: 'approve' });
+  });
+
+  it('keeps desktop Context available and opens Inspector without remounting the conversation', async () => {
+    const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
+    expect(container.querySelector('#lab-context')?.getAttribute('role')).toBeNull();
+    const composer = container.querySelector('textarea');
+    const toggle = container.querySelector('[aria-controls="lab-inspector"]') as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect((container.querySelector('#lab-inspector') as HTMLElement).hidden).toBe(true);
+    await act(async () => toggle.click());
+    expect((container.querySelector('#lab-inspector') as HTMLElement).hidden).toBe(false);
+    expect(container.querySelector('#lab-inspector')?.getAttribute('role')).toBeNull();
+    expect(container.querySelector('textarea')).toBe(composer);
+    await act(async () => toggle.click());
+    expect((container.querySelector('#lab-inspector') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('opens Context as the first task surface on a compact layout without an Agent', async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = compactMatchMedia;
+    try {
+      const container = await render(<App transport={labTransport()} />);
+      expect(container.querySelector('#lab-context')?.getAttribute('role')).toBe('dialog');
+      expect(container.querySelector('#lab-inspector')).toBeNull();
+      expect(document.activeElement?.textContent).toBe('Close Context');
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it('treats the compact Inspector as a keyboard-contained sheet that restores its trigger', async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = compactMatchMedia;
+    try {
+      const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
+      const toggle = container.querySelector('[aria-controls="lab-inspector"]') as HTMLButtonElement;
+
+      toggle.focus();
+      await act(async () => toggle.click());
+      const inspector = container.querySelector('#lab-inspector') as HTMLElement;
+      expect(inspector.getAttribute('role')).toBe('dialog');
+      expect(inspector.getAttribute('aria-modal')).toBe('true');
+      expect(document.activeElement?.textContent).toBe('Close Replica Inspector');
+      expect(container.querySelector('#lab-context')).toBeNull();
+      expect(container.querySelector('.lab-main-stage')?.hasAttribute('inert')).toBe(true);
+      expect(container.querySelector('.lab-view-switcher')?.hasAttribute('inert')).toBe(true);
+
+      await act(async () => inspector.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      expect(container.querySelector('#lab-inspector')).toBeNull();
+      expect(document.activeElement).toBe(toggle);
+      expect(container.querySelector('.lab-main-stage')?.hasAttribute('inert')).toBe(false);
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it('closes compact Context and focuses the Timeline when an Agent attach begins', async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = compactMatchMedia;
+    try {
+      const container = await render(<App transport={labTransport()} />);
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => (container.querySelector('[data-testid="session-create"]') as HTMLButtonElement).click());
+
+      expect(container.querySelector('#lab-context')).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="workbench"]'));
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Connecting');
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it('traces projected entries without claiming Provider-native frames', async () => {
+    const state = {
+      ...replicaState,
+      timeline: {
+        ...replicaState.timeline,
+        entries: [{
+          providerId: 'recorded', seqStart: 6, seqEnd: 6,
+          timestamp: '2026-09-02T00:00:05.000Z',
+          sourceSeqRanges: [{ startSeq: 6, endSeq: 6 }], collapsed: [],
+          item: { type: 'assistant_message' as const, text: 'Visible tail.', messageId: 'tail' },
+          resources: [],
+        }],
+      },
+      diagnostics: [{ code: 'timeline_recovery_failed', message: 'Timeline recovery failed.', recoverable: true }],
+    };
+    const container = await render(<App initialState={state} initialSessionStatus="ready" actions={{}} />);
+
+    await act(async () => tab(container, 'Trace').click());
+    const trace = container.querySelector('[data-testid="trace-view"]') as HTMLElement;
+
+    expect(trace.textContent).toContain('#6');
+    expect(trace.textContent).toContain('Assistant message');
+    expect(trace.textContent).toContain('Provider-native and raw wire frames are not retained');
+  });
+
+  it('identifies a reattached Agent from its Snapshot when no local Provider label is remembered', async () => {
+    const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
+    const summary = container.querySelector('[data-testid="connection-summary"]') as HTMLElement;
+
+    expect(summary.textContent).toContain('recorded');
+    expect(summary.textContent).not.toContain('No active Agent');
+  });
+
+  it('clears the previous replica as soon as a resumed Agent is attached', async () => {
+    const replacement = deferred<AgentSessionResponse>();
+    const transport = labTransport({ resumeAgent: vi.fn(() => replacement.promise) });
+    const previousAgent = replicaState.agent;
+    if (!previousAgent) throw new Error('The App fixture requires an Agent Snapshot.');
+    const previousState = {
+      ...replicaState,
+      agent: {
+        ...previousAgent,
+        persistence: { providerId: 'recorded', sessionId: 'old-session', opaque: 'old-handle' },
+      },
+    };
+    const container = await render(<App
+      initialState={previousState}
+      initialSessionStatus="ready"
+      transport={transport}
+    />);
+
+    await act(async () => {
+      (container.querySelector('[data-testid="session-resume"]') as HTMLButtonElement).click();
+      replacement.resolve(sessionResponse('replacement-agent'));
+      await replacement.promise;
+    });
+
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('No active Agent');
+    expect((container.querySelector('.lab-composer-dock') as HTMLElement).hidden).toBe(true);
+    expect(container.querySelector('[data-testid="connection-status"]')?.textContent).toBe('Connecting');
+  });
+
+  it('starts only one Agent transition when the create control is activated twice before rerender', async () => {
+    const creation = deferred<AgentSessionResponse>();
+    const createAgent = vi.fn(() => creation.promise);
+    const transport = labTransport({ createAgent });
+    const container = await render(<App transport={transport} />);
+    await act(async () => { await Promise.resolve(); });
+    const create = container.querySelector('[data-testid="session-create"]') as HTMLButtonElement;
+
+    await act(async () => {
+      create.click();
+      create.click();
+    });
+
+    expect(createAgent).toHaveBeenCalledOnce();
+  });
+
+  it('reattaches a remembered Agent when the injected transport changes', async () => {
+    const connectFirst = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
+    const connectSecond = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
+    const first = labTransport({ connect: connectFirst });
+    const second = labTransport({ connect: connectSecond });
+    window.history.replaceState(null, '', '/?agent=remembered-agent');
+    try {
+      function Harness() {
+        const [useSecond, setUseSecond] = useState(false);
+        return <>
+          <button type="button" onClick={() => setUseSecond(true)}>Switch transport</button>
+          <App transport={useSecond ? second : first} />
+        </>;
+      }
+      const container = await render(<Harness />);
+      expect(connectFirst).toHaveBeenCalledOnce();
+
+      await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
+
+      expect(connectSecond).toHaveBeenCalledOnce();
+      expect(connectSecond).toHaveBeenCalledWith('remembered-agent', expect.any(Object));
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+});
+
+function tab(container: HTMLElement, label: string): HTMLButtonElement {
+  const match = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+    .find((candidate) => candidate.textContent === label);
+  if (!match) throw new Error(`${label} tab was not rendered.`);
+  return match;
+}
+
+function compactMatchMedia(query: string): MediaQueryList {
+  return {
+    matches: query === '(max-width: 1180px)',
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  };
+}
+
+function labTransport(overrides: Partial<LabTransport> = {}): LabTransport {
+  return {
+    listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }],
+    createAgent: async () => sessionResponse('created-agent'),
+    resumeAgent: async () => sessionResponse('resumed-agent'),
+    fetchSnapshot: async () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'agent_snapshot',
+      payload: replicaState.agent!,
+    }),
+    fetchTimeline: async () => ({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'timeline_page',
+      payload: {
+        requestId: 'timeline-request', agentId: 'agent-1', epoch: 'epoch-1', direction: 'tail',
+        reset: false, staleCursor: false, gap: false,
+        window: { minSeq: 1, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null,
+        entries: [], hasOlder: false, hasNewer: false, error: null,
+      },
+    }),
+    connect: (_agentId: string, _listener: RemoteTransportListener) => ({ send: () => undefined, close: () => undefined }),
+    onDiagnostic: () => () => undefined,
+    onProtocolMessage: () => () => undefined,
+    ...overrides,
+  };
+}
+
+function sessionResponse(agentId: string): AgentSessionResponse {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'agent_session',
+    payload: {
+      requestId: `request-${agentId}`,
+      agentId,
+      providerId: 'recorded',
+      sessionId: `session-${agentId}`,
+    },
+  };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => { resolve = accept; });
+  return { promise, resolve };
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@agent-remote-control/dsh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./host": {
+      "types": "./dist/agent-remote.d.ts",
+      "import": "./dist/agent-remote.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000",
+    "build:bundle": "node scripts/build-host-bundle.mjs"
+  },
+  "dependencies": {
+    "@borgee/agent-provider-dsh": "workspace:*",
+    "@borgee/agent-provider-sdk": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.1.2-rc.1",
+    "@borgee/agent-remote-relay": "workspace:*",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5",
+    "esbuild": "^0.28.1",
+    "ws": "^8.21.0",
+    "@types/ws": "^8.18.1"
+  }
+}

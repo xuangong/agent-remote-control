@@ -1,0 +1,13 @@
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- insert:
+    - id: tool-ask-user
+      name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.BORGEE_LIVE_DSH_SESSION_ROOT

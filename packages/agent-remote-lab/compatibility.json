@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "1.1.0",
+  "borgee": {
+    "release": "unreleased",
+    "sourceState": "working_tree",
+    "baseRevision": "65143a95db212538461d5eafc49dea15988aa4e2",
+    "implementation": {
+      "algorithm": "sha256",
+      "root": "../..",
+      "scope": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "scripts",
+        "packages/agent-provider-codex/LICENSE",
+        "packages/agent-provider-codex/NOTICE",
+        "packages/agent-provider-codex/README.md",
+        "packages/agent-provider-codex/package.json",
+        "packages/agent-provider-codex/src",
+        "packages/agent-provider-codex/tsconfig.json",
+        "packages/agent-provider-dsh/fixtures",
+        "packages/agent-provider-dsh/package.json",
+        "packages/agent-provider-dsh/scripts",
+        "packages/agent-provider-dsh/src",
+        "packages/agent-provider-dsh/tsconfig.json",
+        "packages/agent-provider-sdk/README.md",
+        "packages/agent-provider-sdk/package.json",
+        "packages/agent-provider-sdk/src",
+        "packages/agent-provider-sdk/tsconfig.json",
+        "packages/agent-remote-debugger/README.md",
+        "packages/agent-remote-debugger/package.json",
+        "packages/agent-remote-debugger/src",
+        "packages/agent-remote-debugger/tsconfig.json",
+        "packages/agent-remote-dsh/package.json",
+        "packages/agent-remote-dsh/scripts",
+        "packages/agent-remote-dsh/src",
+        "packages/agent-remote-dsh/tsconfig.json",
+        "packages/agent-remote-lab/README.md",
+        "packages/agent-remote-lab/e2e",
+        "packages/agent-remote-lab/index.html",
+        "packages/agent-remote-lab/live-dsh.patch.yml",
+        "packages/agent-remote-lab/package.json",
+        "packages/agent-remote-lab/playwright.config.ts",
+        "packages/agent-remote-lab/public",
+        "packages/agent-remote-lab/scripts",
+        "packages/agent-remote-lab/src",
+        "packages/agent-remote-lab/tsconfig.e2e.json",
+        "packages/agent-remote-lab/tsconfig.json",
+        "packages/agent-remote-lab/tsconfig.node.json",
+        "packages/agent-remote-lab/vite.config.ts",
+        "packages/agent-remote-lab/vitest.config.ts",
+        "packages/agent-remote-protocol/.gitignore",
+        "packages/agent-remote-protocol/README.md",
+        "packages/agent-remote-protocol/package.json",
+        "packages/agent-remote-protocol/scripts",
+        "packages/agent-remote-protocol/src",
+        "packages/agent-remote-protocol/tsconfig.json",
+        "packages/agent-remote-relay/package.json",
+        "packages/agent-remote-relay/src",
+        "packages/agent-remote-relay/tsconfig.json",
+        "packages/agent-remote-web/package.json",
+        "packages/agent-remote-web/scripts",
+        "packages/agent-remote-web/src",
+        "packages/agent-remote-web/tsconfig.json",
+        "packages/agent-remote-web/vitest.config.ts"
+      ],
+      "digest": "sha256:ebe2958b72e530e001b773fefaf7f3eaa6318a5b2757f907b84cd102b252fd3d"
+    }
+  },
+  "providers": [
+    {
+      "providerId": "dsh",
+      "native": {
+        "name": "@deepseek-ai/dsh-agent",
+        "version": "0.1.2-rc.1",
+        "revision": "a66e4702047846cdaa10c66c9d3df3951f5ea70d"
+      },
+      "degradations": [
+        {
+          "capability": "events.session/title",
+          "status": "degraded",
+          "reason": "The adapter recognizes the title but the Agent Snapshot has no title field."
+        },
+        {
+          "capability": "events.user-message.unknown-source",
+          "status": "degraded",
+          "reason": "Unknown injected sources remain visible as diagnostics instead of impersonating the user; known plugin, skill-catalog, and agent-instructions context is consumed without a Timeline item."
+        }
+      ]
+    },
+    {
+      "providerId": "codex",
+      "native": {
+        "name": "codex-cli",
+        "version": "0.148.0",
+        "revision": null
+      },
+      "degradations": [
+        {
+          "capability": "steer",
+          "status": "unsupported",
+          "reason": "The Codex adapter does not expose steering."
+        },
+        {
+          "capability": "cancel",
+          "status": "unsupported",
+          "reason": "The Codex adapter does not expose cancellation."
+        },
+        {
+          "capability": "readResource",
+          "status": "unsupported",
+          "reason": "The Codex adapter does not expose generated resources."
+        },
+        {
+          "capability": "events.thread/name",
+          "status": "degraded",
+          "reason": "Codex thread names remain native session metadata because the Agent Snapshot has no title field."
+        },
+        {
+          "capability": "events.commandExecution/terminalInteraction",
+          "status": "degraded",
+          "reason": "Codex terminal interactions remain native command side-channel activity because normalized tool detail has no process ID, stdin, or progress fields."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@borgee/agent-remote-protocol",
+  "version": "0.1.1",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "description": "Serialized relay protocol for provider-neutral agent observation.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/clean-dist.mjs && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.52"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5"
+  }
+}

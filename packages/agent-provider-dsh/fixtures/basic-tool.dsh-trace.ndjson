@@ -1,0 +1,7 @@
+{"type":"trace_header","format":"borgee.dsh.trace.v1","sessionId":"fixture-basic-tool","nativeSessionHeader":{"protocol":"dsh","scenario":"basic-tool"},"runtimeInfo":{"status":"waiting","cwd":"/workspace","model":{"id":"dsh-lab"}}}
+{"type":"native_record","ordinal":1,"offset":0,"recordId":"turn-start","kind":"session_event","payload":{"type":"turn/start","data":{"turn":"turn-basic"}}}
+{"type":"native_record","ordinal":2,"offset":12,"recordId":"user-message","kind":"session_event","payload":{"type":"user/message","data":{"id":"message-basic","turn":"turn-basic","source":{"kind":"user"},"content":[{"type":"text","text":"List this workspace."}]}}}
+{"type":"native_record","ordinal":3,"offset":28,"recordId":"tool-call","kind":"session_event","payload":{"type":"tool/call","data":{"turn":"turn-basic","callId":"call-basic","name":"shell","arguments":"{\"command\":\"pwd\"}"}}}
+{"type":"native_record","ordinal":4,"offset":44,"recordId":"tool-result","kind":"session_event","payload":{"type":"tool/result","data":{"message":{"source":{"callId":"call-basic"},"content":[{"content":[{"type":"text","text":"/workspace"}]}]}}}}
+{"type":"native_record","ordinal":5,"offset":63,"recordId":"todo","kind":"session_event","payload":{"type":"todo/write","data":{"turn":"turn-basic","todos":[{"content":"Inspect workspace","status":"completed"}]}}}
+{"type":"native_record","ordinal":6,"offset":80,"recordId":"turn-end","kind":"session_event","payload":{"type":"turn/end","data":{"turn":"turn-basic","reason":"completed"}}}

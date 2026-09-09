@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.worktrees/
+.env
+.env.*
+!.env.example
+.runtime/
+docs/_drafts/
+playwright-report/
+test-results/
+coverage/
+*.tsbuildinfo
+.DS_Store
+
+.tmp/

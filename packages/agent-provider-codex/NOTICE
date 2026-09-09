@@ -1,0 +1,9 @@
+This package contains code derived from Paseo commit
+463415ae846cbcfef0df691e413a1a73a9213757.
+
+Paseo copyright (c) 2025-present Mohamed Boudra.
+Paseo is licensed under the Apache License, Version 2.0, reproduced in LICENSE.
+
+The derived code has been adapted to Borgee-owned Provider contracts and
+substantially reorganized into transport, native parsing, projection, history,
+session, and provider modules.

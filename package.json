@@ -1,0 +1,28 @@
+{
+  "name": "agent-remote-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent agent session control and protocol workbench.",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm compatibility:update && pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "node scripts/run-tests.mjs unit",
+    "test:e2e": "node scripts/run-tests.mjs e2e",
+    "test:conformance": "node scripts/run-tests.mjs conformance",
+    "compatibility:update": "node scripts/compatibility.mjs",
+    "compatibility:check": "node scripts/compatibility.mjs --check",
+    "lint:docs": "bash scripts/lint-mermaid.sh docs",
+    "bdb": "node packages/agent-remote-debugger/dist/cli.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  }
+}

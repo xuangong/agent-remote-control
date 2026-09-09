@@ -1,0 +1,96 @@
+import { useRef } from 'react';
+import type {
+  AgentInteractionResponse,
+  ResourceBinding,
+} from '@borgee/agent-remote-protocol';
+import type { AgentReplicaState, RemoteSessionStatus } from '@borgee/agent-remote-web';
+import { AgentTimeline, type QuestionDraft } from '@borgee/agent-remote-web/react';
+
+import { LiveControlPanel } from './LiveControlPanel.js';
+import { PlanningControl } from './PlanningControl.js';
+import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
+
+export interface LabWorkbenchActions {
+  loadOlder?(): void | Promise<void>;
+  sendMessage?(text: string): Promise<void>;
+  steer?(text: string): Promise<void>;
+  cancel?(): Promise<void>;
+  respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
+  requestResource?(binding: ResourceBinding): Promise<void>;
+  setPlanning?(active: boolean): Promise<void>;
+}
+
+export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange }: { state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+  const readingPositions = useRef(new Map());
+  const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions.current);
+  const hasReplica = state !== undefined;
+  const isAttaching = !hasReplica && attachingAgentId !== undefined;
+  const connectionFailure = sessionStatus === 'connecting'
+    ? state?.diagnostics.find((diagnostic) => !diagnostic.recoverable)
+    : undefined;
+  const agentFailure = state?.agent?.status === 'failed'
+    ? state.agent.lastError?.trim() || 'The Agent did not provide a failure reason.'
+    : undefined;
+  const activityLabel = agentFailure ? 'Agent failed'
+    : connectionFailure ? 'Connection failed'
+    : sessionStatus === 'disconnected' ? 'Reconnecting'
+    : sessionStatus === 'connecting' ? 'Connecting'
+    : sessionStatus === 'catching_up' ? 'Synchronizing'
+    : sessionStatus === 'idle' ? 'Disconnected'
+    : !state?.agent ? 'Connecting'
+    : state.agent.status === 'closed' ? 'Closed'
+    : state.agent.status === 'starting' ? 'Starting'
+    : state.pendingInteractions.length > 0 || state.agent.status === 'waiting' ? 'Waiting for response'
+    : state.agent.activeTurn || state.agent.status === 'running' ? 'Working'
+    : 'Ready';
+  return <div className="lab-workbench-layout">
+    <header className="lab-workbench-heading">
+      <div>
+        <h2>{hasReplica ? 'Conversation' : isAttaching ? `Connecting to ${attachingAgentId}` : 'Ready for a session'}</h2>
+      </div>
+      <span>{hasReplica ? activityLabel : isAttaching ? 'Connecting' : 'Awaiting Agent'}</span>
+    </header>
+    <div className="lab-timeline-stage">
+      <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
+        <div className="lab-conversation-content" ref={scroll.contentRef}>
+          {hasReplica ? <>
+            {agentFailure ? <p className="lab-control-note" role="alert">Agent failed: {agentFailure}</p>
+              : connectionFailure ? <p className="lab-control-note" role="alert">Agent connection failed: {connectionFailure.message}</p>
+              : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">Timeline synchronization is reconnecting.</p> : null}
+            <AgentTimeline
+              state={state}
+              showHeader={false}
+              onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
+              onInteractionResponse={actions.respondToInteraction}
+              onResourceRequest={actions.requestResource}
+              questionDrafts={questionDrafts}
+              onQuestionDraftChange={onQuestionDraftChange}
+            />
+          </> : isAttaching ? <div className="lab-empty-state">
+            <span className="lab-empty-icon" aria-hidden="true">↗</span>
+            <h3>Connecting to {attachingAgentId}</h3>
+            <p>The Timeline will appear when the Agent Snapshot is available.</p>
+          </div> : <div className="lab-empty-state">
+            <span className="lab-empty-icon" aria-hidden="true">↗</span>
+            <h3>Start with a Provider</h3>
+            <p>Open a registered Agent to observe its Timeline, interactions, and durable resources.</p>
+          </div>}
+        </div>
+      </div>
+      {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
+    </div>
+    <div className="lab-composer-dock" hidden={!state?.agent}>
+      {state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
+      <LiveControlPanel
+        state={state}
+        sessionKey={state?.agent?.id}
+        draft={messageDraft}
+        onDraftChange={onMessageDraftChange}
+        disabled={sessionStatus !== 'ready'}
+        onSendMessage={actions.sendMessage}
+        onSteer={actions.steer}
+        onCancel={actions.cancel}
+      />
+    </div>
+  </div>;
+}

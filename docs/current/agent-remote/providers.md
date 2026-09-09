@@ -99,3 +99,9 @@ The default local workbench composes the real Codex Provider, Recorded, and the 
 - `packages/agent-provider-codex/src/provider.ts:21-82`
 - `packages/agent-provider-codex/src/app-server-transport.ts:41-162`
 - `packages/agent-provider-codex/src/session.ts:66-418`
+
+## Tool result mapping
+
+Both adapters attach bounded result snapshots to the same tool call ID. Codex maps command `aggregatedOutput` as combined text and preserves native exit code and duration, MCP text and structured content, file change records including diffs, and available web-search actions and result records. Live completed items and `thread/read` history use the same mapping. Output delta notifications are not streamed into the public result; the completed item is authoritative (`packages/agent-provider-codex/src/tool-result.ts`).
+
+DSH retains the nested content of `tool/result` messages and optional presentation metadata. Text stays text; JSON and unrecognized native content blocks remain JSON. The adapter does not parse exit codes or split stdout/stderr from human-readable output, because DSH's session event does not guarantee those structured fields. Failed calls retain their output in addition to the error (`packages/agent-provider-dsh/src/tool-result.ts`).

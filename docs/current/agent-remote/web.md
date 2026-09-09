@@ -113,3 +113,7 @@ flowchart LR
 - `packages/agent-remote-web/src/react/AgentComposer.tsx:21`
 - `packages/agent-remote-web/src/react/AgentPlanningControl.tsx:11`
 - `packages/agent-remote-web/src/react/useTimelineScroll.ts:5`
+
+## Tool result disclosure
+
+The existing tool row remains compact. Expanding it shows the call details followed by result text/JSON, available exit code and duration, and a truncation notice when needed. Result bodies render as escaped plain text rather than HTML, inside a bounded scroll area. The disclosure state survives updates to the same tool call. A completed tool result is also retained in the headless replica used by the terminal debugger (`packages/agent-remote-web/src/react/items/ToolResultView.tsx`, `packages/agent-remote-web/src/react/items/ToolCallItem.tsx`).

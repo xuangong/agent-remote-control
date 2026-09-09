@@ -74,3 +74,7 @@ pnpm test:e2e e2e/codex.spec.ts --timeout=180000
 ```
 
 The browser regression runs the real app-server against a local model-response fixture and covers questions, consecutive turns, and paginated history on desktop and mobile. It does not require a model API key. Use a live conversation and `bdb` to verify the configured model gateway separately.
+
+## Tool output
+
+Expand a completed command row to inspect its combined output, exit code, and duration. Failed commands retain their output too. `pnpm bdb timeline AGENT_ID --all --json` exposes the same `item.result`. Results appear when the native tool item completes; incremental command output is not currently streamed. Long output is a bounded preview with an explicit truncation notice.

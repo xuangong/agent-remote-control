@@ -52,7 +52,7 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 
 ## Invariants
 
-- Protocol negotiation requires exactly version `1.1.0`; planning controls and completed interaction history belong to this public contract rather than an implicit fallback (`packages/agent-remote-protocol/src/version.ts:3-6`, `packages/agent-remote-protocol/src/messages.ts:74-82`, `packages/agent-remote-protocol/src/timeline.ts:54`).
+- Protocol negotiation requires exactly version `1.2.0`; planning controls and completed interaction history belong to this public contract rather than an implicit fallback (`packages/agent-remote-protocol/src/version.ts:3-6`, `packages/agent-remote-protocol/src/messages.ts:74-82`, `packages/agent-remote-protocol/src/timeline.ts:54`).
 - Planning is an optional capability with an explicit creation preference and authoritative runtime state; clients cannot infer planning support or activity from permission settings or a command acknowledgement (`packages/agent-remote-protocol/src/snapshot.ts:19-55`, `packages/agent-remote-protocol/src/messages.ts:71-87`, `packages/agent-remote-protocol/src/messages.ts:124-135`).
 - `AgentSnapshot` contains current Agent state and pending interactions, not Timeline entries (`packages/agent-remote-protocol/src/snapshot.ts:47-72`).
 - Timeline recovery uses `timeline_page` with an epoch and cursors; a stale or forward cursor is represented explicitly rather than inferred from Snapshot (`packages/agent-remote-protocol/src/history.ts:13-48`, `packages/agent-remote-relay/src/timeline-projector.ts:50-88`).
@@ -80,3 +80,9 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 - `packages/agent-remote-protocol/src/resources.ts:22-94`
 - `packages/agent-remote-protocol/src/uplink.ts:5-69`
 - `packages/agent-remote-protocol/src/remote-host-uplink.ts:18-76`
+
+## Tool results
+
+Protocol `1.2.0` adds optional `tool_call.result`. A result contains ordered text or JSON content blocks, optional `exitCode` and `durationMs`, and an explicit `truncated` flag. Text may identify `stdout`, `stderr`, or combined output; absent stream metadata stays unspecified. Missing results mean the Provider supplied no result, while an empty content array explicitly represents an available result with no body. Results are complete snapshots attached to the existing `callId`, not append-only output chunks. Relay and client lifecycle projection replace the result along with the call state, and history/replay use the same representation (`packages/agent-provider-sdk/src/tool-result.ts`, `packages/agent-remote-protocol/src/tool-result.ts`, `packages/agent-remote-relay/src/timeline-projector.ts`).
+
+Adapters bound result bodies to 65,536 characters across at most 128 blocks. Oversized JSON becomes a text preview and marks the result truncated. This preview does not expose a full-result download endpoint. Protocol negotiation remains exact: clients and Hosts using `1.1.0` must update together with the Relay; transport uplink versions are unchanged.

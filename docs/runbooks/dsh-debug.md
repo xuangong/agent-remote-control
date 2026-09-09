@@ -79,3 +79,7 @@ Logs are owner-readable and contain child startup diagnostics. Pairing keys are 
 | No previous sessions in the directory | The default home is isolated. Use `--home` to deliberately choose an existing DSH home, with no other DSH process using it. |
 
 Run `pnpm test:setup` for bounded helper and CLI workflow tests. The CLI workflow test uses a simulated native runtime with real subprocesses and HTTP boundaries; it does not prove a native DSH build or model execution.
+
+## Tool output protocol compatibility
+
+Tool results use public protocol `1.2.0`. After updating the repository, rerun the guided setup to rebuild and reinstall the DSH Host bundle, and use a Relay and workbench from the same version. Existing processes keep their loaded version until restarted. Expand a tool row in the workbench, or inspect `item.result` with `pnpm bdb timeline AGENT_ID --all --json`, to view the native result body. DSH output is retained as emitted; exit codes embedded in text are not inferred as structured metadata.

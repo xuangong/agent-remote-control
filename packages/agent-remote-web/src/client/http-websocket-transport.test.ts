@@ -83,8 +83,8 @@ describe('HttpWebSocketTransport', () => {
       .resolves.toEqual(history);
 
     expect(calls).toEqual([
-      'http://relay.test/base/v1/sessions/agent%20one/snapshot?protocolVersion=1.1.0',
-      'http://relay.test/base/v1/sessions/agent%20one/timeline?protocolVersion=1.1.0&requestId=history-one&direction=after&limit=50&epoch=epoch-one&seq=1',
+      'http://relay.test/base/v1/sessions/agent%20one/snapshot?protocolVersion=1.2.0',
+      'http://relay.test/base/v1/sessions/agent%20one/timeline?protocolVersion=1.2.0&requestId=history-one&direction=after&limit=50&epoch=epoch-one&seq=1',
     ]);
   });
 

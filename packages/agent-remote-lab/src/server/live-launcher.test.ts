@@ -66,7 +66,7 @@ describe('live DSH launcher', () => {
     const manifest = join(testRoot, 'invalid-compatibility.json');
     writeFileSync(manifest, JSON.stringify({
       schemaVersion: 2,
-      protocolVersion: '1.1.0',
+      protocolVersion: '1.2.0',
       borgee: { release: 'unreleased', revision: 'test' },
       providers: [{
         providerId: 'dsh',
@@ -142,7 +142,7 @@ describe('live DSH launcher', () => {
     const manifest = join(testRoot, 'compatibility.json');
     writeFileSync(manifest, JSON.stringify({
       schemaVersion: 1,
-      protocolVersion: '1.1.0',
+      protocolVersion: '1.2.0',
       borgee: {
         release: 'unreleased', sourceState: 'working_tree',
         baseRevision: '9e21c2ad9a0ba55413960a1681d34675c5d6e026',

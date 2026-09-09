@@ -1,3 +1,4 @@
+import { AgentToolResult } from './tool-result.js';
 import { type Static, Type } from '@sinclair/typebox';
 
 import { SafeNonNegativeInteger } from './cursor.js';
@@ -26,6 +27,7 @@ const ToolCallBase = {
   callId: NonEmptyString,
   name: NonEmptyString,
   detail: AgentToolDetail,
+  result: Type.Optional(AgentToolResult),
 };
 
 export const AgentToolCallTimelineItem = Type.Union([

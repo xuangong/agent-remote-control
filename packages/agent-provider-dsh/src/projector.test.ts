@@ -268,6 +268,7 @@ describe('DSH event projector', () => {
       item: {
         type: 'tool_call', callId: 'call-1', name: 'bash', status: 'completed', error: null,
         detail: { type: 'shell', command: 'pwd' },
+        result: { content: [{ type: 'text', text: '/workspace' }] },
       },
     }]);
     expect(projectedEvents(projector, event('todo', 'todo/write', {

@@ -200,7 +200,7 @@ async function createResourceManager(
     ...(options.resourceStore ? { resourceStore: options.resourceStore } : {}),
   });
   await relay.createAgent({
-    protocolVersion: '1.1.0',
+    protocolVersion: '1.2.0',
     type: 'create_agent',
     payload: {
       requestId: `create-${sessionId}`,
@@ -231,7 +231,7 @@ describe('DSH projection convergence', () => {
   it('converges through the shared Relay history page and Web replica', async () => {
     const relay = createAgentRemoteRelay({ providers: [provider()], epoch: () => 'epoch-dsh' });
     await relay.createAgent({
-      protocolVersion: '1.1.0', type: 'create_agent',
+      protocolVersion: '1.2.0', type: 'create_agent',
       payload: {
         requestId: 'create-dsh', agentId: 'agent-dsh', providerId: 'delta-provider',
         config: { sessionId: 'delta-session' },
@@ -273,7 +273,7 @@ describe('DSH projection convergence', () => {
     ];
     const relay = createSourceAgentRemoteRelay({ providers: [provider(history)], epoch: () => 'epoch-pagination' });
     await relay.createAgent({
-      protocolVersion: '1.1.0', type: 'create_agent',
+      protocolVersion: '1.2.0', type: 'create_agent',
       payload: {
         requestId: 'create-pagination', agentId: 'agent-pagination', providerId: 'delta-provider',
         config: { sessionId: 'pagination-session' },
@@ -328,7 +328,7 @@ describe('DSH projection convergence', () => {
     ];
     const relay = createSourceAgentRemoteRelay({ providers: [provider(history)], epoch: () => 'epoch-message-pages' });
     await relay.createAgent({
-      protocolVersion: '1.1.0', type: 'create_agent',
+      protocolVersion: '1.2.0', type: 'create_agent',
       payload: {
         requestId: 'create-message-pages', agentId: 'agent-message-pages', providerId: 'delta-provider',
         config: { sessionId: 'message-pages-session' },
@@ -406,7 +406,7 @@ describe('DSH projection convergence', () => {
       .map((observation) => ({ ...observation, delivery: 'history' as const }));
     const relay = createAgentRemoteRelay({ providers: [provider(history)], epoch: () => 'epoch-source' });
     await relay.createAgent({
-      protocolVersion: '1.1.0', type: 'create_agent',
+      protocolVersion: '1.2.0', type: 'create_agent',
       payload: {
         requestId: 'create-source', agentId: 'agent-source', providerId: 'delta-provider',
         config: { sessionId: 'source-session' },

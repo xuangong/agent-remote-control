@@ -1,3 +1,4 @@
+import { ToolResultView } from './ToolResultView.js';
 import { useId, useState } from 'react';
 import type { AgentTimelineItem, AgentToolDetail } from '@borgee/agent-remote-protocol';
 
@@ -25,6 +26,7 @@ export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineIte
     </header>
     <div id={detailsId} className="agent-tool-details" hidden={!expanded}>
       <ToolCallDetails detail={item.detail} />
+      {item.result ? <ToolResultView result={item.result} /> : null}
     </div>
     {item.error ? <p className="agent-tool-error" role="alert">{item.error}</p> : null}
   </article>;

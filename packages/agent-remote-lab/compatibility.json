@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "1.1.0",
+  "protocolVersion": "1.2.0",
   "borgee": {
     "release": "unreleased",
     "sourceState": "working_tree",
@@ -65,7 +65,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:0d282fd7d31f4f3d5cbe0fbae8335668d3de0c23808bc39e2d3041d0d2ceb50e"
+      "digest": "sha256:f8a7080be4cc78184c44762000d4fd1fde686c627ec79a1936ebc2bb9e897fb6"
     }
   },
   "providers": [

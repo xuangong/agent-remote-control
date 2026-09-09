@@ -42,3 +42,19 @@ describe('ToolCallItem', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('File is unavailable.');
   });
 });
+
+it('shows output and command metadata inside the existing disclosure without interpreting output as HTML', async () => {
+  const container = await render(<ToolCallItem item={{
+    type: 'tool_call', callId: 'command-result', name: 'shell', status: 'completed', error: null,
+    detail: { type: 'shell', command: 'echo hello' },
+    result: { content: [{ type: 'text', stream: 'combined', text: '<img src=x onerror=alert(1)>\nhello' }, { type: 'json', value: { count: 2 } }], exitCode: 0, durationMs: 12, truncated: true },
+  }} />);
+  await act(async () => container.querySelector<HTMLButtonElement>('.agent-tool-toggle')!.click());
+  const result = container.querySelector('[aria-label="Tool result"]');
+  expect(result?.textContent).toContain('hello');
+  expect(result?.textContent).toContain('Exit code 0');
+  expect(result?.textContent).toContain('12 ms');
+  expect(result?.textContent).toContain('truncated');
+  expect(result?.textContent).toContain('"count": 2');
+  expect(container.querySelector('img')).toBeNull();
+});

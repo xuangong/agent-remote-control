@@ -1,3 +1,4 @@
+import { codexToolResult } from './tool-result.js';
 import type {
   AgentStreamEvent,
   AgentTaskItem,
@@ -384,7 +385,7 @@ export class CodexEventProjector {
       command
         ? { type: 'shell', command, ...(cwd ? { cwd } : {}) }
         : { type: 'other', description: 'Run a command' },
-      readErrorMessage(item.error) ?? (status === 'failed' ? readString(item.aggregatedOutput) : undefined));
+      readErrorMessage(item.error) ?? (status === 'failed' ? readString(item.aggregatedOutput) : undefined), codexToolResult(item));
   }
 
   private mapFileChange(item: JsonObject, lifecycle: 'started' | 'completed'): AgentToolCallTimelineItem {
@@ -394,7 +395,7 @@ export class CodexEventProjector {
     const filePath = change ? readString(change.path) : undefined;
     return this.toolItem(callId, 'file_change', status,
       filePath ? { type: 'edit', filePath } : { type: 'other', description: 'File changes' },
-      readErrorMessage(item.error));
+      readErrorMessage(item.error), lifecycle === 'completed' ? codexToolResult(item) : undefined);
   }
 
   private mapMcpTool(item: JsonObject, lifecycle: 'started' | 'completed'): AgentToolCallTimelineItem {
@@ -404,14 +405,15 @@ export class CodexEventProjector {
     const status = normalizeStatus(item.status, lifecycle);
     return this.toolItem(callId, `${server}.${tool}`, status, {
       type: 'other', description: `MCP tool ${server}.${tool}`,
-    }, readErrorMessage(item.error));
+    }, readErrorMessage(item.error), codexToolResult(item));
   }
 
   private mapWebSearch(item: JsonObject, lifecycle: 'started' | 'completed'): AgentToolCallTimelineItem {
     const callId = readString(item.id) ?? 'web-search';
     const query = readString(item.query);
     return this.toolItem(callId, 'web_search', normalizeStatus(item.status, lifecycle),
-      query ? { type: 'search', query } : { type: 'other', description: 'Web search' });
+      query ? { type: 'search', query } : { type: 'other', description: 'Web search' }, undefined,
+      lifecycle === 'completed' ? codexToolResult(item) : undefined);
   }
 
   private toolItem(
@@ -420,9 +422,10 @@ export class CodexEventProjector {
     status: 'running' | 'completed' | 'failed' | 'canceled',
     detail: AgentToolCallTimelineItem['detail'],
     error?: string,
+    result?: import('@borgee/agent-provider-sdk').AgentToolResult,
   ): AgentToolCallTimelineItem {
-    if (status === 'failed') return { type: 'tool_call', callId, name, detail, status, error: error ?? 'Tool failed' };
-    return { type: 'tool_call', callId, name, detail, status, error: null };
+    if (status === 'failed') return { type: 'tool_call', callId, name, detail, status, error: error ?? 'Tool failed', ...(result ? { result } : {}) };
+    return { type: 'tool_call', callId, name, detail, status, error: null, ...(result ? { result } : {}) };
   }
 
   private readUserMessageText(item: JsonObject): string {

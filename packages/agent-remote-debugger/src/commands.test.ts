@@ -7,7 +7,7 @@ import type { DebuggerRuntime } from './runtime.js';
 
 import { runCli, type CliEnvironment } from './cli.js';
 
-const protocolVersion = '1.1.0' as const;
+const protocolVersion = '1.2.0' as const;
 
 function agentSnapshot(capabilities = fullCapabilities): AgentSnapshot {
   return {

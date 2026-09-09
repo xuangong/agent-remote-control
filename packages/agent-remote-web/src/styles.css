@@ -355,3 +355,10 @@
   .agent-composer-actions > button { margin-left: auto; }
   .agent-composer button { min-height: 40px; }
 }
+
+.agent-tool-result { margin-top: 12px; border-top: 1px solid var(--agent-border, #dce3eb); padding-top: 10px; min-width: 0; }
+.agent-tool-result-header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+.agent-tool-result-header span, .agent-tool-result-block small, .agent-tool-result-note { color: var(--agent-muted, #526372); }
+.agent-tool-result-block { min-width: 0; margin-top: 8px; }
+.agent-tool-result-block pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; padding: 10px; background: var(--agent-code-bg, #f3f6f9); border-radius: 6px; font-size: 12px; line-height: 1.5; }
+.agent-tool-result-note { font-size: 12px; }

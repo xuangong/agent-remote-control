@@ -20,9 +20,9 @@ async function start(authorize = (request: IncomingMessage) => request.headers.a
 }
 
 const routes = [
-  ['GET', '/v1/providers?protocolVersion=1.1.0'],
-  ['GET', '/v1/sessions/private/snapshot?protocolVersion=1.1.0'],
-  ['GET', '/v1/sessions/private/timeline?protocolVersion=1.1.0'],
+  ['GET', '/v1/providers?protocolVersion=1.2.0'],
+  ['GET', '/v1/sessions/private/snapshot?protocolVersion=1.2.0'],
+  ['GET', '/v1/sessions/private/timeline?protocolVersion=1.2.0'],
   ['POST', '/v1/sessions'],
   ['POST', '/v1/sessions/resume'],
   ['GET', '/unknown'],
@@ -44,17 +44,17 @@ describe('Agent Remote request access policy', () => {
   it('allows authenticated reads and preserves typed missing-session errors', async () => {
     const url = await start();
     const headers = { authorization: 'Bearer service-test' };
-    const response = await fetch(`${url}/v1/providers?protocolVersion=1.1.0`, { headers });
+    const response = await fetch(`${url}/v1/providers?protocolVersion=1.2.0`, { headers });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ type: 'provider_list', payload: { providers: [] } });
-    const missing = await fetch(`${url}/v1/sessions/private/snapshot?protocolVersion=1.1.0`, { headers });
+    const missing = await fetch(`${url}/v1/sessions/private/snapshot?protocolVersion=1.2.0`, { headers });
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ payload: { code: 'agent_not_found' } });
   });
 
   it('fails closed when the policy throws', async () => {
     const url = await start(() => { throw new Error('credential lookup failed'); });
-    const response = await fetch(`${url}/v1/providers?protocolVersion=1.1.0`);
+    const response = await fetch(`${url}/v1/providers?protocolVersion=1.2.0`);
     expect(response.status).toBe(401);
     expect(await response.text()).not.toContain('credential lookup failed');
     expect(await upgrade(url, '/v1/sessions/private/events')).toBe(401);

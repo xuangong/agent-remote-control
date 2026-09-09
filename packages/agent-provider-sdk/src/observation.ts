@@ -1,3 +1,4 @@
+import type { AgentToolResult } from './tool-result.js';
 import type { AgentInteractionRequest, AgentInteractionResponse, AgentToolDetail } from './control.js';
 
 export interface AgentTaskItem {
@@ -13,6 +14,7 @@ interface AgentToolCallBase {
   callId: string;
   name: string;
   detail: AgentToolDetail;
+  result?: AgentToolResult;
 }
 
 export type AgentToolCallTimelineItem = AgentToolCallBase & (

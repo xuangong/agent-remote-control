@@ -51,7 +51,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
         const entry = requireEntry(providerId);
         if (!await entry.catalog.session(nativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The native session is unavailable.');
         const agentId = randomUUID();
-        await relay.createAgent({ protocolVersion: '1.1.0', type: 'create_agent', payload: {
+        await relay.createAgent({ protocolVersion: '1.2.0', type: 'create_agent', payload: {
           requestId: randomUUID(), agentId, providerId,
           config: { sessionId: agentId, nativeSessionId } as AgentSessionConfig,
         } });

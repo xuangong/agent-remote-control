@@ -31,7 +31,7 @@ export default defineConfig({
   webServer: [
     {
       command: relayCommand,
-      url: `http://127.0.0.1:${relayPort}/v1/providers?protocolVersion=1.1.0`,
+      url: `http://127.0.0.1:${relayPort}/v1/providers?protocolVersion=1.2.0`,
       reuseExistingServer: false,
       timeout: 120_000,
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },

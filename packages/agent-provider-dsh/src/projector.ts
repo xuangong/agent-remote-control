@@ -1,3 +1,4 @@
+import { dshToolResult } from './tool-result.js';
 import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
@@ -347,9 +348,11 @@ export class DshProjector {
     const failed = first?.isError === true || data.isError === true || data.error !== undefined;
     const pendingWrite = this.state.pendingWrites.get(callId);
     this.state.pendingWrites.delete(callId);
+    const result = dshToolResult(data);
+    const completed = { ...opened, ...(result ? { result } : {}) };
     const item: AgentToolCallTimelineItem = failed
-      ? { ...opened, status: 'failed', error: readError(data.error) }
-      : { ...opened, status: 'completed', error: null };
+      ? { ...completed, status: 'failed', error: readError(data.error) }
+      : { ...completed, status: 'completed', error: null };
     this.state.tools.set(callId, item);
     const readLocator = !failed && pendingWrite
       ? this.options.referenceGeneratedResource?.(pendingWrite.locator, revisionKey)

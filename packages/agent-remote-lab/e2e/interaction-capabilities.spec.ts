@@ -101,7 +101,7 @@ test('reviews typed interactions and recovers redacted history through the real 
   expect(incoming.join('\n')).not.toContain('browser-secret');
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toContain('browser-secret');
   const agentId = new URL(page.url()).searchParams.get('agent')!;
-  const history = await request.get(`${relayUrl}/v1/sessions/${encodeURIComponent(agentId)}/timeline?protocolVersion=1.3.0&requestId=browser-history&direction=tail&limit=100`);
+  const history = await request.get(`${relayUrl}/v1/sessions/${encodeURIComponent(agentId)}/timeline?protocolVersion=1.4.0&requestId=browser-history&direction=tail&limit=100`);
   expect(history.ok()).toBe(true);
   const historyText = await history.text();
   expect(historyText).not.toContain('browser-secret');

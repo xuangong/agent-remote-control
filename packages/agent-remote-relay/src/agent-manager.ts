@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
+import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@borgee/agent-provider-sdk';
 import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@borgee/agent-provider-sdk';
 import type {
   AgentInteractionResponse,
+  AgentMessageOptions,
   AgentPersistenceHandle,
   AgentProviderAdapter,
   AgentProviderDescriptor,
@@ -11,6 +14,7 @@ import type {
 } from '@borgee/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
+  type AgentCommand,
   type AgentSnapshot,
   type HistoryPage,
   type ResourceResponse,
@@ -62,15 +66,15 @@ export class InteractionResponseError extends Error {
 }
 
 export class UnsupportedAgentCapabilityError extends Error {
-  constructor(readonly capability: 'send_message' | 'steer' | 'cancel' | 'set_planning') {
+  constructor(readonly capability: 'send_message' | 'queue_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'list_commands' | 'execute_command') {
     super(`Provider does not support ${capability}.`);
     this.name = 'UnsupportedAgentCapabilityError';
   }
 }
 
 export class AgentBusyError extends Error {
-  constructor() {
-    super('Planning can only change while the Agent is idle with no pending interactions.');
+  constructor(message = 'Planning can only change while the Agent is idle with no pending interactions.') {
+    super(message);
     this.name = 'AgentBusyError';
   }
 }
@@ -92,6 +96,8 @@ export class AgentManager {
   private boundarySeen = false;
   private closed = false;
   private commandTail: Promise<void> = Promise.resolve();
+  private pendingCommandExecutions = 0;
+  private commandResources = new Map<string, { commandId: string; locator: string }>();
 
   private constructor(
     readonly agentId: string,
@@ -205,10 +211,13 @@ export class AgentManager {
     this.emit({ type: 'timeline_replacement', agentId: this.agentId, epoch });
   }
 
-  async sendMessage(text: string): Promise<void> {
+  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
+    if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
     return this.serializeCommand(async () => {
       if (!this.session.capabilities.sendMessage) throw new UnsupportedAgentCapabilityError('send_message');
-      await this.session.sendMessage(text);
+      if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
+      if (options === undefined) await this.session.sendMessage(text);
+      else await this.session.sendMessage(text, options);
     });
   }
 
@@ -225,12 +234,55 @@ export class AgentManager {
     });
   }
 
-  private serializeCommand(operation: () => Promise<void>): Promise<void> {
+  async setSessionSetting(id: string, value: string): Promise<void> {
+    return this.serializeCommand(async () => {
+      if (this.session.capabilities.sessionSettings !== true || !this.session.setSessionSetting) {
+        throw new UnsupportedAgentCapabilityError('set_session_setting');
+      }
+      const state = this.state.payload;
+      if (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0) throw new AgentBusyError();
+      validateSessionSetting((await this.session.runtimeInfo()).settings, id, value);
+      await this.session.setSessionSetting(id, value);
+      const runtimeInfo = await this.session.runtimeInfo();
+      this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+    });
+  }
+
+  async listCommands(): Promise<AgentCommand[]> {
+    if (this.closed) throw new Error('Agent session is closed.');
+    if (this.session.capabilities.commands !== true || !this.session.listCommands) throw new UnsupportedAgentCapabilityError('list_commands');
+    const resources = new Map<string, { commandId: string; locator: string }>();
+    const commands = validateCommandDirectory(await this.session.listCommands()).map(({ documentation, ...command }): AgentCommand => {
+      if (!documentation || !this.session.capabilities.readResource || !this.session.readResource || !normalizeFileLocator(documentation)) return command;
+      const resourceId = `command:${createHash('sha256').update(JSON.stringify([this.agentId, command.id, documentation])).digest('hex')}`;
+      resources.set(resourceId, { commandId: command.id, locator: documentation });
+      return { ...command, documentation: { locator: documentation, resourceId, status: 'pending' } };
+    });
+    this.commandResources = resources;
+    return commands;
+  }
+
+  async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
+    this.pendingCommandExecutions += 1;
+    try {
+      return await this.serializeCommand(async () => {
+        if (this.session.capabilities.commands !== true || !this.session.executeCommand) throw new UnsupportedAgentCapabilityError('execute_command');
+        const commands = await this.listCommands();
+        if (!commands.some((command) => command.id === id)) throw new Error('Native command is no longer available. Refresh the command list.');
+        const result = await this.session.executeCommand(id, args);
+        const runtimeInfo = await this.session.runtimeInfo();
+        this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+        return result;
+      });
+    } finally { this.pendingCommandExecutions -= 1; }
+  }
+
+  private serializeCommand<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.commandTail.then(() => {
       if (this.closed) throw new Error('Agent session is closed.');
       return operation();
     });
-    this.commandTail = result.catch(() => undefined);
+    this.commandTail = result.then(() => undefined, () => undefined);
     return result;
   }
 
@@ -271,6 +323,19 @@ export class AgentManager {
   }
 
   async readResource(requestId: string, resourceId: string): Promise<ResourceResponse> {
+    const document = this.commandResources.get(resourceId);
+    if (document && !this.closed) {
+      const commands = await this.listCommands();
+      if (commands.some((command) => command.id === document.commandId && command.documentation?.resourceId === resourceId)) {
+        const acquisition = this.resourceIngestor.acquire({ agentId: this.agentId, locator: document.locator,
+          reader: (locator) => this.session.readResource!(locator) });
+        if (acquisition) {
+          const binding = await acquisition.settled;
+          const response = this.resourceIngestor.readResponse(requestId, this.agentId, binding.resourceId);
+          return { ...response, payload: { ...response.payload, resourceId } };
+        }
+      }
+    }
     return this.resourceIngestor.readResponse(requestId, this.agentId, resourceId);
   }
 

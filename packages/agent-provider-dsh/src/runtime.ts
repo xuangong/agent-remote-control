@@ -1,5 +1,9 @@
+import { DshCommands } from './commands.js';
+import { DshSessionSettings } from './session-settings.js';
 import { validateInteractionResponse } from '@borgee/agent-provider-sdk';
 import type {
+  AgentCommand,
+  AgentCommandResult,
   AgentInteractionRequest,
   AgentInteractionResponse,
   AgentPersistenceHandle,
@@ -23,10 +27,13 @@ export interface AgentRuntimeInfoValue {
   readonly cwd?: string;
   readonly model?: string | null;
   readonly planning?: { active: boolean; requested?: boolean };
+  readonly settings?: import('@borgee/agent-provider-sdk').AgentSessionSetting[];
 }
 
 export interface DshOwnedRuntimeFeatures {
+  readonly commands?: boolean;
   readonly planning?: boolean;
+  readonly sessionSettings?: boolean;
   readonly steer: boolean;
   readonly cancel: boolean;
   readonly readResource: boolean;
@@ -52,9 +59,14 @@ export interface DshOwnedAgent {
   followup(text: string): void;
   steer(text: string): void;
   cancel(): boolean;
+  listCommands?(): Promise<AgentCommand[]>;
+  executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
   setPlanning?(active: boolean): void;
+  loadSettings?(): Promise<void>;
+  setSessionSetting?(id: string, value: string): Promise<void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): boolean | Promise<boolean>;
   readImage(reference: DshImageReference): Promise<DshStoredImage>;
+  readDocumentation?(locator: string): Promise<import('@borgee/agent-provider-sdk').AgentResourceReadResult>;
   flush(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -403,6 +415,10 @@ class CordisDshRuntime implements DshRuntime {
 
 class CordisDshOwnedAgent implements DshOwnedAgent {
   readonly features: DshOwnedRuntimeFeatures;
+  private readonly settings: DshSessionSettings;
+  private readonly commands: DshCommands;
+  private readonly commandRequests = new Map<string, DshNativeObservation>();
+  private changingSetting = false;
   private readonly listeners = new Set<(record: DshNativeObservation) => void>();
   private readonly pending = new Map<string, PendingInteractionState>();
   private readonly stopSessionEvents: () => unknown;
@@ -418,7 +434,19 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
     private readonly releaseOwner: () => void,
     private readonly sharedInteractions?: DshWebInteractionAdapter,
   ) {
-    this.features = features;
+    this.settings = new DshSessionSettings(handle.agent, (name) => scopedService(context, handle.agent, name));
+    this.commands = new DshCommands(handle.agent, (name) => scopedService(context, handle.agent, name), this.settings, (event) => {
+      if (event.type === 'interaction_requested') {
+        const record = this.interactionRecord('interaction_requested', event.request, undefined, undefined);
+        this.commandRequests.set(event.request.requestId, record);
+        this.publish(record);
+      } else if (event.type === 'interaction_resolved') {
+        this.commandRequests.delete(event.requestId);
+        this.publish(this.interactionRecord('interaction_resolved', event.response, event.requestId, undefined));
+      }
+    }, () => this.assertCommandIdle());
+    this.features = { ...features, readResource: features.readResource || this.commands.documentsSupported, sessionSettings: this.settings.supported, commands: this.commands.supported,
+      interactions: { ...features.interactions, question: features.interactions.question || this.commands.supported } };
     this.stopSessionEvents = context.on('session/event', (session, event) => {
       if (session === handle.agent.session) this.publish(sessionObservation(this.sessionId, event));
     });
@@ -435,6 +463,7 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
   get events(): readonly DshNativeObservation[] {
     const history = this.handle.agent.session.snapshotEvents().map((event) => sessionObservation(this.sessionId, event));
     const interactions = [
+      ...this.commandRequests.values(),
       ...[...this.pending.values()].map(({ requestRecord }) => requestRecord),
       ...(this.sharedInteractions?.events(this.sessionId) ?? []),
     ];
@@ -447,12 +476,38 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
     return {
       status: agent.status === 'running' ? 'running' : 'idle',
       ...(agent.session.header.cwd ? { cwd: agent.session.header.cwd } : {}),
-      model: requestModel(agent) ?? agent.options.model ?? null,
+      model: this.settings.currentModel() ?? requestModel(agent) ?? agent.options.model ?? null,
+      ...(this.settings.supported ? { settings: this.settings.describe() } : {}),
       ...(state ? { planning: {
         active: state.active,
         ...(state.pending !== undefined ? { requested: state.pending } : {}),
       } } : {}),
     };
+  }
+
+  loadSettings(): Promise<void> { return this.settings.load(); }
+
+  listCommands(): Promise<AgentCommand[]> { return this.commands.list(); }
+  readDocumentation(locator: string): Promise<import('@borgee/agent-provider-sdk').AgentResourceReadResult> { return this.commands.readDocumentation(locator); }
+  executeCommand(id: string, args: string): Promise<AgentCommandResult> { return this.commands.execute(id, args); }
+
+  private assertCommandIdle(): void {
+    if (this.disposePromise) throw new Error('DSH session is closed.');
+    if (this.changingSetting || currentDshTurn(this.handle.agent.session.snapshotEvents()) !== undefined || this.handle.agent.status === 'running') {
+      throw new Error('DSH commands can only execute while idle.');
+    }
+    if (this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new Error('DSH commands cannot execute with pending interactions.');
+  }
+
+  async setSessionSetting(id: string, value: string): Promise<void> {
+    if (this.disposePromise) throw new Error('DSH session is closed.');
+    if (this.changingSetting || currentDshTurn(this.handle.agent.session.snapshotEvents()) !== undefined || this.handle.agent.status === 'running') {
+      throw new Error('DSH settings can only change while idle.');
+    }
+    if (this.commands.pending || this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new Error('DSH settings cannot change with pending interactions.');
+    this.changingSetting = true;
+    try { await this.settings.select(id, value); }
+    finally { this.changingSetting = false; }
   }
 
   setPlanning(active: boolean): void {
@@ -462,7 +517,7 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
     if (currentDshTurn(this.handle.agent.session.snapshotEvents()) !== undefined || this.handle.agent.status === 'running') {
       throw new Error('DSH planning can only change while idle.');
     }
-    if (this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new Error('DSH planning cannot change with pending interactions.');
+    if (this.commands.pending || this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new Error('DSH planning cannot change with pending interactions.');
     service.set(this.handle.agent, active);
   }
 
@@ -472,21 +527,30 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
   }
 
   followup(text: string): void {
+    if (this.commands.pending) throw new Error('A DSH command or interaction is pending.');
     this.handle.agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
   }
 
   steer(text: string): void {
+    if (this.commands.pending) throw new Error('A DSH command or interaction is pending.');
     this.handle.agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
   }
 
   cancel(): boolean {
-    if (this.handle.agent.status !== 'running') return false;
+    const commandCanceled = this.commands.cancel();
+    for (const [requestId, record] of this.commandRequests) {
+      const request = (record.payload as { request: AgentInteractionRequest }).request;
+      this.publish(this.interactionRecord('interaction_resolved', cancellationResponse(request), requestId, undefined));
+    }
+    this.commandRequests.clear();
+    if (this.handle.agent.status !== 'running') return commandCanceled;
     this.handle.agent.cancel({ kind: 'user' }, { keepInbox: true });
     return true;
   }
 
   respondToInteraction(requestId: string, response: AgentInteractionResponse): boolean | Promise<boolean> {
     if (this.disposePromise) throw new Error('DSH session is closed.');
+    if (this.commandRequests.has(requestId)) return this.commands.respond(requestId, response);
     if (this.sharedInteractions) return this.sharedInteractions.respond(this.sessionId, requestId, response);
     const pending = this.pending.get(requestId);
     if (!pending || pending.request.kind !== response.kind) return false;
@@ -518,6 +582,8 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
 
   dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
+    this.commands.dispose();
+    this.commandRequests.clear();
     this.disposePromise = (async () => {
       let failure: unknown;
       try {

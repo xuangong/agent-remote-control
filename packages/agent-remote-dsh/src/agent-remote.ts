@@ -153,7 +153,7 @@ async function startRemoteHost(
       const projection: Projection = { bindingId, nativeSessionId, agent };
       pendingProjections.set(bindingId, projection);
       try {
-        await relay!.createAgent({ protocolVersion: '1.3.0', type: 'create_agent', payload: {
+        await relay!.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
           requestId: randomUUID(), agentId: bindingId, providerId: 'dsh', config: { sessionId: bindingId },
         } });
         projections.set(bindingId, projection);

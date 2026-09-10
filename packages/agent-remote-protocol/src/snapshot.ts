@@ -1,6 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
 
 import { AgentInteractionRequest } from './interactions.js';
+import { AgentSessionSetting } from './session-settings.js';
 import { AgentUsage } from './timeline.js';
 import { ProtocolVersionSchema } from './version.js';
 
@@ -19,10 +20,13 @@ export type AgentStatus = Static<typeof AgentStatus>;
 export const AgentCapabilities = Strict({
   history: Type.Boolean(),
   sendMessage: Type.Boolean(),
+  queueMessage: Type.Optional(Type.Boolean()),
   steer: Type.Boolean(),
   cancel: Type.Boolean(),
   readResource: Type.Boolean(),
   planning: Type.Optional(Type.Boolean()),
+  sessionSettings: Type.Optional(Type.Boolean()),
+  commands: Type.Optional(Type.Boolean()),
   interactions: Strict({
     question: Type.Boolean(),
     planApproval: Type.Boolean(),
@@ -55,6 +59,7 @@ export const AgentRuntimeInfo = Strict({
   model: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   mode: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   planning: Type.Optional(AgentPlanningState),
+  settings: Type.Optional(Type.Array(AgentSessionSetting)),
   persistence: Type.Optional(AgentPersistenceHandle),
 });
 export type AgentRuntimeInfo = Static<typeof AgentRuntimeInfo>;

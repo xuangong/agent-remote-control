@@ -2,8 +2,11 @@ import { createHash, type Hash } from 'node:crypto';
 
 import type {
   AgentCapabilities,
+  AgentCommand,
+  AgentCommandResult,
   AgentInteractionRequest,
   AgentInteractionResponse,
+  AgentMessageOptions,
   AgentPersistenceHandle,
   AgentResourceReadResult,
   AgentRuntimeInfo,
@@ -97,12 +100,15 @@ export class LiveDshSession implements AgentSession {
       ),
     });
     this.capabilities = {
+      commands: agent.features.commands ?? false,
       history: true,
       sendMessage: true,
+      queueMessage: true,
       steer: agent.features.steer,
       cancel: agent.features.cancel,
       readResource: agent.features.readResource,
       planning: agent.features.planning ?? false,
+      sessionSettings: agent.features.sessionSettings ?? false,
       interactions: { ...agent.features.interactions },
     };
   }
@@ -133,9 +139,14 @@ export class LiveDshSession implements AgentSession {
     return queue;
   }
 
-  async sendMessage(text: string): Promise<void> {
+  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
     this.assertOpen();
     if (!text.trim()) throw new Error('DSH message must not be empty.');
+    if (options?.delivery !== 'next_turn' && this.agent.runtimeInfo.status === 'running') {
+      if (!this.capabilities.steer) throw new Error('DSH immediate delivery requires native steering while running.');
+      this.agent.steer(text);
+      return;
+    }
     this.agent.followup(text);
   }
 
@@ -149,6 +160,26 @@ export class LiveDshSession implements AgentSession {
   async cancel(): Promise<void> {
     this.assertOpen();
     if (!this.capabilities.cancel || !this.agent.cancel()) throw new Error('DSH session cannot be canceled.');
+  }
+
+  async listCommands(): Promise<AgentCommand[]> {
+    this.assertOpen();
+    if (!this.capabilities.commands || !this.agent.listCommands) throw new Error('DSH commands are unsupported.');
+    return this.agent.listCommands();
+  }
+
+  async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
+    this.assertOpen();
+    if (!this.capabilities.commands || !this.agent.executeCommand) throw new Error('DSH commands are unsupported.');
+    if (this.pending.size > 0) throw new Error('DSH commands cannot execute with pending interactions.');
+    return this.agent.executeCommand(id, args);
+  }
+
+  async setSessionSetting(id: string, value: string): Promise<void> {
+    this.assertOpen();
+    if (!this.capabilities.sessionSettings || !this.agent.setSessionSetting) throw new Error('DSH session settings are unsupported.');
+    if (this.pending.size > 0) throw new Error('DSH settings cannot change with pending interactions.');
+    await this.agent.setSessionSetting(id, value);
   }
 
   async setPlanning(active: boolean): Promise<void> {
@@ -174,6 +205,7 @@ export class LiveDshSession implements AgentSession {
 
   async readResource(locator: string): Promise<AgentResourceReadResult> {
     this.assertOpen();
+    if (locator.startsWith('dsh-skill:')) return this.agent.readDocumentation?.(locator) ?? { status: 'unavailable', reason: 'DSH skill documentation is unsupported.' };
     const reference = this.projector.imageReference(locator);
     if (reference) {
       try {
@@ -194,6 +226,7 @@ export class LiveDshSession implements AgentSession {
   }
 
   async runtimeInfo(): Promise<AgentRuntimeInfo> {
+    await this.agent.loadSettings?.();
     return {
       providerId: this.persistence.providerId,
       sessionId: this.agent.sessionId,

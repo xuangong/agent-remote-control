@@ -1,7 +1,16 @@
+import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { CodexSessionSettings } from './session-settings.js';
 import { isDeepStrictEqual } from 'node:util';
 
 import type {
   AgentCapabilities,
+  AgentCommand,
+  AgentCommandResult,
+  AgentMessageOptions,
+  AgentSessionSetting,
   AgentInteractionRequest,
   AgentInteractionResponse,
   AgentPersistenceHandle,
@@ -13,7 +22,7 @@ import type {
   ProviderStreamItem,
 } from '@borgee/agent-provider-sdk';
 
-import { validateInteractionResponse, redactInteractionResponse } from '@borgee/agent-provider-sdk';
+import { CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@borgee/agent-provider-sdk';
 import { mapCodexQuestion, mapCodexQuestionResponse } from './questions.js';
 import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.js';
 import { mapCodexPermissions } from './permissions.js';
@@ -35,6 +44,8 @@ export const CODEX_CAPABILITIES: AgentCapabilities = {
   cancel: true,
   readResource: true,
   planning: false,
+  sessionSettings: true,
+  commands: true,
   interactions: {
     question: true,
     planApproval: false,
@@ -70,6 +81,15 @@ interface RawNotification {
 export class CodexAppServerSession implements AgentSession {
   readonly capabilities: AgentCapabilities = { ...CODEX_CAPABILITIES, interactions: { ...CODEX_CAPABILITIES.interactions } };
 
+  private readonly settings = new CodexSessionSettings();
+  private changingSetting = false;
+  private executingCommand = false;
+  private commandEventSequence = 0;
+  private readonly commandEventPrefix = randomUUID();
+  private readonly commandInteractions = new CommandInteractions(PROVIDER_ID, (event) => this.emit({
+    type: 'observation', sourceKey: `command:${this.commandEventPrefix}:${++this.commandEventSequence}`, occurredAt: Date.now(), delivery: 'live', event,
+  }));
+  private settingConfirmation: { id: string; value: string; resolve(): void } | undefined;
   private threadId: string | undefined;
   private projector: CodexEventProjector | undefined;
   private images: CodexImageRegistry | undefined;
@@ -90,11 +110,13 @@ export class CodexAppServerSession implements AgentSession {
   private planningModes: CodexPlanningModes | undefined;
   private latestPlan: { id: string; text: string } | undefined;
   private startingTurn = false;
+  private sendingMessage = false;
   private activeTurnId: string | undefined;
 
   private constructor(
     private readonly transport: CodexAppServerTransport,
     private readonly config: StoredSessionConfig,
+    private readonly codexHome = process.env.CODEX_HOME || path.join(homedir(), '.codex'),
   ) {
     transport.setTerminationHandler((error) => this.handleTransportTermination(error));
     transport.setNotificationHandler((method, params) => this.handleNotification(method, params));
@@ -110,9 +132,10 @@ export class CodexAppServerSession implements AgentSession {
     transport: CodexAppServerTransport,
     config: AgentSessionConfig,
     collaborationMode?: 'plan',
+    codexHome?: string,
   ): Promise<CodexAppServerSession> {
     const stored = toStoredConfig(config, collaborationMode);
-    const session = new CodexAppServerSession(transport, stored);
+    const session = new CodexAppServerSession(transport, stored, codexHome);
     await session.initialize();
     const response = await transport.request('thread/start', {
       historyMode: 'paginated',
@@ -129,12 +152,13 @@ export class CodexAppServerSession implements AgentSession {
     transport: CodexAppServerTransport,
     handle: AgentPersistenceHandle,
     collaborationMode?: 'plan',
+    codexHome?: string,
   ): Promise<CodexAppServerSession> {
     if (handle.providerId !== PROVIDER_ID) {
       throw new Error(`Cannot resume ${handle.providerId} with the Codex provider`);
     }
     const stored = { ...parseStoredConfig(handle.opaque), ...(collaborationMode ? { collaborationMode } : {}) };
-    const session = new CodexAppServerSession(transport, stored);
+    const session = new CodexAppServerSession(transport, stored, codexHome);
     session.threadId = handle.sessionId;
     await session.initialize();
     const resumed = await transport.request('thread/resume', {
@@ -168,18 +192,63 @@ export class CodexAppServerSession implements AgentSession {
     };
   }
 
-  async sendMessage(text: string): Promise<void> {
+  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
+    this.assertMessageReady();
+    if (options?.delivery === 'next_turn') throw new Error('Codex does not support next-turn message delivery.');
+    if (this.sendingMessage) throw new Error('A Codex message is already being submitted.');
+    if (!text.trim()) throw new Error('Codex message must not be empty.');
+    this.sendingMessage = true;
+    try {
+      if (!this.activeTurnId) return await this.startTurn(text);
+      let expectedTurnId = this.activeTurnId;
+      for (let attempt = 0; ; attempt += 1) {
+        const revision = this.statusRevision;
+        try {
+          await this.steerTurn(text, expectedTurnId);
+          return;
+        } catch (error) {
+          if (!(error instanceof CodexAppServerRpcError) || error.code !== -32602) throw error;
+          this.assertMessageReady();
+          if (error.message === 'no active turn to steer') {
+            // A native rejection confirms non-delivery, but a newer turn notification wins.
+            if (this.activeTurnId && (this.activeTurnId !== expectedTurnId || this.statusRevision !== revision)) throw error;
+            if (this.runtimeStatus === 'failed' || this.runtimeStatus === 'closed'
+              || (this.statusRevision !== revision && this.runtimeStatus !== 'idle')) throw error;
+            this.activeTurnId = undefined;
+            this.runtimeStatus = 'idle';
+            this.statusRevision += 1;
+            this.assertMessageReady();
+            await this.startTurn(text);
+            return;
+          }
+          const mismatch = /^expected active turn id `([^`]+)` but found `([^`]+)`$/.exec(error.message);
+          if (attempt > 0 || !mismatch || mismatch[1] !== expectedTurnId || mismatch[2] === expectedTurnId || this.statusRevision !== revision) throw error;
+          expectedTurnId = mismatch[2]!;
+          this.activeTurnId = expectedTurnId;
+          this.runtimeStatus = 'running';
+          this.statusRevision += 1;
+        }
+      }
+    } finally { this.sendingMessage = false; }
+  }
+
+  private assertMessageReady(): void {
     this.assertOpen();
-    if (this.pendingInteractions.size > 0) throw new Error('Codex has pending interactions');
-    await this.startTurn(text);
+    if (this.commandInteractions.pending || (!this.activeTurnId && this.pendingInteractions.size > 0)) throw new Error('Codex has pending interactions');
+    if (this.executingCommand) throw new Error('A Codex command is active');
+    if (this.changingSetting || this.startingTurn) throw new Error('A Codex turn or setting change is already active');
   }
 
   async steer(text: string): Promise<void> {
     this.assertOpen();
     if (!this.activeTurnId) throw new Error('Codex has no active turn.');
     if (!text.trim()) throw new Error('Codex message must not be empty.');
+    await this.steerTurn(text, this.activeTurnId);
+  }
+
+  private async steerTurn(text: string, expectedTurnId: string): Promise<void> {
     await this.transport.request('turn/steer', {
-      threadId: this.threadId, expectedTurnId: this.activeTurnId,
+      threadId: this.threadId, expectedTurnId,
       input: [{ type: 'text', text, text_elements: [] }],
     });
   }
@@ -190,18 +259,18 @@ export class CodexAppServerSession implements AgentSession {
     await this.transport.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId });
   }
 
-  private async startTurn(text: string): Promise<void> {
+  private async startTurn(text: string, skill?: { name: string; path: string }): Promise<void> {
     this.assertOpen();
     if (!this.threadId) throw new Error('Codex session has no thread');
-    if (!text.trim()) throw new Error('Codex message must not be empty');
-    if (this.startingTurn || this.runtimeStatus === 'running') throw new Error('A Codex turn is already active');
+    if (!text.trim() && !skill) throw new Error('Codex message must not be empty');
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new Error('A Codex turn is already active');
     const collaborationMode = this.buildCollaborationMode();
     const statusRevision = this.statusRevision;
     this.startingTurn = true;
     try {
       const result = await this.transport.request('turn/start', {
         threadId: this.threadId,
-        input: [{ type: 'text', text, text_elements: [] }],
+        input: [...(skill ? [{ type: 'skill', ...skill }] : []), ...(text ? [{ type: 'text', text, text_elements: [] }] : [])],
         ...(this.config.model ? { model: this.config.model } : {}),
         ...(this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
         ...(collaborationMode ? { collaborationMode } : {}),
@@ -215,17 +284,51 @@ export class CodexAppServerSession implements AgentSession {
     }
   }
 
+  async setSessionSetting(id: string, value: string): Promise<void> {
+    if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new Error('Codex has pending command interactions or message submission');
+    await this.applySessionSetting(id, value);
+  }
+
+  private async applySessionSetting(id: string, value: string): Promise<void> {
+    this.assertOpen();
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle' || this.activeTurnId) throw new Error('Codex settings can only change while idle.');
+    if (this.pendingInteractions.size > 0) throw new Error('Codex settings cannot change with pending interactions.');
+    const patch = this.settings.patch(id, value, this.config.model, this.config.reasoningEffort);
+    const collaborationMode = this.buildCollaborationMode();
+    if (collaborationMode) {
+      patch.collaborationMode = { ...collaborationMode, settings: { ...collaborationMode.settings,
+        ...(typeof patch.model === 'string' ? { model: patch.model } : {}),
+        ...(typeof patch.effort === 'string' ? { reasoning_effort: patch.effort } : {}),
+      } };
+    }
+    if (this.settings.describe(this.config.model, this.config.reasoningEffort).find((setting) => setting.id === id)?.value === value) return;
+    this.changingSetting = true;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const confirmed = new Promise<void>((resolve, reject) => {
+      this.settingConfirmation = { id, value, resolve };
+      deadline = setTimeout(() => reject(new Error('Codex did not confirm the requested setting. Check the current session state before retrying.')), 10_000);
+    });
+    try {
+      await Promise.all([this.transport.request('thread/settings/update', { threadId: this.threadId, ...patch }), confirmed]);
+    } finally {
+      clearTimeout(deadline);
+      this.settingConfirmation = undefined;
+      this.changingSetting = false;
+    }
+  }
+
   async setPlanning(active: boolean): Promise<void> {
     this.assertOpen();
     if (!this.planningModes) throw new Error('Codex planning control is unsupported.');
-    if (this.startingTurn || this.runtimeStatus !== 'idle') throw new Error('Codex planning can only change while idle.');
+    if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new Error('Codex has pending command interactions or message submission');
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle') throw new Error('Codex planning can only change while idle.');
     if (this.pendingInteractions.size > 0) throw new Error('Codex planning cannot change with pending interactions.');
     if (active) this.config.collaborationMode = 'plan';
     else delete this.config.collaborationMode;
     this.emitRuntimeUpdate();
   }
 
-  private buildCollaborationMode(): object | undefined {
+  private buildCollaborationMode(): { mode: string; settings: { model: string; reasoning_effort: string | null; developer_instructions: string | null } } | undefined {
     if (!this.planningModes) return undefined;
     const selected = this.config.collaborationMode === 'plan' ? this.planningModes.plan : this.planningModes.normal;
     const model = this.config.model ?? selected.model;
@@ -242,6 +345,7 @@ export class CodexAppServerSession implements AgentSession {
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
     this.assertOpen();
+    if (await this.commandInteractions.respond(requestId, response)) return;
     const pending = this.pendingInteractions.get(requestId);
     if (!pending) throw new Error(`No pending Codex interaction ${requestId}`);
     if (pending.kind !== response.kind) {
@@ -259,6 +363,83 @@ export class CodexAppServerSession implements AgentSession {
     this.emitInteractionResolved(requestId, redactInteractionResponse(pending.request, response));
   }
 
+  async listCommands(): Promise<AgentCommand[]> {
+    this.assertOpen();
+    const commands = await discoverCodexCommands(this.transport, this.config.cwd, this.codexHome);
+    return commands.map(({ descriptor }) => descriptor);
+  }
+
+  async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
+    this.assertCommandIdle();
+    if (this.executingCommand) throw new Error('A Codex command is already active.');
+    if (this.commandInteractions.pending) throw new Error('Codex has pending command interactions.');
+    this.executingCommand = true;
+    try {
+      const command = (await discoverCodexCommands(this.transport, this.config.cwd, this.codexHome)).find(({ descriptor }) => descriptor.id === id);
+      this.assertCommandIdle();
+      if (!command) throw new Error('Codex command is unavailable. Refresh the command directory.');
+      if (command.type === 'skill') await this.startTurn(args, { name: command.name, path: command.path });
+      else if (command.type === 'prompt') await this.startTurn(expandCodexPrompt(command.body, args));
+      else {
+        if (args.trim()) throw new Error('This Codex command does not accept arguments.');
+        if (id === 'compact') await this.transport.request('thread/compact/start', { threadId: this.threadId });
+        else {
+          await this.settings.discover(this.transport);
+          this.assertCommandIdle();
+          if (id === 'model') this.openSettingQuestion('model', true);
+          else this.openPermissionsQuestion();
+        }
+      }
+      return {};
+    } finally { this.executingCommand = false; }
+  }
+
+  private assertCommandIdle(): void {
+    this.assertOpen();
+    if (this.changingSetting || this.startingTurn || this.sendingMessage || this.activeTurnId || this.runtimeStatus !== 'idle') throw new Error('Codex commands require an idle session.');
+    if (this.pendingInteractions.size > 0) throw new Error('Codex has pending native interactions.');
+  }
+
+  private openSettingQuestion(id: string, followWithEffort = false): void {
+    const setting = this.settings.describe(this.config.model, this.config.reasoningEffort).find((item) => item.id === id);
+    if (!setting?.mutable || !setting.options.length) throw new Error('Codex setting is unavailable.');
+    this.openCommandQuestion(setting, async (value) => {
+      this.assertCommandIdle();
+      await this.settings.discover(this.transport);
+      await this.applySessionSetting(id, value);
+      if (followWithEffort) {
+        const effort = this.settings.describe(this.config.model, this.config.reasoningEffort).find((item) => item.id === 'effort');
+        if (effort?.mutable && effort.options.length) this.openSettingQuestion('effort');
+      }
+    });
+  }
+
+  private openPermissionsQuestion(): void {
+    const available = this.settings.describe(this.config.model, this.config.reasoningEffort).filter((setting) => setting.category === 'permissions' && setting.mutable && setting.options.length);
+    if (!available.length) throw new Error('Codex permission settings are unavailable.');
+    this.openCommandQuestion({
+      id: 'permissions', category: 'permissions', label: 'Permissions', value: null, mutable: true, scope: 'session',
+      options: available.map(({ id, label, description }) => ({ value: id, label, description })),
+    }, async (value) => {
+      this.assertCommandIdle();
+      await this.settings.discover(this.transport);
+      this.openSettingQuestion(value);
+    });
+  }
+
+  private openCommandQuestion(setting: AgentSessionSetting, handler: (value: string) => Promise<void>): void {
+    this.commandInteractions.open({ kind: 'question', questions: [{
+      questionId: setting.id, header: setting.label, prompt: `Choose ${setting.label.toLowerCase()}`,
+      description: [setting.value ? `Current: ${setting.options.find(({ value }) => value === setting.value)?.label ?? setting.value}.` : '', setting.description ?? ''].filter(Boolean).join(' '),
+      required: true, selection: 'single', options: setting.options, allowCustomText: false, allowDismiss: true,
+    }] }, async (response) => {
+      if (response.kind !== 'question') throw new Error('Codex command requires a question response.');
+      const value = response.answers.find(({ questionId }) => questionId === setting.id)?.selectedValues[0];
+      if (!value) throw new Error('Codex command requires a selection.');
+      await handler(value);
+    });
+  }
+
   async runtimeInfo(): Promise<AgentRuntimeInfo> {
     return this.currentRuntimeInfo();
   }
@@ -270,6 +451,7 @@ export class CodexAppServerSession implements AgentSession {
       status: this.runtimeStatus,
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
       model: this.config.model ?? null,
+      settings: this.settings.describe(this.config.model, this.config.reasoningEffort),
       mode: this.config.collaborationMode ?? null,
       ...(this.planningModes ? { planning: { active: this.config.collaborationMode === 'plan' } } : {}),
       persistence: this.threadId ? {
@@ -281,6 +463,8 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   async readResource(locator: string): Promise<AgentResourceReadResult> {
+    this.assertOpen();
+    if (locator.startsWith('skill:')) return readCodexCommandDocumentation(this.transport, this.config.cwd, this.codexHome, locator);
     return this.images?.readResource(locator) ?? { status: 'unavailable', reason: 'Codex image reader is unavailable.' };
   }
 
@@ -296,6 +480,7 @@ export class CodexAppServerSession implements AgentSession {
 
   private async initialize(): Promise<void> {
     await initializeCodexTransport(this.transport);
+    await this.settings.discover(this.transport);
     let modes: unknown;
     try {
       modes = await this.transport.request('collaborationMode/list', {});
@@ -318,6 +503,7 @@ export class CodexAppServerSession implements AgentSession {
     const threadId = readString(response.thread.id);
     if (!threadId) throw new Error(`Codex ${method} returned no thread id`);
     this.threadId = threadId;
+    this.applyThreadSettings({ ...response, sandboxPolicy: response.sandbox });
     if (!this.config.model) this.config.model = readString(response.model);
     if (!this.config.cwd) this.config.cwd = readString(response.cwd) ?? readString(response.thread.cwd);
     if (!this.config.reasoningEffort) this.config.reasoningEffort = readString(response.reasoningEffort);
@@ -419,7 +605,7 @@ export class CodexAppServerSession implements AgentSession {
   ): Promise<void> {
     if (!request.allowedActions.includes(response.action)) throw new Error(`Unsupported Codex plan action ${response.action}`);
     if (response.action !== 'reject' && 'feedback' in response) throw new Error('Codex approval cannot contain revision feedback.');
-    if (this.startingTurn || this.runtimeStatus === 'running') throw new Error('Codex plan review requires an idle turn.');
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new Error('Codex plan review requires an idle turn.');
     const previousMode = this.config.collaborationMode;
     const nativeTurnRevision = this.nativeTurnRevision;
     if (response.action === 'approve_and_resume') delete this.config.collaborationMode;
@@ -464,6 +650,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private applyThreadSettings(settings: Record<string, unknown>): void {
+    this.settings.apply(settings);
     const cwd = readString(settings.cwd);
     const model = readString(settings.model);
     if (cwd) this.config.cwd = cwd;
@@ -476,6 +663,10 @@ export class CodexAppServerSession implements AgentSession {
     if (isRecord(settings.collaborationMode)) {
       if (readString(settings.collaborationMode.mode) === 'plan') this.config.collaborationMode = 'plan';
       else delete this.config.collaborationMode;
+    }
+    const confirmation = this.settingConfirmation;
+    if (confirmation && this.settings.describe(this.config.model, this.config.reasoningEffort).find(({ id }) => id === confirmation.id)?.value === confirmation.value) {
+      confirmation.resolve();
     }
   }
 
@@ -541,6 +732,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private resolvePendingInteractions(turnId?: string): void {
+    if (turnId === undefined) this.commandInteractions.clear();
     for (const [requestId, pending] of this.pendingInteractions) {
       if (turnId === undefined || pending.turnId === turnId) this.cancelInteraction(requestId);
     }

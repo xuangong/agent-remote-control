@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -39,6 +39,11 @@ export async function createCodexProviderFixture(options: CodexValidationServerO
 
   const codexHome = mkdtempSync(join(tmpdir(), 'borgee-codex-home-'));
   const workspace = mkdtempSync(join(tmpdir(), 'borgee-codex-workspace-'));
+  const skillDirectory = join(workspace, '.agents', 'skills', 'remote-fixture-skill');
+  mkdirSync(skillDirectory, { recursive: true });
+  writeFileSync(join(skillDirectory, 'SKILL.md'), '---\nname: remote-fixture-skill\ndescription: Verify native skill discovery\n---\nFollow the user instructions.\n');
+  mkdirSync(join(codexHome, 'prompts'), { recursive: true });
+  writeFileSync(join(codexHome, 'prompts', 'remote-fixture-prompt.md'), '---\ndescription: Verify native prompt discovery\n---\n$ARGUMENTS');
   const responses = await startResponsesFixture();
   writeFileSync(join(codexHome, 'config.toml'), codexConfig(responses.url));
   const provider = withCodexDefaults(new CodexAppServerProvider({
@@ -109,9 +114,15 @@ async function startResponsesFixture(): Promise<{ url: string; close(): Promise<
       }
       const body = Buffer.concat(chunks).toString('utf8');
       const parsedBody = JSON.parse(body) as {
-        input?: Array<{ type?: string; call_id?: string; output?: string }>;
+        input?: Array<{ type?: string; call_id?: string; output?: string; role?: string; content?: Array<{ text?: string }> }>;
       };
       const ordinal = ++responseOrdinal;
+      const userInput = parsedBody.input?.filter((item) => item.role === 'user').at(-1);
+      if (userInput?.content?.some((part) => part.text === 'Hold this native turn for an interrupt.')) {
+        response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+        response.write(sse([responseCreated(`response-interrupt-${ordinal}`)]));
+        return;
+      }
       const responseBody = hasExpectedQuestionAnswer(parsedBody.input)
         ? assistantMessageSse('CODEX_BROWSER_CONTINUATION_OK', ordinal)
         : hasQuestionOutput(parsedBody.input)

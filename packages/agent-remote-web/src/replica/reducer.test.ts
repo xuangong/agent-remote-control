@@ -29,12 +29,25 @@ const capabilities = {
   interactions: { question: true, planApproval: true, toolApproval: true },
 };
 
+it('retains the source turn start through live delivery and repeated snapshot handoff', () => {
+  const initial = applyAgentSnapshot(createReplicaState(), snapshot());
+  const started: AgentStreamMessage = {
+    protocolVersion: '1.4.0', type: 'agent_stream',
+    payload: { agentId: 'agent-one', timestamp: '2026-09-10T00:00:00.000Z',
+      event: { type: 'turn_started', providerId: 'provider-neutral', turnId: 'turn-one' } },
+  };
+  const live = reduceTimelineEvent(initial, started).state;
+  expect(live.agent?.activeTurn).toEqual({ turnId: 'turn-one', startedAt: started.payload.timestamp });
+  const restored = applyAgentSnapshot(createReplicaState(), { ...snapshot('running'), payload: live.agent! });
+  expect(reduceTimelineEvent(restored, started).state.agent?.activeTurn).toEqual(live.agent?.activeTurn);
+});
+
 function snapshot(
   status: AgentSnapshot['payload']['status'] = 'idle',
   pendingInteractions: AgentInteractionRequest[] = [],
 ): AgentSnapshot {
   return {
-    protocolVersion: '1.3.0',
+    protocolVersion: '1.4.0',
     type: 'agent_snapshot',
     payload: {
       id: 'agent-one',
@@ -61,7 +74,7 @@ function stream(
   resources: ResourceBinding[] = [],
 ): AgentStreamMessage {
   return {
-    protocolVersion: '1.3.0',
+    protocolVersion: '1.4.0',
     type: 'agent_stream',
     payload: {
       agentId: 'agent-one',
@@ -94,7 +107,7 @@ function page(
   const start = entries[0]?.seqStart ?? 0;
   const end = entries.at(-1)?.seqEnd ?? 0;
   return {
-    protocolVersion: '1.3.0',
+    protocolVersion: '1.4.0',
     type: 'timeline_page',
     payload: {
       requestId: 'timeline-request',
@@ -340,7 +353,7 @@ describe('agent replica reducer', () => {
     ).state;
 
     liveState = applyTimelineResourceBindingReplacement(liveState, {
-      protocolVersion: '1.3.0',
+      protocolVersion: '1.4.0',
       type: 'timeline_resource_binding_replaced',
       payload: {
         agentId: 'agent-one', epoch: 'epoch-one', seq: 1,
@@ -348,7 +361,7 @@ describe('agent replica reducer', () => {
       },
     });
     liveState = applyResourceUpdate(liveState, {
-      protocolVersion: '1.3.0',
+      protocolVersion: '1.4.0',
       type: 'resource_update',
       payload: { agentId: 'agent-one', resourceId: replacement.resourceId, state: terminal },
     });

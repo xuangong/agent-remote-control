@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRemoteHostBroker } from './remote-host-broker.js';
+import type { AgentMessageOptions, AgentSession } from '@borgee/agent-provider-sdk';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -58,7 +59,7 @@ describe('Remote Host broker', () => {
     const repeated = await (await f.post(base + '/attach', { nativeSessionId: 'cold' })).json();
     expect(repeated).toEqual(attached); expect(attached.agentId).toBeTruthy();
     expect(calls.find((call) => call.path === '/remote/attach')).toMatchObject({ sessionId: attached.agentId });
-    expect((await fetch(f.url + `/v1/sessions/${attached.agentId}/snapshot?protocolVersion=1.3.0`)).status).toBe(200);
+    expect((await fetch(f.url + `/v1/sessions/${attached.agentId}/snapshot?protocolVersion=1.4.0`)).status).toBe(200);
   });
   it('bounds RPC waits and never repeats an uncertain creation', async () => {
     const f = await setup({ rpcTimeoutMs: 40 }); const pair = await (await f.post('/v1/remote/pairings')).json(); const native = await host(f.url, pair.key);
@@ -77,7 +78,21 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
   const { createRecordedLabProvider } = await import('./recorded.js');
   const { vi } = await import('vitest');
   const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json();
-  const relay = createAgentRemoteRelay({ providers: [createRecordedLabProvider().provider] });
+  const provider = createRecordedLabProvider({ capabilities: { queueMessage: true } }).provider;
+  const nativeSessions: AgentSession[] = [];
+  const deliveries: Array<{ text: string; options?: AgentMessageOptions }> = [];
+  const createSession = provider.createSession.bind(provider);
+  provider.createSession = async (config) => {
+    const session = await createSession(config);
+    nativeSessions.push(session);
+    const send = session.sendMessage.bind(session);
+    session.sendMessage = async (text, options) => {
+      deliveries.push({ text, options });
+      await send(text);
+    };
+    return session;
+  };
+  const relay = createAgentRemoteRelay({ providers: [provider] });
   cleanup.push(() => relay.close());
   const sessions = new Set(['cold-session']); const agents = new Set<string>(); const nativeBindings = new Map<string, string>();
   const connect = () => createRemoteHostUplinkClient({
@@ -94,7 +109,7 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
       if (request.path === '/remote/create') sessions.add(body.nativeSessionId);
       if (!sessions.has(body.nativeSessionId)) return { status: 404, body: '{}' };
       let existing = false; try { relay.requireAgent(request.sessionId!); existing = true; } catch {}
-      if (!existing) await relay.createAgent({ protocolVersion: '1.3.0', type: 'create_agent', payload: { requestId: request.sessionId!, agentId: request.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId } } });
+      if (!existing) await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: { requestId: request.sessionId!, agentId: request.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId } } });
       agents.add(request.sessionId!);
       return { status: 200, body: JSON.stringify({ nativeSessionId: body.nativeSessionId }) };
     },
@@ -115,6 +130,15 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
   await vi.waitFor(() => expect(status).toBe('ready'));
   expect((await client.sendMessage('Across the host uplink')).type).toBe('command_acknowledged');
   await vi.waitFor(() => expect(JSON.stringify(replica.getState().timeline)).toContain('Recorded reply: Across the host uplink'));
+  const queuedText = '  Keep this text\nexactly as submitted  ';
+  expect((await client.sendMessage(queuedText, { delivery: 'next_turn' })).payload.command).toBe('send_message');
+  expect(deliveries).toEqual([
+    { text: 'Across the host uplink', options: undefined },
+    { text: queuedText, options: { delivery: 'next_turn' } },
+  ]);
+  for (const session of nativeSessions) delete session.capabilities.queueMessage;
+  await expect(client.sendMessage('Unsupported queue', { delivery: 'next_turn' })).rejects.toMatchObject({ code: 'unsupported_command', recoverable: true });
+  expect(deliveries).toHaveLength(2);
   client.stop();
   await uplink.close();
   agents.clear(); nativeBindings.clear();

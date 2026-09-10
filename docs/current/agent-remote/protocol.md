@@ -52,7 +52,7 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 
 ## Invariants
 
-- Protocol negotiation requires exactly version `1.3.0`; planning controls and completed interaction history belong to this public contract rather than an implicit fallback (`packages/agent-remote-protocol/src/version.ts:3-6`, `packages/agent-remote-protocol/src/messages.ts:74-82`, `packages/agent-remote-protocol/src/timeline.ts:54`).
+- Protocol negotiation requires exactly version `1.4.0`; planning controls and completed interaction history belong to this public contract rather than an implicit fallback (`packages/agent-remote-protocol/src/version.ts:3-6`, `packages/agent-remote-protocol/src/messages.ts:74-82`, `packages/agent-remote-protocol/src/timeline.ts:54`).
 - Planning is an optional capability with an explicit creation preference and authoritative runtime state; clients cannot infer planning support or activity from permission settings or a command acknowledgement (`packages/agent-remote-protocol/src/snapshot.ts:19-55`, `packages/agent-remote-protocol/src/messages.ts:71-87`, `packages/agent-remote-protocol/src/messages.ts:124-135`).
 - `AgentSnapshot` contains current Agent state and pending interactions, not Timeline entries (`packages/agent-remote-protocol/src/snapshot.ts:47-72`).
 - Timeline recovery uses `timeline_page` with an epoch and cursors; a stale or forward cursor is represented explicitly rather than inferred from Snapshot (`packages/agent-remote-protocol/src/history.ts:13-48`, `packages/agent-remote-relay/src/timeline-projector.ts:50-88`).
@@ -92,3 +92,24 @@ Adapters bound result bodies to 65,536 characters across at most 128 blocks. Ove
 Protocol `1.3.0` adds `form`, `permission_approval`, and `external_action`. Forms carry typed fields and stable field IDs; permission requests carry the exact resources and allowed durations; external actions separate opening an HTTP(S) link from explicitly confirming completion. Tool approvals can declare native cancellation and named policy choices. Capability flags are optional and absent flags mean unsupported (`packages/agent-remote-protocol/src/interactions.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).
 
 Sensitive question answers and form fields travel to the Provider only in the response command. Completed events and history carry `redacted` or `redactedFields` markers instead of those values. Sensitive field defaults are removed from public requests. Historical redaction markers are not valid new responses. Form `required` means property presence; nonempty strings and arrays require explicit minimum constraints. SDK request-aware validation additionally enforces choices, required values, form constraints, and exact permission scopes; structural wire decoding alone cannot authorize a response (`packages/agent-provider-sdk/src/interactions.ts`, `packages/agent-remote-relay/src/agent-manager.ts`). All endpoints must upgrade together because negotiation remains exact; uplink envelope versions do not change.
+
+## Session settings
+
+The unshipped protocol `1.4.0` includes optional `sessionSettings` capability, typed selection descriptors in `runtimeInfo.settings`, and `set_session_setting { requestId, agentId, settingId, value }`. Choice IDs are opaque Provider values, not native RPC method names. The existing `command_acknowledged`, runtime stream and Agent Snapshot carry completion and confirmed state. The independent uplink envelope versions stay unchanged. All public protocol participants must upgrade together because negotiation and object schemas are strict (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-protocol/src/messages.ts`).
+
+## Provider commands
+
+The same unshipped `1.4.0` contract adds optional `commands` capability and Provider-owned descriptors containing opaque `id`, slash-free `name`, `description`, `kind` (`command`, `skill`, or `prompt`), and optional `inputHint`, `shortDescription`, and `documentation` resource binding. Names and IDs are unique within a directory. Native operation names and payloads remain private to adapters (`packages/agent-remote-protocol/src/commands.ts`, `packages/agent-provider-sdk/src/commands.ts`).
+
+| Request | Matching reply | Payload |
+| --- | --- | --- |
+| `list_commands` | `command_list` | Request: `requestId`, `agentId`. Reply: the same IDs and `commands`. |
+| `execute_command` | `command_result` | Request: `requestId`, `agentId`, `commandId`, `args`. Reply: the same IDs and `result`. |
+
+Each pair has one correlated reply and no additional `command_acknowledged`. Native failures use the existing error response. `result` contains optional `text`; an empty result can mean a native menu was opened and does not assert completion of its remaining interactions. Existing `question` and `form` requests, interaction responses, and resolved events carry subsequent selections. No public message type is added per menu level. Session-setting toolbar writes still use their existing acknowledgement and confirmed runtime state. Exact version negotiation and independent uplink envelope versions remain unchanged (`packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-relay/src/session-wire.ts`).
+
+## Message delivery
+
+The unshipped `1.4.0` send contract accepts optional `delivery: "immediate" | "next_turn"` on `send_message`. Omission means immediate input: the Provider starts idle work or steers active work using its native state. `next_turn` explicitly requests the native follow-up queue and requires optional `queueMessage` capability. Both use the existing `send_message` acknowledgement, which confirms native acceptance rather than message consumption or turn completion. Strict `steer` remains available to automation. No Remote-owned message queue or new message type is introduced (`packages/agent-provider-sdk/src/provider.ts`, `packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).
+
+Command documentation reuses `ResourceBinding` and `resource_request` / `resource_response`; the command directory does not inline Markdown or native metadata. An unrequested documentation binding is pending. The Relay resolves Provider-owned locators to session-bound resource IDs and materializes documentation on demand. Skill tags and the open detail panel are local client state and introduce no wire operation.

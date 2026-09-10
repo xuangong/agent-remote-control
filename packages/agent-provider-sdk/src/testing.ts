@@ -46,6 +46,9 @@ export function validateAgentSessionCapabilities(session: AgentSession): void {
     [session.capabilities.sendMessage, 'sendMessage', 'sendMessage'],
     [session.capabilities.steer, 'steer', 'steer'],
     [session.capabilities.cancel, 'cancel', 'cancel'],
+    [session.capabilities.sessionSettings === true, 'setSessionSetting', 'setSessionSetting'],
+    [session.capabilities.commands === true, 'listCommands', 'listCommands'],
+    [session.capabilities.commands === true, 'executeCommand', 'executeCommand'],
     [session.capabilities.planning === true, 'setPlanning', 'setPlanning'],
     [session.capabilities.readResource, 'readResource', 'readResource'],
     [

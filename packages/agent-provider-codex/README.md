@@ -15,6 +15,7 @@ This package adapts the native `codex app-server` JSON-RPC protocol to `@borgee/
 | Parent-session subagent activity | Passive tool rows with bounded results |
 | Planning and plan approval | Supported when native collaboration modes are available |
 | Steer and cancel | Supported with the active native turn ID |
+| Provider command directory | Native enabled skills and custom prompts, plus model, permissions, and compact adapters |
 | Native session discovery | Supported through paged `thread/list` metadata |
 | Native image viewing and generation | Assistant Markdown backed by opaque session resource references |
 | Resource reads | Only local files or embedded raster bytes explicitly referenced by native image items |
@@ -36,3 +37,7 @@ Permission approval shows every native read, write, deny, and network grant, inc
 Pending RPC interactions recover while this Provider session remains alive. Native request resolution, interrupted turns, process termination, and disposal clear transient requests without synthesizing input or sending duplicate native responses. A native resolution notification does not include another client's answer: its remote receipt records dismissal/cancellation, and permission closure explicitly states that this remote client granted nothing.
 
 Plan review is synthesized from completed plan items and is process-local. Persistence handles store session configuration, not reviewed-plan decisions; restarting the Provider restores native conversation history but does not reconstruct a pending plan review or distinguish an already reviewed plan. No durable plan-review parity is claimed.
+
+The command directory refreshes enabled skills through `skills/list` with `forceReload` and the session working directory. Execution refreshes the directory again and rejects removed commands. Skills retain their native name/path input and pass arguments unchanged to `turn/start`. The model command opens a model question followed by the selected model’s reasoning efforts; permissions opens approval-policy or sandbox choices. These controls wait for native setting confirmation and preserve Planning. Compact calls `thread/compact/start`. Commands require an idle session and serialize against pending interactions, message submission, and setting changes.
+
+Custom prompts are top-level Markdown files in `CODEX_HOME/prompts`, using the Provider environment override before the process environment or `~/.codex` default. Discovery ignores symlinks and files above 256 KiB, validates names, and limits directory scans to 1,024 entries. Prompt frontmatter supplies `description` and `argument-hint`. Expansion preserves raw `$ARGUMENTS`; named, positional, escaped-dollar, and braced placeholders fail explicitly. Arguments for a prompt without `$ARGUMENTS` are rejected. The input hint names this grammar limit. This directory is adapter-owned native discovery, not terminal menu scraping; additional TUI commands and goal controls are not exposed.

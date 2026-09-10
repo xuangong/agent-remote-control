@@ -23,6 +23,167 @@ const capabilities: AgentCapabilities = {
 };
 
 describe('AgentManager Timeline and Snapshot', () => {
+  it('loads command documentation on demand over the resource wire and rejects removed bindings', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    let present = true;
+    const reads: string[] = [];
+    const session = sessionFor(stream, {
+      capabilities: { ...capabilities, commands: true, readResource: true },
+      listCommands: async () => present ? [{ id: 'inspect', name: 'inspect', kind: 'skill', description: 'Inspect', documentation: 'skill:inspect' }] : [],
+      readResource: async (locator) => { reads.push(locator); return { status: 'available', bytes: new TextEncoder().encode('# Inspect'), mediaType: 'text/plain' }; },
+    });
+    const manager = await AgentManager.attach({ agentId: 'docs', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'e' });
+    try {
+      await manager.ready;
+      const command = (await manager.listCommands())[0]!;
+      expect(reads).toEqual([]);
+      expect(command.documentation).toMatchObject({ locator: 'skill:inspect', status: 'pending' });
+      const output: unknown[] = [];
+      const wire = createSessionWire(manager, (json) => output.push(JSON.parse(json)));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'resource_request', payload: { requestId: 'r', agentId: 'docs', resourceId: command.documentation!.resourceId } }));
+      expect(output).toContainEqual(expect.objectContaining({ type: 'resource_response', payload: expect.objectContaining({ resourceId: command.documentation!.resourceId,
+        state: expect.objectContaining({ status: 'available', contentBase64: Buffer.from('# Inspect').toString('base64') }) }) }));
+      expect(reads).toEqual(['skill:inspect']);
+      present = false;
+      expect((await manager.readResource('stale', command.documentation!.resourceId)).payload.state.status).toBe('unavailable');
+      expect((await manager.readResource('unknown', 'skill:/etc/hosts')).payload.state.status).toBe('unavailable');
+      expect(reads).toEqual(['skill:inspect']);
+      wire.close();
+    } finally { await manager.close(); }
+  });
+  it.each(['failure', 'cancel'] as const)('rejects sends immediately during a native command and permits sends after %s', async (ending) => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    let fail!: (error: Error) => void;
+    const gate = new Promise<never>((_resolve, reject) => { fail = reject; });
+    const sent: string[] = [];
+    const session = sessionFor(stream, {
+      capabilities: { ...capabilities, commands: true, queueMessage: true, cancel: true },
+      async listCommands() { return [{ id: 'native:wait', name: 'wait', description: 'Wait natively', kind: 'command' }]; },
+      async executeCommand() { return gate; },
+      async cancel() { fail(new Error('Native canceled')); },
+      async sendMessage(text) { sent.push(text); },
+    });
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    try {
+      await manager.ready;
+      const command = manager.executeCommand('native:wait', '');
+      const rejected = expect(command).rejects.toThrow(ending === 'cancel' ? 'Native canceled' : 'Native failed');
+      await expect(manager.sendMessage('Immediate')).rejects.toThrow('busy');
+      await expect(manager.sendMessage('Later', { delivery: 'next_turn' })).rejects.toThrow('busy');
+      expect(sent).toEqual([]);
+      if (ending === 'cancel') await manager.cancel();
+      else fail(new Error('Native failed'));
+      await rejected;
+      await manager.sendMessage('After native settlement');
+      expect(sent).toEqual(['After native settlement']);
+    } finally { await manager.close(); }
+  });
+
+  it.each([undefined, 'immediate', 'next_turn'] as const)('passes %s delivery directly to the native provider', async (delivery) => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    const calls: unknown[][] = [];
+    const session = sessionFor(stream, {
+      capabilities: { ...capabilities, queueMessage: true },
+      async sendMessage(...args) { calls.push(args); },
+    });
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    try {
+      await manager.ready;
+      const text = '  Keep this\nexact text  ';
+      if (delivery === undefined) await manager.sendMessage(text);
+      else await manager.sendMessage(text, { delivery });
+      expect(calls).toEqual([delivery === undefined ? [text] : [text, { delivery }]]);
+    } finally { await manager.close(); }
+  });
+
+  it('rejects next-turn delivery when the provider has no native queue', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    const calls: unknown[][] = [];
+    const session = sessionFor(stream, { async sendMessage(...args) { calls.push(args); } });
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    try {
+      await manager.ready;
+      await expect(manager.sendMessage('Later', { delivery: 'next_turn' })).rejects.toThrow('queue_message');
+      expect(calls).toEqual([]);
+      await manager.sendMessage('Now', { delivery: 'immediate' });
+      expect(calls).toEqual([['Now', { delivery: 'immediate' }]]);
+    } finally { await manager.close(); }
+  });
+
+  it('refreshes command availability and preserves native arguments and results', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    let available = true;
+    const calls: unknown[] = [];
+    const command = { id: 'native:inspect', name: 'inspect', description: 'Inspect natively', kind: 'command' as const };
+    const session = sessionFor(stream, {
+      capabilities: { ...capabilities, commands: true },
+      async listCommands() { return available ? [command] : []; },
+      async executeCommand(id, args) { calls.push([id, args]); return { text: 'Native result' }; },
+    });
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    try {
+      await manager.ready;
+      expect(await manager.listCommands()).toEqual([command]);
+      const args = '  first "second third"\n  final  ';
+      await expect(manager.executeCommand(command.id, args)).resolves.toEqual({ text: 'Native result' });
+      expect(calls).toEqual([[command.id, args]]);
+      available = false;
+      await expect(manager.executeCommand(command.id, '')).rejects.toThrow('no longer available');
+      expect(calls).toHaveLength(1);
+    } finally { await manager.close(); }
+  });
+
+  it('rejects command discovery and execution without the advertised capability', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    const calls: string[] = [];
+    const session = sessionFor(stream, {
+      async listCommands() { calls.push('list'); return []; },
+      async executeCommand() { calls.push('execute'); return {}; },
+    });
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    try {
+      await manager.ready;
+      await expect(manager.listCommands()).rejects.toThrow('list_commands');
+      await expect(manager.executeCommand('native:inspect', '')).rejects.toThrow('execute_command');
+      expect(calls).toEqual([]);
+    } finally { await manager.close(); }
+  });
+
+  it('validates native choices, serializes selection before send and publishes confirmed settings', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    const gate = deferred();
+    const calls: string[] = [];
+    let value = 'first';
+    const session = sessionFor(stream, {
+      capabilities: { ...capabilities, sessionSettings: true },
+      async setSessionSetting(_id, next) { calls.push('select'); await gate.promise; value = next; },
+      async sendMessage() { calls.push(value); },
+      async runtimeInfo() { return { providerId: 'codex', sessionId: 'session-1', status: 'idle', settings: [{ id: 'model', category: 'model', label: 'Model', value, options: [{ value: 'first', label: 'First' }, { value: 'second', label: 'Second' }], mutable: true, scope: 'session' }] }; },
+    });
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
+    await manager.ready;
+    await expect(manager.setSessionSetting('model', 'invented')).rejects.toThrow();
+    const selected = manager.setSessionSetting('model', 'second');
+    const sent = manager.sendMessage('Hello');
+    await nextEventLoopTurn();
+    expect(calls).toEqual(['select']);
+    expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('first');
+    gate.resolve();
+    await selected;
+    expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('second');
+    await sent;
+    expect(calls).toEqual(['select', 'second']);
+    await manager.close();
+  });
+
   it('serializes planning selection with message submission and publishes authoritative state before acknowledgement', async () => {
     const stream = new ManualProviderStream();
     stream.push({ type: 'history_boundary' });
@@ -169,7 +330,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     ]);
     const snapshot = manager.snapshot();
     expect(snapshot).toMatchObject({
-      protocolVersion: '1.3.0', type: 'agent_snapshot',
+      protocolVersion: '1.4.0', type: 'agent_snapshot',
       payload: { id: 'agent-1', providerId: 'codex', pendingInteractions: [] },
     });
     expect(snapshot.payload).not.toHaveProperty('timeline');
@@ -328,10 +489,10 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const output: Array<Record<string, unknown>> = [];
     const freshClient = createSessionWire(manager, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await freshClient.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
+    await freshClient.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
     output.length = 0;
     await freshClient.receive(JSON.stringify({
-      protocolVersion: '1.3.0', type: 'resource_request',
+      protocolVersion: '1.4.0', type: 'resource_request',
       payload: { requestId: 'resource-read', agentId: 'agent-1', resourceId },
     }));
 
@@ -418,9 +579,9 @@ describe('AgentManager Timeline and Snapshot', () => {
     });
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.3.0', type: 'timeline_subscription',
+      protocolVersion: '1.4.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resource', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -456,7 +617,7 @@ describe('AgentManager Timeline and Snapshot', () => {
       state: { status: 'unavailable', reason: 'The generated file expired.' },
     })]);
     expect(wireOutput.slice(1)).toEqual([expect.objectContaining({
-      protocolVersion: '1.3.0',
+      protocolVersion: '1.4.0',
       type: 'resource_update',
       payload: expect.objectContaining({
         agentId: 'agent-1', resourceId: pendingBinding!.resourceId,
@@ -494,9 +655,9 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.3.0', type: 'timeline_subscription',
+      protocolVersion: '1.4.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resources', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -533,7 +694,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     secondRead.resolve({ status: 'available', mediaType: 'image/png', bytes: pngBytes });
     await nextEventLoopTurn();
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.3.0', type: 'timeline_request',
+      protocolVersion: '1.4.0', type: 'timeline_request',
       payload: { requestId: 'tail-after-settlement', agentId: 'agent-1', direction: 'tail', limit: 10 },
     }));
 

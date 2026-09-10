@@ -56,6 +56,7 @@ export interface AgentRuntimeInfo {
   model?: string | null;
   mode?: string | null;
   planning?: AgentPlanningState;
+  settings?: import('./session-settings.js').AgentSessionSetting[];
   persistence?: import('./provider.js').AgentPersistenceHandle;
 }
 

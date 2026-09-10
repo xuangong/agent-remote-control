@@ -1,10 +1,11 @@
-import { useRef } from 'react';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
+import { useRef, useState } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
 } from '@borgee/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus } from '@borgee/agent-remote-web';
-import { AgentTimeline, type QuestionDraft } from '@borgee/agent-remote-web/react';
+import { AgentCommandDetails, AgentTimeline, type QuestionDraft } from '@borgee/agent-remote-web/react';
 
 import { LiveControlPanel } from './LiveControlPanel.js';
 import { PlanningControl } from './PlanningControl.js';
@@ -12,16 +13,21 @@ import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 
 export interface LabWorkbenchActions {
   loadOlder?(): void | Promise<void>;
-  sendMessage?(text: string): Promise<void>;
+  sendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
   respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
   requestResource?(binding: ResourceBinding): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
+  setSessionSetting?(id: string, value: string): Promise<void>;
+  listCommands?(): Promise<AgentCommand[]>;
+  executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
 export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange }: { state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const readingPositions = useRef(new Map());
+  const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
+  const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions.current);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
@@ -43,7 +49,7 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
     : state.pendingInteractions.length > 0 || state.agent.status === 'waiting' ? 'Waiting for response'
     : state.agent.activeTurn || state.agent.status === 'running' ? 'Working'
     : 'Ready';
-  return <div className="lab-workbench-layout">
+  return <div className={`lab-workbench-layout${selectedCommand ? ' lab-command-details-open' : ''}`}>
     <header className="lab-workbench-heading">
       <div>
         <h2>{hasReplica ? 'Conversation' : isAttaching ? `Connecting to ${attachingAgentId}` : 'Ready for a session'}</h2>
@@ -88,9 +94,14 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
         onDraftChange={onMessageDraftChange}
         disabled={sessionStatus !== 'ready'}
         onSendMessage={actions.sendMessage}
-        onSteer={actions.steer}
         onCancel={actions.cancel}
+        onSetSessionSetting={actions.setSessionSetting}
+        onListCommands={actions.listCommands}
+        onExecuteCommand={actions.executeCommand}
+        onInspectCommand={(command) => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }}
       />
     </div>
+    {selectedCommand && state ? <AgentCommandDetails key={`${state.agent?.id}:${selectedCommand.id}`} command={selectedCommand} resources={state.resources}
+      onRequestResource={actions.requestResource} onClose={() => setInspected(undefined)} /> : null}
   </div>;
 }

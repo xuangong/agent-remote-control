@@ -129,9 +129,12 @@ export class CodexEventProjector {
     }
     if (method === 'turn/started') {
       const id = turnId;
+      const nativeStart = isRecord(params) && isRecord(params.turn) ? readNumber(params.turn.startedAt) : undefined;
+      const startedAt = nativeStart !== undefined && nativeStart >= 0 && nativeStart <= 8_640_000_000_000
+        ? nativeStart * 1_000 : undefined;
       return id ? this.observation(`turn:${id}:started`, {
         type: 'turn_started', provider: PROVIDER_ID, turnId: id,
-      }) : this.invalidNotification(method, params, turnId);
+      }, startedAt) : this.invalidNotification(method, params, turnId);
     }
     if (method === 'turn/completed') {
       return this.projectTurnCompleted(params, turnId)

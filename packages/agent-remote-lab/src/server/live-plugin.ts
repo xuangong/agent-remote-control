@@ -13,7 +13,7 @@ import { loadCompatibilityManifest } from './compatibility.js';
 const workspaceEnvironment = 'BORGEE_LIVE_DSH_WORKSPACE';
 
 export const name = 'borgee-agent-remote-live';
-export const inject = ['agentDefaultModel', 'agents', 'sessions', 'sessionController', 'agentPresets'];
+export const inject = ['agentDefaultModel', 'agents', 'sessions'];
 
 export interface Config {
   runtimeMode?: 'standalone' | 'shared-web';

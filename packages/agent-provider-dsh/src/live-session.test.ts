@@ -58,7 +58,7 @@ async function observeHistory(session: AgentSession, records: number): Promise<v
 }
 
 class FakeOwnedAgent {
-  readonly runtimeInfo: { status: 'idle'; cwd: string; model: string };
+  readonly runtimeInfo: { status: 'idle' | 'running'; cwd: string; model: string };
   readonly features = {
     steer: true,
     cancel: true,
@@ -66,6 +66,7 @@ class FakeOwnedAgent {
     interactions: { question: true, planApproval: true, toolApproval: true },
   };
   readonly messages: string[] = [];
+  readonly steering: string[] = [];
   readonly responses: Array<{ requestId: string; response: AgentInteractionResponse }> = [];
   readonly imageReads: unknown[] = [];
   private readonly listeners = new Set<(record: DshNativeObservation) => void>();
@@ -102,7 +103,7 @@ class FakeOwnedAgent {
     this.messages.push(text);
   }
 
-  steer(): void {}
+  steer(text: string): void { this.steering.push(text); }
   cancel(): boolean { return true; }
 
   respondToInteraction(requestId: string, response: AgentInteractionResponse): boolean | Promise<boolean> {
@@ -231,6 +232,37 @@ describe('live DSH Provider session', () => {
     await session.dispose();
   });
 
+  it('routes immediate messages using the latest native status and leaves explicit steering unchanged', async () => {
+    const agent = new FakeOwnedAgent('session-1');
+    const session = await createLiveDshProvider({ runtime: new FakeRuntime(agent) }).createSession({ sessionId: 'session-1' });
+    try {
+      await session.sendMessage('idle');
+      agent.runtimeInfo.status = 'running';
+      await session.sendMessage('busy');
+      await session.sendMessage('queued while busy', { delivery: 'next_turn' });
+      agent.runtimeInfo.status = 'idle';
+      await session.sendMessage('queued after turn ended', { delivery: 'next_turn' });
+      await session.steer!('explicit steer while idle');
+      expect(agent.messages).toEqual(['idle', 'queued while busy', 'queued after turn ended']);
+      expect(agent.steering).toEqual(['busy', 'explicit steer while idle']);
+      expect(session.capabilities.queueMessage).toBe(true);
+    } finally { await session.dispose(); }
+  });
+
+  it('rejects busy immediate delivery when steering is unavailable without falling back to a queue', async () => {
+    const agent = new FakeOwnedAgent('session-1');
+    agent.features.steer = false;
+    agent.runtimeInfo.status = 'running';
+    const session = await createLiveDshProvider({ runtime: new FakeRuntime(agent) }).createSession({ sessionId: 'session-1' });
+    try {
+      await expect(session.sendMessage('urgent')).rejects.toThrow('steering');
+      expect(agent.messages).toEqual([]);
+      expect(agent.steering).toEqual([]);
+      await session.sendMessage('later', { delivery: 'next_turn' });
+      expect(agent.messages).toEqual(['later']);
+    } finally { await session.dispose(); }
+  });
+
   it('correlates typed interactions and rejects mismatched or stale responses', async () => {
     const agent = new FakeOwnedAgent('session-1');
     const session = await createLiveDshProvider({ runtime: new FakeRuntime(agent) })
@@ -300,9 +332,12 @@ describe('live DSH Provider session', () => {
       .createSession({ sessionId: 'session-1' });
 
     expect(session.capabilities).toEqual({
+      commands: false,
+      sessionSettings: false,
       planning: false,
       history: true,
       sendMessage: true,
+      queueMessage: true,
       steer: true,
       cancel: true,
       readResource: true,

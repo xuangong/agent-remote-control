@@ -25,7 +25,7 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(controlled.agent);
     const closed = socketClose(socket);
 
-    socket.send(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
 
     await expect(closed).resolves.toEqual({ code: 1011, reason: 'Agent Remote event delivery failed' });
     expect(controlled.unsubscribeCount()).toBe(1);
@@ -40,7 +40,7 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(controlled.agent);
     const closed = socketClose(socket);
 
-    socket.send(JSON.stringify({ protocolVersion: '1.3.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
 
     await expect(closed).resolves.toEqual({ code: 1013, reason: 'Agent event buffer overflowed' });
     expect(controlled.unsubscribeCount()).toBe(1);
@@ -77,7 +77,7 @@ function controlledAgent(onSnapshot: (emit: (event: AgentManagerEvent) => void) 
 
 function validSnapshot() {
   return {
-    protocolVersion: '1.3.0' as const,
+    protocolVersion: '1.4.0' as const,
     type: 'agent_snapshot' as const,
     payload: {
       id: 'agent-1', providerId: 'fake', createdAt: '2026-09-03T00:00:00.000Z',

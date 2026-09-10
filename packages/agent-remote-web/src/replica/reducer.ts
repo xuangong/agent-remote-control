@@ -278,7 +278,7 @@ function applyNonTimelineEvent(state: AgentReplicaState, message: AgentStreamMes
         agent: {
           ...state.agent,
           status: 'running',
-          activeTurn: event.turnId ? { turnId: event.turnId } : state.agent.activeTurn,
+          activeTurn: event.turnId ? { turnId: event.turnId, startedAt: message.payload.timestamp } : state.agent.activeTurn,
         },
       };
     case 'turn_completed':

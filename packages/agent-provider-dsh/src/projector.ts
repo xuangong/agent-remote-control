@@ -107,9 +107,14 @@ export class DshProjector {
       case 'session/title-llm-request':
       case 'approval/asked':
       case 'approval/decided':
+        return { events: [] };
+      case 'model/selection':
       case 'permission/preset':
       case 'sandbox/mode':
-      case 'approval/policy': return { events: [] };
+      case 'approval/policy': {
+        const runtimeInfo = this.options.runtimeInfo?.();
+        return { events: runtimeInfo ? [{ type: 'runtime_updated', provider: PROVIDER_ID, runtimeInfo }] : [] };
+      }
       default: return { events: [this.error(`Unsupported DSH event ${type}.`)] };
     }
   }

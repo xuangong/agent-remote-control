@@ -55,7 +55,7 @@ Each row names one independently reusable component.
 
 | Component | Responsibility | Excluded responsibility |
 | --- | --- | --- |
-| `@borgee/agent-provider-sdk` | Provider descriptors, session lifecycle, capabilities, normalized events, Timeline item types, typed interactions, persistence handles, and resource reads. | Native SDK implementations, public wire encoding, Relay storage, UI, or product authorization. |
+| `@borgee/agent-provider-sdk` | Provider descriptors, session lifecycle, capabilities, normalized events, Timeline item types, typed interactions, command descriptors, persistence handles, and resource reads. | Native SDK implementations, public wire encoding, Relay storage, UI, or product authorization. |
 | `@borgee/agent-provider-dsh` | DSH session ownership, history and live handoff, native event projection, interaction mapping, and authorized generated-resource reads. | Relay transport, public history projection, UI, or authority decisions. |
 | `@borgee/agent-provider-codex` | Codex app-server transport, session ownership, history and live handoff, native projection, and typed interaction mapping. | Relay transport, public history projection, UI, or authority decisions. |
 | `@borgee/agent-remote-protocol` | Strict versioned public requests, responses, Snapshot, Timeline pages, interactions, resource messages, and runtime codecs. | Native event interpretation, Provider process ownership, UI, or deciding Agent ownership. |
@@ -83,6 +83,9 @@ interface AgentSession {
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
+  setSessionSetting?(id: string, value: string): Promise<void>;
+  listCommands?(): Promise<AgentCommand[]>;
+  executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
   readResource?(locator: string): Promise<AgentResourceReadResult>;
   runtimeInfo(): Promise<AgentRuntimeInfo>;
   dispose(): Promise<void>;
@@ -98,6 +101,15 @@ Capabilities state which optional controls, interactions, history, and resource 
 Direct Provider-session message submission, interaction response, steer, and cancel remain explicit control operations admitted by the local server and checked against Provider capabilities.
 
 Planning is an optional session workflow control, independent of permissions and plan approval capability. Creation may select planning, and an idle session with no pending interaction may change it through an acknowledged public command. Unsupported or busy sessions reject the command. Providers report the effective planning state and any requested future target through runtime information; a command acknowledgement alone does not establish that the requested state is effective. Provider-native changes also update the reported state. Planning does not establish a write sandbox.
+
+Session model and permission controls use Provider-declared selection descriptors in `runtimeInfo.settings`. Each descriptor declares an opaque ID and value, a display label, available choices, mutability, and whether the native write affects the current session or also the default for future sessions. A single `set_session_setting` command selects one advertised value. It never accepts arbitrary native RPC parameters. Relay validates the latest Provider choices and serializes setting writes with message submission; only idle sessions without active turns or pending interactions admit a change. Confirmed values arrive through existing runtime updates and snapshots, without new Timeline activity or a settings-specific response channel.
+
+Chat slash commands come from the concrete Provider session through optional `commands` capability and `listCommands()` / `executeCommand(id, args)` operations. Each descriptor contains an opaque `id`, slash-free `name`, `description`, `kind` (`command`, `skill`, or `prompt`), and optional `inputHint`. The composer discovers this directory when its menu opens, filters names, preserves arguments, and sends only a selected Provider command. Unknown or unavailable commands remain local errors. Toolbar model, permission, and status controls remain independent shortcuts; the client does not invent a fixed slash directory.
+
+The public wire uses `list_commands` → `command_list` and `execute_command` → `command_result`, correlated by `requestId` and `agentId`, without an additional command acknowledgement for either pair. A result may contain text or may be empty when the Provider has opened an interaction. Multi-step native menus reuse existing `question` / `form` requests and interaction responses. The initial command result does not imply that those later selections have completed. Providers own native translation, validation, and continuations; the Relay keeps the interaction-response path available while a command is pending.
+
+Codex discovers enabled skills for the current working directory and custom prompts from its configured home, alongside explicit model, permissions, and compact adapters. Skills use native skill input; model selection may lead to a reasoning-effort question, permission selection preserves native requirement constraints, and setting changes require native confirmation. Prompt expansion supports raw `$ARGUMENTS`; unsupported named, positional, escaped-dollar, or braced placeholders fail explicitly. DSH discovers the agent-scoped native command registry on demand and executes registered commands through that registry. Its model selector is adapted only when no native model command exists, and exposes the native side effect of saving the default for future sessions. Neither Provider directory claims terminal menu scraping or full TUI command parity.
+
 
 ## Normalized Event Model
 
@@ -216,6 +228,10 @@ Question forms retain stable question identifiers and structured selected values
 
 The Lab is a loopback-only protocol Workbench. It composes replaceable Providers through one Relay, renders the shared React DOM Timeline, exposes current Agent state and typed interaction forms, and shows public replica and protocol diagnostics. A deterministic Recorded Provider validates protocol behavior without a native runtime, while DSH and Codex compositions validate real Provider boundaries.
 
+The chat composer shows current runtime activity and the active turn's elapsed wall time, including time spent waiting for an interaction. Elapsed time uses the start timestamp from the Snapshot or live event envelope, survives browser recovery, and remains unavailable when the source timestamp is unknown. Native turn timestamps take precedence over notification receipt time when supplied. A disconnected view does not present retained activity as live.
+
+Interrupt forwards the existing cancel operation to the native Provider. It requires a synchronized connection, cancel capability, and either an active turn or a native command currently pending in the composer. The request preserves the message draft and remains distinct from native completion: acknowledgement does not change the Agent to idle, and the control suppresses repeated interrupts for that turn until the native state changes. Runtime activity is presentation of existing state, not an additional Timeline event or execution mechanism.
+
 The Lab may use an explicit synthetic Owner identity to exercise commands, but it does not establish production authority. Its observer mode remains read-only. Product code cannot reuse loopback assumptions as an authorization decision.
 
 The debugger provides equivalent operation and observation through commands suitable for automation. It uses the same public transport, session client, and replica as the browser; it does not duplicate synchronization or projection logic. Against a product deployment, debugger control commands require the same authenticated Agent Owner as browser controls.
@@ -269,3 +285,7 @@ The resource side may revoke its own access grant. Only the Agent Owner may sele
 - Claiming lossless preservation of every native Provider field when it has no supported cross-provider meaning.
 - Defining retention or multi-node deployment in the validation packages.
 - Letting a product role, resource role, protocol capability, Provider, Helper, or observer act as the Agent Owner.
+
+## Composer message delivery
+
+Ordinary send means immediate input: start work when idle, or supplement active work through native steering. The Provider resolves the state at delivery time. A separate busy-state action requests next-turn delivery only when the Provider exposes a native follow-up queue. Remote does not manufacture a queue for an adapter whose native API lacks it. Explicit next-turn intent remains next-turn intent when the current turn ends during submission. Native acceptance, pending input, and consumed input are distinct states; a send acknowledgement does not assert consumption. Only definite native non-delivery may permit a safe fallback, while uncertain failures retain the draft and do not automatically resubmit.

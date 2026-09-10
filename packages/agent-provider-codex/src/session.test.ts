@@ -20,7 +20,7 @@ function createSessionHarness() {
       if (!line) continue;
       const message = JSON.parse(line) as { id?: number; method?: string; params?: unknown };
       if (typeof message.id === 'number' && message.method) requests.push(message as typeof requests[number]);
-      if (typeof message.id === 'number' && message.method === 'collaborationMode/list') {
+      if (typeof message.id === 'number' && ['collaborationMode/list', 'model/list', 'configRequirements/read'].includes(message.method ?? '')) {
         child.stdout.write(`${JSON.stringify({ id: message.id, result: { data: [] } })}\n`);
       }
     }

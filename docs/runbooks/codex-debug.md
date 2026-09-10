@@ -24,7 +24,7 @@ AGENT_REMOTE_CODEX_EXECUTABLE="$PWD/.runtime/codex/node_modules/.bin/codex" pnpm
 
 The child process inherits this key and the native profile's configured base URL. This does not modify the profile or store credentials in the workbench.
 
-Open `http://127.0.0.1:6175`, select **Codex**, choose the working directory, and click **Open session**. A fresh thread has an empty Timeline. Send a message to start its first turn. **Steer**, **Cancel turn**, questions, and tool approvals use the same process and native thread. Planning is available when the CLI reports both planning and normal collaboration modes.
+Open `http://127.0.0.1:6175`, select **Codex**, choose the working directory, and click **Open session**. A fresh thread has an empty Timeline. Send a message to start its first turn. **Send message** also supplements a running turn; **Interrupt**, questions, and tool approvals use the same process and native thread. Planning is available when the CLI reports both planning and normal collaboration modes.
 
 To use a separate profile, create its directory and log in with the same home before launching:
 
@@ -83,6 +83,18 @@ New sessions use Codex paginated history to preserve tool output across process 
 
 ## Forms, approvals, and images
 
-Use a Host, Relay, debugger, and workbench built from protocol `1.3.0`. MCP requests can display flat typed forms, explicit browser actions, and exact filesystem/network approvals. Tool approvals expose only decisions advertised by Codex. Unsupported form schemas are declined with a visible diagnostic. Sensitive text is hidden in completed history and public traces, but still reaches the requesting native service when submitted.
+Use a Host, Relay, debugger, and workbench built from protocol `1.4.0`. MCP requests can display flat typed forms, explicit browser actions, and exact filesystem/network approvals. Tool approvals expose only decisions advertised by Codex. Unsupported form schemas are declined with a visible diagnostic. Sensitive text is hidden in completed history and public traces, but still reaches the requesting native service when submitted.
 
 Native completed images appear through the normal resource renderer. File-backed images require the referenced native file to exist on first read. Parent subagent calls appear as tool summaries; child-session navigation is not available. Browser reload preserves pending interactions while the Host lives, but restarting it does not recover pending native RPCs or synthesized plan approvals. Do not use historical receipts as answers to new requests.
+
+## Chat session controls
+
+Build the Provider, Relay, debugger, and workbench from the same unshipped protocol `1.4.0` checkout. Type `/` to fetch the current Provider directory. Codex exposes `/model`, `/permissions`, and `/compact`, enabled skills for the current working directory, and custom prompts from its configured home. Opening the menu and executing an entry each refresh native availability, so removing or disabling a skill makes an old selection fail explicitly. The toolbar still provides current session facts and model/permission shortcuts.
+
+`/model` opens a model question, then the selected model's available reasoning efforts. `/permissions` opens approval-policy or sandbox questions constrained by native requirements. Submit or dismiss these through the ordinary interaction cards. The initial command response may only indicate that a menu opened; continue until the remaining questions are resolved. Selection requires a connected idle session without competing interactions. Values change after native confirmation; rejection retains the current setting and permits retry. Model changes preserve Planning. `/compact` invokes native thread compaction.
+
+Place a custom prompt such as `review.md` in `CODEX_HOME/prompts` to discover `/prompts:review`. The Provider environment override selects this home before process `CODEX_HOME` or the `~/.codex` default. Use optional `description` and `argument-hint` frontmatter and `$ARGUMENTS` in the body for raw arguments. Named, positional, escaped-dollar, and braced placeholders are explicitly unsupported; passing arguments to a prompt without `$ARGUMENTS` also fails. Files must be top-level regular Markdown files no larger than 256 KiB; symlinks are ignored and scans are bounded to 1,024 entries. Skills execute native skill input with their argument text. The directory does not claim terminal scraping or every Codex TUI command.
+
+For command acceptance, exercise directory loading, a model-to-effort interaction, permission selection, and a skill or prompt on desktop and mobile; include browser reload, Working elapsed time, and native interrupt. The fixture model-response stream is deterministic, so actual gateway behavior still needs a live session. These are validation steps, not a claim that the new command flow has passed browser or live-runtime acceptance.
+
+While Codex is Working, type a correction and press Enter. The input should be accepted into the active native turn, and elapsed time should continue. This adapter does not expose a next-turn queue button. An uncertain send failure must preserve the draft without automatically retrying it.

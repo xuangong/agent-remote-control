@@ -19,7 +19,7 @@ test('selects a paired Host as a Provider and creates through its real uplink', 
       if (control.path !== '/remote/create') return { status: 404, body: '{}' };
       const body = JSON.parse(control.body!);
       creations.push(body);
-      await relay.createAgent({ protocolVersion: '1.3.0', type: 'create_agent', payload: {
+      await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
         requestId: control.sessionId!, agentId: control.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId },
       } });
       agents.add(control.sessionId!);

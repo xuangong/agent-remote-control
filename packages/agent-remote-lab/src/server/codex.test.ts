@@ -56,7 +56,7 @@ describe('Codex Lab composition', () => {
     );
     if ('server' in attempt) await attempt.server.close();
     expect(attempt).toMatchObject({ error: expect.objectContaining({
-      message: expect.stringContaining('protocolVersion 1.3.0'),
+      message: expect.stringContaining('protocolVersion 1.4.0'),
     }) });
   });
 
@@ -86,7 +86,7 @@ describe('Codex Lab composition', () => {
     const manifest = join(root, 'compatibility.json');
     writeFileSync(manifest, JSON.stringify({
       schemaVersion: 1,
-      protocolVersion: overrides.protocolVersion ?? '1.3.0',
+      protocolVersion: overrides.protocolVersion ?? '1.4.0',
       borgee: {
         release: 'unreleased', sourceState: 'working_tree',
         baseRevision: '9e21c2ad9a0ba55413960a1681d34675c5d6e026',

@@ -1,0 +1,88 @@
+import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+
+test.skip(process.env.AGENT_REMOTE_DSH_DELIVERY_FIXTURE !== '1', 'Requires the native DSH delivery fixture.');
+test.setTimeout(120_000);
+
+test('delivers immediate input within the native turn, queues a new turn, and interrupts DSH', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  const evidence = process.env.AGENT_REMOTE_DSH_DELIVERY_EVIDENCE;
+  expect(evidence, 'Record native Inbox and turn events for acceptance').toBeTruthy();
+  const readRecords = async () => (await readFile(evidence!, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const evidenceOffset = (await readRecords()).length;
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await page.getByTestId('provider-select').selectOption({ label: 'DeepSeek Harness' });
+  await page.getByTestId('session-create').click();
+  await expect(page.getByTestId('connection-summary')).toContainText('Ready', { timeout: 30_000 });
+  const input = page.getByTestId('prompt-input');
+  const label = page.getByTestId('agent-activity-label');
+  const queue = page.getByTestId('queue-submit');
+  const elapsed = page.getByTestId('turn-elapsed');
+  await expect(queue).toHaveCount(0);
+  await input.fill('REMOTE_START');
+  await input.press('Enter');
+  await expect(label).toHaveText('Working');
+  await expect(elapsed).toHaveText(/^[1-9]\d*s$/, { timeout: 5_000 });
+  await input.fill('REMOTE_IMMEDIATE');
+  await input.press('Enter');
+  await expect(input).toHaveValue('');
+  await expect(label).toHaveText('Working');
+  await input.fill('REMOTE_QUEUED');
+  await queue.click();
+  await expect(input).toHaveValue('');
+  await expect(page.getByText('Message queued by Provider.', { exact: true })).toBeVisible();
+  const assistant = page.getByRole('article', { name: 'Assistant message' });
+  await expect(assistant.filter({ hasText: 'IMMEDIATE_STEP_CONSUMED' })).toBeVisible({ timeout: 30_000 });
+  await expect(assistant.filter({ hasText: 'QUEUED_TURN_CONSUMED' })).toBeVisible({ timeout: 30_000 });
+  await expect(label).toHaveText('Ready');
+  await expect(page.locator('article.agent-tool').filter({ hasText: 'read' }).filter({ hasText: 'Completed' })).toBeVisible();
+  await expect(queue).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('dsh-delivery.png'), fullPage: true });
+
+  await input.fill('REMOTE_HOLD');
+  await input.press('Enter');
+  await expect(label).toHaveText('Working');
+  await expect(elapsed).toHaveText(/^[1-9]\d*s$/, { timeout: 5_000 });
+  const before = Number((await elapsed.getAttribute('datetime'))?.match(/\d+/)?.[0]);
+  await page.reload();
+  await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+  await expect(label).toHaveText('Working');
+  await expect.poll(async () => Number((await elapsed.getAttribute('datetime'))?.match(/\d+/)?.[0])).toBeGreaterThanOrEqual(before);
+  await input.fill('Keep this unsent draft.');
+  await page.getByRole('button', { name: 'Interrupt', exact: true }).click();
+  await expect(label).toHaveText('Ready');
+  await expect(elapsed).toHaveCount(0);
+  await expect(input).toHaveValue('Keep this unsent draft.');
+  await expect(page.getByTestId('cancel-submit')).toBeDisabled();
+
+  const records = (await readRecords()).slice(evidenceOffset);
+  const requests = records.filter(record => record.kind === 'model-request');
+  const start = requests.findIndex(record => record.userText.includes('REMOTE_START') && !record.userText.includes('REMOTE_IMMEDIATE'));
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(requests[start + 1].userText).toContain('REMOTE_IMMEDIATE');
+  expect(requests[start + 1].userText).not.toContain('REMOTE_QUEUED');
+  expect(requests[start + 2].userText).toContain('REMOTE_QUEUED');
+  const events = records.filter(record => record.kind === 'native-event').map(record => record.event);
+  const insertions = events.filter(event => event.type === 'agent/inbox/spliced' && event.data.inserted.length > 0);
+  const insertion = (marker: string) => insertions.find(event => JSON.stringify(event.data.inserted).includes(marker));
+  expect(insertion('REMOTE_START').data.target).toBe('next-turn');
+  expect(insertion('REMOTE_IMMEDIATE').data.target).toBe('next-step');
+  expect(insertion('REMOTE_QUEUED').data.target).toBe('next-turn');
+  let turn = 0;
+  const messages = events.flatMap(event => {
+    if (event.type === 'turn/start') turn = event.data.turn;
+    return event.type === 'user/message' ? [{ ...event, turn }] : [];
+  });
+  const message = (marker: string) => messages.find(event => JSON.stringify(event.data).includes(marker));
+  expect(message('REMOTE_IMMEDIATE').turn).toBe(message('REMOTE_START').turn);
+  expect(message('REMOTE_QUEUED').turn).toBeGreaterThan(message('REMOTE_START').turn);
+  for (const marker of ['REMOTE_START', 'REMOTE_IMMEDIATE', 'REMOTE_QUEUED']) {
+    expect(message(marker).data.source).toEqual({ kind: 'user' });
+    expect(messages.filter(event => JSON.stringify(event.data).includes(marker))).toHaveLength(1);
+  }
+  expect(records.some(record => record.kind === 'model-aborted')).toBe(true);
+  expect(errors).toEqual([]);
+  await testInfo.attach('native-dsh-evidence', { body: JSON.stringify(records, null, 2), contentType: 'application/json' });
+  await page.screenshot({ path: testInfo.outputPath('dsh-interrupted.png'), fullPage: true });
+});

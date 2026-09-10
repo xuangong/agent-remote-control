@@ -15,6 +15,7 @@ import {
 } from './resources.js';
 import { AgentPersistenceHandle, AgentSnapshot } from './snapshot.js';
 import { ProtocolVersionSchema } from './version.js';
+import { ListCommandsRequest, ExecuteCommandRequest, CommandListResponse, CommandResultResponse } from './commands.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => Type.Object(
@@ -50,9 +51,10 @@ export type ProviderListResponse = Static<typeof ProviderListResponse>;
 export const SendMessageRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('send_message'),
-  payload: Strict({ requestId: NonEmptyString, agentId: NonEmptyString, text: Type.String() }),
+  payload: Strict({ requestId: NonEmptyString, agentId: NonEmptyString, text: Type.String(), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
 });
 export type SendMessageRequest = Static<typeof SendMessageRequest>;
+export type AgentMessageOptions = Pick<SendMessageRequest['payload'], 'delivery'>;
 
 export const SteerRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
@@ -74,6 +76,13 @@ export const SetPlanningRequest = Strict({
   payload: Strict({ requestId: NonEmptyString, agentId: NonEmptyString, active: Type.Boolean() }),
 });
 export type SetPlanningRequest = Static<typeof SetPlanningRequest>;
+
+export const SetSessionSettingRequest = Strict({
+  protocolVersion: ProtocolVersionSchema,
+  type: Type.Literal('set_session_setting'),
+  payload: Strict({ requestId: NonEmptyString, agentId: NonEmptyString, settingId: NonEmptyString, value: NonEmptyString }),
+});
+export type SetSessionSettingRequest = Static<typeof SetSessionSettingRequest>;
 
 export const AgentSessionConfig = Strict({
   sessionId: NonEmptyString,
@@ -128,7 +137,7 @@ export const CommandAcknowledgementMessage = Strict({
     requestId: NonEmptyString,
     agentId: NonEmptyString,
     command: Type.Union([
-      Type.Literal('send_message'), Type.Literal('steer'), Type.Literal('cancel'), Type.Literal('set_planning'),
+      Type.Literal('send_message'), Type.Literal('steer'), Type.Literal('cancel'), Type.Literal('set_planning'), Type.Literal('set_session_setting'),
     ]),
   }),
 });
@@ -187,6 +196,8 @@ export const IncompatibleProtocolVersionErrorMessage = Strict({
 export type IncompatibleProtocolVersionErrorMessage = Static<typeof IncompatibleProtocolVersionErrorMessage>;
 
 export const ClientMessage = Type.Union([
+  ListCommandsRequest,
+  ExecuteCommandRequest,
   NegotiateRequest,
   CreateAgentRequest,
   ResumeAgentRequest,
@@ -194,6 +205,7 @@ export const ClientMessage = Type.Union([
   SteerRequest,
   CancelRequest,
   SetPlanningRequest,
+  SetSessionSettingRequest,
   TimelineSubscriptionRequest,
   TimelineRequest,
   InteractionResponseMessage,
@@ -202,6 +214,8 @@ export const ClientMessage = Type.Union([
 export type ClientMessage = Static<typeof ClientMessage>;
 
 export const ServerMessage = Type.Union([
+  CommandListResponse,
+  CommandResultResponse,
   NegotiateResponse,
   ProviderListResponse,
   AgentSessionResponse,

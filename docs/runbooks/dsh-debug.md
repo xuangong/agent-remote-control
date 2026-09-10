@@ -82,4 +82,35 @@ Run `pnpm test:setup` for bounded helper and CLI workflow tests. The CLI workflo
 
 ## Tool output protocol compatibility
 
-The current public protocol is `1.3.0`, including tool results. After updating the repository, rerun the guided setup to rebuild and reinstall the DSH Host bundle, and use a Relay and workbench from the same version. Existing processes keep their loaded version until restarted. Expand a tool row in the workbench, or inspect `item.result` with `pnpm bdb timeline AGENT_ID --all --json`, to view the native result body. DSH output is retained as emitted; exit codes embedded in text are not inferred as structured metadata.
+The current checkout uses unshipped public protocol `1.4.0`, including tool results and Provider commands. After updating the repository, rerun the guided setup to rebuild and reinstall the DSH Host bundle, and use a Relay and workbench from the same version. Existing processes keep their loaded version until restarted. Expand a tool row in the workbench, or inspect `item.result` with `pnpm bdb timeline AGENT_ID --all --json`, to view the native result body. DSH output is retained as emitted; exit codes embedded in text are not inferred as structured metadata.
+
+## Chat session controls
+
+Rebuild the Host, Relay, and console from the same unshipped protocol `1.4.0` checkout, then type `/` to read the selected agent's current native command registry. The directory is fetched on demand and execution revalidates the selected entry; names, descriptions, argument hints, availability, and results come from installed DSH services. Registered commands execute through DSH's command service without submitting a synthetic model prompt. Missing services or removed commands remain explicit unavailable states.
+
+A registered native `/model` command takes precedence. If it is absent and the native session controller supports selection, the adapter offers a model question. This native selection applies to the current session and saves the default for future sessions; the menu states that scope. Registered `/permission` without arguments can open the installed permission-preset question; selecting a preset invokes that same native command. Use the names actually returned by the directory, and follow any subsequent ordinary question/form cards until they finish. An initial command result is not confirmation that a multi-step menu is complete. The toolbar keeps current session facts and setting shortcuts available independently.
+
+Validate a refreshed directory, one native registered command and its result text, model selection, permission selection, and cancellation of a pending command with the intended DSH installation. The setup tests and simulated runtime do not establish acceptance of these command flows against a real native DSH process.
+
+While DSH is running, ordinary Send supplements the current work through native steering. Use **Queue for next turn** for a separate follow-up; DSH owns the Inbox and when it consumes that message. The action appears only while busy and with native queue capability. A native command currently executing keeps message submission unavailable.
+
+## Repeatable native delivery verification
+
+The delivery browser suite launches the pinned DSH source CLI in its headless profile with a temporary home and workspace. The real Agent Loop, Inbox, read tool, adapter, Relay, and browser run normally. A test LLM adapter supplies controlled responses without external credentials; it does not implement message dispatch or queuing. No Codex executable is required for this suite.
+
+After `pnpm build`, choose two unused ports and run:
+
+```bash
+DSH_REPO=/absolute/path/to/deepseek-harness \
+AGENT_REMOTE_DSH_DELIVERY_FIXTURE=1 \
+AGENT_REMOTE_DSH_DELIVERY_EVIDENCE="$(mktemp -t dsh-delivery)" \
+AGENT_REMOTE_TEST_RELAY_PORT=6351 \
+AGENT_REMOTE_TEST_WEB_PORT=6352 \
+pnpm test:e2e dsh-delivery.spec.ts
+```
+
+Set `AGENT_REMOTE_TEST_BROWSER` to an installed Chromium executable when Playwright browsers are unavailable. On macOS, Google Chrome is `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`.
+
+Desktop and mobile tests verify idle sending, busy immediate delivery at a step boundary within the same native turn, explicit delivery in the next native turn, a real read-tool result, elapsed time restored after reload, native interruption, and preservation of an unsent draft. Assertions inspect native Inbox insertion targets, consumed user-message source and turn boundaries, and the messages actually received by the LLM adapter. Screenshots and native JSON evidence are attached to Playwright results. The launcher cleans up only its own processes, temporary home, workspace, and plugin build; the evidence file remains available.
+
+This suite exercises the standalone native plugin composition. Installing and pairing the Web Host, selecting models through the native Web controller, and calling a real model endpoint remain separate guided-setup acceptance paths.

@@ -88,7 +88,6 @@ describe('LiveControlPanel', () => {
     const container = await render(<LiveControlPanel
       state={replicaState}
       onSendMessage={sendMessage}
-      onSteer={vi.fn()}
       onCancel={vi.fn()}
     />);
     const input = container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement;
@@ -98,9 +97,8 @@ describe('LiveControlPanel', () => {
     await act(async () => (container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).click());
 
     expect(sendMessage).toHaveBeenCalledWith('Continue through the shared stack.');
-    expect((container.querySelector('[data-testid="steer-submit"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelector('[data-testid="queue-submit"]')).toBeNull();
     expect((container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement).disabled).toBe(true);
-    expect(container.querySelector('[data-testid="steer-submit"]')?.getAttribute('title')).toContain('Steer is unavailable for this Provider.');
   });
 
   it('keeps message submission unavailable before an Agent Snapshot exists', async () => {
@@ -129,7 +127,7 @@ describe('LiveControlPanel', () => {
     expect(container.textContent).toContain('Message sent.');
   });
 
-  it('reports rejected shared client confirmations for send, steer, and cancel', async () => {
+  it('reports rejected shared client confirmations for send and cancel', async () => {
     const activeState = {
       ...replicaState,
       agent: {
@@ -139,9 +137,8 @@ describe('LiveControlPanel', () => {
       },
     };
     const sendMessage = vi.fn(() => Promise.reject(new Error('Send was rejected.')));
-    const steer = vi.fn(() => Promise.reject(new Error('Steer was rejected.')));
     const cancel = vi.fn(() => Promise.reject(new Error('Cancel was rejected.')));
-    const container = await render(<LiveControlPanel state={activeState} onSendMessage={sendMessage} onSteer={steer} onCancel={cancel} />);
+    const container = await render(<LiveControlPanel state={activeState} onSendMessage={sendMessage} onCancel={cancel} />);
     const input = container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'Retry after rejection.');
     await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
@@ -149,10 +146,6 @@ describe('LiveControlPanel', () => {
     await act(async () => (container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).click());
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Send was rejected.');
     expect(container.textContent).not.toContain('Message sent.');
-
-    await act(async () => (container.querySelector('[data-testid="steer-submit"]') as HTMLButtonElement).click());
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Steer was rejected.');
-    expect(container.textContent).not.toContain('Steer sent.');
 
     await act(async () => (container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement).click());
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Cancel was rejected.');

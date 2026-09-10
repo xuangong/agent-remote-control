@@ -1,3 +1,4 @@
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
 import {
   useCallback,
   useEffect,
@@ -43,10 +44,13 @@ export interface LabTransport extends RemoteAgentTransport {
 
 export interface AppActions {
   loadOlder?(): void | Promise<void>;
-  sendMessage?(text: string): Promise<void>;
+  sendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
+  setSessionSetting?(id: string, value: string): Promise<void>;
+  listCommands?(): Promise<AgentCommand[]>;
+  executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
   respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
   requestResource?(binding: ResourceBinding): Promise<void>;
   advanceFixture?(): void | Promise<void>;
@@ -360,9 +364,9 @@ export function App({
     return clientRef.current;
   }
 
-  async function runMutation(operation: () => Promise<unknown>): Promise<void> {
+  async function runMutation<T>(operation: () => Promise<T>): Promise<T> {
     setUncertainMutation(false);
-    try { await operation(); } catch (error) {
+    try { return await operation(); } catch (error) {
       if (error instanceof RemoteOperationError && ['connection_disconnected', 'operation_timeout', 'operation_send_failed'].includes(error.code)) setUncertainMutation(true);
       throw error;
     }
@@ -370,11 +374,14 @@ export function App({
 
   const clientActions: AppActions = actions ?? {
     loadOlder: () => clientRef.current?.loadOlder(),
-    sendMessage: async (text) => runMutation(() => activeClient().sendMessage(text)),
-    steer: async (text) => runMutation(() => activeClient().steer(text)),
-    cancel: async () => runMutation(() => activeClient().cancel()),
-    setPlanning: async (active) => runMutation(() => activeClient().setPlanning(active)),
-    respondToInteraction: async (requestId, response) => runMutation(() => activeClient().respondToInteraction(requestId, response)),
+    sendMessage: async (text, options) => { await runMutation(() => activeClient().sendMessage(text, options)); },
+    steer: async (text) => { await runMutation(() => activeClient().steer(text)); },
+    cancel: async () => { await runMutation(() => activeClient().cancel()); },
+    listCommands: () => activeClient().listCommands(),
+    executeCommand: (id, args) => runMutation(() => activeClient().executeCommand(id, args)),
+    setSessionSetting: async (id, value) => { await runMutation(() => activeClient().setSessionSetting(id, value)); },
+    setPlanning: async (active) => { await runMutation(() => activeClient().setPlanning(active)); },
+    respondToInteraction: async (requestId, response) => { await runMutation(() => activeClient().respondToInteraction(requestId, response)); },
     requestResource: async (binding) => { await activeClient().requestResource(binding.resourceId); },
     ...(fixtureAction && activeAgentId && state?.agent?.providerId === 'recorded' && !activeRemoteSession ? {
       advanceFixture: () => fixtureAction(activeAgentId, 'advance'),

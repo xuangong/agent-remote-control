@@ -12,7 +12,7 @@ const capabilities = {
 
 function snapshot(status: 'idle' | 'failed' = 'idle'): AgentSnapshot {
   return {
-    protocolVersion: '1.3.0', type: 'agent_snapshot',
+    protocolVersion: '1.4.0', type: 'agent_snapshot',
     payload: {
       id: 'agent-one', providerId: 'provider-one', createdAt: '2026-09-03T00:00:00.000Z',
       updatedAt: '2026-09-03T00:00:01.000Z', status, activeTurn: null, capabilities,
@@ -23,7 +23,7 @@ function snapshot(status: 'idle' | 'failed' = 'idle'): AgentSnapshot {
 
 function page(): HistoryPage {
   return {
-    protocolVersion: '1.3.0', type: 'timeline_page',
+    protocolVersion: '1.4.0', type: 'timeline_page',
     payload: {
       requestId: 'page-one', agentId: 'agent-one', direction: 'tail', epoch: 'epoch-one', reset: false, staleCursor: false, gap: false,
       window: { minSeq: 0, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null,
@@ -73,10 +73,10 @@ class FakeTransport implements RemoteAgentTransport {
     if (this.fast) {
       queueMicrotask(() => {
         this.open();
-        this.emit({ protocolVersion: '1.3.0', type: 'negotiated' });
+        this.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
         this.emit(this.snapshot);
         this.emit({
-          protocolVersion: '1.3.0', type: 'timeline_subscribed',
+          protocolVersion: '1.4.0', type: 'timeline_subscribed',
           payload: { requestId: this.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
         });
       });
@@ -122,10 +122,10 @@ async function makeReady(transport: FakeTransport) {
   const runtime = await createDebuggerRuntime('agent-one', { transport });
   const ready = runtime.ready(100);
   transport.open();
-  transport.emit({ protocolVersion: '1.3.0', type: 'negotiated' });
+  transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
   transport.emit(snapshot());
   transport.emit({
-    protocolVersion: '1.3.0', type: 'timeline_subscribed',
+    protocolVersion: '1.4.0', type: 'timeline_subscribed',
     payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
   });
   await ready;
@@ -257,7 +257,7 @@ describe('createDebuggerRuntime', () => {
     await Promise.resolve();
     expect(settled).toBe(false);
     transport.emit({
-      protocolVersion: '1.3.0', type: 'agent_stream',
+      protocolVersion: '1.4.0', type: 'agent_stream',
       payload: {
         agentId: 'agent-one', timestamp: '2026-09-03T00:00:02.000Z',
         event: { type: 'turn_started', providerId: 'provider-one', turnId: 'turn-one' },
@@ -266,7 +266,7 @@ describe('createDebuggerRuntime', () => {
     await Promise.resolve();
     expect(settled).toBe(false);
     transport.emit({
-      protocolVersion: '1.3.0', type: 'agent_stream',
+      protocolVersion: '1.4.0', type: 'agent_stream',
       payload: {
         agentId: 'agent-one', timestamp: '2026-09-03T00:00:03.000Z',
         event: { type: 'turn_completed', providerId: 'provider-one', turnId: 'turn-one' },
@@ -285,7 +285,7 @@ describe('createDebuggerRuntime', () => {
 
     runtime.replica.applyHistory(pageWithEntry('after'));
     transport.emit({
-      protocolVersion: '1.3.0', type: 'resource_response',
+      protocolVersion: '1.4.0', type: 'resource_response',
       payload: {
         requestId: 'resource-request', agentId: 'agent-one', resourceId: 'resource-one',
         state: { status: 'available', mediaType: 'text/plain', byteLength: 3, sha256: 'digest', contentBase64: 'YWJj' },
@@ -303,7 +303,7 @@ describe('createDebuggerRuntime', () => {
     const original = snapshot();
     runtime.replica.applySnapshot({
       type: 'agent_snapshot',
-      protocolVersion: '1.3.0',
+      protocolVersion: '1.4.0',
       payload: {
         runtimeInfo: {
           status: original.payload.runtimeInfo.status,
@@ -355,7 +355,7 @@ describe('createDebuggerRuntime', () => {
   it('projects protocol resource bytes into a trace-safe omission marker', () => {
     const record = createProtocolTraceRecord('agent-one', {
       direction: 'inbound', channel: 'websocket', message: {
-        protocolVersion: '1.3.0', type: 'resource_response',
+        protocolVersion: '1.4.0', type: 'resource_response',
         payload: { requestId: 'resource-one', agentId: 'agent-one', resourceId: 'resource-one', state: {
           status: 'available', mediaType: 'text/plain', byteLength: 3, sha256: 'digest', contentBase64: 'YWJj',
         } },
@@ -375,7 +375,7 @@ describe('createDebuggerRuntime', () => {
   it('omits answer values in protocol traces with no request sensitivity metadata', () => {
     const record = createProtocolTraceRecord('agent-one', {
       direction: 'outbound', channel: 'websocket', message: {
-        protocolVersion: '1.3.0', type: 'interaction_response',
+        protocolVersion: '1.4.0', type: 'interaction_response',
         payload: { agentId: 'agent-one', requestId: 'secret', response: { kind: 'question', answers: [{ questionId: 'token', selectedValues: [], customText: 'trace-private-token' }] } },
       },
     });
@@ -386,7 +386,7 @@ describe('createDebuggerRuntime', () => {
 
 it('strips sensitive field defaults from incoming request traces without mutating the transport message', () => {
   const message = {
-    protocolVersion: '1.3.0' as const, type: 'interaction_requested' as const,
+    protocolVersion: '1.4.0' as const, type: 'interaction_requested' as const,
     payload: { agentId: 'agent-one', request: { kind: 'form' as const, requestId: 'form', title: 'Login', message: '', fields: [
       { type: 'text' as const, fieldId: 'token', label: 'Token', required: true, sensitive: true, defaultValue: 'PRIVATE_TRACE_DEFAULT' },
       { type: 'text' as const, fieldId: 'region', label: 'Region', required: false, defaultValue: 'west' },

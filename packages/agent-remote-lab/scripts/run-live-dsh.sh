@@ -206,12 +206,31 @@ printf '%s\n' 'live-dsh-fixture-content' > "$AGENT_WORKSPACE/live-fixture.txt"
   "$LAB_ROOT/src/server/live-plugin.ts"
 
 cp "$LAB_ROOT/live-dsh.patch.yml" "$AGENT_WORKSPACE/live-dsh.runtime.patch.yml"
+if [[ "${AGENT_REMOTE_DSH_DELIVERY_FIXTURE:-}" == '1' ]]; then
+  export DSH_HOME="$AGENT_WORKSPACE/.dsh-home"
+  export DSH_TELEMETRY_DISABLED=1
+  export BORGEE_LIVE_DSH_PLAN_MODE=0
+  mkdir -p "$DSH_HOME"
+  printf '%s\n' \
+    '- id: agent-default-model' \
+    '  config:' \
+    '    provider: remote-delivery-fixture' \
+    '    model: remote-delivery-fixture' \
+    '- insert:' \
+    '    - id: remote-delivery-fixture' \
+    "      name: $LAB_ROOT/scripts/dsh-delivery-fixture.mjs" \
+    >> "$AGENT_WORKSPACE/live-dsh.runtime.patch.yml"
+fi
 printf '%s\n' \
   '' \
   '- insert:' \
   '    - id: borgee-agent-remote-live' \
   "      name: $PLUGIN_BUILD/server/live-plugin.js" \
   >> "$AGENT_WORKSPACE/live-dsh.runtime.patch.yml"
+if [[ "${AGENT_REMOTE_DSH_DELIVERY_FIXTURE:-}" == '1' ]]; then
+  printf '%s\n' '      config:' '        codexFixture: false' \
+    >> "$AGENT_WORKSPACE/live-dsh.runtime.patch.yml"
+fi
 
 (
   cd "$AGENT_WORKSPACE"

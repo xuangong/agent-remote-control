@@ -4,9 +4,12 @@ import type { AgentRuntimeInfo, ProviderStreamItem } from './observation.js';
 export interface AgentCapabilities {
   history: boolean;
   sendMessage: boolean;
+  queueMessage?: boolean;
   steer: boolean;
   cancel: boolean;
   readResource: boolean;
+  sessionSettings?: boolean;
+  commands?: boolean;
   planning?: boolean;
   interactions: {
     question: boolean;
@@ -45,15 +48,23 @@ export interface AgentProviderAdapter {
   resumeSession(handle: AgentPersistenceHandle): Promise<AgentSession>;
 }
 
+export interface AgentMessageOptions {
+  /** Immediate input joins active work; next_turn uses the native follow-up queue. */
+  delivery?: 'immediate' | 'next_turn';
+}
+
 export interface AgentSession {
   readonly capabilities: AgentCapabilities;
 
   observe(): AsyncIterable<ProviderStreamItem>;
-  sendMessage(text: string): Promise<void>;
+  sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
+  setSessionSetting?(id: string, value: string): Promise<void>;
+  listCommands?(): Promise<import('./commands.js').AgentCommand[]>;
+  executeCommand?(id: string, args: string): Promise<import('./commands.js').AgentCommandResult>;
   readResource?(locator: string): Promise<AgentResourceReadResult>;
   runtimeInfo(): Promise<AgentRuntimeInfo>;
   dispose(): Promise<void>;

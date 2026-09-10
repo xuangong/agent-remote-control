@@ -3,6 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { CodexEventProjector } from './projector.js';
 
 describe('CodexEventProjector', () => {
+  it('uses the native turn start timestamp for elapsed time instead of notification delivery time', () => {
+    const projector = new CodexEventProjector('thread-1');
+    const observation = projector.projectNotification('turn/started', {
+      threadId: 'thread-1', turn: { id: 'turn-1', startedAt: 1_789_000_000 },
+    });
+    expect(observation?.occurredAt).toBe(1_789_000_000_000);
+    expect(observation?.event).toEqual({ type: 'turn_started', provider: 'codex', turnId: 'turn-1' });
+  });
+
   it('projects native thread startup into provider lifecycle', () => {
     const projector = new CodexEventProjector('thread-1');
 

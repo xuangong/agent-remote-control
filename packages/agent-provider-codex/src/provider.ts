@@ -47,7 +47,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
     const transport = await this.createTransport(config.cwd);
     try {
-      return await CodexAppServerSession.create(transport, config, this.options.collaborationMode);
+      return await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME);
     } catch (error) {
       await transport.dispose();
       throw error;
@@ -58,7 +58,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const cwd = readPersistenceCwd(handle.opaque);
     const transport = await this.createTransport(cwd);
     try {
-      return await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode);
+      return await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME);
     } catch (error) {
       await transport.dispose();
       throw error;

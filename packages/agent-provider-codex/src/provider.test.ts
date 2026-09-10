@@ -24,7 +24,7 @@ describe('CodexAppServerProvider contract', () => {
     await session.sendMessage('Hello');
 
     expect(appServer.requests.map((request) => request.method)).toEqual([
-      'initialize', 'collaborationMode/list', 'thread/start', 'turn/start',
+      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/start', 'turn/start',
     ]);
     await expect(session.runtimeInfo()).resolves.toMatchObject({
       providerId: 'codex', sessionId: 'thread-1', status: 'running',
@@ -37,16 +37,17 @@ describe('CodexAppServerProvider contract', () => {
 
   it('resumes through thread/resume and thread/read before exposing history', async () => {
     const appServer = createScriptedAppServer({
-      'thread/resume': () => ({ thread: { id: 'thread-1' }, model: 'gpt-5.4', cwd: '/workspace' }),
+      'thread/resume': () => ({ thread: { id: 'thread-1' }, model: 'gpt-5.4', cwd: '/workspace', sandbox: { type: 'readOnly', networkAccess: false } }),
       'thread/read': () => ({ thread: { id: 'thread-1', turns: [] } }),
     });
     const provider = new CodexAppServerProvider({ spawn: () => appServer.child });
     const session = await provider.resumeSession({
       providerId: 'codex', sessionId: 'thread-1', opaque: '{"cwd":"/workspace"}',
     });
+    expect((await session.runtimeInfo()).settings?.find(({ id }) => id === 'sandbox')?.value).toBe('readOnly');
 
     expect(appServer.requests.map((request) => request.method)).toEqual([
-      'initialize', 'collaborationMode/list', 'thread/resume', 'thread/read',
+      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/resume', 'thread/read',
     ]);
     const iterator = session.observe()[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'history_boundary' } });

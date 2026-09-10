@@ -1,4 +1,6 @@
 import type { AgentInteractionResponse } from '@borgee/agent-provider-sdk';
+import { Inbox } from '@deepseek-ai/dsh-agent';
+import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createCordisDshRuntime, installDshNativeInteractionBridge, type DshNativeObservation } from './index.js';
@@ -702,5 +704,33 @@ describe('Cordis DSH runtime interactions', () => {
     });
     expect(context.imageReads).toEqual([reference]);
     await agent.dispose();
+  });
+});
+
+
+describe('DSH native message inbox delivery', () => {
+  it('passes immediate and queued messages directly to their native inboxes with user sources', async () => {
+    const context = new FakeContext();
+    const persisted: Array<{ type: string; data: unknown }> = [];
+    const inbox = new Inbox({
+      ownEvents: () => [],
+      append(type: string, data: unknown) { const event = { type, data }; persisted.push(event); return event; },
+    } as never, { inserted: () => {}, discarded: () => {}, claimed: () => {} });
+    Object.assign(context.agent, {
+      followup: (message: UserMessage) => inbox.append('next-turn', message),
+      steer: (message: UserMessage) => inbox.append('next-step', message),
+    });
+    const { runtime, agent } = await openRuntime(context);
+    const session = new LiveDshSession(agent, { providerId: 'dsh', sessionId: agent.sessionId, opaque: '{}' }, { get: () => undefined } as never);
+    try {
+      await session.sendMessage('  idle input  ');
+      context.agent.status = 'running';
+      await session.sendMessage('busy input');
+      await session.sendMessage('queued input', { delivery: 'next_turn' });
+      expect(inbox.nextTurn.map(({ content }) => content)).toEqual([[{ type: 'text', text: '  idle input  ' }], [{ type: 'text', text: 'queued input' }]]);
+      expect(inbox.nextStep.map(({ content }) => content)).toEqual([[{ type: 'text', text: 'busy input' }]]);
+      expect([...inbox.nextTurn, ...inbox.nextStep].map(({ source }) => source)).toEqual([{ kind: 'user' }, { kind: 'user' }, { kind: 'user' }]);
+      expect(persisted).toHaveLength(3);
+    } finally { await session.dispose(); await runtime.dispose?.(); }
   });
 });

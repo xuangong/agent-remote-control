@@ -1,6 +1,7 @@
-import type { AgentInteractionResponse, AgentStreamEvent } from '@borgee/agent-provider-sdk';
+import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions, AgentStreamEvent } from '@borgee/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
+  type AgentCommand,
   decodeClientMessage,
   encodeServerMessage,
   type AgentSnapshot,
@@ -19,11 +20,14 @@ export interface SessionWireAgent {
   snapshot(): AgentSnapshot;
   fetchTimeline(request: TimelinePageRequest): HistoryPage;
   subscribe(listener: AgentManagerListener): () => void;
-  sendMessage(text: string): Promise<void>;
+  sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
+  setSessionSetting?(id: string, value: string): Promise<void>;
+  listCommands?(): Promise<AgentCommand[]>;
+  executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
   readResource?(requestId: string, resourceId: string): Promise<ResourceResponse>;
 }
 
@@ -146,6 +150,18 @@ export function createSessionWire(
     }
     try {
       switch (message.type) {
+        case 'list_commands': {
+          if (!boundAgent.listCommands) throw new UnsupportedSessionCommandError('list_commands');
+          const commands = await boundAgent.listCommands();
+          sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'command_list', payload: { requestId: message.payload.requestId, agentId: boundAgent.agentId, commands } });
+          return;
+        }
+        case 'execute_command': {
+          if (!boundAgent.executeCommand) throw new UnsupportedSessionCommandError('execute_command');
+          const result = await boundAgent.executeCommand(message.payload.commandId, message.payload.args);
+          sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'command_result', payload: { requestId: message.payload.requestId, agentId: boundAgent.agentId, result } });
+          return;
+        }
         case 'create_agent':
         case 'resume_agent':
           sendMessage(protocolError(
@@ -156,7 +172,8 @@ export function createSessionWire(
           ));
           return;
         case 'send_message':
-          await boundAgent.sendMessage(message.payload.text);
+          if (message.payload.delivery === undefined) await boundAgent.sendMessage(message.payload.text);
+          else await boundAgent.sendMessage(message.payload.text, { delivery: message.payload.delivery });
           sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'send_message'));
           return;
         case 'steer':
@@ -168,6 +185,11 @@ export function createSessionWire(
           if (!boundAgent.cancel) throw new UnsupportedSessionCommandError('cancel');
           await boundAgent.cancel();
           sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'cancel'));
+          return;
+        case 'set_session_setting':
+          if (!boundAgent.setSessionSetting) throw new UnsupportedSessionCommandError('set_session_setting');
+          await boundAgent.setSessionSetting(message.payload.settingId, message.payload.value);
+          sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'set_session_setting'));
           return;
         case 'set_planning':
           if (!boundAgent.setPlanning) throw new UnsupportedSessionCommandError('set_planning');
@@ -294,7 +316,7 @@ export function createSessionWire(
 function commandAcknowledgement(
   requestId: string,
   agentId: string,
-  command: 'send_message' | 'steer' | 'cancel' | 'set_planning',
+  command: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting',
 ): Extract<ServerMessage, { type: 'command_acknowledged' }> {
   return {
     protocolVersion: PROTOCOL_VERSION,

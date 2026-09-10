@@ -35,6 +35,37 @@ importers:
         specifier: ^4.1.5
         version: 4.1.10(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
 
+  packages/agent-host:
+    dependencies:
+      '@borgee/agent-provider-codex':
+        specifier: workspace:*
+        version: link:../agent-provider-codex
+      '@borgee/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+      '@borgee/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
+      '@borgee/agent-remote-relay':
+        specifier: workspace:*
+        version: link:../agent-remote-relay
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.1
+
   packages/agent-provider-codex:
     dependencies:
       '@borgee/agent-provider-sdk':
@@ -195,6 +226,9 @@ importers:
         specifier: ^18.3.0
         version: 18.3.1(react@18.3.1)
     devDependencies:
+      '@borgee/agent-host':
+        specifier: workspace:*
+        version: link:../agent-host
       '@playwright/test':
         specifier: ^1.50.0
         version: 1.62.0
@@ -1074,9 +1108,6 @@ packages:
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
 
-  '@types/node@22.20.1':
-    resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
-
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
 
@@ -1777,9 +1808,6 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
-
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
@@ -2526,10 +2554,6 @@ snapshots:
 
   '@types/ms@2.1.0': {}
 
-  '@types/node@22.20.1':
-    dependencies:
-      undici-types: 6.21.0
-
   '@types/node@24.13.3':
     dependencies:
       undici-types: 7.18.2
@@ -2551,7 +2575,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 24.13.3
 
   '@ungap/structured-clone@1.4.0': {}
 
@@ -3542,8 +3566,6 @@ snapshots:
       fsevents: 2.3.3
 
   typescript@5.9.3: {}
-
-  undici-types@6.21.0: {}
 
   undici-types@7.18.2: {}
 

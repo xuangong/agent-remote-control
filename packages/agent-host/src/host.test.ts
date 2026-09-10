@@ -1,0 +1,278 @@
+import type { AgentCapabilities, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import { describe, expect, it } from 'vitest';
+import { WebSocketServer, type WebSocket } from 'ws';
+import { createCodexSessionDirectory } from './directory.js';
+import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory } from './host.js';
+
+const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
+  interactions: { question: false, planApproval: false, toolApproval: false } };
+
+class Session implements AgentSession {
+  readonly capabilities = capabilities;
+  disposed = false;
+  observeCount = 0;
+  private release!: () => void;
+  private readonly closed = new Promise<void>((resolve) => { this.release = resolve; });
+  constructor(readonly providerId: string, readonly nativeSessionId: string) {}
+  async *observe(): AsyncIterable<ProviderStreamItem> { this.observeCount += 1; yield { type: 'history_boundary' }; await this.closed; }
+  async runtimeInfo(): Promise<AgentRuntimeInfo> { return { providerId: this.providerId, sessionId: this.nativeSessionId, status: 'idle',
+    persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } }; }
+  async sendMessage(): Promise<void> {}
+  async respondToInteraction(): Promise<void> {}
+  async dispose(): Promise<void> { this.disposed = true; this.release(); }
+}
+
+function fixture(providerId: string) {
+  const sessions = new Map<string, Session>();
+  let creates = 0;
+  const adapter: AgentProviderAdapter = { descriptor: { providerId, displayName: providerId.toUpperCase() },
+    async createSession() { throw new Error('Host must supply directory sessions.'); },
+    async resumeSession() { throw new Error('Host must supply directory sessions.'); } };
+  const directory: AgentHostDirectory = { providerId, list: async () => [], workspaces: async () => [],
+    async create() { const id = `${providerId}-${++creates}`; const session = new Session(providerId, id); sessions.set(id, session); return id; },
+    async open(id) { const session = sessions.get(id) ?? new Session(providerId, id); sessions.set(id, session); return session; },
+    async close() { await Promise.all([...sessions.values()].map((session) => session.dispose())); } };
+  return { adapter, directory, sessions, createCount: () => creates };
+}
+
+describe('Agent Host runtime', () => {
+  it('disposes a Codex session whose persistence result arrives after bounded shutdown', async () => {
+    const codex = fixture('codex');
+    let releaseInfo!: () => void;
+    let enteredInfo!: () => void;
+    const blockedInfo = new Promise<void>((resolve) => { releaseInfo = resolve; });
+    const infoEntered = new Promise<void>((resolve) => { enteredInfo = resolve; });
+    let disposeCount = 0;
+    const session: AgentSession = { capabilities, async *observe() { yield { type: 'history_boundary' }; },
+      async runtimeInfo() { enteredInfo(); await blockedInfo; return { providerId: 'codex', sessionId: 'late', status: 'idle' as const,
+        persistence: { providerId: 'codex', sessionId: 'late', opaque: '{}' } }; },
+      async sendMessage() {}, async respondToInteraction() {}, async dispose() { disposeCount += 1; } };
+    const directory = createCodexSessionDirectory({ async listSessions() { return { sessions: [] }; }, async createSession() { return session; },
+      async resumeSession() { throw new Error('unexpected resume'); }, async openChildSession() { throw new Error('unexpected child'); } }, []);
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory }], shutdownTimeoutMs: 20 });
+    const creating = host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay',
+      body: JSON.stringify({ providerId: 'codex', requestId: 'late' }) });
+    await infoEntered;
+    await host.close();
+    releaseInfo();
+    expect((await creating).status).toBe(503);
+    expect(disposeCount).toBe(1);
+  });
+
+  it('disposes a child session returned after bounded shutdown', async () => {
+    const codex = fixture('codex');
+    const child = new Session('codex', 'child');
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    codex.directory.openChild = async () => { await blocked; return child; };
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], shutdownTimeoutMs: 20 });
+    const attaching = host.control({ method: 'POST', path: '/remote/child/attach', sessionId: 'relay',
+      body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'child', parentNativeSessionId: 'parent' }) });
+    await host.close();
+    release();
+    expect((await attaching).status).toBe(503);
+    expect(child.disposed).toBe(true);
+  });
+
+  it('supersedes an overlapping uplink replacement instead of reporting another connection outcome', async () => {
+    const initial = await uplinkBroker('initial'); const first = await uplinkBroker('first', false); const second = await uplinkBroker('second', false);
+    const codex = fixture('codex');
+    const host = createAgentHost({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], installationId: 'installation', name: 'Host',
+      uplink: { url: initial.url, remoteKey: 'initial-key' } });
+    try {
+      await host.ready;
+      const replacedFirst = host.replaceUplink({ url: first.url, remoteKey: 'first-key' });
+      const firstWasSuperseded = expect(replacedFirst).rejects.toThrow(/superseded/i);
+      await first.connected;
+      const replacedSecond = host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
+      await second.connected; second.register();
+      await firstWasSuperseded;
+      await expect(replacedSecond).resolves.toEqual({ hostId: 'second' });
+    } finally { await host.close(); await initial.close(); await first.close(); await second.close(); }
+  });
+
+  it('reserves a native projection before opening and shares compatible concurrent attachment', async () => {
+    const codex = fixture('codex');
+    const session = new Session('codex', 'native');
+    let release!: () => void;
+    const opening = new Promise<void>((resolve) => { release = resolve; });
+    codex.directory.open = async () => { await opening; return session; };
+    codex.directory.openChild = async () => { await opening; return session; };
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }] });
+    try {
+      const attach = (agentId: string, parentNativeSessionId?: string) => host.control({ method: 'POST',
+        path: parentNativeSessionId ? '/remote/child/attach' : '/remote/attach', sessionId: agentId,
+        body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native', ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }) });
+      const one = attach('relay-one');
+      const two = attach('relay-two');
+      const conflictingParent = attach('relay-three', 'parent');
+      release();
+      const [first, second, conflict] = await Promise.all([one, two, conflictingParent]);
+      expect(JSON.parse(first.body)).toEqual({ agentId: 'relay-one', nativeSessionId: 'native' });
+      expect(second).toEqual(first);
+      expect(conflict.status).toBe(409);
+      expect(session.observeCount).toBe(1);
+      expect(host.resolveSession('relay-one')).toBeDefined();
+      expect(host.resolveSession('relay-two')).toBeUndefined();
+    } finally { await host.close(); }
+  });
+
+  it('bounds shutdown when accepted native work and cleanup do not settle', async () => {
+    const codex = fixture('codex');
+    codex.directory.create = () => new Promise<string>(() => undefined);
+    codex.directory.close = () => new Promise<void>(() => undefined);
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], shutdownTimeoutMs: 30 });
+    void host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', requestId: 'blocked' }) });
+    const started = Date.now();
+    await host.close();
+    expect(Date.now() - started).toBeLessThan(250);
+  });
+  it('re-pairs over a real uplink while preserving the projected Agent identity', async () => {
+    const first = await uplinkBroker('host-first'); const second = await uplinkBroker('host-second');
+    const codex = fixture('codex');
+    const host = createAgentHost({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], installationId: 'installation', name: 'Host',
+      uplink: { url: first.url, remoteKey: 'first-key' } });
+    try {
+      await host.ready;
+      const created = await first.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' });
+      expect(JSON.parse(created.body)).toEqual({ agentId: 'relay', nativeSessionId: 'codex-1' });
+      await host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
+      const attached = await second.rpc('POST', '/remote/attach', 'relay', { providerId: 'codex', nativeSessionId: 'codex-1' });
+      expect(JSON.parse(attached.body)).toEqual({ agentId: 'relay', nativeSessionId: 'codex-1' });
+      expect(codex.createCount()).toBe(1);
+    } finally { await host.close(); await first.close(); await second.close(); }
+  });
+  it('recovers a completed creation across real uplink replacement despite a new proposed Agent identity', async () => {
+    const first = await uplinkBroker('host-first'); const second = await uplinkBroker('host-second');
+    const codex = fixture('codex');
+    const host = createAgentHost({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], installationId: 'installation', name: 'Host',
+      uplink: { url: first.url, remoteKey: 'first-key' } });
+    try {
+      await host.ready;
+      const created = await first.rpc('POST', '/remote/create', 'broker-before', { providerId: 'codex', requestId: 'stable-request', cwd: '/work' });
+      await host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
+      const recovered = await second.rpc('POST', '/remote/create', 'broker-after', { providerId: 'codex', requestId: 'stable-request', cwd: '/work' });
+      expect(recovered).toEqual(created);
+      expect(JSON.parse(recovered.body)).toEqual({ agentId: 'broker-before', nativeSessionId: 'codex-1' });
+      expect(codex.createCount()).toBe(1);
+    } finally { await host.close(); await first.close(); await second.close(); }
+  });
+
+  it('preserves catalog errors through a real uplink', async () => {
+    const broker = await uplinkBroker('host');
+    const codex = fixture('codex'); const dsh = fixture('dsh'); const failing = fixture('failing');
+    codex.directory.list = async () => [summary('codex', 'one'), summary('codex', 'two')];
+    dsh.directory.list = async () => [summary('dsh', 'one'), summary('dsh', 'two')];
+    failing.directory.list = async () => { throw new Error('native read failed'); };
+    const host = createAgentHost({ registrations: [{ adapter: codex.adapter, directory: codex.directory }, { adapter: dsh.adapter, directory: dsh.directory },
+      { adapter: failing.adapter, directory: failing.directory }],
+      installationId: 'installation', name: 'Host', uplink: { url: broker.url, remoteKey: 'key' } });
+    try {
+      await host.ready;
+      const first = await broker.rpc('GET', '/remote/catalog?providerId=codex&limit=1');
+      const cursor = JSON.parse(first.body).nextCursor as string;
+      const expired = await broker.rpc('GET', `/remote/catalog?providerId=dsh&cursor=${encodeURIComponent(cursor)}`);
+      expect(expired).toEqual({ status: 409, body: JSON.stringify({ error: 'The catalog read view is unavailable. Refresh the catalog.', code: 'cursor_expired' }) });
+      const invalidCursor = await broker.rpc('GET', '/remote/catalog?providerId=codex&cursor=invalid');
+      expect(invalidCursor).toEqual({ status: 400, body: JSON.stringify({ error: 'Invalid catalog cursor.', code: 'invalid_request' }) });
+      const invalidLimit = await broker.rpc('GET', '/remote/catalog?providerId=codex&limit=0');
+      expect(invalidLimit).toEqual({ status: 400, body: JSON.stringify({ error: 'Catalog page size must be an integer from 1 to 100.', code: 'invalid_request' }) });
+      const unavailable = await broker.rpc('GET', '/remote/catalog?providerId=failing');
+      expect(unavailable).toEqual({ status: 503, body: JSON.stringify({ error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' }) });
+    } finally { await host.close(); await broker.close(); }
+  });
+  it('returns both identities and deduplicates a creation request', async () => {
+    const codex = fixture('codex');
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }] });
+    try {
+      const body = JSON.stringify({ providerId: 'codex', requestId: 'request-1', cwd: '/work' });
+      const first = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay-1', body });
+      const second = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay-1', body });
+      expect(JSON.parse(first.body)).toEqual({ agentId: 'relay-1', nativeSessionId: 'codex-1' });
+      expect(second).toEqual(first);
+      expect(codex.createCount()).toBe(1);
+    } finally { await host.close(); }
+  });
+
+  it('isolates providers and rejects request identity reuse with different settings', async () => {
+    const codex = fixture('codex'); const dsh = fixture('dsh');
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }, { adapter: dsh.adapter, directory: dsh.directory }] });
+    try {
+      const request = (providerId: string, cwd: string) => host.control({ method: 'POST', path: '/remote/create', sessionId: `${providerId}-relay`,
+        body: JSON.stringify({ providerId, requestId: 'same', cwd }) });
+      expect((await request('codex', '/one')).status).toBe(200);
+      expect((await request('dsh', '/two')).status).toBe(200);
+      expect((await request('codex', '/different')).status).toBe(409);
+      expect((await host.control({ method: 'POST', path: '/remote/create', sessionId: 'codex-relay',
+        body: JSON.stringify({ providerId: 'codex', requestId: 'another', cwd: '/one' }) })).status).toBe(409);
+      expect(codex.createCount()).toBe(1); expect(dsh.createCount()).toBe(1);
+    } finally { await host.close(); }
+  });
+
+  it('keeps one projection for repeated attach and rejects child ownership changes', async () => {
+    const codex = fixture('codex');
+    codex.directory.openChild = async (_parent, child) => codex.directory.open(child);
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }] });
+    try {
+      const attach = (agentId: string, parentNativeSessionId?: string) => host.control({ method: 'POST', path: parentNativeSessionId ? '/remote/child/attach' : '/remote/attach', sessionId: agentId,
+        body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native', ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }) });
+      expect(JSON.parse((await attach('relay-a')).body).agentId).toBe('relay-a');
+      expect(JSON.parse((await attach('relay-b')).body).agentId).toBe('relay-a');
+      expect((await attach('relay-c', 'parent')).status).toBe(409);
+    } finally { await host.close(); }
+  });
+
+  it('disposes sessions only when the Host explicitly closes', async () => {
+    const codex = fixture('codex');
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }] });
+    await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', requestId: 'r' }) });
+    const session = codex.sessions.get('codex-1')!;
+    expect(session.disposed).toBe(false);
+    await host.close(); await host.close();
+    expect(session.disposed).toBe(true);
+  });
+});
+
+async function uplinkBroker(hostId: string, autoRegister = true) {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  let socket: WebSocket | undefined;
+  let resolveConnected!: () => void;
+  const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
+  server.on('connection', (connection) => {
+    socket = connection;
+    resolveConnected();
+    connection.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as { type: string };
+      if (message.type === 'register' && autoRegister) connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId }));
+    });
+  });
+  const address = server.address() as { port: number };
+  let sequence = 0;
+  return {
+    url: `ws://127.0.0.1:${address.port}/ws/remote-host`,
+    connected,
+    register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId })); },
+    rpc(method: 'GET' | 'POST', path: string, sessionId?: string, body?: unknown): Promise<{ status: number; body: string }> {
+      const requestId = `rpc-${++sequence}`;
+      return new Promise((resolve, reject) => {
+        if (!socket) { reject(new Error('Broker has no Host connection.')); return; }
+        const timeout = setTimeout(() => reject(new Error('RPC timed out.')), 5000);
+        const receive = (data: import('ws').RawData) => {
+          const response = JSON.parse(data.toString()) as { type: string; requestId?: string; status?: number; body?: string };
+          if (response.type !== 'rpc_response' || response.requestId !== requestId) return;
+          clearTimeout(timeout); socket!.off('message', receive); resolve({ status: response.status!, body: response.body! });
+        };
+        socket.on('message', receive);
+        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId, method, path,
+          ...(sessionId ? { sessionId } : {}), ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
+      });
+    },
+    close: () => new Promise<void>((resolve) => { for (const client of server.clients) client.terminate(); server.close(() => resolve()); }),
+  };
+}
+
+function summary(providerId: string, nativeSessionId: string) {
+  return { providerId, nativeSessionId, title: nativeSessionId, createdAt: '2026-09-11T00:00:00.000Z',
+    updatedAt: '2026-09-11T00:00:00.000Z', state: 'idle' as const };
+}

@@ -2,7 +2,7 @@
 
 ## Role
 
-`agent-remote-lab` is a private Vite site that operates and inspects a deterministic Recorded Provider, the real Codex app-server fixture, and controlled live DSH through the Relay public API and reusable Web package (`packages/agent-remote-lab/src/server/recorded.ts:315-369`, `packages/agent-remote-lab/src/server/codex.ts:30-72`, `packages/agent-remote-lab/src/server/live-plugin.ts:45-108`).
+`agent-remote-lab` is a private Vite site whose production launcher operates the deterministic Recorded Provider and routes native Providers from paired Agent Hosts. Test-only compositions inspect the real Codex app-server against deterministic Responses and controlled live DSH through the Relay public API and reusable Web package (`packages/agent-remote-lab/src/server/local.ts`, `packages/agent-remote-lab/scripts/codex-host-fixture.ts`, `packages/agent-remote-lab/src/server/live-plugin.ts`).
 
 ## Boundary
 
@@ -18,7 +18,7 @@ The package owns the standalone site shell, generic Node Relay composition, decl
 | Web package | Web → Lab | Supplies HTTP/WebSocket transport, replica, session client, and public Timeline (`packages/agent-remote-lab/src/App.tsx:69-125`). |
 | Injected Provider adapters | Provider adapter → Lab | Supplies only explicitly configured validation Providers (`packages/agent-remote-lab/src/server.ts:6-15`). |
 | Recorded Provider | Lab → Recorded Provider | Supplies deterministic Timeline, interaction, replacement, and resource scenarios (`packages/agent-remote-lab/src/server/recorded.ts:37-123`). |
-| Codex app-server | Lab → Codex Provider | Runs the real app-server against a deterministic local Responses fixture and identifies that fixture in the Provider catalog (`packages/agent-remote-lab/src/server/codex.ts:30-57`, `packages/agent-remote-lab/src/server/codex.ts:75-83`). |
+| Codex Agent Host fixture | Test harness → Agent Host | Runs the real app-server against deterministic local Responses in a process separate from the Lab backend and identifies the fixture in the Host catalog (`packages/agent-remote-lab/scripts/codex-host-fixture.ts`, `packages/agent-remote-lab/src/server/codex.ts`). |
 | DSH source checkout | Live launcher → DSH | Loads the compiled validation plugin through a caller-supplied compatible runtime (`packages/agent-remote-lab/scripts/run-live-dsh.sh:76-205`). |
 | DSH Web profile | Profile bundle → DSH | Loads the packaged validation adapter into the existing native Web host and shares its services (`packages/agent-remote-lab/src/server/installed-dsh-plugin.ts:9`, `packages/agent-remote-lab/scripts/build-dsh-plugin.ts:57`). |
 
@@ -152,7 +152,7 @@ flowchart LR
 
 ## Standalone Host Control
 
-The Node host owns temporary pairing keys, installation discovery, catalog forwarding, and opaque native-session bindings. DSH connects outbound through the shared Remote Host uplink; public Snapshot, Timeline, and browser streams retain their existing protocol ( `packages/agent-remote-lab/src/server/remote-host-broker.ts:19`).
+The Node broker owns temporary pairing keys, installation discovery, catalog forwarding, and opaque native-session bindings. Agent Host and DSH connect outbound through the shared Remote Host uplink; public Snapshot, Timeline, and browser streams retain their existing protocol (`packages/agent-remote-lab/src/server/remote-host-broker.ts`).
 
 A reconnect advances the host connection generation and restores native bindings on demand before reading or streaming. Creation request identities remain in memory and uncertain creation outcomes are not replayed (`packages/agent-remote-lab/src/server/remote-host-broker.ts:118`).
 
@@ -189,4 +189,4 @@ The console supplies `/fork` and `/side` independently of Provider command disco
 
 A permanent `& Source` tag with a fork badge identifies the source native session, capture time and cursor. It opens source details and navigation. Browser-local fork records survive opened-session removal and page reload, separately from the opened-session list. The ledger retains context, creation request identity, destination native identity and first-input delivery state. A confirmed retry of the same uncertain first input does not send it again. Unknown delivery is not automatically replayed. Browser storage is required for creating forks; native session retention still depends on the Provider. Fork provenance does not populate native subagent parent fields.
 
-Creation inherits session-scoped mutable settings through existing Provider controls. Remote Hosts resolve the source working directory to a registered workspace and retain their native global defaults. Fork settings are initialized before the first input; later explicit changes belong to the new session.
+Creation inherits session-scoped mutable settings through existing Provider controls. DSH Hosts resolve the source working directory to a registered workspace and retain native global defaults. Codex Hosts preserve the source working directory, model, planning state, and mutable session settings. Fork settings are initialized before the first input; later explicit changes belong to the new session.

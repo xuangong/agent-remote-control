@@ -26,6 +26,15 @@ async function host(url: string, key: string, installationId = 'native-installat
   const [message] = await registration; const result = JSON.parse(message.toString());
   return { socket, id: result.hostId as string };
 }
+async function providerHost(url: string, key: string, installationId = 'provider-installation') {
+  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+  await once(socket, 'open');
+  const registration = once(socket, 'message');
+  const providers = [{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'example', displayName: 'Example' }];
+  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId, name: 'Agent Host', providers }));
+  const [message] = await registration;
+  return { socket, id: JSON.parse(message.toString()).hostId as string, providers };
+}
 describe('Remote Host broker', () => {
   it('issues temporary keys, binds one installation, and keeps disconnected hosts visible', async () => {
     const f = await setup();
@@ -55,6 +64,8 @@ describe('Remote Host broker', () => {
     });
     const base = `/v1/remote/hosts/${native.id}`;
     expect(await (await fetch(f.url + base + '/catalog?limit=10')).json()).toMatchObject({ sessions: [{ nativeSessionId: 'cold' }] });
+    expect(await (await fetch(f.url + base + '/models?providerId=dsh')).json()).toEqual({ models: [] });
+    expect(calls.some((call) => call.path?.startsWith('/remote/models'))).toBe(false);
     const attached = await (await f.post(base + '/attach', { nativeSessionId: 'cold' })).json();
     const repeated = await (await f.post(base + '/attach', { nativeSessionId: 'cold' })).json();
     expect(repeated).toEqual(attached); expect(attached.agentId).toBeTruthy();
@@ -69,6 +80,61 @@ describe('Remote Host broker', () => {
     expect((await f.post(path, { requestId: 'once', workspaceId: 'workspace' })).status).toBe(504);
     expect(messages.filter((message) => message.type === 'rpc_request')).toHaveLength(1);
     expect((await f.post(path, { requestId: 'once', workspaceId: 'different' })).status).toBe(409);
+  });
+  it('forwards provider-scoped discovery and adopts conflict-checked Host identities', async () => {
+    const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json(); const native = await providerHost(f.url, pair.key);
+    const calls: any[] = [];
+    native.socket.on('message', (raw) => {
+      const request = JSON.parse(raw.toString()); calls.push(request);
+      if (request.type !== 'rpc_request') return;
+      const requestBody = request.body ? JSON.parse(request.body) : undefined;
+      const responseBody = request.path === '/remote/create'
+        ? { agentId: 'host-agent', nativeSessionId: 'native-created' }
+        : request.path.endsWith('/attach')
+          ? { agentId: requestBody.nativeSessionId === 'native-child' ? 'host-child'
+              : requestBody.nativeSessionId === 'native-parent' ? 'host-parent' : `host-${requestBody.nativeSessionId}`,
+              nativeSessionId: requestBody.nativeSessionId }
+          : { items: [] };
+      native.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId, status: 200, body: JSON.stringify(responseBody) }));
+    });
+    const base = `/v1/remote/hosts/${native.id}`;
+    expect(await (await fetch(f.url + '/v1/remote/hosts')).json()).toMatchObject({ hosts: [{ providers: native.providers }] });
+    await fetch(f.url + base + '/catalog?providerId=codex&limit=2');
+    await fetch(f.url + base + '/workspaces?providerId=codex');
+    await fetch(f.url + base + '/models?providerId=codex');
+    const created = await (await f.post(base + '/create', { providerId: 'codex', requestId: 'create-one', cwd: '/tmp/project',
+      workspaceId: 'project', model: 'gpt-6', reasoningEffort: 'high', planning: true })).json();
+    expect(created).toEqual({ agentId: 'host-agent', nativeSessionId: 'native-created' });
+    expect(calls.filter((call) => call.method === 'GET').map((call) => call.path)).toEqual([
+      '/remote/catalog?providerId=codex&limit=2', '/remote/workspaces?providerId=codex', '/remote/models?providerId=codex',
+    ]);
+    expect(JSON.parse(calls.find((call) => call.path === '/remote/create').body)).toEqual({ providerId: 'codex', requestId: 'create-one',
+      cwd: '/tmp/project', workspaceId: 'project', model: 'gpt-6', reasoningEffort: 'high', planning: true });
+    expect((await f.post(base + '/create', { providerId: 'codex', requestId: 'create-one', cwd: '/different' })).status).toBe(409);
+    const parent = await (await f.post(base + '/attach', { providerId: 'codex', nativeSessionId: 'native-parent' })).json();
+    const child = await (await f.post(base + '/child/attach', { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' })).json();
+    expect(parent.agentId).toBe('host-parent'); expect(child.agentId).toBe('host-child');
+    expect((await f.post(base + '/child/attach', { providerId: 'codex', parentNativeSessionId: 'other-parent', nativeSessionId: 'native-child' })).status).toBe(409);
+    expect((await f.post(base + '/attach', { providerId: 'codex', nativeSessionId: 'native-child' })).status).toBe(409);
+    const concurrent = await Promise.all([
+      f.post(base + '/child/attach', { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-race' }),
+      f.post(base + '/child/attach', { providerId: 'codex', parentNativeSessionId: 'other-parent', nativeSessionId: 'native-race' }),
+    ]);
+    expect(concurrent.map((response) => response.status).sort()).toEqual([200, 409]);
+    const reconnected = await providerHost(f.url, pair.key);
+    expect(reconnected.id).toBe(native.id);
+    const recovery: string[] = [];
+    reconnected.socket.on('message', (raw) => {
+      const request = JSON.parse(raw.toString());
+      if (request.type !== 'rpc_request') return;
+      recovery.push(request.path);
+      const body = request.body ? JSON.parse(request.body) : {};
+      const agentId = body.nativeSessionId === 'native-child' ? 'host-child' : 'host-parent';
+      reconnected.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId, status: 200,
+        body: request.path.startsWith('/remote/') ? JSON.stringify({ agentId, nativeSessionId: body.nativeSessionId }) : '{}' }));
+    });
+    expect((await fetch(f.url + `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.4.0`)).status).toBe(200);
+    expect(recovery).toEqual(['/remote/attach', '/remote/child/attach', `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.4.0`]);
   });
 });
 

@@ -91,10 +91,11 @@ export function App({
 }: AppProps) {
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
-  const [selectedHost, setSelectedHost] = useState<RemoteHost>({ id: 'local', name: 'Local runtime', online: true });
+  const [selectedHost, setSelectedHost] = useState<RemoteHost>({ id: 'local', name: 'Recorded fixture', online: true });
   const hostClient = useMemo(() => hostService ?? new RemoteHostClient(baseUrl), [baseUrl, hostService]);
   const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
   const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined);
+  const restoredHostSelection = useRef(false);
   const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory ? readOpenedSessions(baseUrl) : []);
   const openedSessionsRef = useRef(openedSessions);
   openedSessionsRef.current = openedSessions;
@@ -145,6 +146,19 @@ export function App({
   const [desktopContextVisible, setDesktopContextVisible] = useState(true);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
 
+  useEffect(() => {
+    if (restoredHostSelection.current || remoteHosts.length === 0) return;
+    const activeId = state?.agent?.id ?? rememberedAgent();
+    const saved = openedSessions.find((item) => item.agentId === activeId && item.hostId && item.hostId !== 'local');
+    if (!saved) { restoredHostSelection.current = true; return; }
+    const host = remoteHosts.find((item) => item.id === saved.hostId);
+    if (!host) return;
+    restoredHostSelection.current = true;
+    setSelectedHost({ ...host, providerId: saved.providerId });
+    const descriptor = host.providers?.find((provider) => provider.providerId === saved.providerId);
+    setProviderName(descriptor ? `${descriptor.displayName} · ${host.name}` : saved.providerId);
+  }, [openedSessions, remoteHosts, state?.agent?.id]);
+
   const loadProviders = useCallback(async (): Promise<void> => {
     const generation = providerRequestGenerationRef.current + 1;
     providerRequestGenerationRef.current = generation;
@@ -176,18 +190,32 @@ export function App({
 
   const providerChoices = [
     ...providers.map((provider) => ({ ...provider, hostId: 'local', selectionId: provider.providerId })),
-    ...remoteHosts.filter((host) => host.id !== 'local').map((host) => ({
-      providerId: host.providerId ?? 'dsh', hostId: host.id,
-      selectionId: JSON.stringify([host.id, host.providerId ?? 'dsh']),
-      displayName: `DSH · ${host.name} · ${host.online ? 'Online' : 'Offline'}`,
-    })),
+    ...remoteHosts.flatMap((host) => (host.providers ?? [{ providerId: host.providerId ?? 'dsh', displayName: 'DeepSeek Harness' }]).map((provider) => ({
+      ...provider, hostId: host.id,
+      selectionId: JSON.stringify([host.id, provider.providerId]),
+      displayName: `${provider.displayName} · ${host.name} · ${host.online ? 'Online' : 'Offline'}`,
+    }))),
   ];
   const selectedProviderChoice = providerChoices.find((choice) => choice.hostId === selectedHost.id && choice.providerId === providerId);
   const selectedHostOffline = selectedHost.id !== 'local' && remoteHosts.find((host) => host.id === selectedHost.id)?.online !== true;
 
+  function providerConnectionName(hostId: string, selectedProviderId: string): string {
+    if (hostId === 'local') return providers.find((provider) => provider.providerId === selectedProviderId)?.displayName ?? selectedProviderId;
+    const host = remoteHosts.find((candidate) => candidate.id === hostId);
+    const descriptor = host?.providers?.find((provider) => provider.providerId === selectedProviderId);
+    return descriptor && host ? `${descriptor.displayName} · ${host.name}` : selectedProviderId;
+  }
+
   function selectHost(host: RemoteHost): void {
     if (creationLocked || transitionRef.current) return;
-    setSelectedHost(host);
+    if (host.id === 'local') setSelectedHost(host);
+    else {
+      const advertised = host.providers ?? (host.providerId ? [{ providerId: host.providerId, displayName: host.providerId }] : []);
+      const selectedProviderId = advertised.some((provider) => provider.providerId === host.providerId)
+        ? host.providerId
+        : advertised.some((provider) => provider.providerId === providerId) ? providerId : advertised[0]?.providerId;
+      setSelectedHost({ ...host, ...(selectedProviderId ? { providerId: selectedProviderId } : {}) });
+    }
     setSessionOptions({});
     setCreatePlanning(false);
   }
@@ -197,7 +225,7 @@ export function App({
     const choice = providerChoices.find((item) => item.selectionId === selectionId);
     if (!choice) return;
     const host = remoteHosts.find((item) => item.id === choice.hostId);
-    selectHost(host ?? { id: 'local', name: 'Local runtime', online: true });
+    selectHost(host ? { ...host, providerId: choice.providerId } : { id: 'local', name: 'Recorded fixture', online: true });
     if (choice.hostId === 'local') setLocalProviderId(choice.providerId);
   }
 
@@ -245,7 +273,7 @@ export function App({
     if (remembered) {
       const saved = openedSessionsRef.current.find((item) => item.agentId === remembered);
       if (directory && saved) {
-        setProviderName(saved.providerId);
+        setProviderName(providerConnectionName(saved.hostId ?? 'local', saved.providerId));
         const target = new SessionDirectoryClient(baseUrl, undefined, saved.hostId ?? 'local');
         const request = saved.parentNativeSessionId ? target.attachChild(saved.providerId, saved.parentNativeSessionId, saved.nativeSessionId) : target.attach(saved.providerId, saved.nativeSessionId);
         void request.then((result) => { rememberSession({ ...saved, agentId: result.agentId }); attach(result.agentId); }).catch((error) => setFailure(message(error, 'Session could not be reconnected.')));
@@ -312,7 +340,7 @@ export function App({
       if (navigationGeneration.current !== generation) return;
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
       rememberSession({ ...prior, ...item, hostId, agentId: result.agentId });
-      setProviderName(providers.find((provider) => provider.providerId === item.providerId)?.displayName ?? item.providerId);
+      setProviderName(providerConnectionName(hostId, item.providerId));
       if (sideSession?.nativeSessionId === item.nativeSessionId && sideSession.providerId === item.providerId && (sideSession.hostId ?? 'local') === hostId) setSideSession(undefined);
       attach(result.agentId);
     } catch (error) { setFailure(message(error, 'Session could not be connected.')); }
@@ -365,7 +393,7 @@ export function App({
         const response = await transport.createAgent(agentId, providerId, { sessionId: agentId, ...(createPlanning ? { planning: true } : {}) });
         attach(response.payload.agentId);
       }
-      setProviderName(selectedHost.id === 'local' ? selectedProviderChoice?.displayName ?? providerId : `DSH · ${selectedHost.name}`);
+      setProviderName(providerConnectionName(selectedHost.id, providerId));
     } catch (error) {
       const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found'].includes(error.code ?? '');
       if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
@@ -507,7 +535,7 @@ export function App({
         const context = await captureForkContext(transport, source);
         const settings = (agent.runtimeInfo.settings ?? []).filter((setting) => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
         let options: CreateSessionOptions;
-        if ((source.hostId ?? 'local') !== 'local') {
+        if ((source.hostId ?? 'local') !== 'local' && source.providerId === 'dsh') {
           const workspaces = (await target.workspaces(source.providerId)).workspaces;
           const workspace = workspaces.find(({ path }) => path === agent.cwd);
           if (agent.cwd && !workspace) throw new Error('The source workspace is no longer registered on this Host.');

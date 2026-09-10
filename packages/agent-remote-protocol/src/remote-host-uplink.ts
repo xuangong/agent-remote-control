@@ -10,6 +10,7 @@ const version = Type.Literal(REMOTE_HOST_UPLINK_VERSION);
 const object = { additionalProperties: false } as const;
 const rpc = { uplinkVersion: version, requestId: identity };
 const stream = { uplinkVersion: version, streamId: identity };
+const provider = Type.Object({ providerId: identity, displayName: identity }, object);
 const closeCode = Type.Union([
   ...[1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014].map((code) => Type.Literal(code)),
   Type.Integer({ minimum: 3000, maximum: 4999 }),
@@ -17,12 +18,16 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/revision)?|workspaces|attach|create)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|models|child/attach|attach|create)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
-  Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity,
-    providerId: Type.Literal('dsh') }, object),
+  Type.Union([
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity,
+      providerId: Type.Literal('dsh') }, object),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity,
+      providers: Type.Array(provider, { minItems: 1, maxItems: 64 }) }, object),
+  ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_request'), method: Type.Union([Type.Literal('GET'), Type.Literal('POST')]),
     path: requestPath, sessionId: Type.Optional(identity), body: Type.Optional(Type.String()) }, object),
@@ -59,14 +64,16 @@ export function encodeRemoteHostUplinkMessage(value: RemoteHostUplinkMessage): W
 
 function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplinkMessage {
   if (!Value.Check(RemoteHostUplinkMessage, value)) return false;
+  if (value.type === 'register' && 'providers' in value
+    && new Set(value.providers.map((provider) => provider.providerId)).size !== value.providers.length) return false;
   if (value.type === 'rpc_request') {
     const pathname = value.path.split('?', 1)[0]!;
-    const sessionScoped = pathname === '/remote/attach' || pathname === '/remote/create' || pathname === '/v1/providers'
+    const sessionScoped = pathname === '/remote/attach' || pathname === '/remote/child/attach' || pathname === '/remote/create' || pathname === '/v1/providers'
       || /^\/v1\/sessions\/[^/]+\/(snapshot|timeline)$/.test(pathname);
     if (sessionScoped !== (value.sessionId !== undefined)) return false;
     if (pathname.startsWith('/remote/')) {
       const isRead = pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
-        || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces';
+        || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/models';
       if ((isRead && (value.method !== 'GET' || value.body !== undefined))
         || (!isRead && (value.method !== 'POST' || value.body === undefined))) return false;
     }

@@ -1,8 +1,8 @@
 # Agent Remote Control
 
-An independent workbench for discovering, creating, connecting to, and debugging agent sessions. It includes the remote protocol, provider SDK, DSH and Codex adapters, Node relay, browser client and renderer, terminal debugger, recorded scenarios, and an outbound DSH Host plugin.
+An independent workbench for discovering, creating, connecting to, and debugging agent sessions. It includes the remote protocol, provider SDK, DSH and Codex adapters, Node relay, browser client and renderer, terminal debugger, recorded scenarios, and an independent Agent Host runtime.
 
-The workbench has no account system. Generate a temporary key locally, configure the DSH Host plugin with that key, and select the connected installation to browse its native sessions and workspaces. Chat, questions, approvals, Timeline, Trace, and Replica Inspector share the existing public protocol.
+The workbench has no account system. Generate a temporary key locally, pair an Agent Host or DSH Host plugin with that key, and select an advertised Provider under the connected installation to browse its native sessions and workspaces. Chat, questions, approvals, Timeline, Trace, and Replica Inspector share the existing public protocol.
 
 ## Run locally
 
@@ -14,19 +14,23 @@ pnpm build
 pnpm dev
 ```
 
-Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` includes the real Codex CLI Provider, recorded sessions, and the DSH pairing broker. Codex starts on demand when its native directory or a session is opened. It requires neither a Borgee checkout nor a Go server. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed.
+Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` owns the labeled Recorded fixture and the Agent Host pairing broker. Native Codex runs only in the independent Agent Host. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed. `AGENT_REMOTE_BIND` can expose the broker on an explicit interface; local management authorization remains unchanged.
 
 The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.148.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-remote-lab/compatibility.json).
 
 ## Connect a real Codex CLI
 
-Select **Codex** in Session intake. The workbench manages `codex app-server` processes over stdio, discovers native threads, and resumes the selected thread with its history. It uses the CLI's native login and configuration; no plugin or pairing key is needed for this local Provider.
+Start the workbench, open **Pair Agent Host**, and generate a temporary key. In another terminal, start Codex through the Host:
 
 ```bash
-AGENT_REMOTE_CODEX_EXECUTABLE=/absolute/path/to/codex pnpm dev
+export AGENT_HOST_SERVER=http://127.0.0.1:5910
+export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
+export AGENT_HOST_CODEX=/absolute/path/to/codex
+export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
+pnpm agent-host start
 ```
 
-The verified CLI version is `0.148.0`; older versions are rejected with an actionable message. Set `AGENT_REMOTE_CODEX_HOME` for an explicit native profile and `AGENT_REMOTE_WORKSPACE` for the default working directory. See [Codex installation and debugging](docs/runbooks/codex-debug.md) for an isolated Tencent-registry install and the process/session boundaries.
+Select **Codex · <Host name> · Online** in Session intake. The verified CLI version is `0.148.0`; older versions are rejected with an actionable message. `AGENT_REMOTE_CODEX_HOME`, `AGENT_REMOTE_CODEX_EXECUTABLE`, and `AGENT_REMOTE_WORKSPACE` remain supported aliases. See [Codex installation and debugging](docs/runbooks/codex-debug.md) for an isolated Tencent-registry install and the process/session boundaries.
 
 ## Connect a real DSH installation
 
@@ -61,9 +65,9 @@ export AGENT_REMOTE_INSTANCE_NAME="My DSH"
 dsh --profile web --host 127.0.0.1 --port 3081
 ```
 
-The plugin also accepts Cordis configuration fields `serverUrl`, `remoteKey`, and `instanceName`. Each paired Host appears in the workbench's Provider selector as `DSH · <Host name> · Online/Offline`, alongside local Providers. Selecting it switches session discovery and workspace selection to that installation. Choose a workspace and click **Open session**, or select an existing session from the directory. Offline Hosts remain visible, with creation disabled; another Provider can still be selected. The native DSH installation continues to own model selection, credentials, persistence, and approval services.
+The plugin also accepts Cordis configuration fields `serverUrl`, `remoteKey`, and `instanceName`. Each advertised Provider appears in the workbench selector as `<Provider name> · <Host name> · Online/Offline`, alongside the labeled Recorded fixture. Selecting it switches session discovery and workspace selection to that installation. Choose a workspace and click **Open session**, or select an existing session from the directory. Offline Hosts remain visible, with creation disabled; another Provider can still be selected. The native DSH installation continues to own model selection, credentials, persistence, and approval services.
 
-Keys are valid for new connections for 24 hours and bind to one installation. Established connections remain active after key expiry until they disconnect. Restarting the workbench clears temporary keys and host bindings, so generate a new key and reconnect the plugin. Host reconnection within the same workbench process restores session bindings on demand without replaying message submissions or uncertain creation requests.
+Keys are valid for new connections for 24 hours and bind to one installation. Established connections remain active after key expiry until they disconnect. Restarting the backend clears temporary keys and host bindings. A background Host can keep native sessions alive: generate a new key, set `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY`, then run `pnpm agent-host pair` to replace only its uplink. Host reconnection within the same backend process restores session bindings on demand without replaying message submissions or uncertain creation requests.
 
 ## Development and verification
 
@@ -77,7 +81,7 @@ pnpm lint:docs
 
 Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing. Run `pnpm compatibility:update` after source changes, then `pnpm compatibility:check` to verify the declared implementation digest.
 
-`pnpm dev codex` runs the real local workbench. `pnpm dev codex-fixture` runs the deterministic Codex model fixture; `pnpm dev recorded` runs only Recorded and the DSH broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
+`pnpm dev` runs the Recorded-backed workbench and pairing broker. `pnpm agent-host start` starts native Codex in the managed Host daemon so a later `pnpm agent-host pair` can replace its uplink without stopping native sessions. `pnpm agent-host foreground` is an attached debugging mode without daemon pairing control. `pnpm dev codex-fixture` remains a clearly labeled direct fixture composition for adapter validation; `pnpm dev recorded` runs the Recorded fixture and broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
 
 ## Package boundaries
 

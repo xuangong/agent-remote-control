@@ -9,7 +9,7 @@ test.setTimeout(180_000);
 test('discovers native commands and continues model and permission menus through Provider interactions', async ({ page }, testInfo) => {
   const errors = collectBrowserErrors(page);
   await page.goto('/');
-  await page.getByTestId('provider-select').selectOption({ label: 'Codex (fixture)' });
+  await selectCodexHost(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
   const input = page.getByTestId('prompt-input');
@@ -50,7 +50,7 @@ test('discovers native commands and continues model and permission menus through
 test('selects native models and permissions from the toolbar and restores confirmed settings', async ({ page }, testInfo) => {
   const errors = collectBrowserErrors(page);
   await page.goto('/');
-  await page.getByTestId('provider-select').selectOption({ label: 'Codex (fixture)' });
+  await selectCodexHost(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
   const input = page.getByTestId('prompt-input');
@@ -97,7 +97,7 @@ test('selects native models and permissions from the toolbar and restores confir
 test('sends immediate input to a working native turn, restores elapsed time and interrupts', async ({ page }, testInfo) => {
   const errors = collectBrowserErrors(page);
   await page.goto('/');
-  await page.getByTestId('provider-select').selectOption({ label: 'Codex (fixture)' });
+  await selectCodexHost(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
   await sendMessage(page, 'Hold this native turn for an interrupt.');
@@ -135,7 +135,7 @@ test('answers a Codex question and renders consecutive turns through the visible
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Agent conversations' })).toBeVisible();
-  await page.getByTestId('provider-select').selectOption({ label: 'Codex (fixture)' });
+  await selectCodexHost(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
 
@@ -204,4 +204,10 @@ function collectBrowserErrors(page: Page): { console: string[]; page: string[] }
   page.on('console', (message) => { if (message.type() === 'error') errors.console.push(message.text()); });
   page.on('pageerror', (error) => errors.page.push(error.message));
   return errors;
+}
+
+async function selectCodexHost(page: Page): Promise<void> {
+  const provider = page.getByTestId('provider-select');
+  await expect(provider.getByRole('option', { name: 'Codex (fixture) · Deterministic Codex Host · Online' })).toHaveCount(1);
+  await provider.selectOption({ label: 'Codex (fixture) · Deterministic Codex Host · Online' });
 }

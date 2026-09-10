@@ -12,6 +12,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly relay: AgentRemoteRelay;
   readonly installationId: string;
   readonly name: string;
+  readonly providers?: readonly { providerId: string; displayName: string }[];
   readonly remoteKey: string;
   readonly url: string;
   readonly resolveSession: RemoteHostPluginHostOptions['resolveSession'];
@@ -22,6 +23,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly maxQueuedBytes?: number;
   readonly reconnectBaseDelayMs?: number;
   readonly reconnectMaxDelayMs?: number;
+  readonly onStateChange?: (state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed') => void;
 }
 
 export interface RemoteHostUplinkClient {
@@ -59,6 +61,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
 
   function connect(): void {
     if (closed || terminal) return;
+    options.onStateChange?.('connecting');
     const socket = new WebSocket(options.url, {
       headers: { authorization: `Bearer ${options.remoteKey}` },
       maxPayload: UPLINK_MAX_FRAME_BYTES,
@@ -88,8 +91,9 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       socket.once('close', (code) => {
         if (code === 1008) {
           terminal = true;
+          options.onStateChange?.('rejected');
           if (!registered) rejectReady(new Error('Remote Host uplink authorization was rejected.'));
-        }
+        } else if (!closed && !terminal) options.onStateChange?.('disconnected');
         retire();
         resolve();
         scheduleReconnect();
@@ -97,7 +101,11 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     socket.on('error', () => retire());
     socket.on('unexpected-response', (_request, response) => {
-      if (response.statusCode === 401 || response.statusCode === 403) terminal = true;
+      if (response.statusCode === 401 || response.statusCode === 403) {
+        terminal = true;
+        options.onStateChange?.('rejected');
+        if (!registered) rejectReady(new Error('Remote Host uplink authorization was rejected.'));
+      }
       retire();
     });
     socket.once('open', () => {
@@ -105,7 +113,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       registrationDeadline = setTimeout(retire, registrationTimeout);
       writer.send(JSON.stringify({
         uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'register', installationId: options.installationId,
-        name: options.name, providerId: 'dsh',
+        name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providers }),
       }));
     });
     socket.on('message', (data, isBinary) => {
@@ -117,6 +125,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         if (decoded.value.type !== 'registered') { retire(); return; }
         clearTimeout(registrationDeadline);
         registered = true;
+        options.onStateChange?.('registered');
         attempts = 0;
         resolveReady({ hostId: decoded.value.hostId });
         return;
@@ -131,6 +140,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     close(): Promise<void> {
       if (closePromise) return closePromise;
       closed = true;
+      options.onStateChange?.('closed');
       clearTimeout(retry);
       rejectReady(new Error('Remote Host uplink closed before registration.'));
       retireConnection?.();
@@ -150,6 +160,17 @@ function validateConfiguration(options: RemoteHostUplinkClientOptions): void {
   }
   if (!options.remoteKey || options.remoteKey.length > 512 || !/^[!-~]+$/.test(options.remoteKey)) {
     throw new Error('Remote Host uplink requires a valid Remote Access Key.');
+  }
+  if (options.providers !== undefined) {
+    if (options.providers.length < 1 || options.providers.length > 64) throw new Error('Remote Host uplink requires between 1 and 64 providers.');
+    const ids = new Set<string>();
+    for (const provider of options.providers) {
+      for (const [name, value] of [['provider identity', provider.providerId], ['provider display name', provider.displayName]] as const) {
+        if (!value.trim() || value.length > 512) throw new Error(`Remote Host uplink requires a valid ${name}.`);
+      }
+      if (ids.has(provider.providerId)) throw new Error('Remote Host uplink provider identities must be unique.');
+      ids.add(provider.providerId);
+    }
   }
 }
 

@@ -37,3 +37,19 @@ it('restores mobile conversation actions when its Host reconnects while Context 
     vi.unstubAllGlobals();
   }
 });
+
+it('restores the Host and Provider directory for an opened remote conversation', async () => {
+  const baseUrl = 'http://127.0.0.1:6175';
+  const agentId = replicaState.agent!.id;
+  window.localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ agentId, nativeSessionId: 'native', providerId: 'codex', title: 'Codex conversation', hostId: 'host-1' }]));
+  const directory = new SessionDirectoryClient(baseUrl, vi.fn(async () => Response.json({ items: [], hasMore: false, revision: '1', workspaces: [] })) as typeof fetch);
+  try {
+    const container = await render(<App baseUrl={baseUrl} directory={directory} hostService={{
+      hosts: async () => ({ hosts: [{ id: 'host-1', name: 'Codex Host', online: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }] }), pair: vi.fn(),
+    }} initialState={{ ...replicaState, agent: { ...replicaState.agent!, providerId: 'codex' } }} initialSessionStatus="ready" />);
+    expect(container.querySelector<HTMLSelectElement>('#remote-host')?.value).toBe('host-1');
+    expect(container.querySelector<HTMLSelectElement>('#provider-select')?.selectedOptions[0]?.textContent).toContain('Codex · Codex Host');
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Codex · Codex Host');
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toContain('Online');
+  } finally { window.localStorage.removeItem(`agent-remote-opened:${baseUrl}`); }
+});

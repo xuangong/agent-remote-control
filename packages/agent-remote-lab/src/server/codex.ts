@@ -24,6 +24,8 @@ export interface CodexValidationServerOptions {
 
 export interface CodexProviderFixture {
   provider: AgentProviderAdapter;
+  directoryProvider: CodexAppServerProvider;
+  workspace: string;
   close(): Promise<void>;
 }
 
@@ -46,14 +48,17 @@ export async function createCodexProviderFixture(options: CodexValidationServerO
   writeFileSync(join(codexHome, 'prompts', 'remote-fixture-prompt.md'), '---\ndescription: Verify native prompt discovery\n---\n$ARGUMENTS');
   const responses = await startResponsesFixture();
   writeFileSync(join(codexHome, 'config.toml'), codexConfig(responses.url));
-  const provider = withCodexDefaults(new CodexAppServerProvider({
+  const directoryProvider = new CodexAppServerProvider({
     executable: options.executable,
     env: { CODEX_HOME: codexHome, OPENAI_API_KEY: 'borgee-local-fixture' },
     requestTimeoutMs: 15_000,
     collaborationMode: 'plan',
-  }), workspace);
+  });
+  const provider = withCodexDefaults(directoryProvider, workspace);
   return {
     provider,
+    directoryProvider,
+    workspace,
     async close(): Promise<void> {
       await responses.close();
       rmSync(codexHome, { recursive: true, force: true });

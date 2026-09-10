@@ -49,8 +49,7 @@ export class RemoteHostClient implements HostPairingService {
     return body as T;
   }
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
-    const result = await this.request<{ hosts: RemoteHost[] }>('hosts');
-    return { hosts: [{ id: 'local', name: 'Local runtime', online: true }, ...result.hosts] };
+    return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
   pair(): Promise<PairingInvitation> { return this.request('pairings', 'POST'); }
 }

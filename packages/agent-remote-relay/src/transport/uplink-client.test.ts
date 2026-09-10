@@ -51,19 +51,38 @@ describe('outbound Agent Remote uplink client', () => {
     }));
   });
 
+  it('registers a v2 Remote Host with provider descriptors', async () => {
+    const b = await broker();
+    const providers = [{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'example', displayName: 'Example' }];
+    const client = remote.createRemoteHostUplinkClient({ relay: b.relay, installationId: 'machine', name: 'Machine',
+      providers, remoteKey: 'remote-test-key', url: `ws://127.0.0.1:${b.address.port}/ws/remote-host`,
+      resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }) });
+    closeables.push(() => client.close());
+    await vi.waitFor(() => expect(b.messages).toContainEqual({ uplinkVersion: 2, type: 'register', installationId: 'machine', name: 'Machine', providers }));
+  });
+
+  it('rejects duplicate provider descriptors before connecting', async () => {
+    const b = await broker();
+    expect(() => remote.createRemoteHostUplinkClient({ relay: b.relay, installationId: 'machine', name: 'Machine',
+      providers: [{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'codex', displayName: 'Other' }],
+      remoteKey: 'remote-test-key', url: `ws://127.0.0.1:${b.address.port}/ws/remote-host`, resolveSession: () => undefined,
+      control: async () => ({ status: 404, body: '{}' }) })).toThrow(/unique/);
+  });
+
   it('does not reconnect after the broker closes a registered v2 Host for policy violation', async () => {
     const b = await broker();
+    const states: string[] = [];
     const client = remote.createRemoteHostUplinkClient({
       relay: b.relay, installationId: 'installation-one', name: 'Desk DSH', remoteKey: 'remote-test-key',
       url: `ws://127.0.0.1:${b.address.port}/ws/remote-host`, resolveSession: () => undefined,
-      control: async () => ({ status: 404, body: '{}' }), reconnectBaseDelayMs: 5,
+      control: async () => ({ status: 404, body: '{}' }), reconnectBaseDelayMs: 5, onStateChange: (state) => states.push(state),
     });
     closeables.push(() => client.close());
     await vi.waitFor(() => expect(b.connections).toHaveLength(1));
     b.connections[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host-one' }));
     await client.ready;
     b.connections[0]!.close(1008, 'Remote key revoked');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.waitFor(() => expect(states).toEqual(['connecting', 'registered', 'rejected']));
     expect(b.connections).toHaveLength(1);
   });
 

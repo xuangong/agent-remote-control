@@ -205,7 +205,7 @@ Open the test-owned UI at `http://127.0.0.1:6175` only while the command runs. T
 
 ### Codex app-server verification
 
-This path starts the real local Codex app-server, but deliberately points it at a deterministic local Responses fixture. It proves the Provider boundary, native question/answer correlation, continuation, reload, and single-copy replay; it does not prove authenticated model output or arbitrary tool execution.
+This path starts the real local Codex app-server inside an independent Agent Host process and points it at a deterministic local Responses fixture. The Lab backend remains a separate process and does not construct Codex. The checks prove the Provider boundary, native question/answer correlation, continuation, reload, single-copy replay, and Host re-pairing after a backend restart while preserving the native and Remote Agent identities. They do not prove authenticated model output or arbitrary tool execution.
 
 ```bash
 cd "$LAB_ROOT"

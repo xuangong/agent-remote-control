@@ -1,6 +1,7 @@
 export * from './agent-manager-events.js';
 export * from './agent-manager.js';
 export * from './relay.js';
+export * from './remote-host-catalog.js';
 export * from './resources/markdown-locators.js';
 export * from './resources/resource-ingestor.js';
 export * from './resources/resource-store.js';

@@ -1,30 +1,33 @@
 # Codex installation and debugging
 
-The local Codex Provider manages a separate `codex app-server` process for each open session. DSH uses its installed Host plugin; Codex uses JSON-RPC over the CLI's stdin/stdout. Both feed the same Provider SDK, Relay, browser Timeline, and `bdb` debugger.
+The independent Agent Host manages a separate `codex app-server` process for each open root session tree. DSH uses its installed Host plugin; Codex uses JSON-RPC over the CLI's stdin/stdout. Both feed the same Provider SDK, Relay, browser Timeline, and `bdb` debugger.
 
 ## Install and launch
 
-Run from the Agent Remote Control repository root with Node 22 or newer. Install the verified CLI locally using the Tencent registry:
+Run from the Agent Remote Control repository root with Node 22 or newer. Complete the repository dependency install and `pnpm build` from the [root setup](../../README.md#run-locally) before invoking Agent Host commands. Install the verified CLI locally using the Tencent registry:
 
 ```bash
 npm install --prefix .runtime/codex --registry=https://mirrors.cloud.tencent.com/npm/ --no-audit --no-fund @openai/codex@0.148.0
 .runtime/codex/node_modules/.bin/codex --version
 .runtime/codex/node_modules/.bin/codex login
-AGENT_REMOTE_CODEX_EXECUTABLE="$PWD/.runtime/codex/node_modules/.bin/codex" pnpm dev
+pnpm dev
 ```
 
 The login command is needed only if that native Codex profile is not already authenticated. Existing credentials and model/provider settings remain owned by Codex. The workbench does not copy them into its configuration or generate an API key.
 
-When the model provider in `~/.codex/config.toml` uses `OPENAI_API_KEY`, pass it to the launcher environment. For the local gateway that accepts the placeholder key `test`, launch with:
+In the browser, open **Pair Agent Host** and generate a key. Start the Host in another terminal. When the model provider in `~/.codex/config.toml` uses `OPENAI_API_KEY`, pass it to this Host environment:
 
 ```bash
-OPENAI_API_KEY=test \
-AGENT_REMOTE_CODEX_EXECUTABLE="$PWD/.runtime/codex/node_modules/.bin/codex" pnpm dev
+export AGENT_HOST_SERVER=http://127.0.0.1:5910
+export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
+export AGENT_HOST_CODEX="$PWD/.runtime/codex/node_modules/.bin/codex"
+export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
+OPENAI_API_KEY=test pnpm agent-host start
 ```
 
-The child process inherits this key and the native profile's configured base URL. This does not modify the profile or store credentials in the workbench.
+The Codex child inherits this key and the native profile's configured base URL. The broker never stores it. This does not modify the profile or store credentials in the workbench.
 
-Open `http://127.0.0.1:6175`, select **Codex**, choose the working directory, and click **Open session**. A fresh thread has an empty Timeline. Send a message to start its first turn. **Send message** also supplements a running turn; **Interrupt**, questions, and tool approvals use the same process and native thread. Planning is available when the CLI reports both planning and normal collaboration modes.
+Open `http://127.0.0.1:6175`, select **Codex · <Host name> · Online**, choose the working directory, and click **Open session**. A fresh thread has an empty Timeline. Send a message to start its first turn. **Send message** also supplements a running turn; **Interrupt**, questions, and tool approvals use the same process and native thread. Planning is available when the CLI reports both planning and normal collaboration modes.
 
 To use a separate profile, create its directory and log in with the same home before launching:
 
@@ -32,16 +35,18 @@ To use a separate profile, create its directory and log in with the same home be
 mkdir -p .runtime/codex-home
 CODEX_HOME="$PWD/.runtime/codex-home" .runtime/codex/node_modules/.bin/codex login
 AGENT_REMOTE_CODEX_HOME="$PWD/.runtime/codex-home" \
-AGENT_REMOTE_CODEX_EXECUTABLE="$PWD/.runtime/codex/node_modules/.bin/codex" \
-AGENT_REMOTE_WORKSPACE=/absolute/path/to/workspace \
-AGENT_REMOTE_PORT=6013 AGENT_REMOTE_WEB_PORT=6284 pnpm dev
+AGENT_HOST_CODEX="$PWD/.runtime/codex/node_modules/.bin/codex" \
+AGENT_HOST_WORKSPACE=/absolute/path/to/workspace \
+pnpm agent-host start
 ```
 
 ## Discover and resume
 
 **Discover sessions** lists up to 500 recent unarchived native threads, ordered by activity, from the selected Codex home. Root discovery reads metadata via `thread/list`; subagent threads are excluded from that root catalog. The console groups runtime-discovered children below their parents and keeps the known relationships while navigating between chats. Selecting a row explicitly resumes that original thread via `thread/resume` and reads its history via `thread/read`. Native files are not moved or deleted. New threads stay alive before their first turn because Codex may not persist an empty thread yet.
 
-This is control of processes owned by the workbench. It does not attach stdio to an already-running terminal or Codex desktop process. Avoid simultaneously continuing the same native thread in another application. A browser reconnect reuses the Relay-owned session; closing the server stops its child processes. After a server restart, discover a persisted thread and open it again. Submitted commands are never automatically replayed after an uncertain failure.
+This is control of processes owned by Agent Host. It does not attach stdio to an already-running terminal or Codex desktop process. Avoid simultaneously continuing the same native thread in another application. A browser reconnect reuses the Host-owned native session. Stopping the Host closes its app-server children. `pnpm agent-host start` creates the managed daemon and management socket. `pnpm agent-host foreground` is only for attached debugging and cannot accept a later daemon `pair` command. Restarting only the backend invalidates its process-local pairing key but does not stop a managed Host: generate another key and run `pnpm agent-host pair` with the new `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY`. The Host replaces its uplink without recreating native sessions. Submitted commands and unknown creation outcomes are never automatically replayed.
+
+The managed daemon appends startup, runtime, and native Codex diagnostics to `~/.agent-remote-control/agent-host/agent-host.log`, or `agent-host.log` under `AGENT_HOST_STATE_DIR` when that override is set. The state directory and log are private to the local user. Pairing and local management credentials are redacted from native diagnostic lines.
 
 ## Inspect and troubleshoot
 

@@ -5,7 +5,7 @@ import { render } from './test/setup.js';
 
 afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 
-async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready') {
+async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', discovered = false) {
   let online = true;
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
   vi.stubGlobal('fetch', async (input: URL | string, init?: RequestInit) => {
@@ -14,11 +14,19 @@ async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready') {
       ? { error: 'Local providers unavailable' }
       : { protocolVersion: '1.4.0', type: 'provider_list', payload: { providers: localProviders === 'empty' ? [] : [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }] } }, { status: localProviders === 'error' ? 503 : 200 });
     if (url.pathname.endsWith('/hosts')) return Response.json({ hosts: [
-      { id: 'desk', name: 'Desk DSH', providerId: 'dsh', online },
+      { id: 'desk', name: 'Desk Host', online, providers: [
+        { providerId: 'dsh', displayName: 'DeepSeek Harness' },
+        { providerId: 'codex', displayName: 'Codex CLI' },
+      ] },
+      { id: 'studio', name: 'Studio Host', online: true, providers: [
+        { providerId: 'codex', displayName: 'Codex CLI' },
+        { providerId: 'example', displayName: 'Example Agent' },
+      ] },
       { id: 'laptop', name: 'Laptop DSH', providerId: 'dsh', online: true },
     ] });
     if (url.pathname.endsWith('/workspaces')) return Response.json({ workspaces: [{ id: url.pathname.includes('/desk/') ? 'desk-workspace' : 'other-workspace', name: 'Project', path: '/project' }] });
-    if (url.pathname.endsWith('/catalog')) return Response.json({ items: [], hasMore: false, revision: '1' });
+    if (url.pathname.endsWith('/catalog')) return Response.json({ items: discovered ? [{ providerId: 'codex', nativeSessionId: 'native-codex', title: 'Existing Codex', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', state: 'idle' }] : [], hasMore: false, revision: '1' });
+    if (url.pathname.endsWith('/attach')) return Response.json({ agentId: 'remote-codex-agent', nativeSessionId: 'native-codex' });
     if (url.pathname.endsWith('/create')) {
       requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) });
       return Response.json({ code: 'invalid_request', error: 'Choose a workspace' }, { status: 400 });
@@ -38,7 +46,7 @@ async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready') {
 
 it('routes Provider creation to each selected DSH Host and clears settings when switching back to local', async () => {
   const f = await setup();
-  await f.selectHost('Desk DSH');
+  await f.selectHost('DeepSeek Harness · Desk Host');
   expect(f.container.querySelector<HTMLSelectElement>('#remote-host')?.value).toBe('desk');
   expect(f.container.querySelector('#session-mode')).toBeNull();
   const workspace = f.container.querySelector<HTMLSelectElement>('#session-workspace')!;
@@ -53,9 +61,51 @@ it('routes Provider creation to each selected DSH Host and clears settings when 
   expect(f.requests[2]).toEqual({ path: '/v1/remote/create', body: { providerId: 'recorded', requestId: expect.any(String) } });
 });
 
+it('renders every Provider on a Host and preserves Codex creation options', async () => {
+  const f = await setup();
+  expect([...f.provider().options].map((option) => option.textContent)).toContain('Codex CLI · Desk Host · Online');
+  await f.selectHost('Codex CLI · Desk Host');
+  const set = async (selector: string, value: string) => act(async () => {
+    const input = f.container.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!;
+    const prototype = input instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLSelectElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await set('#session-directory', '/tmp/codex-project');
+  await set('#session-model', 'gpt-5.1-codex');
+  await set('#session-effort', 'high');
+  await act(async () => f.create().click());
+  expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/desk/create', body: {
+    providerId: 'codex', requestId: expect.any(String), cwd: '/tmp/codex-project', model: 'gpt-5.1-codex', reasoningEffort: 'high',
+  } });
+});
+
+it('uses an advertised Provider when selecting a multi-provider Host directly', async () => {
+  const f = await setup();
+  await f.selectHost('Codex CLI · Desk Host');
+  const connectedHost = f.container.querySelector<HTMLSelectElement>('#remote-host')!;
+  await act(async () => { connectedHost.value = 'studio'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(f.provider().selectedOptions[0]?.textContent).toBe('Codex CLI · Studio Host · Online');
+  await act(async () => f.create().click());
+  expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/studio/create', body: { providerId: 'codex', requestId: expect.any(String) } });
+
+  await act(async () => { connectedHost.value = 'desk'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => { connectedHost.value = 'studio'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(f.provider().selectedOptions[0]?.textContent).toBe('Codex CLI · Studio Host · Online');
+  expect(f.provider().value).not.toContain('dsh');
+});
+
+it('uses the remote Host descriptor when opening an existing session', async () => {
+  const f = await setup('ready', true);
+  await f.selectHost('Codex CLI · Desk Host');
+  await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-session-row')].find((button) => button.textContent?.includes('Existing Codex'))!.click());
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Codex CLI · Desk Host');
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toContain('Online');
+});
+
 it.each(['empty', 'error'] as const)('keeps remote Providers usable when the local catalog is %s', async (status) => {
   const f = await setup(status);
-  await f.selectHost('Desk DSH');
+  await f.selectHost('DeepSeek Harness · Desk Host');
   expect(f.create().disabled).toBe(false);
   expect(f.container.textContent).not.toContain('No Provider is registered');
   await act(async () => f.create().click());
@@ -64,7 +114,7 @@ it.each(['empty', 'error'] as const)('keeps remote Providers usable when the loc
 
 it('shows an offline Host without trapping the Provider selector or showing a false opening state', async () => {
   const f = await setup();
-  await f.selectHost('Desk DSH');
+  await f.selectHost('DeepSeek Harness · Desk Host');
   f.disconnect();
   await act(async () => [...f.container.querySelectorAll('button')].find((button) => button.textContent === 'Retry Hosts')!.click());
   expect(f.create().disabled).toBe(true);

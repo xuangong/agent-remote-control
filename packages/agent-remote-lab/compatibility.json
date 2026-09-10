@@ -13,6 +13,9 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "scripts",
+        "packages/agent-host/package.json",
+        "packages/agent-host/src",
+        "packages/agent-host/tsconfig.json",
         "packages/agent-provider-codex/LICENSE",
         "packages/agent-provider-codex/NOTICE",
         "packages/agent-provider-codex/README.md",
@@ -65,7 +68,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:6d431d3364b539bb988a371b8178d4aad4049579c5a5d7e1778118d80a407a93"
+      "digest": "sha256:300e3dd61cda5524208732e7250871c95ca5eae0c59aede5db58d660525fab95"
     }
   },
   "providers": [

@@ -6,9 +6,9 @@ Agent Remote is the independent session-control and validation boundary that car
 
 ## Boundary
 
-This area covers `@borgee/agent-provider-sdk`, the DSH and Codex adapters, `@borgee/agent-remote-protocol`, `@borgee/agent-remote-relay`, `@borgee/agent-remote-web`, `@borgee/agent-remote-debugger`, `@agent-remote-control/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-remote-relay/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
+This area covers `@borgee/agent-provider-sdk`, the DSH and Codex adapters, `@borgee/agent-host`, `@borgee/agent-remote-protocol`, `@borgee/agent-remote-relay`, `@borgee/agent-remote-web`, `@borgee/agent-remote-debugger`, `@agent-remote-control/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-remote-relay/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
 
-The DSH runtime owns native catalog access, shared-session borrowing, and the outbound Host plugin. The Lab owns a local pairing broker and session directory alongside its public-protocol workbench; temporary Host keys and public bindings have no account or Borgee service dependency (`packages/agent-remote-dsh/src/agent-remote.ts:1`, `packages/agent-remote-lab/src/server/remote-host-broker.ts:20`, `packages/agent-remote-lab/src/server/session-directory.ts:16`).
+The Agent Host owns native Provider directories, runtime lifetime, and outbound uplink replacement. The DSH runtime owns its native catalog and outbound plugin. The Lab production server owns only the Recorded fixture, pairing broker, and public-protocol workbench; temporary Host keys and public bindings have no account or Borgee service dependency (`packages/agent-host/src/host.ts`, `packages/agent-remote-lab/src/server/local.ts`, `packages/agent-remote-lab/src/server/remote-host-broker.ts`).
 
 ## Collaborators
 
@@ -17,7 +17,7 @@ The DSH runtime owns native catalog access, shared-session borrowing, and the ou
 | Provider adapters | Provider adapters → Agent Remote | Normalize native observations to `AgentStreamEvent` and declare session capabilities. |
 | Protocol package | Protocol package → Agent Remote | Defines strict versioned public request, response, snapshot, Timeline, interaction, and resource messages. |
 | Product surfaces | Agent Remote → Product surfaces | Offers a pure React DOM timeline without selecting a product layout (`packages/agent-remote-web/src/react/AgentTimeline.tsx:21-70`). |
-| Native DSH Host | DSH Host → Local broker | Registers an installation, serves native catalog and workspace requests, and carries public session traffic over an outbound uplink. |
+| Agent Host | Agent Host → Local broker | Registers one or more Provider descriptors, serves native directories, and carries public session traffic over an outbound uplink. |
 | Terminal automation | Agent Remote → Terminal automation | Offers the same reconstructed public state and correlated operations through a CLI projection (`packages/agent-remote-debugger/src/commands.ts:148-267`). |
 
 ## Internal Architecture
@@ -32,7 +32,7 @@ flowchart LR
   replica --> renderer["React DOM timeline"]
   replica --> debugger["Terminal debugger projection"]
   renderer --> lab["Session control workbench"]
-  host["Native DSH Host"] --> broker["Local pairing broker"]
+  host["Independent Agent Host"] --> broker["Local pairing broker"]
   broker --> wire
   lab --> broker
 ```

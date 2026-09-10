@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
-export interface RemoteHost { id: string; name: string; online: boolean; providerId?: string }
+export interface HostProvider { providerId: string; displayName: string }
+export interface RemoteHost { id: string; name: string; online: boolean; providers?: HostProvider[]; providerId?: string }
 export interface PairingInvitation { id?: string; key: string; expiresAt: string; serverUrl: string; command?: string }
 export interface HostPairingService {
   invitation?: PairingInvitation;
@@ -38,16 +39,16 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
     <label htmlFor="remote-host">Connected Host</label>
     <select id="remote-host" value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
-      {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}</option>) : <option value="local">Local runtime</option>}
+      {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}</option>) : <option value="local">Recorded fixture</option>}
     </select>
     {onNewSession ? <button type="button" onClick={onNewSession}>New session</button> : null}
-    <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair DSH Host</button>
+    <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
     {showPairing ? <div className="lab-pairing-details">
-      <p className="lab-control-note">Generate a temporary key, then configure the DSH plugin on the machine you want to connect.</p>
+      <p className="lab-control-note">Generate a temporary key, then run <code>pnpm agent-host start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>pnpm agent-host pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>
       {invitation ? <>
-        <label htmlFor="pairing-configuration">DSH Host configuration</label>
+        <label htmlFor="pairing-configuration">Agent Host configuration</label>
         <textarea id="pairing-configuration" readOnly value={configuration} rows={5} spellCheck={false} />
         <p className="lab-control-note" role="status">{expired ? 'This key expired. Generate a new key to pair another Host.' : `Key expires ${new Date(invitation.expiresAt).toLocaleTimeString()}. Keep it private.`}</p>
         <button type="button" disabled={expired} onClick={() => {

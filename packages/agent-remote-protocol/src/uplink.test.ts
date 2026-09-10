@@ -24,6 +24,15 @@ describe('Agent Remote uplink codecs', () => {
       .toEqual({ status: 'ok', value: opened });
   });
 
+  it('accepts unique provider descriptors and rejects duplicate providers', () => {
+    const registration = { uplinkVersion: 2, type: 'register', installationId: 'machine', name: 'Machine', providers: [
+      { providerId: 'codex', displayName: 'Codex' }, { providerId: 'example', displayName: 'Example' },
+    ] } as const;
+    expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(registration))).toEqual({ status: 'ok', value: registration });
+    expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify({ ...registration, providers: [registration.providers[0], registration.providers[0]] })).status).toBe('rejected');
+    expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify({ ...registration, providerId: 'dsh' })).status).toBe('rejected');
+  });
+
   it('requires a Remote Session target for Host provider requests', () => {
     const request = {
       uplinkVersion: 2,

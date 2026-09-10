@@ -6,12 +6,14 @@ import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@bo
 import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
 type RpcResponse = { status: number; body: string };
+type ProviderDescriptor = { providerId: string; displayName: string };
 type Host = {
-  id: string; installationId: string; name: string; generation: number; socket?: WebSocket;
+  id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: WebSocket;
   pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>;
   streams: Map<string, { socket: WebSocket; ready: boolean; buffered: string[]; timer?: ReturnType<typeof setTimeout> }>;
 };
-type Binding = { hostId: string; nativeSessionId: string; agentId: string; generation: number; recovery?: Promise<void> };
+type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
+  parentNativeSessionId?: string; recovery?: Promise<void> };
 class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
@@ -20,6 +22,7 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
   const keys = new Map<string, { expires: number; installationId?: string }>();
   const hosts = new Map<string, Host>();
   const bindings = new Map<string, Binding>();
+  const nativeBindings = new Map<string, Binding>();
   const attached = new Map<string, Promise<Binding>>();
   const creations = new Map<string, { fingerprint: string; result: Promise<Binding> }>();
   const websockets = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
@@ -72,11 +75,15 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
         host = [...hosts.values()].find((value) => value.installationId === message.installationId);
         if (!host) {
           if (hosts.size >= 128) return socket.close(1013, 'Host capacity reached');
-          host = { id: randomUUID(), installationId: message.installationId, name: message.name, generation: 0, pending: new Map(), streams: new Map() };
+          const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
+          host = { id: randomUUID(), installationId: message.installationId, name: message.name, providers,
+            legacyDsh: 'providerId' in message, generation: 0, pending: new Map(), streams: new Map() };
           hosts.set(host.id, host);
         }
         if (host.socket) { const previous = host.socket; disconnected(host, previous); previous.close(1012, 'Host connection replaced'); }
-        host.socket = socket; host.name = message.name; host.generation += 1; clearTimeout(timer);
+        host.socket = socket; host.name = message.name;
+        host.providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
+        host.legacyDsh = 'providerId' in message; host.generation += 1; clearTimeout(timer);
         send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id }); return;
       }
       if (host.socket !== socket) return;
@@ -102,9 +109,26 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
     if (!binding.recovery) {
       const generation = host.generation;
       binding.recovery = (async () => {
-        const result = await rpc(host, 'POST', '/remote/attach', binding.agentId, JSON.stringify({ nativeSessionId: binding.nativeSessionId }));
+        if (binding.parentNativeSessionId) {
+          const parent = nativeBindings.get(JSON.stringify([host.id, binding.providerId, binding.parentNativeSessionId]));
+          if (!parent) throw new BrokerError(409, 'parent_binding_missing', 'The native parent session must be attached before its child.');
+          await recoverBinding(host, parent);
+        }
+        const path = binding.parentNativeSessionId ? '/remote/child/attach' : '/remote/attach';
+        const body = host.legacyDsh ? { nativeSessionId: binding.nativeSessionId } : {
+          providerId: binding.providerId, nativeSessionId: binding.nativeSessionId,
+          ...(binding.parentNativeSessionId ? { parentNativeSessionId: binding.parentNativeSessionId } : {}),
+        };
+        const result = await rpc(host, 'POST', path, binding.agentId, JSON.stringify(body));
         if (result.status >= 300) throw new BrokerError(result.status, 'session_unavailable', 'The native session could not be reattached after the host reconnected.');
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session was reattaching.');
+        if (!host.legacyDsh) {
+          let returned: Record<string, unknown>;
+          try { returned = JSON.parse(result.body); } catch { throw new BrokerError(502, 'invalid_host_response', 'The Remote Host returned invalid session identity.'); }
+          if (returned.agentId !== binding.agentId || returned.nativeSessionId !== binding.nativeSessionId) {
+            throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host returned a different binding during recovery.');
+          }
+        }
         binding.generation = generation;
       })();
       void binding.recovery.finally(() => { binding.recovery = undefined; }).catch(() => undefined);
@@ -112,32 +136,68 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
     await binding.recovery;
   }
   async function mutate(host: Host, action: string, body: Record<string, unknown>): Promise<Binding> {
-    if (action === 'create' && ['cwd', 'model', 'reasoningEffort', 'planning'].some((key) => body[key] !== undefined)) {
+    const providerId = host.legacyDsh ? 'dsh' : required(body.providerId, 'providerId');
+    if (!host.providers.some((provider) => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
+    if (host.legacyDsh && action === 'create' && ['cwd', 'model', 'reasoningEffort', 'planning'].some((key) => body[key] !== undefined)) {
       throw new BrokerError(400, 'unsupported_configuration', 'This Host uses native model settings and a registered workspace.');
     }
+    if (host.legacyDsh && action === 'child/attach') throw new BrokerError(400, 'unsupported_operation', 'This Host does not support native child attachment.');
     if (bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.');
-    const nativeSessionId = action === 'attach' ? required(body.nativeSessionId, 'nativeSessionId') : randomUUID();
-    const key = JSON.stringify([host.id, action === 'create' ? required(body.requestId, 'requestId') : nativeSessionId]);
+    const attaching = action !== 'create';
+    const nativeSessionId = attaching ? required(body.nativeSessionId, 'nativeSessionId') : randomUUID();
+    const parentNativeSessionId = action === 'child/attach' ? required(body.parentNativeSessionId, 'parentNativeSessionId') : undefined;
+    const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.requestId, 'requestId') : nativeSessionId]);
     const operation = async () => {
-      const agentId = randomUUID();
-      const request = { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) };
-      const result = await rpc(host, 'POST', `/remote/${action}`, agentId, JSON.stringify(request));
+      const proposedAgentId = randomUUID();
+      const generation = host.generation;
+      const request = host.legacyDsh
+        ? { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) }
+        : action === 'create'
+          ? { providerId, requestId: required(body.requestId, 'requestId'),
+              ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) }
+          : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+      const result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
+      if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
       if (result.status >= 300) {
         let detail: Record<string, unknown> = {};
         try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
         throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.');
       }
-      const binding = { hostId: host.id, nativeSessionId, agentId, generation: host.generation };
+      let returned: Record<string, unknown> = {};
+      try { returned = JSON.parse(result.body); } catch {
+        if (!host.legacyDsh) throw new BrokerError(502, 'invalid_host_response', 'The Remote Host returned invalid session identity.');
+      }
+      if (host.legacyDsh && returned.nativeSessionId !== undefined && returned.nativeSessionId !== nativeSessionId) {
+        throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
+      }
+      const actualNativeSessionId = host.legacyDsh ? nativeSessionId : requiredHostIdentity(returned.nativeSessionId, 'nativeSessionId');
+      const agentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
+      if (attaching && actualNativeSessionId !== nativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
+      const nativeKey = JSON.stringify([host.id, providerId, actualNativeSessionId]);
+      const byAgent = bindings.get(agentId); const byNative = nativeBindings.get(nativeKey);
+      if ((byAgent && !sameBinding(byAgent, host.id, providerId, actualNativeSessionId)) || (byNative && byNative.agentId !== agentId)) {
+        throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity conflicts with an existing binding.');
+      }
+      const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
+        generation: host.generation, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+      if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
+      binding.generation = host.generation;
       bindings.set(agentId, binding);
-      attached.set(JSON.stringify([host.id, nativeSessionId]), Promise.resolve(binding));
+      nativeBindings.set(nativeKey, binding);
+      attached.set(JSON.stringify([host.id, providerId, actualNativeSessionId]), Promise.resolve(binding));
       return binding;
     };
-    if (action === 'attach') {
+    if (attaching) {
       let result = attached.get(key);
       if (!result) { result = operation(); attached.set(key, result); void result.catch(() => attached.delete(key)); }
-      const binding = await result; await recoverBinding(host, binding); return binding;
+      const binding = await result;
+      if (binding.parentNativeSessionId !== parentNativeSessionId) {
+        throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
+      }
+      await recoverBinding(host, binding); return binding;
     }
-    const fingerprint = JSON.stringify({ workspaceId: body.workspaceId ?? null });
+    const fingerprint = JSON.stringify({ providerId, cwd: body.cwd ?? null, workspaceId: body.workspaceId ?? null,
+      model: body.model ?? null, reasoningEffort: body.reasoningEffort ?? null, planning: body.planning ?? null });
     let existing = creations.get(key);
     if (existing && existing.fingerprint !== fingerprint) throw new BrokerError(409, 'request_conflict', 'This request identity was already used with different settings.');
     if (!existing) {
@@ -153,7 +213,8 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
       const access = createLocalLabMutationPolicy(origin).validate(request);
       if (access.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
-    if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: [...hosts.values()].map(({ id, name, socket }) => ({ id, name, providerId: 'dsh', online: socket?.readyState === WebSocket.OPEN })) });
+    if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: [...hosts.values()].map(({ id, name, providers, legacyDsh, socket }) => ({ id, name, online: socket?.readyState === WebSocket.OPEN, providers,
+      ...(legacyDsh ? { providerId: 'dsh' } : providers.length === 1 ? { providerId: providers[0]!.providerId } : {}) })) });
     if (url.pathname === '/v1/remote/pairings' && request.method === 'POST') {
       await readBody(request);
       for (const [hash, value] of keys) if (value.expires <= Date.now()) keys.delete(hash);
@@ -163,16 +224,19 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
       const address = request.socket.localAddress?.includes(':') ? `[${request.socket.localAddress}]` : request.socket.localAddress;
       return json(response, 201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: `http://${address}:${request.socket.localPort}` });
     }
-    const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|models|attach|create)$/.exec(url.pathname);
+    const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {
       const host = requireHost(directory[1]!); const action = directory[2]!;
-      if (['catalog', 'catalog/revision', 'workspaces'].includes(action) && request.method === 'GET') {
-        const query = new URLSearchParams(url.search); query.delete('providerId');
+      if (action === 'models' && request.method === 'GET' && host.legacyDsh) return json(response, 200, { models: [] });
+      if (['catalog', 'catalog/revision', 'workspaces', 'models'].includes(action) && request.method === 'GET') {
+        const query = new URLSearchParams(url.search);
+        const providerId = query.get('providerId');
+        if (!host.legacyDsh && (!providerId || !host.providers.some((provider) => provider.providerId === providerId))) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
+        if (host.legacyDsh) query.delete('providerId');
         const result = await rpc(host, 'GET', `/remote/${action}${query.size ? '?' + query : ''}`);
         return rawJson(response, result);
       }
-      if (action === 'models' && request.method === 'GET') return json(response, 200, { models: [] });
-      if (['attach', 'create'].includes(action) && request.method === 'POST') { const binding = await mutate(host, action, await readBody(request)); return json(response, 200, { agentId: binding.agentId, nativeSessionId: binding.nativeSessionId }); }
+      if (['attach', 'child/attach', 'create'].includes(action) && request.method === 'POST') { const binding = await mutate(host, action, await readBody(request)); return json(response, 200, { agentId: binding.agentId, nativeSessionId: binding.nativeSessionId }); }
     }
     const session = /^\/v1\/sessions\/([^/]+)\/(snapshot|timeline)$/.exec(url.pathname);
     const binding = session && bindings.get(session[1]!);
@@ -244,7 +308,7 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
       for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket);
       for (const client of websockets.clients) client.terminate();
       await new Promise<void>((resolve) => websockets.close(() => resolve()));
-      keys.clear(); hosts.clear(); bindings.clear(); attached.clear(); creations.clear();
+      keys.clear(); hosts.clear(); bindings.clear(); nativeBindings.clear(); attached.clear(); creations.clear();
     },
   };
 }
@@ -254,6 +318,25 @@ function local(request: IncomingMessage, origin: string): boolean {
 function required(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 512) throw new BrokerError(400, 'invalid_request', `${name} must be a nonempty string.`);
   return value;
+}
+function requiredHostIdentity(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 512) throw new BrokerError(502, 'invalid_host_response', `The Remote Host returned an invalid ${name}.`);
+  return value;
+}
+function optionalSettings(body: Record<string, unknown>, names: readonly string[]): Record<string, string | boolean> {
+  const result: Record<string, string | boolean> = {};
+  for (const name of names) {
+    const value = body[name];
+    if (value === undefined) continue;
+    if (name === 'planning') {
+      if (typeof value !== 'boolean') throw new BrokerError(400, 'invalid_request', 'planning must be a boolean.');
+      result[name] = value;
+    } else result[name] = required(value, name);
+  }
+  return result;
+}
+function sameBinding(binding: Binding, hostId: string, providerId: string, nativeSessionId: string): boolean {
+  return binding.hostId === hostId && binding.providerId === providerId && binding.nativeSessionId === nativeSessionId;
 }
 async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const parts: Buffer[] = []; let size = 0;

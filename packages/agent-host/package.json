@@ -1,0 +1,21 @@
+{
+  "name": "@borgee/agent-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "agent-host": "./dist/cli.js" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000"
+  },
+  "dependencies": {
+    "@borgee/agent-provider-codex": "workspace:*",
+    "@borgee/agent-provider-sdk": "workspace:*",
+    "@borgee/agent-remote-protocol": "workspace:*",
+    "@borgee/agent-remote-relay": "workspace:*"
+  },
+  "devDependencies": { "@types/node": "24.13.3", "@types/ws": "^8.18.1", "typescript": "5.9.3", "vitest": "4.1.10", "ws": "^8.21.0" }
+}

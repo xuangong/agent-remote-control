@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 
 const mode = process.argv[2] ?? 'local';
-if (!['local', 'recorded', 'codex', 'codex-fixture', 'web'].includes(mode)) throw new Error('Usage: pnpm dev [local|codex|recorded|codex-fixture|web]');
+if (!['local', 'recorded', 'codex-fixture', 'web'].includes(mode)) throw new Error('Usage: pnpm dev [local|recorded|codex-fixture|web]. Start native Codex separately with pnpm agent-host start.');
 const host = '127.0.0.1';
 const relayPort = Number(process.env.AGENT_REMOTE_PORT ?? 5910);
 const webPort = Number(process.env.AGENT_REMOTE_WEB_PORT ?? 6175);
@@ -37,6 +37,7 @@ function start(args) {
 }
 process.once('SIGINT', () => shutdown());
 process.once('SIGTERM', () => shutdown());
-if (mode !== 'web') start(['tsx', `src/server/${mode === 'codex' ? 'local' : mode === 'codex-fixture' ? 'codex' : mode}.ts`]);
+if (mode !== 'web') start(['tsx', `src/server/${mode === 'codex-fixture' ? 'codex' : mode}.ts`]);
 start(['vite', '--host', host, '--port', String(webPort), '--strictPort']);
 console.log(`Agent Remote Control: http://${host}:${webPort}`);
+if (mode === 'local') console.log('Native Codex runs in an independent managed Agent Host: generate a pairing key in the workbench, then run pnpm agent-host start. Use foreground only for attached debugging; it has no daemon pairing control.');

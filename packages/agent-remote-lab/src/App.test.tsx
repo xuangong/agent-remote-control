@@ -171,10 +171,11 @@ describe('App', () => {
     />);
 
     expect(container.querySelector('[aria-label="Agent timeline"]')?.textContent).toContain('Visible tail.');
-    await act(async () => (container.querySelector('[aria-controls="lab-inspector"]') as HTMLButtonElement).click());
-    expect(container.querySelector('[aria-label="Replica Inspector"]')?.textContent).toContain('Recorded semantic Provider');
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+    await act(async () => container.querySelector<HTMLInputElement>('[aria-controls="lab-inspector"]')!.click());
+    expect(container.querySelector('#lab-inspector')?.textContent).toContain('Recorded semantic Provider');
     expect(container.querySelector('[data-testid="timeline-epoch"]')?.textContent).toBe('epoch-1');
-    (container.querySelector('.agent-load-older') as HTMLButtonElement).click();
+    await act(async () => { (container.querySelector('.agent-load-older') as HTMLButtonElement).click(); });
     expect(loadOlder).toHaveBeenCalledOnce();
   });
 
@@ -266,9 +267,10 @@ describe('App', () => {
     const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
     expect(container.querySelector('#lab-context')?.getAttribute('role')).toBeNull();
     const composer = container.querySelector('textarea');
-    const toggle = container.querySelector('[aria-controls="lab-inspector"]') as HTMLButtonElement;
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+    const toggle = container.querySelector('[aria-controls="lab-inspector"]') as HTMLInputElement;
     expect(toggle).not.toBeNull();
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.checked).toBe(false);
     expect((container.querySelector('#lab-inspector') as HTMLElement).hidden).toBe(true);
     await act(async () => toggle.click());
     expect((container.querySelector('#lab-inspector') as HTMLElement).hidden).toBe(false);
@@ -296,10 +298,11 @@ describe('App', () => {
     window.matchMedia = compactMatchMedia;
     try {
       const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
-      const toggle = container.querySelector('[aria-controls="lab-inspector"]') as HTMLButtonElement;
+      const toggle = container.querySelector('[aria-label="View options"]') as HTMLButtonElement;
 
       toggle.focus();
       await act(async () => toggle.click());
+      await act(async () => container.querySelector<HTMLInputElement>('[aria-controls="lab-inspector"]')!.click());
       const inspector = container.querySelector('#lab-inspector') as HTMLElement;
       expect(inspector.getAttribute('role')).toBe('dialog');
       expect(inspector.getAttribute('aria-modal')).toBe('true');

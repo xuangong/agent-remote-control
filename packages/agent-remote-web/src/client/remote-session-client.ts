@@ -56,6 +56,7 @@ export class RemoteSessionClient {
   private connection: RemoteConnection | undefined;
   private unsubscribeDiagnostic: (() => void) | undefined;
   private recovery: AbortController | undefined;
+  private olderHistory?: { controller: AbortController; promise: Promise<void> };
   private generation = 0;
   private requestCounter = 0;
   private reconnectAttempt = 0;
@@ -129,7 +130,22 @@ export class RemoteSessionClient {
     const state = this.replica.getState().timeline;
     const first = state.entries[0];
     if (!state.initialized || !state.epoch || !first || !state.hasOlder) return Promise.resolve();
-    return this.fetchTimeline(this.generation, 'before', { epoch: state.epoch, seq: first.seqStart });
+    if (this.olderHistory) return this.olderHistory.promise;
+    const generation = this.generation;
+    const controller = new AbortController();
+    const promise = this.transport.fetchTimeline(this.agentId, 'before', { epoch: state.epoch, seq: first.seqStart }, this.historyPageSize, { signal: controller.signal }).then((page) => {
+      if (generation !== this.generation || controller.signal.aborted) return;
+      if (page.payload.epoch !== this.replica.getState().timeline.epoch || page.payload.reset || page.payload.staleCursor || page.payload.gap) {
+        throw new Error('Earlier activity changed. Retry loading history.');
+      }
+      if (page.payload.error) throw new Error(page.payload.error);
+      const result = this.replica.applyHistory(page);
+      if (result.status !== 'applied' && result.status !== 'duplicate') throw new Error('Earlier activity could not be loaded.');
+    }).finally(() => {
+      if (this.olderHistory?.controller === controller) this.olderHistory = undefined;
+    });
+    this.olderHistory = { controller, promise };
+    return promise;
   }
 
   sendMessage(text: string, options?: AgentMessageOptions): Promise<CommandAcknowledgementMessage> {
@@ -475,6 +491,8 @@ export class RemoteSessionClient {
   }
 
   private stopConnection(): void {
+    this.olderHistory?.controller.abort();
+    this.olderHistory = undefined;
     this.cancelReconnect?.();
     this.cancelReconnect = undefined;
     this.retireRecovery();

@@ -9,8 +9,8 @@ const followingPositions = new Map<string, { following: boolean; scrollTop?: num
 let root: Root;
 let container: HTMLDivElement;
 
-function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, continuityIdentity, onRender }: { identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
-  const scroll = (useTimelineScroll as unknown as (identity: string, visible: boolean, positions: TimelineReadingPositions, continuity?: { identity: string; positions: Map<string, { following: boolean; scrollTop?: number }> }) => ReturnType<typeof useTimelineScroll>)(identity, true, positions, continuityIdentity ? { identity: continuityIdentity, positions: followingPositions } : undefined);
+function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, continuityIdentity, history, firstIndex = 0, onRender }: { history?: Parameters<typeof useTimelineScroll>[4]; firstIndex?: number; identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
+  const scroll = useTimelineScroll(identity, true, positions, continuityIdentity ? { identity: continuityIdentity, positions: followingPositions } : undefined, history);
   onRender?.(scroll.showLatest);
   return <div onWheel={scroll.onWheel} onScroll={scroll.onScroll} ref={(element) => {
     (scroll.viewportRef as MutableRefObject<HTMLDivElement | null>).current = element;
@@ -28,7 +28,7 @@ function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, conti
     });
     element.getBoundingClientRect = () => ({ top: 0, bottom: 100 } as DOMRect);
   }}>
-    <div ref={scroll.contentRef}>{empty ? null : Array.from({ length: entryCount }, (_, index) => <div key={index} data-entry-key={`${identity}:${index}`} ref={(element) => {
+    <div ref={scroll.contentRef}>{empty ? null : Array.from({ length: entryCount }, (_, index) => <div key={index} data-entry-key={`${identity}:${index + firstIndex}`} ref={(element) => {
       if (element) element.getBoundingClientRect = () => ({ top: index * 100 - scroll.viewportRef.current!.scrollTop, bottom: (index + 1) * 100 - scroll.viewportRef.current!.scrollTop } as DOMRect);
     }}>Message {index}</div>)}</div>
   </div>;
@@ -114,4 +114,37 @@ describe('useTimelineScroll reading memory', () => {
     act(() => root.render(<Surface identity="epoch-two" continuityIdentity="owner-and-public-route" />));
     expect(viewport().scrollTop).toBe(900);
   });
+});
+
+
+it('prefetches before reaching the top, shares the in-flight request, and preserves the visible entry after prepending', async () => {
+  let finish!: () => void;
+  const load = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const history = { hasOlder: true, cursor: '0', load };
+  act(() => root.render(<Surface history={history} />));
+  expect(load).not.toHaveBeenCalled();
+  await act(async () => readEarlier());
+  expect(viewport().scrollTop).toBe(240);
+  expect(load).toHaveBeenCalledTimes(1);
+  await act(async () => readEarlier());
+  expect(load).toHaveBeenCalledTimes(1);
+  act(() => { viewport().scrollTop = 180; viewport().dispatchEvent(new Event('scroll')); });
+  await act(async () => {
+    root.render(<Surface history={{ ...history, cursor: '-10' }} firstIndex={-10} entryCount={20} />);
+    finish();
+  });
+  expect(viewport().scrollTop).toBe(1180);
+  expect(load).toHaveBeenCalledTimes(1);
+});
+
+it('does not automatically retry a failed cursor or load an exhausted conversation', async () => {
+  const load = vi.fn(async () => { throw new Error('Offline'); });
+  const history = { hasOlder: true, cursor: '0', load };
+  act(() => root.render(<Surface history={history} />));
+  await act(async () => readEarlier());
+  await act(async () => readEarlier());
+  expect(load).toHaveBeenCalledTimes(1);
+  act(() => root.render(<Surface identity="another" history={{ ...history, hasOlder: false }} />));
+  await act(async () => readEarlier());
+  expect(load).toHaveBeenCalledTimes(1);
 });

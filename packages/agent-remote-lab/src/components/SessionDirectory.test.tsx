@@ -42,3 +42,23 @@ describe('SessionDirectory', () => {
     expect(onClose).toHaveBeenCalledWith('agent-1');
   });
 });
+
+it('shows unopened native children in discovery and preserves the opened hierarchy when a parent view closes', async () => {
+  const directory = new SessionDirectoryClient('http://localhost');
+  vi.spyOn(directory, 'list').mockResolvedValue({ items: [summary('root')], hasMore: false, revision: '1' });
+  const child = { ...summary('child'), parentNativeSessionId: 'root', createdAt: '2026-09-10', status: 'running' as const };
+  const opened = [{ agentId: 'child-agent', nativeSessionId: 'child', providerId: 'recorded', title: 'child', parentNativeSessionId: 'root' }];
+  const onOpenRelated = vi.fn();
+  const container = await render(<SessionDirectory directory={directory} providerId="recorded" opened={opened} known={[summary('root'), child]} activeAgentId="child-agent" busy={false} revision={0} onOpenRelated={onOpenRelated} onOpen={() => {}} onSelect={() => {}} onClose={() => {}} />);
+  const discovery = container.querySelector('[aria-label="Discover sessions"]')!;
+  expect(discovery.querySelector('.lab-session-tree .lab-session-tree')).toBeNull();
+  expect(discovery.querySelector('[aria-expanded="false"]')).not.toBeNull();
+  await act(async () => (discovery.querySelector('[aria-label="Expand root"]') as HTMLButtonElement).click());
+  const nested = discovery.querySelector('.lab-session-tree .lab-session-tree .lab-session-row') as HTMLButtonElement;
+  expect(nested.textContent).toContain('Working');
+  await act(async () => nested.click());
+  expect(onOpenRelated).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'child', parentNativeSessionId: 'root' }));
+  expect(container.querySelector('[aria-label="Opened sessions"]')?.textContent).toContain('View closed');
+  await act(async () => (discovery.querySelector('[aria-label="Collapse root"]') as HTMLButtonElement).click());
+  expect(discovery.querySelector('.lab-session-tree .lab-session-tree')).toBeNull();
+});

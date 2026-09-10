@@ -38,10 +38,11 @@ test('protects earlier reading from live updates and resumes following on reques
 
 test('anchors earlier history by visible entry while live content also arrives', async ({ page }) => {
   const timeline = page.getByTestId('timeline');
-  await timeline.press('Home');
-  const load = page.getByRole('button', { name: 'Load earlier activity' });
-  await load.click();
+  await timeline.hover();
+  await page.mouse.wheel(0, -100);
+  await timeline.evaluate((element) => { element.scrollTop = 500; });
   await expect(page.getByRole('button', { name: 'Loading earlier activity…' })).toBeDisabled();
+  expect(await timeline.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   const anchor = await visibleAnchor(timeline);
   await page.getByRole('button', { name: 'Append live' }).click();
   await page.getByRole('button', { name: 'Complete history with live' }).click();

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@borgee/agent-remote-protocol';
@@ -8,6 +8,7 @@ import { AgentActivityStatus } from './AgentActivityStatus.js';
 
 export interface AgentComposerProps {
   state?: AgentReplicaState;
+  sessionControls?: ReactNode;
   sessionKey?: string;
   disabled?: boolean;
   draft?: string;
@@ -37,7 +38,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string };
 }
 
-export function AgentComposer({ state, sessionKey, disabled = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource }: AgentComposerProps) {
+export function AgentComposer({ state, sessionControls, sessionKey, disabled = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource }: AgentComposerProps) {
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
   const currentAgent = useRef(agentId);
@@ -231,15 +232,6 @@ export function AgentComposer({ state, sessionKey, disabled = false, draft: cont
   }
 
   return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy}>
-    {state?.agent ? <AgentSessionSettings key={agentId} state={state} disabled={disabled} view={currentDraft.view} busy={busy}
-      onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
-      onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
-      onSelect={onSetSessionSetting} /> : null}
-    {state?.agent ? <AgentActivityStatus state={state} disabled={disabled}
-      commandPending={pending === 'command'}
-      interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
-      interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
-      onInterrupt={() => void run('cancel')} /> : null}
     <div className="agent-composer-input">
     {showCommands ? <div className="agent-command-menu">
       {capabilities?.commands !== true ? <p>This Provider does not expose native commands.</p>
@@ -268,7 +260,7 @@ export function AgentComposer({ state, sessionKey, disabled = false, draft: cont
       ref={inputRef}
       id="prompt-input"
       data-testid="prompt-input"
-      rows={2}
+      rows={1}
       value={text}
       onChange={(event) => { setText(event.target.value); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; refresh((value) => value + 1); }}
       onKeyDown={handleKeyDown}
@@ -282,12 +274,21 @@ export function AgentComposer({ state, sessionKey, disabled = false, draft: cont
     />
     </div>
     <div className="agent-composer-actions">
-      <p id="composer-hint" className="agent-composer-note">{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter for a new line · / for commands</p>
+      <p id="composer-hint" className="agent-composer-note agent-visually-hidden">{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter for a new line · / for commands</p>
       <div className="agent-composer-secondary-controls">
         <button type="button" aria-label="Open chat commands" disabled={!ready || busy} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); inputRef.current?.focus(); }}>/</button>
-        {canQueue ? <button type="button" data-testid="queue-submit" disabled={!ready || !capabilities?.sendMessage || !text.trim() || isCommand || Boolean(selectedSkill) || busy || !onSendMessage} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue for next turn'}</button> : null}
+        {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={!ready || !capabilities?.sendMessage || !text.trim() || isCommand || Boolean(selectedSkill) || busy || !onSendMessage} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}
       </div>
-      <button type="button" data-testid="prompt-submit" title={nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} disabled={!ready || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !text.trim() || (!isCommand && (capabilities?.sendMessage !== true || !onSendMessage)))} onClick={() => void run('send')}>{pending === 'send' ? 'Sending…' : 'Send message'}</button>
+      {state?.agent ? <AgentSessionSettings key={agentId} state={state} disabled={disabled} view={currentDraft.view} busy={busy}
+        onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
+        onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
+        onSelect={onSetSessionSetting}>{sessionControls}</AgentSessionSettings> : null}
+      {state?.agent ? <AgentActivityStatus state={state} disabled={disabled}
+        commandPending={pending === 'command'}
+        interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
+        interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
+        onInterrupt={() => void run('cancel')} /> : null}
+      <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} disabled={!ready || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !text.trim() || (!isCommand && (capabilities?.sendMessage !== true || !onSendMessage)))} onClick={() => void run('send')}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
     </div>
     {!ready ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
     {feedback ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}

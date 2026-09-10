@@ -1,3 +1,4 @@
+import { toggleViewPanel } from './view-options';
 import { expect, test } from '@playwright/test';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@borgee/agent-remote-relay';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
@@ -49,7 +50,7 @@ test('selects a paired Host as a Provider and creates through its real uplink', 
     await page.getByTestId('prompt-input').press('Enter');
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Hello from the Provider selector.' })).toBeVisible();
     await uplink.close();
-    if (compact) await page.getByRole('button', { name: 'Context', exact: true }).click();
+    if (compact) await toggleViewPanel(page, 'Sidebar');
     await expect(context().getByRole('region', { name: 'Lab scenario controls' })).toHaveCount(0);
     await expect(context().getByTestId('session-resume')).toBeDisabled();
     await context().getByRole('button', { name: 'Retry Hosts', exact: true }).click();

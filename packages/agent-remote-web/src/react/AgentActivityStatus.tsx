@@ -34,7 +34,7 @@ export function AgentActivityStatus({ state, disabled, commandPending = false, i
     return () => clearInterval(interval);
   }, [agent?.id, agent?.activeTurn?.turnId, startedAt, timed]);
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
-  return <div className="agent-activity" aria-label="Agent activity" data-testid="agent-activity">
+  return <div className="agent-activity" data-active={disabled || terminal || working || waiting || commandPending || agent?.status === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
     <div className="agent-activity-summary">
       <span className={`agent-presence agent-state-${disabled ? 'offline' : terminal ? agent?.status : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
       <span data-testid="agent-activity-label" aria-live="polite">{label}</span>

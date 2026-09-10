@@ -1,3 +1,4 @@
+import { toggleViewPanel } from './view-options';
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -9,7 +10,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   const compact = testInfo.project.name === 'chromium-mobile';
   const context = () => compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
   const showContext = async () => {
-    if (compact && !await context().isVisible()) await page.getByRole('button', { name: 'Context', exact: true }).click();
+    if (compact && !await context().isVisible()) await toggleViewPanel(page, 'Sidebar');
   };
   await expect(context().getByRole('region', { name: 'Discover sessions' })).toBeVisible();
   const discovery = () => context().getByRole('region', { name: 'Discover sessions' });
@@ -29,7 +30,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   await showContext();
   const opened = () => context().getByRole('region', { name: 'Opened sessions' });
   await expect(opened().locator('.lab-session-row')).toHaveCount(2);
-  await opened().getByRole('button', { name: `${existingTitle} recorded`, exact: true }).click();
+  await opened().getByRole('button').filter({ has: page.getByText(existingTitle, { exact: true }) }).click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
   await expect(page.getByTestId('prompt-input')).toHaveValue('A draft to retain while switching sessions.');
   await showContext();
@@ -39,6 +40,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   await showContext();
   await expect(opened().locator('.lab-session-row')).toHaveCount(2);
   if (compact) await context().getByRole('button', { name: 'Close Context' }).click();
+  await page.getByLabel('Connection details', { exact: true }).click();
   await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
   await expect(page.getByTestId('prompt-input')).toHaveValue('A draft to retain while switching sessions.');

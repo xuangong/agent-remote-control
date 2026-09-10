@@ -39,7 +39,7 @@ AGENT_REMOTE_PORT=6013 AGENT_REMOTE_WEB_PORT=6284 pnpm dev
 
 ## Discover and resume
 
-**Discover sessions** lists up to 500 recent unarchived native threads, ordered by activity, from the selected Codex home. Discovery reads metadata via `thread/list`; subagent threads are excluded. Selecting a row explicitly resumes that original thread via `thread/resume` and reads its history via `thread/read`. Native files are not moved or deleted. New threads stay alive before their first turn because Codex may not persist an empty thread yet.
+**Discover sessions** lists up to 500 recent unarchived native threads, ordered by activity, from the selected Codex home. Root discovery reads metadata via `thread/list`; subagent threads are excluded from that root catalog. The console groups runtime-discovered children below their parents and keeps the known relationships while navigating between chats. Selecting a row explicitly resumes that original thread via `thread/resume` and reads its history via `thread/read`. Native files are not moved or deleted. New threads stay alive before their first turn because Codex may not persist an empty thread yet.
 
 This is control of processes owned by the workbench. It does not attach stdio to an already-running terminal or Codex desktop process. Avoid simultaneously continuing the same native thread in another application. A browser reconnect reuses the Relay-owned session; closing the server stops its child processes. After a server restart, discover a persisted thread and open it again. Submitted commands are never automatically replayed after an uncertain failure.
 

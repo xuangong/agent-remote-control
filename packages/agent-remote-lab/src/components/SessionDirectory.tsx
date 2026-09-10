@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { openedEntry, sessionForest, sessionKey, sessionStatusLabel, type SessionEntry } from '../session-tree.js';
+import { SessionTree } from './SessionTree.js';
 import { DirectoryError, type CreateSessionOptions, type OpenedSession, type SessionCatalogPage, type SessionDirectoryClient, type SessionSummary, type SessionWorkspace } from '../directory-client.js';
 
 interface Props {
@@ -6,6 +8,9 @@ interface Props {
   providerId: string;
   activeAgentId?: string;
   opened: readonly OpenedSession[];
+  known?: readonly SessionEntry[];
+  hostId?: string;
+  onOpenRelated?(item: SessionEntry): void;
   busy: boolean;
   revision: number;
   onOpen(item: SessionSummary): void;
@@ -13,7 +18,7 @@ interface Props {
   onClose(agentId: string): void;
 }
 
-export function SessionDirectory({ directory, providerId, activeAgentId, opened, busy, revision, onOpen, onSelect, onClose }: Props) {
+export function SessionDirectory({ directory, providerId, activeAgentId, opened, known = [], hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
   const [page, setPage] = useState<SessionCatalogPage | undefined>(directory.cachedPages.get(providerId));
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -83,28 +88,43 @@ export function SessionDirectory({ directory, providerId, activeAgentId, opened,
     return () => { retired = true; window.clearInterval(timer); };
   }, [providerId, directory]);
 
+  const openedTree = sessionForest(opened.map((item) => openedEntry(item, known)), known);
+  const discovered = new Map<string, SessionEntry>((page?.items ?? []).map((item) => [sessionKey({ ...item, hostId }), { ...item, hostId }]));
+  for (const item of known) {
+    if ((item.hostId ?? 'local') !== hostId || item.providerId !== providerId) continue;
+    if (item.parentNativeSessionId || discovered.has(sessionKey(item))) discovered.set(sessionKey(item), { ...discovered.get(sessionKey(item)), ...item });
+  }
+  const discoveredTree = sessionForest([...discovered.values()], known);
+  const active = known.find((item) => item.agentId === activeAgentId) ?? opened.find((item) => item.agentId === activeAgentId);
+  const activeKey = active ? sessionKey(active) : undefined;
+  const openRelated = (item: SessionEntry) => {
+    if (onOpenRelated) onOpenRelated(item);
+    else { const saved = opened.find((entry) => sessionKey(entry) === sessionKey(item)); if (saved) onSelect(saved); }
+  };
   return <>
     {opened.length > 0 ? <section className="lab-session-directory" aria-label="Opened sessions">
       <div className="lab-directory-heading"><h2>Opened sessions</h2><span>{opened.length}</span></div>
-      <ul className="lab-session-list">{opened.map((item) => <li key={item.agentId} className="lab-opened-session">
-        <button type="button" className="lab-session-row" aria-current={item.agentId === activeAgentId ? 'page' : undefined} disabled={busy} onClick={() => onSelect(item)}><strong>{item.title}</strong><small>{item.providerId}</small></button>
-        <button type="button" className="lab-session-close" aria-label={`Close ${item.title}`} title="Remove from opened sessions" onClick={() => onClose(item.agentId)}>×</button>
-      </li>)}</ul>
+      <SessionTree nodes={openedTree} activeKey={activeKey} renderRow={(item, placeholder) => <>
+        <button type="button" className="lab-session-row" aria-current={item.agentId === activeAgentId ? 'page' : undefined} disabled={busy || (placeholder && !onOpenRelated)} onClick={() => { const saved = opened.find((entry) => entry.agentId === item.agentId); if (saved && !placeholder) onSelect(saved); else openRelated(item); }}><strong>{item.title}</strong><small>{placeholder ? 'Parent · View closed' : item.role ?? item.providerId}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small></button>
+        {!placeholder && item.agentId ? <button type="button" className="lab-session-close" aria-label={`Close ${item.title}`} title="Remove from opened sessions" onClick={() => onClose(item.agentId!)}>×</button> : null}
+      </>} />
     </section> : null}
     <section className="lab-session-directory" aria-label="Discover sessions">
       <div className="lab-directory-heading"><h2>Discover sessions</h2><button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div>
-      <p className="lab-control-note">Latest activity first</p>
+      <p className="lab-control-note">Roots by activity · Subagents by creation</p>
       {updates && !expired ? <button type="button" className="lab-directory-updates" onClick={() => void load()} disabled={loading}>Updates available · Refresh</button> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       {loading ? <p className="lab-control-note" role="status">Loading sessions…</p> : null}
-      {!loading && !failure && page?.items.length === 0 ? <p className="lab-control-note">No sessions yet. Open a new session below.</p> : null}
-      <ul className="lab-session-list">{page?.items.map((item) => <li key={item.nativeSessionId}>
-        <button type="button" className="lab-session-row" disabled={busy || item.state === 'unavailable'} onClick={() => onOpen(item)} title={item.workspace}>
+      {!loading && !failure && discoveredTree.length === 0 ? <p className="lab-control-note">No sessions yet. Open a new session below.</p> : null}
+      <SessionTree nodes={discoveredTree} activeKey={activeKey} renderRow={(item, placeholder) => {
+        const summary = page?.items.find((entry) => entry.nativeSessionId === item.nativeSessionId);
+        const related = Boolean(item.parentNativeSessionId) || !summary;
+        return <button type="button" className="lab-session-row" aria-current={sessionKey(item) === activeKey ? 'page' : undefined} disabled={busy || (related ? !onOpenRelated : summary?.state === 'unavailable')} onClick={() => { if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>
           <strong>{item.title || item.nativeSessionId}</strong>
-          <small>{item.workspace ?? item.providerId}{item.model ? ` · ${item.model}` : ''}</small>
-          <span><i className={`lab-session-indicator lab-session-${item.state}`} aria-hidden="true" />{stateLabel(item.state)}<time dateTime={item.updatedAt}>{formatTime(item.updatedAt)}</time></span>
-        </button>
-      </li>)}</ul>
+          <small>{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
+          <span><i className={`lab-session-indicator lab-session-${item.status ?? summary?.state ?? 'unavailable'}`} aria-hidden="true" />{sessionStatusLabel(item) || (summary ? stateLabel(summary.state) : placeholder ? 'Parent session' : 'Discovered')}{summary ? <time dateTime={summary.updatedAt}>{formatTime(summary.updatedAt)}</time> : null}</span>
+        </button>;
+      }} />
       {page?.hasMore ? <button type="button" className="lab-directory-more" disabled={loading || expired} onClick={() => void load(page.nextCursor)}>Load more sessions</button> : null}
     </section>
   </>;

@@ -18,7 +18,7 @@ describe('LiveControlPanel', () => {
     });
     expect(sendMessage).toHaveBeenCalledExactlyOnceWith('A new message');
     expect(input.value).toBe('  A new message  ');
-    expect(container.querySelector('[data-testid="prompt-submit"]')?.textContent).toBe('Sending…');
+    expect(container.querySelector('[data-testid="prompt-submit"]')?.getAttribute('aria-label')).toBe('Sending…');
     await act(async () => acknowledgement.resolve());
     expect(input.value).toBe('');
     expect(document.activeElement).toBe(input);

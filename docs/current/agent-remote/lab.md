@@ -51,6 +51,10 @@ The shell keeps Workbench mounted because its Timeline, composer, and interactio
 
 The Lab supplies its conversation layout and callback wiring; shared Web components own command drafts, planning controls, scroll anchoring, and semantic Timeline rendering (`packages/agent-remote-lab/src/components/LabWorkbench.tsx:20-82`, `packages/agent-remote-web/src/react/useTimelineScroll.ts:5`, `packages/agent-remote-web/src/react/AgentComposer.tsx:21`).
 
+The app header and desktop Context rail can be hidden independently. A single View menu stays at a fixed top-left position in every layout and contains Header, Sidebar, and Replica Inspector visibility checkboxes. Show all selects every panel on desktop; Hide all clears the panel selection in any layout. Compact layouts open one supporting drawer at a time. The surrounding heading reserves its space without adding a toolbar row. Drafts and the active view remain mounted. Compact supporting rails keep their focus-managed drawer behavior and return focus to View when dismissed.
+
+The conversation header shares one row with its parent path and a collapsed Sessions popover. Connection identifiers and reconnect live in the app-bar disclosure. The composer contains its message field and a single wrapping toolbar; model and permission settings open above it, while detailed status and planning appear under Status. Working time and interrupt remain visible during active operations. Popovers do not resize the Timeline (`packages/agent-remote-lab/src/components/LabWorkbench.tsx`, `packages/agent-remote-lab/src/components/ChatSessionManager.tsx`, `packages/agent-remote-lab/src/app.css`).
+
 Conversation styling gives adjacent tool, reasoning, and compaction entries compact spacing while preserving message and interaction-card reading space. The shared disclosures retain keyboard controls, and coarse-pointer layouts retain larger touch targets (`packages/agent-remote-lab/src/app.css:410-449`, `packages/agent-remote-lab/src/app.css:582-598`).
 
 ## Key Flows
@@ -165,4 +169,14 @@ The opt-in `AGENT_REMOTE_TEST_INTERACTIONS=1` Playwright mode launches a determi
 
 Selecting a child preserves the parent's draft and opens the child's existing chat. Navigation releases no native runtime. Parent navigation remains available, and the normal composer uses the child's actual capability snapshot.
 
+Opened sessions and Discover sessions render a shared hierarchy with groups collapsed by default keyed by Host, Provider, and native session identity. Catalog roots retain activity order; runtime-discovered children use creation order and stable discovery order for ties. Discovery includes known children before they are opened, without requesting another native runtime. Missing catalog pages or closed parent views retain ancestor rows. Closing an opened row removes only that view's directory entry.
+
+The chat Sessions component starts collapsed and reveals the current session family when opened, including parent and sibling navigation, native status summaries, and saved-history availability. Relationship observations are retained while switching chats; only the active chat has a client subscription, so inactive family status reflects its last received observation until refreshed through the parent or child. Drafts and native control capabilities remain scoped to each chat. No additional Remote protocol fields or lifecycle actions are introduced (`packages/agent-remote-lab/src/session-tree.ts`, `packages/agent-remote-lab/src/hooks/useSessionEntries.ts`, `packages/agent-remote-lab/src/components/ChatSessionManager.tsx`).
+
 The directory-backed Resume action reattaches the existing native session instead of creating a duplicate runtime. Child views disable generic Resume and retain the parent attachment path. Direct debugger-created sessions must first be opened through the directory before using its child attachment route.
+
+
+The conversation layout keeps long session paths on one line, uses compact message spacing, and places settings beside activity controls at desktop widths. The composer starts with one line and grows with its draft; narrow layouts stack controls and retain touch-sized actions. Session groups stay collapsed until explicitly expanded, including when their active child changes.
+
+
+The workbench requests 100 projected Timeline entries per page and prefetches older history as the reader approaches the loaded beginning. Manual loading remains available, shares the prefetch request, and exposes pending or failed history independently of the live connection. Prepending keeps the latest visible entry offset, including when the reader keeps moving during the request or new live activity arrives.

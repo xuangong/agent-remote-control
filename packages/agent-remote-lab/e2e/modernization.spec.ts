@@ -1,3 +1,4 @@
+import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 interface Rgba { red: number; green: number; blue: number; alpha: number }
@@ -16,24 +17,122 @@ test('names the active connection state without relying on its marker', async ({
   expectBrowserErrors(browserErrors);
 });
 
+test('opens session settings above the composer without moving the conversation', async ({ page }) => {
+  await openRecordedSession(page);
+  const timeline = page.getByTestId('timeline');
+  const before = (await timeline.boundingBox())!;
+  const model = page.getByTestId('session-model-button');
+  await model.click();
+  await expect(page.getByRole('region', { name: 'Model settings', exact: true })).toBeVisible();
+  expect((await timeline.boundingBox())!.height).toBe(before.height);
+  await model.press('Escape');
+  await expect(page.getByRole('region', { name: 'Model settings', exact: true })).toHaveCount(0);
+  await expect(model).toBeFocused();
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  await expect(page.getByRole('switch', { name: 'Planning mode' })).toBeVisible();
+  await page.getByTestId('prompt-input').click();
+  await expect(page.getByRole('region', { name: 'Session status', exact: true })).toHaveCount(0);
+  const send = (await page.getByTestId('prompt-submit').boundingBox())!;
+  const composer = (await page.locator('.agent-composer').boundingBox())!;
+  expect(send.x + send.width).toBeLessThanOrEqual(composer.x + composer.width);
+  expect(send.y + send.height).toBeLessThanOrEqual(composer.y + composer.height);
+  expect(composer.x + composer.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+});
+
+test('keeps one View entry fixed while toggling panels and preserving the chat', async ({ page }, testInfo) => {
+  await openRecordedSession(page);
+  const input = page.getByTestId('prompt-input');
+  await input.fill('Keep this draft');
+  const trigger = page.getByRole('button', { name: 'View options', exact: true });
+  const origin = (await trigger.boundingBox())!;
+  const assertFixed = async () => {
+    await expect(trigger).toHaveCount(1);
+    const bounds = (await trigger.boundingBox())!;
+    expect({ x: bounds.x, y: bounds.y }).toEqual({ x: origin.x, y: origin.y });
+  };
+  const timeline = page.getByTestId('timeline');
+  const height = (await timeline.boundingBox())!.height;
+  await toggleViewPanel(page, 'Header');
+  await expect(page.locator('.lab-app-bar')).toBeHidden();
+  expect((await timeline.boundingBox())!.height).toBeGreaterThan(height);
+  await assertFixed();
+  await expect(trigger).toBeFocused();
+  if (testInfo.project.name === 'chromium-desktop') {
+    const width = (await timeline.boundingBox())!.width;
+    await toggleViewPanel(page, 'Sidebar');
+    await expect(page.locator('#lab-context')).toBeHidden();
+    expect((await timeline.boundingBox())!.width).toBeGreaterThan(width);
+    await assertFixed();
+    await toggleViewPanel(page, 'Header');
+    await assertFixed();
+    await toggleViewPanel(page, 'Sidebar');
+    await expect(page.locator('#lab-context')).toBeVisible();
+    await assertFixed();
+  } else {
+    await toggleViewPanel(page, 'Sidebar');
+    await expect(page.getByRole('dialog', { name: 'Context' })).toBeVisible();
+    await page.getByRole('button', { name: 'Close Context' }).press('Escape');
+    await expect(trigger).toBeFocused();
+    await assertFixed();
+    await toggleViewPanel(page, 'Header');
+  }
+  await expect(input).toHaveValue('Keep this draft');
+  await page.getByRole('tab', { name: 'Trace', exact: true }).click();
+  await toggleViewPanel(page, 'Header');
+  await assertFixed();
+  await toggleViewPanel(page, 'Replica Inspector');
+  await expect(page.locator('#lab-inspector')).toBeVisible();
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Close Replica Inspector' }).press('Escape');
+  else await toggleViewPanel(page, 'Replica Inspector');
+  await toggleViewPanel(page, 'Header');
+  await expect(page.getByRole('tab', { name: 'Trace', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await trigger.click();
+  await expect(page.getByRole('checkbox', { name: 'Header', exact: true })).toBeChecked();
+  const options = page.getByRole('region', { name: 'View options', exact: true });
+  await options.getByRole('button', { name: 'Hide all', exact: true }).click();
+  await expect(options.locator('input:checked')).toHaveCount(0);
+  await expect(page.locator('.lab-app-bar')).toBeHidden();
+  await expect(page.locator('#lab-context')).toBeHidden();
+  await expect(page.locator('#lab-inspector')).toBeHidden();
+  await assertFixed();
+  if (testInfo.project.name === 'chromium-desktop') {
+    await options.getByRole('button', { name: 'Show all', exact: true }).click();
+    await expect(options.locator('input:checked')).toHaveCount(3);
+    await expect(page.locator('.lab-app-bar')).toBeVisible();
+    await expect(page.locator('#lab-context')).toBeVisible();
+    await expect(page.locator('#lab-inspector')).toBeVisible();
+    await options.getByRole('button', { name: 'Show all', exact: true }).click();
+    await expect(options.locator('input:checked')).toHaveCount(3);
+    await options.getByRole('button', { name: 'Hide all', exact: true }).click();
+    await expect(options.locator('input:checked')).toHaveCount(0);
+    await options.getByRole('button', { name: 'Show all', exact: true }).click();
+  } else {
+    await expect(options.getByRole('button', { name: 'Show all', exact: true })).toHaveCount(0);
+    await options.getByRole('checkbox', { name: 'Header', exact: true }).check();
+  }
+  await assertFixed();
+  await page.getByRole('tab', { name: 'Trace', exact: true }).click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('keeps Context and Replica Inspector keyboard-contained on compact layouts', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-mobile');
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
 
   await page.getByRole('button', { name: 'Close Context' }).press('Escape');
-  const contextTrigger = page.getByRole('button', { name: 'Context', exact: true });
+  const contextTrigger = page.getByRole('button', { name: 'View options', exact: true });
   await expect(contextTrigger).toBeFocused();
-  await contextTrigger.click();
+  await toggleViewPanel(page, 'Sidebar');
   await assertKeyboardContained(page, 'Context', contextTrigger);
 
-  await contextTrigger.click();
+  await toggleViewPanel(page, 'Sidebar');
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
   await page.getByTestId('session-create').click();
-  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(3);
+  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
 
-  const inspectorTrigger = page.getByRole('button', { name: 'Replica Inspector', exact: true });
-  await inspectorTrigger.click();
+  const inspectorTrigger = page.getByRole('button', { name: 'View options', exact: true });
+  await toggleViewPanel(page, 'Replica Inspector');
   await assertKeyboardContained(page, 'Replica Inspector', inspectorTrigger);
   expectBrowserErrors(browserErrors);
 });
@@ -42,7 +141,7 @@ test('keeps command feedback visible in compact layout', async ({ page }, testIn
   test.skip(testInfo.project.name !== 'chromium-mobile');
   const browserErrors = collectBrowserErrors(page);
   await openRecordedSession(page);
-  await page.getByRole('button', { name: 'Context', exact: true }).click();
+  await toggleViewPanel(page, 'Sidebar');
   await page.getByTestId('playback-advance').click();
 
   const feedback = page.getByText('Recorded observation advanced.');
@@ -64,9 +163,8 @@ test('meets AA contrast for operational text and primary actions', async ({ page
   });
   const primaryContrast = await renderedContrast(primaryAction);
   await primaryAction.click();
-  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(3);
+  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
 
-  await page.getByRole('button', { name: 'Load earlier activity' }).click();
   const failedResource = page.locator('.agent-resources li').filter({ hasText: 'artifacts/failed.txt' });
   const errorText = failedResource.getByText('Failed', { exact: true });
   await expect(errorText).toBeVisible();
@@ -129,7 +227,7 @@ test('renders default control boundaries with three-to-one contrast', async ({ p
   await page.getByTestId('playback-advance').click();
 
   const controls = {
-    button: page.getByRole('button', { name: 'Load earlier activity' }),
+    button: page.getByRole('button', { name: 'Load resource', exact: true }),
     select: page.getByTestId('provider-select'),
     input: page.locator('.agent-question-custom input'),
   };
@@ -145,17 +243,17 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
   await assertMinimumSize(page.locator('.lab-app-bar button'), 44);
+  await assertMinimumSize(page.getByRole('button', { name: 'View options', exact: true, includeHidden: true }), 44);
   await assertMinimumSize(page.locator('.lab-provider-controls button'), 44);
 
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
   await page.getByTestId('session-create').click();
-  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(3);
-  await page.getByRole('button', { name: 'Load earlier activity' }).click();
+  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
   await page.getByRole('button', { name: 'Load resource' }).click();
   const resourceLinks = page.getByRole('link', { name: /resource/ });
   await expect(resourceLinks.first()).toBeVisible();
   await assertMinimumSize(resourceLinks, 44);
-  await page.getByRole('button', { name: 'Context', exact: true }).click();
+  await toggleViewPanel(page, 'Sidebar');
   await page.getByTestId('playback-advance').click();
   await page.getByRole('button', { name: 'Close Context' }).click();
 
@@ -169,7 +267,7 @@ async function openRecordedSession(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
   await page.getByTestId('session-create').click();
-  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(3);
+  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
 }
 
 async function assertKeyboardContained(page: Page, label: string, trigger: Locator): Promise<void> {

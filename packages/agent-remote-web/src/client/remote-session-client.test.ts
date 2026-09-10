@@ -1006,3 +1006,47 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+it('loads older pages once without interrupting live readiness and retries history failures locally', async () => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica);
+  const statuses: string[] = [];
+  client.subscribeStatus((status) => statuses.push(status));
+  client.start(); transport.open();
+  transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+  transport.emit(snapshot());
+  transport.emit({ protocolVersion: '1.4.0', type: 'timeline_subscribed', payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] } });
+  transport.resolveTimeline(page('tail', [entry(10, 10, 'Current')], { hasOlder: true }));
+  await transport.settle();
+  statuses.length = 0;
+  const first = client.loadOlder();
+  expect(client.loadOlder()).toBe(first);
+  const failed = expect(first).rejects.toThrow('Offline');
+  transport.rejectTimeline(new Error('Offline'));
+  await failed;
+  expect(statuses).toEqual([]);
+  expect(transport.connections).toBe(1);
+  const retried = client.loadOlder();
+  transport.emit(live(11, 'Live text'));
+  transport.resolveTimeline(page('before', [entry(1, 9, 'Earlier')], { window: { minSeq: 1, maxSeq: 11, nextSeq: 12 } }));
+  await retried;
+  expect(replica.getState().timeline.entries[0]?.seqStart).toBe(1);
+  expect(replica.getState().timeline.nextSeq).toBe(12);
+  expect(statuses).toEqual([]);
+  client.stop();
+});
+
+it.each([{ gap: true }, { error: 'History is unavailable' }, { epoch: 'obsolete-epoch' }])('keeps the loaded conversation intact when an older page is unusable: %j', async (response) => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  replica.applySnapshot(snapshot());
+  replica.applyHistory(page('tail', [entry(10, 10, 'Keep reading')], { hasOlder: true }));
+  const client = new RemoteSessionClient('agent-one', transport, replica);
+  const pending = client.loadOlder();
+  const failure = expect(pending).rejects.toThrow();
+  transport.resolveTimeline(page('before', [entry(1, 9, 'Earlier')], response));
+  await failure;
+  expect(replica.getState().timeline).toMatchObject({ epoch: 'epoch-one', initialized: true, hasOlder: true });
+  expect(replica.getState().timeline.entries).toEqual([entry(10, 10, 'Keep reading')]);
+});

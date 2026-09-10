@@ -29,7 +29,9 @@ test('discovers native commands and continues model and permission menus through
   await page.getByRole('radio').first().check();
   await page.getByRole('button', { name: 'Submit response' }).click();
   await expect(page.getByRole('heading', { name: 'Agent questions' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
   await expect(page.getByRole('switch', { name: 'Planning mode' })).toBeChecked();
+  await page.getByRole('button', { name: 'Close session controls' }).click();
   await input.fill('/permissions');
   await expect(page.getByRole('option').filter({ hasText: /^\/permissions/ })).toBeVisible();
   await input.press('Enter');
@@ -64,7 +66,9 @@ test('selects native models and permissions from the toolbar and restores confir
   await model.selectOption(selectedModel);
   await expect(model).toHaveValue(selectedModel, { timeout: 20_000 });
   await expect(model).toBeEnabled();
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
   await expect(page.getByRole('switch', { name: 'Planning mode' })).toBeChecked();
+  await page.getByRole('button', { name: 'Close session controls' }).click();
   await page.getByTestId('session-permissions-button').click();
   const approval = page.getByTestId('session-setting-approval');
   const sandbox = page.getByTestId('session-setting-sandbox');
@@ -156,9 +160,7 @@ test('answers a Codex question and renders consecutive turns through the visible
   await expectReady(page);
   await expect(page.getByRole('article', { name: 'User message' })
     .filter({ hasText: 'Second message after the interaction.' })).toBeVisible();
-  await page.getByRole('button', { name: 'Load earlier activity' }).click();
   await expect.poll(() => assistantOccurrenceCount(page, completion), { timeout: 30_000 }).toBe(3);
-  await page.getByRole('button', { name: 'Load earlier activity' }).click();
   await expect(page.getByRole('article', { name: 'User message' }).filter({ hasText: prompt })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Load earlier activity' })).toHaveCount(0);
   expect(await assistantOccurrenceCount(page, completion)).toBe(3);

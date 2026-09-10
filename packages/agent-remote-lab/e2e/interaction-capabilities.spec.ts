@@ -109,7 +109,6 @@ test('reviews typed interactions and recovers redacted history through the real 
   await page.reload();
   await expect(page.getByText('The fixture verified all four exact interaction responses.', { exact: true })).toBeVisible();
   await expect(page.locator('.agent-interaction')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Load earlier activity' }).click();
   await expect(page.locator('.agent-interaction-completed')).toHaveCount(4);
   await expect(page.getByText('Hidden answer', { exact: true })).toBeVisible();
   await page.getByText('Hidden answer', { exact: true }).scrollIntoViewIfNeeded();

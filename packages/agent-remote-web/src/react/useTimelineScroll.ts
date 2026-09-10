@@ -7,7 +7,9 @@ export interface TimelineReadingContinuityPosition { following: boolean; scrollT
 export type TimelineReadingContinuityPositions = Map<string, TimelineReadingContinuityPosition>;
 export interface TimelineReadingContinuity { identity: string; positions: TimelineReadingContinuityPositions }
 
-export function useTimelineScroll(identity: string, visible = true, positions?: TimelineReadingPositions, continuity?: TimelineReadingContinuity) {
+interface TimelineHistoryLoading { hasOlder: boolean; cursor?: string; load(): void | Promise<void> }
+
+export function useTimelineScroll(identity: string, visible = true, positions?: TimelineReadingPositions, continuity?: TimelineReadingContinuity, history?: TimelineHistoryLoading) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -26,6 +28,21 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   isVisible.current = visible;
   const [showLatest, setShowLatest] = useState(false);
   const latestVisible = useRef(false);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const loading = useRef<{ identity: string; promise: Promise<void> }>();
+  const attemptedCursor = useRef<string>();
+  const historyIntent = useRef(false);
+  const [historyState, setHistoryState] = useState<{ identity: string; pending: boolean; error?: string }>();
+
+  function prefetchHistory(): void {
+    const viewport = viewportRef.current;
+    const source = historyRef.current;
+    if (!viewport || !isVisible.current || following.current || !historyIntent.current || !source?.hasOlder || !source.cursor || loading.current) return;
+    if (viewport.scrollTop > Math.max(600, viewport.clientHeight * 1.5) || attemptedCursor.current === source.cursor) return;
+    attemptedCursor.current = source.cursor;
+    void loadOlder(source.load).catch(() => {});
+  }
 
   function updateLatest(viewport: HTMLDivElement): void {
     const next = !following.current && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 64;
@@ -86,6 +103,9 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   useLayoutEffect(() => {
     if (currentIdentity.current !== identity) {
       currentIdentity.current = identity;
+      attemptedCursor.current = undefined;
+      historyIntent.current = false;
+      loading.current = undefined;
       const saved = positionsRef.current?.get(identity);
       const continuity = continuityRef.current?.positions.get(continuityRef.current.identity);
       following.current = saved?.following ?? continuity?.following ?? true;
@@ -116,6 +136,8 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     captureAnchor();
   }
 
+  useLayoutEffect(() => () => { loading.current = undefined; currentIdentity.current = undefined; }, []);
+
   useLayoutEffect(() => {
     const end = () => { draggingScrollbar.current = false; };
     window.addEventListener('pointerup', end);
@@ -137,6 +159,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
         return;
       }
       following.current = false;
+      historyIntent.current = true;
     } else if (viewport.scrollTop > lastScrollTop.current && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 64) {
       following.current = true;
     }
@@ -144,19 +167,36 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     lastScrollTop.current = viewport.scrollTop;
     captureAnchor();
     updateLatest(viewport);
+    prefetchHistory();
   }, []);
 
   function scrollToLatest(): void {
     draggingScrollbar.current = false;
+    historyIntent.current = false;
     following.current = true;
     updatePosition();
   }
 
-  async function loadOlder(action: () => void | Promise<void>): Promise<void> {
+  function loadOlder(action: () => void | Promise<void>): Promise<void> {
+    if (loading.current && loading.current.identity === currentIdentity.current) return loading.current.promise;
+    const requestIdentity = currentIdentity.current ?? identity;
     captureAnchor();
     following.current = false;
     captureReadingContinuity();
-    await action();
+    attemptedCursor.current = historyRef.current?.cursor;
+    setHistoryState({ identity: requestIdentity, pending: true });
+    const promise = Promise.resolve().then(() => {
+      if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) return action();
+    }).catch((error: unknown) => {
+      if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) setHistoryState({ identity: requestIdentity, pending: false, error: error instanceof Error ? error.message : 'Earlier activity could not be loaded.' });
+      throw error;
+    }).finally(() => {
+      if (loading.current?.promise !== promise) return;
+      loading.current = undefined;
+      if (currentIdentity.current === requestIdentity) setHistoryState((state) => state?.identity === requestIdentity ? { ...state, pending: false } : state);
+    });
+    loading.current = { identity: requestIdentity, promise };
+    return promise;
   }
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>): void {
@@ -166,18 +206,18 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   }
 
   function onWheel(event: WheelEvent<HTMLDivElement>): void {
-    if (event.deltaY < 0 && event.currentTarget.scrollTop > 0) pauseFollowing();
+    if (event.deltaY < 0) { historyIntent.current = true; pauseFollowing(); prefetchHistory(); }
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
     const movesUp = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey && event.target === event.currentTarget);
-    if (movesUp && event.currentTarget.scrollTop > 0) pauseFollowing();
+    if (movesUp) { historyIntent.current = true; pauseFollowing(); prefetchHistory(); }
   }
 
   function onTouchMove(event: TouchEvent<HTMLDivElement>): void {
     const y = event.touches[0]?.clientY;
-    if (y !== undefined && touchY.current !== undefined && y > touchY.current && event.currentTarget.scrollTop > 0) pauseFollowing();
+    if (y !== undefined && touchY.current !== undefined && y > touchY.current) { historyIntent.current = true; pauseFollowing(); prefetchHistory(); }
     touchY.current = y;
   }
 
@@ -191,6 +231,8 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
 
   return {
     viewportRef, contentRef, onScroll, showLatest, scrollToLatest, loadOlder,
+    historyLoading: historyState?.identity === identity && historyState.pending,
+    historyError: historyState?.identity === identity ? historyState.error : undefined,
     onWheel, onPointerDown, onKeyDown, onFocus,
     onTouchStart: (event: TouchEvent<HTMLDivElement>) => { touchY.current = event.touches[0]?.clientY; },
     onTouchMove,

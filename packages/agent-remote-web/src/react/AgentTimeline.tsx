@@ -21,6 +21,8 @@ export interface AgentTimelineProps {
   readonly registry?: RendererRegistry;
   readonly showHeader?: boolean;
   readonly onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>;
+  readonly historyLoading?: boolean;
+  readonly historyError?: string;
   readonly onLoadOlder?: () => void | Promise<void>;
   readonly onInteractionResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void>;
@@ -33,6 +35,8 @@ export function AgentTimeline({
   registry,
   showHeader = true,
   onLoadOlder,
+  historyLoading,
+  historyError,
   onOpenChildSession,
   onInteractionResponse,
   onResourceRequest,
@@ -77,7 +81,7 @@ export function AgentTimeline({
       </div>
     </header> : null}
 
-    {state.timeline.hasOlder ? <HistoryControls
+    {state.timeline.hasOlder ? <HistoryControls loading={historyLoading} error={historyError}
       key={JSON.stringify([state.agent?.id, state.timeline.epoch])}
       onLoadOlder={onLoadOlder}
     /> : null}
@@ -107,13 +111,13 @@ export function AgentTimeline({
   </section>;
 }
 
-function HistoryControls({ onLoadOlder }: { readonly onLoadOlder?: () => void | Promise<void> }) {
+function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onLoadOlder?: () => void | Promise<void>; loading?: boolean; error?: string }) {
   const inFlight = useRef(false);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string>();
 
   async function loadOlder(): Promise<void> {
-    if (!onLoadOlder || inFlight.current) return;
+    if (!onLoadOlder || inFlight.current || loading) return;
     inFlight.current = true;
     setPending(true);
     setFailure(undefined);
@@ -131,10 +135,10 @@ function HistoryControls({ onLoadOlder }: { readonly onLoadOlder?: () => void | 
     <button
       className="agent-load-older"
       type="button"
-      disabled={!onLoadOlder || pending}
-      aria-busy={pending}
+      disabled={!onLoadOlder || pending || loading}
+      aria-busy={pending || loading}
       onClick={() => { void loadOlder(); }}
-    >{pending ? 'Loading earlier activity…' : 'Load earlier activity'}</button>
-    {failure ? <p className="agent-history-error" role="alert">{failure}</p> : null}
+    >{pending || loading ? 'Loading earlier activity…' : 'Load earlier activity'}</button>
+    {failure || error ? <p className="agent-history-error" role="alert">{failure ?? error}</p> : null}
   </div>;
 }

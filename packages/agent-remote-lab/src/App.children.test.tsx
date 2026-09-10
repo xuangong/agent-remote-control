@@ -167,3 +167,23 @@ it('reattaches a resumable directory parent without creating another native runt
   expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } });
   expect(f.container.querySelector('[aria-label="Conversation path"]')?.textContent).toContain('Review transport');
 });
+
+it('navigates through the chat session manager and keeps sibling discovery after switching', async () => {
+  const f = await setup(false, { live: true });
+  const manager = () => f.container.querySelector('[aria-label="Chat sessions"]')!;
+  expect(manager().querySelector('.lab-session-tree')).toBeNull();
+  expect(manager().querySelector('[aria-expanded="false"]')).not.toBeNull();
+  await act(async () => manager().querySelector<HTMLButtonElement>('.lab-chat-sessions-heading')!.click());
+  expect(manager().textContent).toContain('Review transport');
+  await act(async () => [...manager().querySelectorAll<HTMLButtonElement>('.lab-session-row')].find((row) => row.textContent?.includes('Review transport'))!.click());
+  expect(f.attachments).toEqual([{ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } }]);
+  expect(manager().querySelector('.lab-chat-sessions-heading')?.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => (manager().querySelector('.lab-chat-sessions-heading') as HTMLButtonElement).click());
+  expect(manager().querySelector('[aria-current="page"]')?.textContent).toContain('Review transport');
+  const discovery = f.container.querySelector('[aria-label="Discover sessions"]')!;
+  expect(discovery.querySelector('.lab-session-tree .lab-session-tree')).toBeNull();
+  await act(async () => discovery.querySelector<HTMLButtonElement>('[aria-expanded="false"]')!.click());
+  expect(discovery.querySelector('.lab-session-tree .lab-session-tree')?.textContent).toContain('Review transport');
+  await act(async () => [...manager().querySelectorAll<HTMLButtonElement>('.lab-session-row')].find((row) => row.textContent?.includes('Parent'))!.click());
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('parent');
+});

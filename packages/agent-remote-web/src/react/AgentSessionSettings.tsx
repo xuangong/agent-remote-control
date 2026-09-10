@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentSessionSetting } from '@borgee/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
 
@@ -6,6 +6,7 @@ export type SessionControlView = 'status' | 'model' | 'permissions';
 
 interface Props {
   state: AgentReplicaState;
+  children?: ReactNode;
   disabled: boolean;
   view?: SessionControlView;
   busy: boolean;
@@ -14,7 +15,23 @@ interface Props {
   onSelect?(id: string, value: string): Promise<void>;
 }
 
-export function AgentSessionSettings({ state, disabled, view, busy, onView, onPendingChange, onSelect }: Props) {
+export function AgentSessionSettings({ state, children, disabled, view, busy, onView, onPendingChange, onSelect }: Props) {
+  const layer = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLElement>();
+  useEffect(() => {
+    if (!view) return;
+    trigger.current = layer.current?.querySelector<HTMLElement>('[aria-expanded="true"]') ?? undefined;
+    const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !layer.current?.contains(event.target)) onView(undefined); };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || layer.current?.closest('[hidden], [inert]')) return;
+      event.preventDefault();
+      onView(undefined);
+      trigger.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [view, onView]);
   const agent = state.agent!;
   const settings = agent.runtimeInfo.settings ?? [];
   const [failure, setFailure] = useState<string>();
@@ -39,14 +56,17 @@ export function AgentSessionSettings({ state, disabled, view, busy, onView, onPe
 
   const model = settings.find(({ id }) => id === 'model');
   const permissions = settings.filter(({ category }) => category === 'permissions');
-  return <div className="agent-session-controls">
+  const modelLabel = model ? selectedLabel(model) : agent.runtimeInfo.model;
+  const permissionLabel = permissions.map(selectedLabel).filter((label) => label !== 'Unavailable').join(' · ');
+  return <div className="agent-session-controls" ref={layer}>
     <div className="agent-session-toolbar" aria-label="Session controls">
-      <button type="button" data-testid="session-model-button" aria-expanded={view === 'model'} onClick={() => onView(view === 'model' ? undefined : 'model')}>Model: {model ? selectedLabel(model) : agent.runtimeInfo.model ?? 'Unavailable'}</button>
-      <button type="button" data-testid="session-permissions-button" aria-expanded={view === 'permissions'} onClick={() => onView(view === 'permissions' ? undefined : 'permissions')}>Permissions: {permissions.length ? permissions.map(selectedLabel).join(' · ') : 'Unavailable'}</button>
-      <button type="button" aria-expanded={view === 'status'} onClick={() => onView(view === 'status' ? undefined : 'status')}>Status</button>
+      <button type="button" data-testid="session-model-button" title={`Model: ${modelLabel ?? 'Unavailable'}`} aria-expanded={view === 'model'} onClick={() => onView(view === 'model' ? undefined : 'model')}>{modelLabel && modelLabel !== 'Unavailable' ? modelLabel : 'Model'}<span aria-hidden="true"> ▾</span></button>
+      <button type="button" data-testid="session-permissions-button" title={`Permissions: ${permissions.length ? permissions.map(selectedLabel).join(' · ') : 'Unavailable'}`} aria-expanded={view === 'permissions'} onClick={() => onView(view === 'permissions' ? undefined : 'permissions')}>{permissionLabel || 'Permissions'}<span aria-hidden="true"> ▾</span></button>
+      <button type="button" aria-expanded={view === 'status'} onClick={() => onView(view === 'status' ? undefined : 'status')} aria-label="Status" title="Session status and planning"><span aria-hidden="true">•••</span></button>
     </div>
-    {view ? <section className="agent-session-panel" aria-label={view === 'status' ? 'Session status' : `${view === 'model' ? 'Model' : 'Permission'} settings`}>
-      <div className="agent-session-panel-heading"><strong>{view === 'status' ? 'Session status' : view === 'model' ? 'Model settings' : 'Permission settings'}</strong><button type="button" aria-label="Close session controls" onClick={() => onView(undefined)}>Close</button></div>
+    <section hidden={!view} className="agent-session-panel" aria-label={view === 'status' ? 'Session status' : `${view === 'model' ? 'Model' : 'Permission'} settings`}>
+      <div className="agent-session-panel-heading"><strong>{view === 'status' ? 'Session status' : view === 'model' ? 'Model settings' : 'Permission settings'}</strong><button type="button" aria-label="Close session controls" onClick={() => { onView(undefined); trigger.current?.focus({ preventScroll: true }); }}>Close</button></div>
+      <div hidden={view !== 'status'}>{children}</div>
       {view === 'status' ? <dl className="agent-session-facts">
           <dt>Provider</dt><dd>{agent.providerId}</dd><dt>Session</dt><dd>{agent.runtimeInfo.sessionId ?? 'Unavailable'}</dd>
           <dt>Connection</dt><dd>{disabled ? 'Unavailable' : 'Connected'}</dd><dt>Runtime</dt><dd>{agent.status}{disabled ? ' (last known)' : ''}</dd>
@@ -69,7 +89,7 @@ export function AgentSessionSettings({ state, disabled, view, busy, onView, onPe
             : <p className="agent-composer-note">This Provider does not expose these session settings.</p>}
         </>}
       {failure ? <p role="alert" className="agent-composer-note">{failure}</p> : null}
-    </section> : null}
+    </section>
   </div>;
 }
 

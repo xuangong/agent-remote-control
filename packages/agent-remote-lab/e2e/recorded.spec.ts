@@ -1,3 +1,4 @@
+import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -13,7 +14,7 @@ test('sends a multiline conversation through the Relay and returns focus to an e
     await expect(page.getByRole('button', { name: 'Back to latest' })).toHaveCount(0);
   };
   await expect(input).toBeEnabled();
-  await expect(timeline.locator('.agent-timeline-entry')).toHaveCount(3);
+  await expect(timeline.locator('.agent-timeline-entry')).toHaveCount(6);
   await expectLatest();
   await input.fill('Help me improve the conversation experience.');
   await input.press('Shift+Enter');
@@ -23,7 +24,7 @@ test('sends a multiline conversation through the Relay and returns focus to an e
   await input.press('Enter');
   await expect(input).toHaveValue('');
   await expect(input).toBeFocused();
-  await expect(page.locator('.agent-message-user')).toContainText('Help me improve the conversation experience.');
+  await expect(page.locator('.agent-message-user').filter({ hasText: 'Help me improve the conversation experience.' })).toContainText('shared React components');
   await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Help me improve' })).toContainText('shared React components');
   await expectLatest();
   await input.fill('Keep the conversation readable while the Agent works.\n\nShow concise tool summaries, preserve my place when I read earlier messages, and let me return to the latest reply.');
@@ -55,14 +56,14 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await expect(page.getByLabel('Agent timeline')).toBeVisible();
   await expect(page.getByLabel('Live provider controls')).toBeVisible();
   await expect(page.getByTestId('prompt-input')).toBeVisible();
-  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(3);
+  await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
 
   await page.getByRole('tab', { name: 'Trace' }).click();
   const trace = page.getByTestId('trace-view');
   await expect(trace.getByRole('heading', { name: 'Normalized Timeline trace' })).toBeVisible();
   await expect(trace.getByText(/normalized Timeline received by the Web client/)).toBeVisible();
   await expect(trace.getByText(/Provider-native and raw wire frames are not retained/)).toBeVisible();
-  await expect(trace.locator('.lab-trace-list > li')).toHaveCount(3);
+  await expect(trace.locator('.lab-trace-list > li')).toHaveCount(6);
   await page.getByRole('tab', { name: 'Workbench' }).click();
 
   const inspector = await openInspector(page, testInfo);
@@ -83,7 +84,6 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await expect(fixtureControls.getByLabel('Lab scenario controls')).toBeVisible();
   if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
 
-  await page.getByRole('button', { name: 'Load earlier activity' }).click();
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
   await expect(page.getByText('Recorded history 1')).toBeVisible();
 
@@ -148,13 +148,13 @@ function contextRail(page: Page, testInfo: TestInfo): Locator {
 
 async function openContextForFixture(page: Page, testInfo: TestInfo): Promise<Locator> {
   if (isCompact(testInfo)) {
-    await page.getByRole('button', { name: 'Context', exact: true }).click();
+    await toggleViewPanel(page, 'Sidebar');
   }
   return contextRail(page, testInfo);
 }
 
 async function openInspector(page: Page, testInfo: TestInfo): Promise<Locator> {
-  await page.getByRole('button', { name: 'Replica Inspector', exact: true }).click();
+  await toggleViewPanel(page, 'Replica Inspector');
   return isCompact(testInfo) ? page.getByRole('dialog', { name: 'Replica Inspector' }) : page.locator('#lab-inspector');
 }
 

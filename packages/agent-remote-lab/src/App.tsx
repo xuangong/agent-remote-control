@@ -28,6 +28,10 @@ import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
 import { DirectoryError, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
+import { useSessionEntries } from './hooks/useSessionEntries.js';
+import { sessionKey } from './session-tree.js';
+import { ViewOptions } from './components/ViewOptions.js';
+import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
 import type { QuestionDraft } from '@borgee/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
@@ -105,8 +109,8 @@ export function App({
   const providerRequestGenerationRef = useRef(0);
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const traceTabRef = useRef<HTMLButtonElement>(null);
-  const contextTriggerRef = useRef<HTMLButtonElement>(null);
-  const inspectorTriggerRef = useRef<HTMLButtonElement>(null);
+  const viewTriggerRef = useRef<HTMLButtonElement>(null);
+  const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
   const compactLayoutRef = useRef(isCompactLayout());
   const focusTimelineAfterAttachRef = useRef(false);
@@ -126,6 +130,8 @@ export function App({
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !initialState);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [headerHidden, setHeaderHidden] = useState(false);
+  const [desktopContextVisible, setDesktopContextVisible] = useState(true);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
 
   const loadProviders = useCallback(async (): Promise<void> => {
@@ -147,6 +153,15 @@ export function App({
       setCatalogError(message(error, 'Provider list could not be loaded.'));
     }
   }, [transport]);
+
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      const summary = connectionSummaryRef.current;
+      if (summary?.open && event.target instanceof Node && !summary.contains(event.target)) summary.open = false;
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, []);
 
   const providerChoices = [
     ...providers.map((provider) => ({ ...provider, hostId: 'local', selectionId: provider.providerId })),
@@ -191,7 +206,7 @@ export function App({
     setAttachingAgentId(agentId);
     const replica = replicas.current.get(agentId) ?? new AgentReplica();
     replicas.current.set(agentId, replica);
-    const client = new RemoteSessionClient(agentId, transport, replica, { historyPageSize: 3 });
+    const client = new RemoteSessionClient(agentId, transport, replica, { historyPageSize: 100 });
     replicaRef.current = replica;
     clientRef.current = client;
     unsubscribeReplicaRef.current = replica.subscribe(() => { if (replicaRef.current === replica) setState(replica.getState()); });
@@ -266,12 +281,14 @@ export function App({
     try { window.localStorage.setItem(openedSessionsKey(baseUrl), JSON.stringify(openedSessions)); } catch { /* Storage may be unavailable in private browser contexts. */ }
   }, [baseUrl, directory, openedSessions]);
 
-  function rememberSession(item: OpenedSession): void {
+  function rememberSession(value: OpenedSession): void {
+    const item = openedSessionMetadata(value);
     setOpenedSessions((current) => [item, ...current.filter((entry) => !((entry.hostId ?? 'local') === (item.hostId ?? 'local') && entry.providerId === item.providerId && entry.nativeSessionId === item.nativeSessionId) && entry.agentId !== item.agentId)]);
   }
 
   async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }): Promise<void> {
     if (!directory || transitionRef.current) return;
+    const generation = navigationGeneration.current;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined);
@@ -281,7 +298,9 @@ export function App({
       const result = item.parentNativeSessionId
         ? await target.attachChild(item.providerId, item.parentNativeSessionId, item.nativeSessionId)
         : await target.attach(item.providerId, item.nativeSessionId);
-      rememberSession({ ...item, hostId, agentId: result.agentId });
+      if (navigationGeneration.current !== generation) return;
+      const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
+      rememberSession({ ...prior, ...item, hostId, agentId: result.agentId });
       setProviderName(providers.find((provider) => provider.providerId === item.providerId)?.displayName ?? item.providerId);
       attach(result.agentId);
     } catch (error) { setFailure(message(error, 'Session could not be connected.')); }
@@ -305,7 +324,7 @@ export function App({
       if (navigationGeneration.current !== generation) return;
       rememberSession(saved ?? { agentId: parent.id, providerId: parent.providerId, nativeSessionId: parentNativeSessionId, hostId, title: 'Parent conversation' });
       rememberSession({ agentId: result.agentId, providerId: parent.providerId, nativeSessionId: result.nativeSessionId,
-        title: child.title, hostId, parentAgentId: parent.id, parentNativeSessionId });
+        title: child.title, createdAt: child.createdAt, hostId, parentAgentId: parent.id, parentNativeSessionId });
       attach(result.agentId);
     } finally {
       transitionRef.current = false;
@@ -389,6 +408,7 @@ export function App({
   }
 
   function openContext(): void {
+    setDesktopContextVisible(true);
     setInspectorOpen(false);
     setContextOpen(true);
   }
@@ -398,6 +418,17 @@ export function App({
     setInspectorOpen(true);
   }
 
+  const contextVisible = compactLayout ? contextOpen : desktopContextVisible;
+  function toggleContext(): void {
+    if (compactLayout) { if (contextOpen) setContextOpen(false); else openContext(); }
+    else setDesktopContextVisible((value) => !value);
+  }
+  function setAllPanelsVisible(visible: boolean): void {
+    setHeaderHidden(!visible);
+    setDesktopContextVisible(visible);
+    setContextOpen(false);
+    setInspectorOpen(visible && !compactLayout);
+  }
   const supportingRailOpen = compactLayout && (contextOpen || inspectorOpen);
   const backgroundInert = supportingRailOpen ? { inert: '' } : {};
 
@@ -414,6 +445,8 @@ export function App({
     ancestors.unshift(ancestor);
     ancestorId = ancestor.parentAgentId;
   }
+  const sessionEntries = useSessionEntries(openedSessions, state);
+  const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId);
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);
   const hostOffline = activeHost?.online === false;
@@ -433,7 +466,7 @@ export function App({
   }
 
   const clientActions: AppActions = actions ?? {
-    loadOlder: () => clientRef.current?.loadOlder(),
+    loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
     sendMessage: async (text, options) => { await runMutation(() => activeClient().sendMessage(text, options)); },
     steer: async (text) => { await runMutation(() => activeClient().steer(text)); },
     cancel: async () => { await runMutation(() => activeClient().cancel()); },
@@ -450,31 +483,36 @@ export function App({
     } : {}),
   };
 
-  return <main className={`lab-shell${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
-    <header className="lab-app-bar">
+  return <main className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+    <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
+      inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
+      onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
+      onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
+    <header className="lab-app-bar" hidden={headerHidden}>
       <div className="lab-brand">
-        <span className="lab-brand-mark" aria-hidden="true">AR</span>
         <div>
           <p>Agent Remote Control</p>
           <h1>Agent conversations</h1>
         </div>
       </div>
-      <div
+      <details
+        ref={connectionSummaryRef}
         className="lab-session-summary"
         data-testid="connection-summary"
         aria-label={`${connectionProviderName}. Agent ${connectionAgentId}. ${connectionStatusLabel}`}
-        aria-live="polite"
-        aria-atomic="true"
+        onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}
+        onKeyDown={(event) => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}
       >
-        <span className={`lab-status-dot lab-status-${state?.agent?.status ?? 'disconnected'}`} aria-hidden="true" />
+        <summary aria-label="Connection details" title="Connection details"><span className={`lab-status-dot lab-status-${state?.agent?.status ?? 'disconnected'}`} aria-hidden="true" />
         <span>{connectionProviderName}</span>
-        <code title={connectionAgentId}>{connectionAgentId}</code>
-        <span>{connectionStatusLabel}</span>
+        <span aria-live="polite">{connectionStatusLabel}</span><span aria-hidden="true">▾</span></summary>
+        <div className="lab-connection-details"><strong>{connectionProviderName}</strong><code>{connectionAgentId}</code>
         {directory && activeAgentId ? <button type="button" className="lab-session-reconnect" disabled={transitioning} onClick={() => {
           const saved = openedSessions.find((item) => item.agentId === activeAgentId);
           if (saved) void openSession(saved); else attach(activeAgentId);
         }}>Reconnect</button> : null}
-      </div>
+        </div>
+      </details>
       <nav className="lab-view-switcher" role="tablist" aria-label="Observatory views" {...backgroundInert}>
         <button
           ref={workbenchTabRef}
@@ -499,32 +537,15 @@ export function App({
           onKeyDown={handleViewKeyDown}
         >Trace</button>
       </nav>
-      <div className="lab-supporting-controls" {...backgroundInert}>
-        {compactLayout ? <button
-          ref={contextTriggerRef}
-          className="lab-supporting-trigger"
-          type="button"
-          aria-controls="lab-context"
-          aria-expanded={contextOpen}
-          onClick={() => contextOpen ? setContextOpen(false) : openContext()}
-        >Context</button> : null}
-        <button
-          ref={inspectorTriggerRef}
-          className="lab-supporting-trigger"
-          type="button"
-          aria-controls="lab-inspector"
-          aria-expanded={inspectorOpen}
-          onClick={() => inspectorOpen ? setInspectorOpen(false) : openInspector()}
-        >Replica Inspector</button>
-      </div>
     </header>
     <SupportingRail
       id="lab-context"
       label="Context"
       className="lab-context-rail"
       compact={compactLayout}
-      open={contextOpen}
-      triggerRef={contextTriggerRef}
+      collapsible
+      open={contextVisible}
+      triggerRef={viewTriggerRef}
       onClose={() => setContextOpen(false)}
     >
       <div className="lab-rail-heading">
@@ -532,7 +553,7 @@ export function App({
         <span title={baseUrl}>Connected runtime · {new URL(baseUrl, window.location.origin).host}</span>
       </div>
       {directory ? <HostPairing service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={() => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
-      {directory ? <SessionDirectory directory={directory} providerId={providerId} activeAgentId={activeAgentId} opened={openedSessions} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
+      {directory ? <SessionDirectory directory={directory} providerId={providerId} activeAgentId={activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       <ProviderSessionControls
         providers={providerChoices}
         selectedProviderId={selectedProviderChoice?.selectionId ?? ''}
@@ -569,6 +590,7 @@ export function App({
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <LabWorkbench
           state={state} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && (status === 'ready' || initialState) ? clientActions : {}} visible={activeView === 'workbench'}
+          sessionManager={directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : undefined}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
               <button type="button" disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
@@ -602,7 +624,7 @@ export function App({
       collapsible
       compact={compactLayout}
       open={inspectorOpen}
-      triggerRef={inspectorTriggerRef}
+      triggerRef={viewTriggerRef}
       onClose={() => setInspectorOpen(false)}
     >
       <div className="lab-rail-heading">
@@ -652,6 +674,14 @@ function readOpenedSessions(baseUrl: string): OpenedSession[] {
   try {
     const value: unknown = JSON.parse(window.localStorage.getItem(openedSessionsKey(baseUrl)) ?? '[]');
     if (!Array.isArray(value)) return [];
-    return value.filter((item): item is OpenedSession => item !== null && typeof item === 'object' && ['agentId', 'providerId', 'nativeSessionId', 'title'].every((key) => typeof item[key] === 'string')).slice(0, 100);
+    return value.filter((item): item is OpenedSession => item !== null && typeof item === 'object' && ['agentId', 'providerId', 'nativeSessionId', 'title'].every((key) => typeof item[key] === 'string')).slice(0, 100).map(openedSessionMetadata);
   } catch { return []; }
+}
+
+function openedSessionMetadata(item: OpenedSession): OpenedSession {
+  return { agentId: item.agentId, providerId: item.providerId, nativeSessionId: item.nativeSessionId, title: item.title,
+    ...(typeof item.hostId === 'string' ? { hostId: item.hostId } : {}),
+    ...(typeof item.parentAgentId === 'string' ? { parentAgentId: item.parentAgentId } : {}),
+    ...(typeof item.parentNativeSessionId === 'string' ? { parentNativeSessionId: item.parentNativeSessionId } : {}),
+    ...(typeof item.createdAt === 'string' ? { createdAt: item.createdAt } : {}) };
 }

@@ -50,6 +50,8 @@ Relay delays readiness until it observes the single history boundary, buffers ea
 
 ## Codex process and native directory
 
+The process launcher verifies an explicitly selected working directory before spawning Codex. Missing directories and paths that are not directories produce workspace-specific errors; the launcher does not substitute another project (`packages/agent-provider-codex/src/native.ts`).
+
 The default local workbench composes the real Codex Provider, Recorded, and the DSH Host broker. Codex owns one app-server process per opened root session tree, receives JSONL events over stdio, and retains a bounded stderr tail for exit diagnostics. It uses the selected native home and login. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in memory until attached, and server shutdown disposes those children. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-remote-lab/src/server/codex-directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
 
 ## Invariants

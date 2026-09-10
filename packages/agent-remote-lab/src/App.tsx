@@ -33,6 +33,10 @@ import { sessionKey } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
+import { SideConversation } from './components/SideConversation.js';
+import { ForkEntries, ForkReference } from './components/ForkReference.js';
+import { captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
+import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
 import type { QuestionDraft } from '@borgee/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
@@ -94,6 +98,13 @@ export function App({
   const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory ? readOpenedSessions(baseUrl) : []);
   const openedSessionsRef = useRef(openedSessions);
   openedSessionsRef.current = openedSessions;
+  const forkStore = useMemo(() => new ForkStore(baseUrl), [baseUrl]);
+  const [, setForkRevision] = useState(0);
+  useEffect(() => forkStore.subscribe(() => setForkRevision((value) => value + 1)), [forkStore]);
+  const [sideSession, setSideSession] = useState<OpenedSession>();
+  const forkReservation = useRef<{ key: string; record: SessionFork }>();
+  const forkBusy = useRef(false);
+  const [forkInputStatus, setForkInputStatus] = useState<{ agentId: string; pending: boolean; error?: string }>();
   const [sessionOptions, setSessionOptions] = useState<CreateSessionOptions>({});
   const [directoryRevision, setDirectoryRevision] = useState(0);
   const creationReservation = useRef<{ requestId: string; options: CreateSessionOptions; providerId: string }>();
@@ -237,7 +248,7 @@ export function App({
         setProviderName(saved.providerId);
         const target = new SessionDirectoryClient(baseUrl, undefined, saved.hostId ?? 'local');
         const request = saved.parentNativeSessionId ? target.attachChild(saved.providerId, saved.parentNativeSessionId, saved.nativeSessionId) : target.attach(saved.providerId, saved.nativeSessionId);
-        void request.then((result) => attach(result.agentId)).catch((error) => setFailure(message(error, 'Session could not be reconnected.')));
+        void request.then((result) => { rememberSession({ ...saved, agentId: result.agentId }); attach(result.agentId); }).catch((error) => setFailure(message(error, 'Session could not be reconnected.')));
       } else attach(remembered);
     }
     return () => clientRef.current?.stop();
@@ -302,6 +313,7 @@ export function App({
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
       rememberSession({ ...prior, ...item, hostId, agentId: result.agentId });
       setProviderName(providers.find((provider) => provider.providerId === item.providerId)?.displayName ?? item.providerId);
+      if (sideSession?.nativeSessionId === item.nativeSessionId && sideSession.providerId === item.providerId && (sideSession.hostId ?? 'local') === hostId) setSideSession(undefined);
       attach(result.agentId);
     } catch (error) { setFailure(message(error, 'Session could not be connected.')); }
     finally { transitionRef.current = false; setTransitioning(false); }
@@ -452,10 +464,7 @@ export function App({
   const hostOffline = activeHost?.online === false;
   const connectionProviderName = providerName ?? state?.agent?.providerId ?? 'No active Agent';
   const connectionStatusLabel = hostOffline ? 'Host offline' : state?.agent?.status === 'failed' ? 'Agent failed' : sessionStatusLabel(status);
-  function activeClient(): RemoteSessionClient {
-    if (!clientRef.current) throw new Error('Remote client is not attached to an Agent.');
-    return clientRef.current;
-  }
+
 
   async function runMutation<T>(operation: () => Promise<T>): Promise<T> {
     setUncertainMutation(false);
@@ -465,23 +474,96 @@ export function App({
     }
   }
 
+  const activeFork = forkStore.find(activeOpened ?? (state?.agent?.runtimeInfo.sessionId ? {
+    providerId: state.agent.providerId, nativeSessionId: state.agent.runtimeInfo.sessionId, hostId: 'local',
+  } : undefined));
+  const boundFork = activeFork && activeAgentId ? { ...activeFork, target: { ...activeFork.target!, agentId: activeAgentId } } : undefined;
+
+  async function openFork(record: SessionFork): Promise<void> {
+    if (!record.target || !directory) return;
+    const saved = record.target;
+    const target = (saved.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, saved.hostId);
+    try {
+      const result = await target.attach(saved.providerId, saved.nativeSessionId);
+      const session = { ...saved, agentId: result.agentId };
+      forkStore.bind(record.id, session);
+      await configureFork(transport, forkStore, forkStore.get(record.id));
+      rememberSession(session);
+      if (session.agentId !== activeAgentId) setSideSession(session);
+    } catch (error) { setFailure(message(error, 'Forked session could not be opened.')); }
+  }
+
+  async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
+    const agent = sourceState.agent;
+    if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
+    if (forkBusy.current) throw new Error('A session fork is already being created.');
+    forkBusy.current = true;
+    try {
+      const source: OpenedSession = saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' };
+      const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
+      const key = JSON.stringify([sessionKey(source), id, args]);
+      let record = forkReservation.current?.key === key ? forkStore.get(forkReservation.current.record.id) : forkStore.all().find((fork) => fork.creationKey === key);
+      if (!record) {
+        const context = await captureForkContext(transport, source);
+        const settings = (agent.runtimeInfo.settings ?? []).filter((setting) => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
+        let options: CreateSessionOptions;
+        if ((source.hostId ?? 'local') !== 'local') {
+          const workspaces = (await target.workspaces(source.providerId)).workspaces;
+          const workspace = workspaces.find(({ path }) => path === agent.cwd);
+          if (agent.cwd && !workspace) throw new Error('The source workspace is no longer registered on this Host.');
+          options = workspace ? { workspaceId: workspace.id } : {};
+        } else options = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}),
+          ...(agent.capabilities.planning && source.providerId !== 'dsh' ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
+        record = forkStore.prepare(context, options, settings, key);
+        forkReservation.current = { key, record };
+      }
+      const result = record.target ? await target.attach(record.target.providerId, record.target.nativeSessionId) : await target.create(source.providerId, record.id, record.options);
+      const session: OpenedSession = { agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? result.agentId, providerId: source.providerId,
+        hostId: source.hostId ?? 'local', title: `Fork of ${source.title}`, createdAt: record.capturedAt };
+      forkStore.bind(record.id, session);
+      await configureFork(transport, forkStore, forkStore.get(record.id));
+      rememberSession(source); rememberSession(session);
+      setDirectoryRevision((value) => value + 1);
+      if (args.trim()) setMessageDrafts((current) => ({ ...current, [session.agentId]: args.trim() }));
+      if (id === 'console:side') setSideSession(session);
+      if (args.trim() && forkStore.get(record.id).delivery !== 'sent') {
+        setForkInputStatus({ agentId: session.agentId, pending: true });
+        try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
+        catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: message(error, 'The first fork input failed.') }); throw error; }
+        setForkInputStatus(undefined);
+        setMessageDrafts((current) => current[session.agentId] === args.trim() ? { ...current, [session.agentId]: '' } : current);
+      }
+      forkStore.finishCreation(record.id);
+      forkReservation.current = undefined;
+      return {};
+    } finally { forkBusy.current = false; }
+  }
+
+  const submittedClient = clientRef.current;
+  function commandClient(): RemoteSessionClient {
+    if (!submittedClient || clientRef.current !== submittedClient) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true);
+    return submittedClient;
+  }
+
   const clientActions: AppActions = actions ?? {
     loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
-    sendMessage: async (text, options) => { await runMutation(() => activeClient().sendMessage(text, options)); },
-    steer: async (text) => { await runMutation(() => activeClient().steer(text)); },
-    cancel: async () => { await runMutation(() => activeClient().cancel()); },
-    listCommands: () => activeClient().listCommands(),
-    executeCommand: (id, args) => runMutation(() => activeClient().executeCommand(id, args)),
-    setSessionSetting: async (id, value) => { await runMutation(() => activeClient().setSessionSetting(id, value)); },
-    setPlanning: async (active) => { await runMutation(() => activeClient().setPlanning(active)); },
-    respondToInteraction: async (requestId, response) => { await runMutation(() => activeClient().respondToInteraction(requestId, response)); },
-    requestResource: async (binding) => { await activeClient().requestResource(binding.resourceId); },
+    sendMessage: async (text, options) => { await runMutation(() => commandClient().sendMessage(text, options)); },
+    steer: async (text) => { await runMutation(() => commandClient().steer(text)); },
+    cancel: async () => { await runMutation(() => commandClient().cancel()); },
+    listCommands: () => commandClient().listCommands(),
+    executeCommand: (id, args) => runMutation(() => commandClient().executeCommand(id, args)),
+    setSessionSetting: async (id, value) => { await runMutation(() => commandClient().setSessionSetting(id, value)); },
+    setPlanning: async (active) => { await runMutation(() => commandClient().setPlanning(active)); },
+    respondToInteraction: async (requestId, response) => { await runMutation(() => commandClient().respondToInteraction(requestId, response)); },
+    requestResource: async (binding) => { await commandClient().requestResource(binding.resourceId); },
     ...(fixtureAction && activeAgentId && state?.agent?.providerId === 'recorded' && !activeRemoteSession ? {
       advanceFixture: () => fixtureAction(activeAgentId, 'advance'),
       rehydrateFixture: () => fixtureAction(activeAgentId, 'rehydrate'),
       stopReader: () => fixtureAction(activeAgentId, 'stop-reader'),
     } : {}),
   };
+
+  const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
   return <main className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
@@ -588,8 +670,14 @@ export function App({
         hidden={activeView !== 'workbench'}
       >
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
+        <div className={`lab-conversation-split${sideSession ? ' lab-has-side' : ''}`}>
+        <div className="lab-primary-conversation">
         <LabWorkbench
-          state={state} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && (status === 'ready' || initialState) ? clientActions : {}} visible={activeView === 'workbench'}
+          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : {}} visible={activeView === 'workbench'}
+          consoleCommands={directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
+          onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
+          composerAttachments={boundFork ? <ForkReference fork={boundFork} onOpen={(session) => void openSession(session)} /> : undefined}
+          composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} onOpen={(fork) => void openFork(fork)} />}
           sessionManager={directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : undefined}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
@@ -606,6 +694,14 @@ export function App({
             ...current, [activeAgentId]: { ...current[activeAgentId], [requestId]: draft },
           })) : undefined}
         />
+        </div>
+        {sideSession ? <SideConversation key={sessionKey(sideSession)} session={sideSession} transport={transport} store={forkStore}
+          initialInput={forkInputStatus?.agentId === sideSession.agentId ? forkInputStatus : undefined}
+          visible={activeView === 'workbench'} draft={messageDrafts[sideSession.agentId] ?? ''}
+          onDraftChange={(text) => setMessageDrafts((current) => ({ ...current, [sideSession.agentId]: text }))}
+          onClose={() => { setSideSession(undefined); workbenchPanelRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true }); }}
+          onOpenSource={(session) => void openSession(session)} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} /> : null}
+        </div>
       </section>
       <section
         id="lab-trace"

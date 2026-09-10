@@ -21,7 +21,7 @@ test('selects a paired Host as a Provider and creates through its real uplink', 
       const body = JSON.parse(control.body!);
       creations.push(body);
       await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
-        requestId: control.sessionId!, agentId: control.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId },
+        requestId: control.sessionId!, agentId: control.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId, cwd: '/native/project' },
       } });
       agents.add(control.sessionId!);
       return { status: 200, body: JSON.stringify({ nativeSessionId: body.nativeSessionId }) };
@@ -49,6 +49,14 @@ test('selects a paired Host as a Provider and creates through its real uplink', 
     await page.getByTestId('prompt-input').fill('Hello from the Provider selector.');
     await page.getByTestId('prompt-input').press('Enter');
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Hello from the Provider selector.' })).toBeVisible();
+    await page.getByTestId('prompt-input').fill('/side Continue from the paired Host context.');
+    await page.getByTestId('prompt-input').press('Enter');
+    const side = page.getByRole('complementary', { name: 'Side conversation' });
+    await expect(side.locator('.agent-message-user').last()).toContainText('Continue from the paired Host context.');
+    await expect(side.locator('.lab-fork-reference summary')).toBeVisible();
+    expect(creations).toHaveLength(2);
+    expect(creations[1]).toMatchObject({ nativeSessionId: expect.any(String), workspaceId: 'native-project' });
+    await side.getByRole('button', { name: 'Close side conversation' }).click();
     await uplink.close();
     if (compact) await toggleViewPanel(page, 'Sidebar');
     await expect(context().getByRole('region', { name: 'Lab scenario controls' })).toHaveCount(0);

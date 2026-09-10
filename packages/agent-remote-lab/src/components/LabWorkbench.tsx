@@ -24,7 +24,7 @@ export interface LabWorkbenchActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
-export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, conversationPath, sessionManager }: { state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, conversationPath, sessionManager, composerAttachments, composerNotice, consoleCommands, onExecuteConsoleCommand }: { composerAttachments?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const readingPositions = useRef(new Map());
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
@@ -92,7 +92,11 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
       {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
     </div>
     <div className="lab-composer-dock" hidden={!state?.agent}>
+      {composerNotice}
       <LiveControlPanel
+        attachments={composerAttachments}
+        consoleCommands={consoleCommands}
+        onExecuteConsoleCommand={onExecuteConsoleCommand}
         sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
         state={state}
         sessionKey={state?.agent?.id}

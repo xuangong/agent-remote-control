@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { statSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 export type JsonObject = Record<string, unknown>;
 
@@ -69,6 +71,18 @@ export interface SpawnCodexAppServerOptions {
 export function spawnCodexAppServer(
   options: SpawnCodexAppServerOptions = {},
 ): ChildProcessWithoutNullStreams {
+  if (options.cwd !== undefined) {
+    const cwd = resolve(options.cwd);
+    try {
+      if (!statSync(cwd).isDirectory()) throw new Error(`Codex working directory is not a directory: ${cwd}`);
+    } catch (error) {
+      if (isRecord(error) && error.code === 'ENOENT') {
+        throw new Error(`Codex working directory does not exist: ${cwd}. Restore it or select an existing workspace before starting the session.`, { cause: error });
+      }
+      if (isRecord(error) && error.code === 'ENOTDIR') throw new Error(`Codex working directory is not a directory: ${cwd}`, { cause: error });
+      throw error;
+    }
+  }
   return spawn(options.executable ?? 'codex', ['app-server'], {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },

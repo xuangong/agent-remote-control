@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@borgee/agent-remote-protocol';
@@ -9,6 +9,9 @@ import { AgentActivityStatus } from './AgentActivityStatus.js';
 export interface AgentComposerProps {
   state?: AgentReplicaState;
   sessionControls?: ReactNode;
+  attachments?: ReactNode;
+  consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[];
+  onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>;
   sessionKey?: string;
   disabled?: boolean;
   draft?: string;
@@ -38,7 +41,8 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string };
 }
 
-export function AgentComposer({ state, sessionControls, sessionKey, disabled = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource }: AgentComposerProps) {
+export function AgentComposer({ state, sessionControls, sessionKey, disabled = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, attachments, consoleCommands = [], onExecuteConsoleCommand }: AgentComposerProps) {
+  const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
   const currentAgent = useRef(agentId);
@@ -64,7 +68,8 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
   const wantsCommands = !currentDraft.commandsDismissed && Boolean(isCommand || currentDraft.commandsOpen);
   const directory = useAgentCommands(agentId, ready && wantsCommands && capabilities?.commands === true, onListCommands);
   const commandQuery = isCommand ? text.trimStart().slice(1) : '';
-  const commands = directory.commands.filter(({ name }) => name.startsWith(commandQuery));
+  const availableCommands = [...consoleCommands, ...directory.commands.filter((command) => !consoleCommands.some((local) => local.name === command.name || local.aliases?.includes(command.name)))];
+  const commands = availableCommands.filter((command) => command.name.startsWith(commandQuery) || (commandQuery && consoleCommands.find((local) => local.id === command.id)?.aliases?.some((alias) => alias.startsWith(commandQuery))));
   const showCommands = wantsCommands && !/\s/u.test(commandQuery);
   const commandIndex = Math.min(currentDraft.commandIndex ?? 0, Math.max(0, commands.length - 1));
   const activeTurnId = state?.agent?.activeTurn?.turnId;
@@ -83,7 +88,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
   }, []);
   useLayoutEffect(() => { composing.current = false; }, [agentId]);
   useLayoutEffect(() => {
-    if (showCommands) inputRef.current?.parentElement?.querySelector(`#chat-command-${commandIndex}`)?.scrollIntoView?.({ block: 'nearest' });
+    if (showCommands) inputRef.current?.parentElement?.querySelector(`#${controlId}-command-${commandIndex}`)?.scrollIntoView?.({ block: 'nearest' });
   }, [commandIndex, showCommands]);
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -121,7 +126,8 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
   }
 
   async function executeCommand(command: AgentCommand, args: string): Promise<void> {
-    if (!onExecuteCommand || !ready || busy || currentDraft.pending) return;
+    const execute = consoleCommands.some((local) => local.id === command.id) ? onExecuteConsoleCommand : onExecuteCommand;
+    if (!execute || !ready || busy || currentDraft.pending) return;
     const submitted = currentDraft.text;
     const submittedSkill = currentDraft.selectedSkill;
     currentDraft.pending = 'command';
@@ -131,7 +137,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
     currentDraft.feedback = undefined;
     refresh((value) => value + 1);
     try {
-      const result = await onExecuteCommand(command.id, args);
+      const result = await execute(command.id, args);
       if (submittedSkill?.id === command.id && currentDraft.selectedSkill === submittedSkill) currentDraft.selectedSkill = undefined;
       if (currentDraft.text === submitted && (isCommand || submittedSkill?.id === command.id)) {
         currentDraft.text = '';
@@ -173,8 +179,8 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
     if (isCommand) {
       if (!ready || busy) return;
       const match = /^\/([^\s]+)([\s\S]*)$/u.exec(currentDraft.text.trimStart());
-      const command = directory.commands.find(({ name }) => name === match?.[1]);
-      if (directory.status === 'loading' && capabilities?.commands) return;
+      const command = consoleCommands.find((local) => local.name === match?.[1] || local.aliases?.includes(match?.[1] ?? '')) ?? directory.commands.find(({ name }) => name === match?.[1]);
+      if (!command && directory.status === 'loading' && capabilities?.commands) return;
       if (kind === 'send' && command?.kind === 'skill') chooseCommand(command);
       else if (kind === 'send' && command) await executeCommand(command, match?.[2] ?? '');
       else {
@@ -234,17 +240,18 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
   return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy}>
     <div className="agent-composer-input">
     {showCommands ? <div className="agent-command-menu">
-      {capabilities?.commands !== true ? <p>This Provider does not expose native commands.</p>
-        : directory.status === 'loading' ? <p role="status">Loading native commands…</p>
-        : directory.status === 'failed' ? <><p role="alert">{directory.error}</p><button type="button" data-testid="retry-commands" onClick={directory.retry}>Retry</button></>
-        : commands.length === 0 ? <p>No matching native commands.</p>
-        : <div role="listbox" id="chat-commands" aria-label="Native commands">{commands.map((command, index) => <button
-          type="button" role="option" aria-selected={index === commandIndex} id={`chat-command-${index}`} key={command.id}
+      {directory.status === 'loading' && capabilities?.commands ? <p role="status">Loading native commands…</p> : null}
+      {directory.status === 'failed' && capabilities?.commands ? <><p role="alert">{directory.error}</p><button type="button" data-testid="retry-commands" onClick={directory.retry}>Retry</button></> : null}
+      {commands.length === 0 ? <p>{capabilities?.commands !== true ? 'This Provider does not expose native commands.' : 'No matching native commands.'}</p>
+        : <div role="listbox" id={`${controlId}-commands`} aria-label="Native commands">{commands.map((command, index) => <button
+          type="button" role="option" aria-selected={index === commandIndex} id={`${controlId}-command-${index}`} key={command.id}
           onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command)}>
           <strong>/{command.name}</strong><span className="agent-command-description" title={command.description}>{command.shortDescription || command.description}</span>
-          {command.kind !== 'command' ? <small className="agent-command-kind">{command.kind === 'skill' ? 'Skill' : 'Prompt'}</small> : null}
+          {consoleCommands.some((local) => local.id === command.id) ? <small className="agent-command-kind">Console</small>
+            : command.kind !== 'command' ? <small className="agent-command-kind">{command.kind === 'skill' ? 'Skill' : 'Prompt'}</small> : null}
         </button>)}</div>}
     </div> : null}
+    {attachments}
     {selectedSkill ? <div className="agent-composer-attachments" aria-label="Selected skill">
       <span className="agent-skill-tag">
         <button type="button" aria-label={`View skill ${selectedSkill.name}`} onClick={() => {
@@ -255,10 +262,10 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       </span>
       {nativeBusy ? <span className="agent-composer-note">This Provider can invoke skills when the current turn finishes.</span> : null}
     </div> : null}
-    <label htmlFor="prompt-input" className="agent-visually-hidden">Message</label>
+    <label htmlFor={`${controlId}-input`} className="agent-visually-hidden">Message</label>
     <textarea
       ref={inputRef}
-      id="prompt-input"
+      id={`${controlId}-input`}
       data-testid="prompt-input"
       rows={1}
       value={text}
@@ -268,13 +275,13 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       onCompositionEnd={() => { composing.current = false; }}
       disabled={!ready || busy}
       placeholder={ready ? 'Message the Agent…' : 'Open or attach to an Agent first.'}
-      aria-describedby="composer-hint"
-      aria-controls={showCommands && commands.length > 0 ? 'chat-commands' : undefined}
-      aria-activedescendant={showCommands && commands.length > 0 ? `chat-command-${commandIndex}` : undefined}
+      aria-describedby={`${controlId}-hint`}
+      aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
+      aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
     />
     </div>
     <div className="agent-composer-actions">
-      <p id="composer-hint" className="agent-composer-note agent-visually-hidden">{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter for a new line · / for commands</p>
+      <p id={`${controlId}-hint`} className="agent-composer-note agent-visually-hidden">{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter for a new line · / for commands</p>
       <div className="agent-composer-secondary-controls">
         <button type="button" aria-label="Open chat commands" disabled={!ready || busy} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); inputRef.current?.focus(); }}>/</button>
         {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={!ready || !capabilities?.sendMessage || !text.trim() || isCommand || Boolean(selectedSkill) || busy || !onSendMessage} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}

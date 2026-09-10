@@ -163,3 +163,15 @@ function deferred<T>(): { promise: Promise<T>; resolve(value?: T): void } {
   const promise = new Promise<T>((accept) => { resolve = accept; });
   return { promise, resolve: (value) => resolve(value as T) };
 }
+
+it('offers console commands independently of provider capabilities and scopes both composers', async () => {
+  const execute = vi.fn(async () => ({}));
+  const command = { id: 'console:side', name: 'side', description: 'Open side chat', kind: 'command' as const, aliases: ['btw'] };
+  const container = await render(<><LiveControlPanel state={replicaState} consoleCommands={[command]} onExecuteConsoleCommand={execute} />
+    <LiveControlPanel state={replicaState} /></>);
+  const inputs = container.querySelectorAll('textarea');
+  expect(inputs[0]!.id).not.toBe(inputs[1]!.id);
+  await type(inputs[0]!, '/btw explain');
+  await act(async () => inputs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  expect(execute).toHaveBeenCalledWith('console:side', ' explain');
+});

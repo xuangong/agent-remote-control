@@ -56,6 +56,7 @@ pnpm bdb protocol trace AGENT_ID --jsonl --until idle --timeout 15000
 For non-default ports, add `--relay http://127.0.0.1:6013 --origin http://127.0.0.1:6284`.
 
 - An old PATH executable: set `AGENT_REMOTE_CODEX_EXECUTABLE` to the isolated installation above. The live launcher accepts 0.148.0 or newer; only the recorded compatibility target is guaranteed by the pinned tests.
+- A missing working directory: historical sessions can reference removed worktrees. The launcher reports the missing directory explicitly. Restore that workspace or choose an existing directory for the new session; the Provider does not silently change projects. A raw `spawn ... codex ENOENT` can also mean the requested working directory is absent even when the executable exists.
 - Authentication or model errors: use the same native Codex home to configure/login, then retry deliberately. The workbench retains the native failure.
 - Process exit: the Provider fails the observation stream and includes a bounded stderr tail in diagnostics. Other local Codex processes remain running.
 - Native image-view and generated-image resources are supported; general filesystem reads and remote image URL fetching are unavailable. Native logs stay native; public Trace shows normalized events and `bdb protocol trace` shows public Remote frames.

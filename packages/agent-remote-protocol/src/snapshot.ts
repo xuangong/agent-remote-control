@@ -51,6 +51,19 @@ export const AgentPlanningState = Strict({
 });
 export type AgentPlanningState = Static<typeof AgentPlanningState>;
 
+export const AgentChildSession = Strict({
+  nativeSessionId: NonEmptyString,
+  title: Type.String(),
+  role: Type.Optional(Type.String()),
+  description: Type.Optional(Type.String()),
+  createdAt: NonEmptyString,
+  parentTurnId: Type.Optional(NonEmptyString),
+  parentCallId: Type.Optional(NonEmptyString),
+  status: AgentStatus,
+  observation: Type.Union([Type.Literal('live'), Type.Literal('saved_history')]),
+});
+export type AgentChildSession = Static<typeof AgentChildSession>;
+
 export const AgentRuntimeInfo = Strict({
   providerId: NonEmptyString,
   sessionId: Type.Union([NonEmptyString, Type.Null()]),
@@ -60,6 +73,7 @@ export const AgentRuntimeInfo = Strict({
   mode: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   planning: Type.Optional(AgentPlanningState),
   settings: Type.Optional(Type.Array(AgentSessionSetting)),
+  childSessions: Type.Optional(Type.Array(AgentChildSession)),
   persistence: Type.Optional(AgentPersistenceHandle),
 });
 export type AgentRuntimeInfo = Static<typeof AgentRuntimeInfo>;

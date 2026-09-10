@@ -48,6 +48,19 @@ export interface AgentPlanningState {
   requested?: boolean;
 }
 
+/** A direct native child, with stable creation provenance when the runtime provides it. */
+export interface AgentChildSession {
+  nativeSessionId: string;
+  title: string;
+  role?: string;
+  description?: string;
+  createdAt: string;
+  parentTurnId?: string;
+  parentCallId?: string;
+  status: 'starting' | 'idle' | 'running' | 'waiting' | 'failed' | 'closed';
+  observation: 'live' | 'saved_history';
+}
+
 export interface AgentRuntimeInfo {
   providerId: string;
   sessionId: string | null;
@@ -57,6 +70,7 @@ export interface AgentRuntimeInfo {
   mode?: string | null;
   planning?: AgentPlanningState;
   settings?: import('./session-settings.js').AgentSessionSetting[];
+  childSessions?: AgentChildSession[];
   persistence?: import('./provider.js').AgentPersistenceHandle;
 }
 

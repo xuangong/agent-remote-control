@@ -74,6 +74,10 @@ export class CodexEventProjector {
     this.cwd = options.cwd;
   }
 
+  snapshotText(): ReadonlyMap<string, string> {
+    return new Map([...this.assistantText, ...this.reasoningText]);
+  }
+
   seedHistoryItem(item: unknown): void {
     if (!isRecord(item)) return;
     const itemId = readString(item.id);

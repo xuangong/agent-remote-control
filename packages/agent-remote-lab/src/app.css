@@ -670,3 +670,9 @@ textarea {
 
 .lab-composer-dock .agent-command-menu { background: var(--obs-surface); }
 .lab-composer-dock .agent-command-menu button[aria-selected="true"], .lab-composer-dock .agent-command-menu button:hover:not(:disabled) { background: var(--obs-surface-selected); }
+
+.lab-conversation-path { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; color: var(--agent-muted); font-size: 12px; }
+.lab-conversation-path button { padding: 4px 0; border: 0; background: none; color: var(--agent-action-text); font: inherit; cursor: pointer; }
+.lab-conversation-path button:hover { text-decoration: underline; }
+.lab-conversation-path button:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 3px; }
+.lab-conversation-path [aria-current] { color: var(--agent-ink); font-weight: 600; }

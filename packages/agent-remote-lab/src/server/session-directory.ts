@@ -12,6 +12,7 @@ export interface SessionDirectorySource {
   models?(): unknown;
   create(input: Partial<AgentSessionConfig> & { workspaceId?: string }): Promise<string>;
   open(nativeSessionId: string): Promise<AgentSession>;
+  openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close?(): Promise<void>;
 }
 
@@ -24,7 +25,17 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
     descriptor: provider.descriptor,
     resumeSession: (handle) => provider.resumeSession(handle),
     async createSession(config) {
-      const nativeSessionId = (config as AgentSessionConfig & { nativeSessionId?: string }).nativeSessionId;
+      const { nativeSessionId, parentNativeSessionId } = config as AgentSessionConfig & { nativeSessionId?: string; parentNativeSessionId?: string };
+      if (nativeSessionId && parentNativeSessionId) {
+        const source = entries.get(provider.descriptor.providerId)!.source;
+        if (!source.openChild) throw new DirectoryError(409, 'child_control_unavailable', 'This Provider cannot attach native child sessions.');
+        const child = await source.openChild(parentNativeSessionId, nativeSessionId);
+        const info = await child.runtimeInfo();
+        if (info.sessionId !== nativeSessionId || info.providerId !== source.providerId) {
+          throw new DirectoryError(409, 'child_identity_mismatch', 'The Provider returned a different native child session.');
+        }
+        return child;
+      }
       return nativeSessionId === undefined ? provider.createSession(config)
         : entries.get(provider.descriptor.providerId)!.source.open(nativeSessionId);
     },
@@ -36,7 +47,23 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
     if (!entry) throw new DirectoryError(404, 'provider_not_found', 'The Provider is unavailable.');
     return entry;
   };
-  const attach = async (relay: AgentRemoteRelay, providerId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId: string }> => {
+  const attach = async (relay: AgentRemoteRelay, providerId: string, nativeSessionId: string, parentNativeSessionId?: string): Promise<{ agentId: string; nativeSessionId: string }> => {
+    if (parentNativeSessionId !== undefined) {
+      const entry = requireEntry(providerId);
+      if (!entry.source.openChild) throw new DirectoryError(409, 'child_control_unavailable', 'This Provider cannot attach native child sessions.');
+      const parentAttachment = attachments.get(JSON.stringify([providerId, parentNativeSessionId]));
+      if (!parentAttachment) throw new DirectoryError(409, 'parent_unavailable', 'Open the parent session before its child.');
+      const parent = await parentAttachment;
+      let parentState;
+      try { parentState = relay.requireAgent(parent.agentId).snapshot().payload; }
+      catch { throw new DirectoryError(409, 'parent_unavailable', 'The parent session is no longer attached.'); }
+      if (parentState.runtimeInfo.sessionId !== parentNativeSessionId || parentState.status === 'closed') {
+        throw new DirectoryError(409, 'parent_unavailable', 'The parent runtime is unavailable.');
+      }
+      if (!parentState.runtimeInfo.childSessions?.some((child) => child.nativeSessionId === nativeSessionId)) {
+        throw new DirectoryError(404, 'child_unavailable', 'This session is not a discovered direct child of the parent.');
+      }
+    }
     const key = JSON.stringify([providerId, nativeSessionId]);
     let pending = attachments.get(key);
     if (pending) {
@@ -49,11 +76,11 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
     if (!pending) {
       pending = (async () => {
         const entry = requireEntry(providerId);
-        if (!await entry.catalog.session(nativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The native session is unavailable.');
+        if (parentNativeSessionId === undefined && !await entry.catalog.session(nativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The native session is unavailable.');
         const agentId = randomUUID();
         await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
           requestId: randomUUID(), agentId, providerId,
-          config: { sessionId: agentId, nativeSessionId } as AgentSessionConfig,
+          config: { sessionId: agentId, nativeSessionId, ...(parentNativeSessionId === undefined ? {} : { parentNativeSessionId }) } as AgentSessionConfig,
         } });
         return { agentId, nativeSessionId };
       })();
@@ -104,6 +131,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           const body = await readBody(request);
           const providerId = required(body.providerId, 'providerId');
           const { source } = requireEntry(providerId);
+          if (url.pathname === '/v1/remote/child/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId'), required(body.parentNativeSessionId, 'parentNativeSessionId')));
           if (url.pathname === '/v1/remote/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId')));
           if (url.pathname === '/v1/remote/create') {
             const requestId = required(body.requestId, 'requestId');

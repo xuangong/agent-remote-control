@@ -1,5 +1,5 @@
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
-import { useRef, useState } from 'react';
+import type { AgentChildSession, AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
+import { useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -24,7 +24,7 @@ export interface LabWorkbenchActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
-export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange }: { state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, conversationPath }: { state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const readingPositions = useRef(new Map());
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
@@ -52,6 +52,7 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
   return <div className={`lab-workbench-layout${selectedCommand ? ' lab-command-details-open' : ''}`}>
     <header className="lab-workbench-heading">
       <div>
+        {conversationPath}
         <h2>{hasReplica ? 'Conversation' : isAttaching ? `Connecting to ${attachingAgentId}` : 'Ready for a session'}</h2>
       </div>
       <span>{hasReplica ? activityLabel : isAttaching ? 'Connecting' : 'Awaiting Agent'}</span>
@@ -66,6 +67,7 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
             <AgentTimeline
               state={state}
               showHeader={false}
+              onOpenChildSession={onOpenChildSession}
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
               onResourceRequest={actions.requestResource}

@@ -1,4 +1,4 @@
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
+import type { AgentChildSession, AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
 import {
   useCallback,
   useEffect,
@@ -99,7 +99,9 @@ export function App({
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
   const clientRef = useRef<RemoteSessionClient>();
   const replicaRef = useRef<AgentReplica>();
+  const unsubscribeReplicaRef = useRef<() => void>();
   const transitionRef = useRef(false);
+  const navigationGeneration = useRef(0);
   const providerRequestGenerationRef = useRef(0);
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const traceTabRef = useRef<HTMLButtonElement>(null);
@@ -174,6 +176,9 @@ export function App({
   }
 
   const attach = useCallback((agentId: string): void => {
+    navigationGeneration.current += 1;
+    unsubscribeReplicaRef.current?.();
+    unsubscribeReplicaRef.current = undefined;
     clientRef.current?.stop();
     if (compactLayoutRef.current) {
       focusTimelineAfterAttachRef.current = true;
@@ -189,7 +194,7 @@ export function App({
     const client = new RemoteSessionClient(agentId, transport, replica, { historyPageSize: 3 });
     replicaRef.current = replica;
     clientRef.current = client;
-    replica.subscribe(() => { if (replicaRef.current === replica) setState(replica.getState()); });
+    unsubscribeReplicaRef.current = replica.subscribe(() => { if (replicaRef.current === replica) setState(replica.getState()); });
     client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
     client.start();
     rememberAgent(agentId);
@@ -202,6 +207,10 @@ export function App({
 
   useEffect(() => () => {
     providerRequestGenerationRef.current += 1;
+    navigationGeneration.current += 1;
+    unsubscribeReplicaRef.current?.();
+    unsubscribeReplicaRef.current = undefined;
+    clientRef.current?.stop();
   }, []);
 
   useEffect(() => {
@@ -211,7 +220,9 @@ export function App({
       const saved = openedSessionsRef.current.find((item) => item.agentId === remembered);
       if (directory && saved) {
         setProviderName(saved.providerId);
-        void new SessionDirectoryClient(baseUrl, undefined, saved.hostId ?? 'local').attach(saved.providerId, saved.nativeSessionId).then((result) => attach(result.agentId)).catch((error) => setFailure(message(error, 'Session could not be reconnected.')));
+        const target = new SessionDirectoryClient(baseUrl, undefined, saved.hostId ?? 'local');
+        const request = saved.parentNativeSessionId ? target.attachChild(saved.providerId, saved.parentNativeSessionId, saved.nativeSessionId) : target.attach(saved.providerId, saved.nativeSessionId);
+        void request.then((result) => attach(result.agentId)).catch((error) => setFailure(message(error, 'Session could not be reconnected.')));
       } else attach(remembered);
     }
     return () => clientRef.current?.stop();
@@ -259,7 +270,7 @@ export function App({
     setOpenedSessions((current) => [item, ...current.filter((entry) => !((entry.hostId ?? 'local') === (item.hostId ?? 'local') && entry.providerId === item.providerId && entry.nativeSessionId === item.nativeSessionId) && entry.agentId !== item.agentId)]);
   }
 
-  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string }): Promise<void> {
+  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }): Promise<void> {
     if (!directory || transitionRef.current) return;
     transitionRef.current = true;
     setTransitioning(true);
@@ -267,12 +278,39 @@ export function App({
     try {
       const hostId = item.hostId ?? selectedHost.id;
       const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
-      const result = await target.attach(item.providerId, item.nativeSessionId);
+      const result = item.parentNativeSessionId
+        ? await target.attachChild(item.providerId, item.parentNativeSessionId, item.nativeSessionId)
+        : await target.attach(item.providerId, item.nativeSessionId);
       rememberSession({ ...item, hostId, agentId: result.agentId });
       setProviderName(providers.find((provider) => provider.providerId === item.providerId)?.displayName ?? item.providerId);
       attach(result.agentId);
     } catch (error) { setFailure(message(error, 'Session could not be connected.')); }
     finally { transitionRef.current = false; setTransitioning(false); }
+  }
+
+  async function openChildSession(child: AgentChildSession): Promise<void> {
+    const parent = state?.agent;
+    const parentNativeSessionId = parent?.runtimeInfo.sessionId;
+    if (!directory || !parent || !parentNativeSessionId) throw new Error('The parent session is unavailable.');
+    const generation = navigationGeneration.current;
+    if (transitionRef.current) return;
+    transitionRef.current = true;
+    setTransitioning(true);
+    setFailure(undefined);
+    try {
+      const saved = openedSessions.find((item) => item.agentId === parent.id);
+      const hostId = saved?.hostId ?? 'local';
+      const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
+      const result = await target.attachChild(parent.providerId, parentNativeSessionId, child.nativeSessionId);
+      if (navigationGeneration.current !== generation) return;
+      rememberSession(saved ?? { agentId: parent.id, providerId: parent.providerId, nativeSessionId: parentNativeSessionId, hostId, title: 'Parent conversation' });
+      rememberSession({ agentId: result.agentId, providerId: parent.providerId, nativeSessionId: result.nativeSessionId,
+        title: child.title, hostId, parentAgentId: parent.id, parentNativeSessionId });
+      attach(result.agentId);
+    } finally {
+      transitionRef.current = false;
+      setTransitioning(false);
+    }
   }
 
   async function createAgent(): Promise<void> {
@@ -309,16 +347,28 @@ export function App({
 
   async function resumeAgent(): Promise<void> {
     const persistence = state?.agent?.persistence;
-    if (!persistence || transitionRef.current) return;
+    const session = openedSessions.find((item) => item.agentId === state?.agent?.id);
+    if (!persistence || session?.parentAgentId || session?.parentNativeSessionId || transitionRef.current) return;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined);
-    const agentId = createAgentId();
+    const generation = navigationGeneration.current;
     try {
-      const response = await transport.resumeAgent(agentId, persistence);
-      attach(response.payload.agentId);
+      if (directory) {
+        const hostId = session?.hostId ?? 'local';
+        const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
+        const response = await target.attach(persistence.providerId, persistence.sessionId);
+        if (navigationGeneration.current !== generation) return;
+        rememberSession({ ...session, agentId: response.agentId, providerId: persistence.providerId,
+          nativeSessionId: response.nativeSessionId ?? persistence.sessionId, hostId, title: session?.title ?? 'Resumed session' });
+        attach(response.agentId);
+      } else {
+        const response = await transport.resumeAgent(createAgentId(), persistence);
+        if (navigationGeneration.current !== generation) return;
+        attach(response.payload.agentId);
+      }
     } catch (error) {
-      setFailure(message(error, 'Agent could not be resumed.'));
+      if (navigationGeneration.current === generation) setFailure(message(error, 'Agent could not be resumed.'));
     } finally {
       transitionRef.current = false;
       setTransitioning(false);
@@ -354,6 +404,16 @@ export function App({
   const activeAgentId = state?.agent?.id ?? attachingAgentId;
   const connectionAgentId = state?.agent?.id ?? attachingAgentId ?? 'standby';
   const activeOpened = openedSessions.find((item) => item.agentId === activeAgentId);
+  const ancestors: OpenedSession[] = [];
+  const visited = new Set<string>(activeAgentId ? [activeAgentId] : []);
+  let ancestorId = activeOpened?.parentAgentId;
+  while (ancestorId && !visited.has(ancestorId)) {
+    visited.add(ancestorId);
+    const ancestor = openedSessions.find((item) => item.agentId === ancestorId);
+    if (!ancestor) break;
+    ancestors.unshift(ancestor);
+    ancestorId = ancestor.parentAgentId;
+  }
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);
   const hostOffline = activeHost?.online === false;
@@ -484,10 +544,10 @@ export function App({
         configurationLocked={creationLocked}
         onPlanningChange={providerId !== 'dsh' && !creationLocked ? setCreatePlanning : undefined}
         onRetryProviders={() => void loadProviders()}
-        persistence={state?.agent?.persistence}
+        persistence={activeOpened?.parentAgentId || activeOpened?.parentNativeSessionId ? undefined : state?.agent?.persistence}
         onSelectedProviderChange={selectProvider}
         onCreateSession={() => void createAgent()}
-        onResumeSession={activeRemoteSession ? undefined : () => void resumeAgent()}
+        onResumeSession={activeRemoteSession || activeOpened?.parentAgentId || activeOpened?.parentNativeSessionId ? undefined : () => void resumeAgent()}
       >{directory ? <SessionConfiguration directory={directory} providerId={providerId} value={sessionOptions} disabled={transitioning || creationLocked || selectedHostOffline} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
       {clientActions.advanceFixture || clientActions.rehydrateFixture || clientActions.stopReader ? <RecordedPlaybackControls
         onAdvance={clientActions.advanceFixture}
@@ -509,6 +569,14 @@ export function App({
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <LabWorkbench
           state={state} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && (status === 'ready' || initialState) ? clientActions : {}} visible={activeView === 'workbench'}
+          conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
+            {ancestors.map((ancestor) => <span key={ancestor.agentId}>
+              <button type="button" disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
+              <span aria-hidden="true"> / </span>
+            </span>)}
+            <span aria-current="page">{activeOpened?.title}</span>
+          </nav> : null}
+          onOpenChildSession={directory && !hostOffline && !transitioning ? openChildSession : undefined}
           messageDraft={activeAgentId ? messageDrafts[activeAgentId] ?? '' : ''}
           onMessageDraftChange={activeAgentId ? (text) => setMessageDrafts((current) => ({ ...current, [activeAgentId]: text })) : undefined}
           questionDrafts={activeAgentId ? questionDrafts[activeAgentId] ?? {} : undefined}

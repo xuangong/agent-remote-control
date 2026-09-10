@@ -157,3 +157,12 @@ The workbench presents host pairing, provider session discovery, workspace selec
 ## Interaction acceptance fixture
 
 The opt-in `AGENT_REMOTE_TEST_INTERACTIONS=1` Playwright mode launches a deterministic Provider for typed forms, permissions, external actions, policy approvals, and sensitive form answers. Desktop and mobile tests use the real HTTP/WebSocket workbench pipeline, verify history and reconnect, and save screenshots under the ignored package `.tmp/interaction-capabilities` directory. This is fixture-backed acceptance; native Codex mapping and real CLI transport have separate tests (`packages/agent-remote-lab/src/server/interactions.ts`, `packages/agent-remote-lab/e2e/interaction-capabilities.spec.ts`).
+
+
+## Native child chat navigation
+
+`POST /v1/remote/child/attach` accepts `providerId`, `parentNativeSessionId`, and `nativeSessionId`. The local directory requires an attached parent whose current Snapshot contains the requested direct child, then calls the source's optional `openChild` method. The Codex source delegates to its existing runtime. Concurrent attachment reuses one Remote Agent, and children remain excluded from the root catalog. Sources without native child attachment return an explicit unavailable response (`packages/agent-remote-lab/src/server/session-directory.ts`, `packages/agent-remote-lab/src/server/codex-directory.ts`).
+
+Selecting a child preserves the parent's draft and opens the child's existing chat. Navigation releases no native runtime. Parent navigation remains available, and the normal composer uses the child's actual capability snapshot.
+
+The directory-backed Resume action reattaches the existing native session instead of creating a duplicate runtime. Child views disable generic Resume and retain the parent attachment path. Direct debugger-created sessions must first be opened through the directory before using its child attachment route.

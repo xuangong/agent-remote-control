@@ -5,7 +5,7 @@ import type { RemoteSessionSummary } from '@agent-remote-control/dsh';
 import type { SessionDirectorySource } from './session-directory.js';
 
 /** Keeps unpersisted new threads alive until their first turn is written by Codex. */
-export function createCodexDirectory(provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession'>, workspace: string): SessionDirectorySource {
+export function createCodexDirectory(provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession'> & Partial<Pick<CodexAppServerProvider, 'openChildSession'>>, workspace: string): SessionDirectorySource {
   const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string }>();
   let discovery: Promise<RemoteSessionSummary[]> | undefined;
   let closed = false;
@@ -62,6 +62,11 @@ export function createCodexDirectory(provider: Pick<CodexAppServerProvider, 'lis
       const session = await provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' });
       await remember(session);
       return session;
+    },
+    async openChild(parentNativeSessionId, nativeSessionId) {
+      if (closed) throw new Error('Codex directory is closed.');
+      if (!provider.openChildSession) throw new Error('Native child attachment is unavailable.');
+      return provider.openChildSession(parentNativeSessionId, nativeSessionId);
     },
     async close() {
       closed = true;

@@ -29,6 +29,8 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     displayName: 'Codex',
   };
 
+  private readonly sessions = new Set<CodexAppServerSession>();
+
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {}
 
   async listSessions(options: CodexSessionListOptions = {}): Promise<CodexSessionPage> {
@@ -47,7 +49,10 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
     const transport = await this.createTransport(config.cwd);
     try {
-      return await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME);
+      const session = await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME);
+      this.sessions.add(session);
+      session.onRuntimeClosed(() => this.sessions.delete(session));
+      return session;
     } catch (error) {
       await transport.dispose();
       throw error;
@@ -58,11 +63,22 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const cwd = readPersistenceCwd(handle.opaque);
     const transport = await this.createTransport(cwd);
     try {
-      return await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME);
+      const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME);
+      this.sessions.add(session);
+      session.onRuntimeClosed(() => this.sessions.delete(session));
+      return session;
     } catch (error) {
       await transport.dispose();
       throw error;
     }
+  }
+
+  async openChildSession(parentNativeSessionId: string, childNativeSessionId: string): Promise<AgentSession> {
+    const owners = [...this.sessions].filter((session) => session.hasNativeChild(parentNativeSessionId, childNativeSessionId));
+    if (owners.length > 1) throw new Error('Codex native child ownership is ambiguous across loaded runtimes');
+    if (owners[0]) return owners[0].openChildSession(parentNativeSessionId, childNativeSessionId);
+    if ([...this.sessions].some((session) => session.hasNativeThread(parentNativeSessionId))) throw new Error('Codex session is not a direct child of the loaded parent');
+    throw new Error('Codex parent session is not loaded');
   }
 
   private async createTransport(cwd?: string): Promise<CodexAppServerTransport> {

@@ -85,7 +85,7 @@ New sessions use Codex paginated history to preserve tool output across process 
 
 Use a Host, Relay, debugger, and workbench built from protocol `1.4.0`. MCP requests can display flat typed forms, explicit browser actions, and exact filesystem/network approvals. Tool approvals expose only decisions advertised by Codex. Unsupported form schemas are declined with a visible diagnostic. Sensitive text is hidden in completed history and public traces, but still reaches the requesting native service when submitted.
 
-Native completed images appear through the normal resource renderer. File-backed images require the referenced native file to exist on first read. Parent subagent calls appear as tool summaries; child-session navigation is not available. Browser reload preserves pending interactions while the Host lives, but restarting it does not recover pending native RPCs or synthesized plan approvals. Do not use historical receipts as answers to new requests.
+Native completed images appear through the normal resource renderer. File-backed images require the referenced native file to exist on first read. Parent subagent calls appear as tool summaries. Loaded native children also appear below the originating parent reply and open their own chat on the same runtime. Browser reload preserves pending interactions while the Host lives, but restarting it does not recover pending native RPCs or synthesized plan approvals. Do not use historical receipts as answers to new requests.
 
 ## Chat session controls
 
@@ -98,3 +98,14 @@ Place a custom prompt such as `review.md` in `CODEX_HOME/prompts` to discover `/
 For command acceptance, exercise directory loading, a model-to-effort interaction, permission selection, and a skill or prompt on desktop and mobile; include browser reload, Working elapsed time, and native interrupt. The fixture model-response stream is deterministic, so actual gateway behavior still needs a live session. These are validation steps, not a claim that the new command flow has passed browser or live-runtime acceptance.
 
 While Codex is Working, type a correction and press Enter. The input should be accepted into the active native turn, and elapsed time should continue. This adapter does not expose a next-turn queue button. An uncertain send failure must preserve the draft without automatically retrying it.
+
+
+## Verify a native child chat
+
+Use the real local Provider with the pinned Codex executable and a configured model endpoint. Ask the parent to create two native subagents with distinct tasks and wait for them. Check that the child rows appear before either child page is opened, remain in creation order as their statuses change, and navigate to distinct transcripts. Return to the parent and confirm its draft is retained. A child that forbids native direct input must show a disabled composer rather than silently creating a new session.
+
+The existing debugger can inspect relationships and child activity without a new protocol: `pnpm bdb inspect <parent-agent-id> --relay <relay-url> --json` includes `agent.runtimeInfo.childSessions`. Once a child is attached in the console, use its Remote Agent ID with `inspect`, `timeline`, `observe`, `interaction list`, and `interaction respond`. These target the child's ordinary session wire. Do not use `session resume` as a substitute for attaching a still-running native child.
+
+Repeat with a child awaiting a native question or approval before opening its chat; its parent row must indicate waiting, and the child must show the actual pending request. Closing or switching a browser view must not terminate the native task. Historical creation metadata and live control availability are distinct; native instances outside the held app-server are not assumed controllable.
+
+If native text changes during its initial history read, the Provider retries the conflicting snapshot read a bounded number of times. Continued contention leaves the child listed and returns an explicit retry error when opening it. Retry opening that child; do not create or resume another native session. Model and permission values may initially be unavailable because native `thread/read` omits them; parent settings are not assumed to apply to the child.

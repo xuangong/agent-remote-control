@@ -390,6 +390,7 @@ describe('App', () => {
       await replacement.promise;
     });
 
+    expect(transport.resumeAgent).toHaveBeenCalledWith(expect.any(String), previousState.agent.persistence);
     expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('No active Agent');
     expect((container.querySelector('.lab-composer-dock') as HTMLElement).hidden).toBe(true);
     expect(container.querySelector('[data-testid="connection-status"]')?.textContent).toBe('Connecting');

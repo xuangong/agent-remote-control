@@ -23,6 +23,28 @@ const capabilities: AgentCapabilities = {
 };
 
 describe('AgentManager Timeline and Snapshot', () => {
+  it('publishes native child relationships and refreshed capabilities on the session wire', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    const mutableCapabilities = { ...capabilities };
+    const session = sessionFor(stream, { capabilities: mutableCapabilities });
+    const manager = await AgentManager.attach({ agentId: 'parent', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'e' });
+    const output: unknown[] = [];
+    const wire = createSessionWire(manager, (json) => output.push(JSON.parse(json)));
+    try {
+      await manager.ready;
+      await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+      mutableCapabilities.sendMessage = false;
+      const child = { nativeSessionId: 'child', title: 'Review', createdAt: '2026-09-10T00:00:00.000Z', status: 'waiting' as const, observation: 'live' as const };
+      stream.push({ type: 'observation', sourceKey: 'children:1', occurredAt: Date.now(), delivery: 'live', event: {
+        type: 'runtime_updated', provider: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'native-parent', status: 'running', childSessions: [child] },
+      } });
+      await expect.poll(() => manager.snapshot().payload.runtimeInfo.childSessions).toEqual([child]);
+      expect(manager.snapshot().payload.capabilities.sendMessage).toBe(false);
+      expect(output).toContainEqual(expect.objectContaining({ type: 'agent_update', payload: expect.objectContaining({ capabilities: expect.objectContaining({ sendMessage: false }), runtimeInfo: expect.objectContaining({ childSessions: [child] }) }) }));
+      await expect(manager.sendMessage('Disallowed')).rejects.toThrow('send_message');
+    } finally { wire.close(); await manager.close(); }
+  });
   it('loads command documentation on demand over the resource wire and rejects removed bindings', async () => {
     const stream = new ManualProviderStream();
     stream.push({ type: 'history_boundary' });

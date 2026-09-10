@@ -50,7 +50,7 @@ Relay delays readiness until it observes the single history boundary, buffers ea
 
 ## Codex process and native directory
 
-The default local workbench composes the real Codex Provider, Recorded, and the DSH Host broker. Codex owns one app-server child per open session, receives JSONL events over stdio, and retains a bounded stderr tail for exit diagnostics. It uses the selected native home and login. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in memory until attached, and server shutdown disposes those children. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-remote-lab/src/server/codex-directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
+The default local workbench composes the real Codex Provider, Recorded, and the DSH Host broker. Codex owns one app-server process per opened root session tree, receives JSONL events over stdio, and retains a bounded stderr tail for exit diagnostics. It uses the selected native home and login. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in memory until attached, and server shutdown disposes those children. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-remote-lab/src/server/codex-directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
 
 ## Invariants
 
@@ -141,3 +141,12 @@ DSH synchronously reads native status: immediate input uses `steer` while runnin
 Codex skill descriptors prefer `interface.shortDescription`, then legacy `shortDescription`, while preserving the full description. Their documentation reader refreshes `skills/list`, accepts only a currently enabled advertised skill, and reads a bounded regular file without following a final symlink. The native skill name and path remain authoritative for `turn/start`; viewing the file never starts a turn.
 
 DSH advertises user-invocable skills when the scoped skill registry and native skill tool are installed. Discovery and documentation use the agent scope and working directory, ordinary command names take precedence, and `skills.get()` supplies the Markdown body. Executing a skill sends the native leading `/name` gesture as a user message; the installed DSH pre-step hook owns loading and injecting its instructions. No Remote-side instruction injection is synthesized (`packages/agent-provider-dsh/src/commands.ts`, `packages/agent-provider-dsh/src/runtime.ts`).
+
+
+## Codex native child sessions
+
+The Codex runtime routes notifications and original server requests by native thread ID over the parent's app-server connection. Discovery preserves direct parentage and stable spawn provenance, updates parent `childSessions` summaries, and receives child activity before a child chat is opened. Opening a child reuses this runtime rather than starting another app-server or cold-resuming an unavailable native child. The child's normal session handles its Timeline, resource reads, commands and pending interaction responses.
+
+Native `canAcceptDirectInput` governs child input availability. Unknown or prohibited direct input is not enabled by the Remote UI. Runtime disconnection is not inferred to be a successful child completion. Native creation, shutdown and resumption tools are not exposed as invented Remote lifecycle actions. This integration does not add DSH child control capabilities.
+
+An unloaded child with persisted turns opens as read-only saved history through `thread/read`; an unloaded ephemeral child without history reports unavailable. Native reactivation restores live observation and supported controls. Initial child model and permission values remain unknown when native reads omit them; parent settings are not presented as child settings. Planning requires a known child model.

@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react';
 import type {
+  AgentChildSession,
   AgentInteractionResponse,
   ResourceBinding,
 } from '@borgee/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
+import { AgentChildSessionList } from './AgentChildSessionList.js';
 import { InteractionPanel } from './InteractionPanel.js';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
 import { ResourceList } from './ResourceList.js';
@@ -18,6 +20,7 @@ export interface AgentTimelineProps {
   readonly state: AgentReplicaState;
   readonly registry?: RendererRegistry;
   readonly showHeader?: boolean;
+  readonly onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>;
   readonly onLoadOlder?: () => void | Promise<void>;
   readonly onInteractionResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void>;
@@ -30,12 +33,37 @@ export function AgentTimeline({
   registry,
   showHeader = true,
   onLoadOlder,
+  onOpenChildSession,
   onInteractionResponse,
   onResourceRequest,
   questionDrafts,
   onQuestionDraftChange,
 }: AgentTimelineProps) {
   const renderModel = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries);
+  const discovered = useRef({ identity: '', order: new Map<string, number>() });
+  const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);
+  if (discovered.current.identity !== identity) discovered.current = { identity, order: new Map() };
+  const children = [...(state.agent?.runtimeInfo.childSessions ?? [])];
+  for (const child of children) {
+    if (!discovered.current.order.has(child.nativeSessionId)) discovered.current.order.set(child.nativeSessionId, discovered.current.order.size);
+  }
+  children.sort((a, b) => (Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    || discovered.current.order.get(a.nativeSessionId)! - discovered.current.order.get(b.nativeSessionId)!);
+  const replies = new Map<string, string>();
+  const calls = new Map<string, string>();
+  for (const { entry, key } of renderModel) {
+    if (!entry.turnId) continue;
+    if (entry.item.type === 'assistant_message') replies.set(entry.turnId, key);
+    if (entry.item.type === 'tool_call') calls.set(entry.item.callId, entry.turnId);
+  }
+  const childrenByReply = new Map<string, AgentChildSession[]>();
+  const unassociated: AgentChildSession[] = [];
+  for (const child of children) {
+    const turnId = child.parentTurnId ?? (child.parentCallId ? calls.get(child.parentCallId) : undefined);
+    const key = turnId ? replies.get(turnId) : undefined;
+    if (key) childrenByReply.set(key, [...(childrenByReply.get(key) ?? []), child]);
+    else unassociated.push(child);
+  }
   return <section className="agent-remote-surface" aria-label="Agent timeline">
     {showHeader ? <header className="agent-surface-header">
       <div>
@@ -61,8 +89,11 @@ export function AgentTimeline({
             <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} />
             {registry?.render(entry.item)}
             <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
+            <AgentChildSessionList children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
           </div>)}
     </div>
+
+    <AgentChildSessionList key={identity} children={unassociated} label="Session subagents" onOpenChildSession={onOpenChildSession} />
 
     {state.pendingInteractions.length > 0 ? <aside className="agent-interactions" aria-label="Pending interactions">
       {state.pendingInteractions.map((request) => <InteractionPanel

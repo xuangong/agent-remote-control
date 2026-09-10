@@ -30,6 +30,12 @@ export class CodexSessionSettings {
   private readonly sandboxPolicies = new Map<string, Record<string, unknown>>();
   private discoveryFailure: string | undefined;
 
+  inheritCatalog(source: CodexSessionSettings): void {
+    this.models = structuredClone(source.models);
+    this.requirements = structuredClone(source.requirements);
+    this.discoveryFailure = source.discoveryFailure;
+  }
+
   async discover(transport: CodexAppServerTransport): Promise<void> {
     this.models = [];
     this.discoveryFailure = undefined;

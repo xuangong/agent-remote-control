@@ -547,6 +547,7 @@ export class AgentManager {
         state.lastUsage = structuredClone(event.usage);
         break;
       case 'runtime_updated':
+        state.capabilities = structuredClone(this.session.capabilities);
         state.runtimeInfo = structuredClone(event.runtimeInfo);
         state.status = event.runtimeInfo.status;
         if (event.runtimeInfo.cwd !== undefined) state.cwd = event.runtimeInfo.cwd;

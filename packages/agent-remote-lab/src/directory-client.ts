@@ -12,7 +12,7 @@ export interface SessionSummary {
 export interface SessionCatalogPage { items: SessionSummary[]; hasMore: boolean; nextCursor?: string; revision: string }
 export interface SessionWorkspace { id: string; name: string; path: string }
 export interface CreateSessionOptions { workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
-export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string }
+export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string }
 export class DirectoryError extends Error {
   constructor(message: string, readonly code?: string) { super(message); }
 }
@@ -35,6 +35,7 @@ export class SessionDirectoryClient {
   revision(providerId: string): Promise<{ revision: string }> { return this.request(`catalog/revision?${new URLSearchParams({ providerId })}`); }
   workspaces(providerId: string): Promise<{ workspaces: SessionWorkspace[] }> { return this.request(`workspaces?${new URLSearchParams({ providerId })}`); }
   attach(providerId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('attach', { providerId, nativeSessionId }); }
+  attachChild(providerId: string, parentNativeSessionId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('child/attach', { providerId, parentNativeSessionId, nativeSessionId }); }
   create(providerId: string, requestId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('create', { providerId, requestId, ...options }); }
 }
 

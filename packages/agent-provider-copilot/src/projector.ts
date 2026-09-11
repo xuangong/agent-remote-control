@@ -4,7 +4,8 @@ export const provider = 'copilot';
 export function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 export function detail(name: string, value: unknown): AgentToolDetail {
   const args = record(value);
-  if (typeof args.command === 'string') return { type: 'shell', command: args.command };
+  const command = args.command ?? args.fullCommandText;
+  if (typeof command === 'string') return { type: 'shell', command };
   const path = args.path ?? args.file_path ?? args.fileName;
   if (typeof path === 'string') return { type: /edit|patch/i.test(name) ? 'edit' : /write|create/i.test(name) ? 'write' : 'read', filePath: path };
   return { type: 'other', description: name };

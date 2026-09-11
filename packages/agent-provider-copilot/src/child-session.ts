@@ -16,6 +16,7 @@ export class CopilotChildSession implements AgentSession {
   activityGeneration = 0;
   private taskRevision = 0;
   private lastTaskTerminal?: string;
+  private deferredTask?: {info: AgentChildSession; expectedGeneration: number; nativeStatus?: string};
   constructor(private readonly parent: CopilotAgentSession, private readonly info: AgentChildSession, private readonly onDispose: () => void) {}
   async initialize(): Promise<void> {
     let cursor: string | undefined;
@@ -31,6 +32,10 @@ export class CopilotChildSession implements AgentSession {
     for (const event of history) this.project(event, 'history');
     this.stream.push({type: 'history_boundary'}); const buffered = this.buffered!; this.buffered = undefined;
     for (const event of buffered) this.project(event, 'live');
+    if (this.deferredTask) {
+      const snapshot = this.deferredTask; this.deferredTask = undefined;
+      this.updateTask(snapshot.info, snapshot.expectedGeneration, snapshot.nativeStatus);
+    }
   }
   accept(event: SessionEvent, delivery: 'history' | 'live'): void {
     const d = record(event.data); const owner = event.agentId ?? d.parentToolCallId;
@@ -44,7 +49,8 @@ export class CopilotChildSession implements AgentSession {
     if (projected) this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
   }
   updateTask(info: AgentChildSession, expectedGeneration?: number, nativeStatus?: string): void {
-    if (this.closed || this.buffered || expectedGeneration !== this.activityGeneration) return;
+    if (this.closed || expectedGeneration !== this.activityGeneration) return;
+    if (this.buffered) { this.deferredTask = {info, expectedGeneration, nativeStatus}; return; }
     const terminal = `${nativeStatus ?? info.status}:${this.activityGeneration}`;
     if (this.lastTaskTerminal === terminal) return;
     if (info.status !== 'running' && info.status !== 'starting' && info.status !== 'waiting') this.lastTaskTerminal = terminal;

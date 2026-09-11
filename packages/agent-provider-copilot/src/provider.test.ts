@@ -10,6 +10,7 @@ function event(type: string, data: unknown, extra = {}) { return {id: `e${++sequ
 beforeEach(() => {
   mock.history = []; mock.handler = undefined;
   mock.native = {on: vi.fn((handler: unknown) => {mock.handler = handler; return vi.fn();}), getEvents: vi.fn(async () => mock.history), send: vi.fn(async () => 'm'), abort: vi.fn(async () => {}), disconnect: vi.fn(async () => {}), rpc: {
+    metadata: {isProcessing: vi.fn(async () => ({processing: false}))},
     permissions: {handlePendingPermissionRequest: vi.fn(async () => ({success: true}))},
     interruptMainTurn: vi.fn(async () => ({interrupted: true})),
     commands: {invoke: vi.fn(async () => ({kind: 'agent-prompt', prompt: 'Resolved skill instructions', displayPrompt: '/native-cmd args'}))},
@@ -35,6 +36,7 @@ describe('Copilot native adapter', () => {
   }, 10000);
   it('validates callback approvals and questions before resolving the native callback', async () => {
     const {provider, session} = await open(); const seen = await collect(session);
+    mock.handler(event('tool.execution_start', {toolCallId: 'call', toolName: 'bash'}));
     mock.handler(event('permission.requested', {requestId: 'approval', permissionRequest: {kind: 'shell', toolCallId: 'call', command: 'pwd'}}));
     const pending = mock.config.onPermissionRequest({kind: 'shell', toolCallId: 'call', command: 'pwd'}); await Promise.resolve();
     let request = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_requested' ? [v.event.request] : []).at(-1)!;
@@ -44,7 +46,7 @@ describe('Copilot native adapter', () => {
     await expect(session.respondToInteraction(request.requestId, {kind: 'tool_approval', decision: 'allow', scope: 'session'})).rejects.toThrow();
     await session.respondToInteraction(request.requestId, {kind: 'tool_approval', decision: 'allow', scope: 'once'});
     expect(await pending).toEqual({kind: 'no-result'});
-    expect(mock.native.rpc.permissions.handlePendingPermissionRequest).toHaveBeenCalledWith({requestId: 'approval', result: {kind: 'approved'}});
+    expect(mock.native.rpc.permissions.handlePendingPermissionRequest).toHaveBeenCalledWith({requestId: 'approval', result: {kind: 'approve-once', approvedInteractively: true}});
     mock.handler(event('user_input.requested', {requestId: 'question', question: 'Choose', choices: ['A', 'B'], allowFreeform: false}));
     const answer = mock.config.onUserInputRequest({question: 'Choose', choices: ['A', 'B'], allowFreeform: false}); await new Promise(resolve => setImmediate(resolve));
     request = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_requested' ? [v.event.request] : []).at(-1)!;
@@ -196,4 +198,71 @@ it('keeps an active child history turn open and completes repeated rounds from n
   const lifecycle = seen.values.flatMap(v => v.type === 'observation' && ['turn_started', 'turn_completed'].includes(v.event.type) ? [v.event as any] : []);
   expect(lifecycle.map(e => e.type)).toEqual(['turn_started', 'turn_completed', 'turn_started', 'turn_completed']);
   expect(lifecycle[0].turnId).toBe(lifecycle[1].turnId); expect(lifecycle[2].turnId).toBe(lifecycle[3].turnId); expect(lifecycle[0].turnId).not.toBe(lifecycle[2].turnId);
+}, 10000);
+it('keeps an active root history turn continuous through buffered next step and live idle', async () => {
+  const history = [event('user.message', {content: 'Work'}), event('assistant.turn_start', {turnId: '0'}), event('assistant.turn_end', {turnId: '0'})];
+  mock.native.getEvents.mockImplementation(async () => {mock.handler(event('assistant.turn_start', {turnId: '1'})); return history;});
+  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: true});
+  const {provider, session} = await open(); const seen = await collect(session); await new Promise(resolve => setImmediate(resolve));
+  expect(seen.values.some(v => v.type === 'observation' && v.event.type === 'turn_completed')).toBe(false);
+  mock.handler(event('assistant.message', {messageId: 'root-final', content: 'Final answer'})); mock.handler(event('assistant.turn_end', {turnId: '1'})); mock.handler(event('assistant.idle', {}));
+  await provider.dispose(); await seen.done;
+  const lifecycle = seen.values.flatMap(v => v.type === 'observation' && ['turn_started', 'turn_completed'].includes(v.event.type) ? [v.event as any] : []);
+  expect(lifecycle.map(e => e.type)).toEqual(['turn_started', 'turn_completed']); expect(lifecycle[0].turnId).toBe(lifecycle[1].turnId);
+}, 10000);
+it('applies a native idle snapshot received while child history is still loading', async () => {
+  const task = {type: 'agent', id: 'child', toolCallId: 'spawn', description: 'Child', agentType: 'explore', status: 'running', startedAt: new Date().toISOString()};
+  mock.native.rpc.tasks.list.mockImplementation(async () => ({tasks: [{...task}]}));
+  let finish!: (page: unknown) => void; let reading!: () => void;
+  const started = new Promise<void>(resolve => {reading = resolve;});
+  mock.native.rpc.eventLog.read.mockImplementation(() => new Promise(resolve => {finish = resolve; reading();}));
+  const {provider, session} = await open(); const opening = session.openChildSession('child'); await started;
+  task.status = 'idle'; await session.refreshChildren();
+  finish({events: [event('user.message', {content: 'Child'}, {agentId: 'child'}), event('assistant.turn_start', {turnId: '0'}, {agentId: 'child'}), event('assistant.turn_end', {turnId: '0'}, {agentId: 'child'})], cursor: 'end', hasMore: false});
+  const child = await opening; const seen = await collect(child); await provider.dispose(); await seen.done;
+  expect(seen.values.flatMap(v => v.type === 'observation' && ['turn_started', 'turn_completed'].includes(v.event.type) ? [v.event.type] : [])).toEqual(['turn_started', 'turn_completed']);
+  const completion = seen.values.findIndex(v => v.type === 'observation' && v.event.type === 'turn_completed');
+  expect(completion).toBeGreaterThan(seen.values.findIndex(v => v.type === 'history_boundary'));
+}, 10000);
+it('derives an untagged child permission owner from native tool identity and sends a user approval decision', async () => {
+  const {provider, session} = await open(); const seen = await collect(session);
+  mock.handler(event('tool.execution_start', {toolCallId: 'root-tool', toolName: 'bash'}));
+  mock.handler(event('tool.execution_start', {toolCallId: 'child-tool', toolName: 'bash'}, {agentId: 'child'}));
+  mock.handler(event('permission.requested', {requestId: 'root-permission', permissionRequest: {kind: 'shell', toolCallId: 'root-tool'}, promptRequest: {kind: 'commands', toolCallId: 'root-tool'}}));
+  mock.handler(event('permission.requested', {requestId: 'child-permission', permissionRequest: {kind: 'shell', toolCallId: 'child-tool'}, promptRequest: {kind: 'commands', toolCallId: 'child-tool'}}));
+  await session.cancel();
+  await session.respondToInteraction('child-permission', {kind: 'tool_approval', decision: 'allow', scope: 'once'});
+  expect(mock.native.rpc.permissions.handlePendingPermissionRequest).toHaveBeenCalledWith({requestId: 'child-permission', result: {kind: 'approve-once', approvedInteractively: true}});
+  await provider.dispose(); await seen.done;
+  const retired = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event] : []);
+  expect(retired.map(e => [e.requestId, e.response])).toEqual([['root-permission', {kind: 'tool_approval', decision: 'cancel'}], ['child-permission', {kind: 'tool_approval', decision: 'allow', scope: 'once'}]]);
+}, 10000);
+it('applies a stable native idle snapshot after buffered final text, not before it', async () => {
+  const history = [event('user.message', {content: 'Work'}), event('assistant.turn_start', {turnId: '0'}), event('assistant.turn_end', {turnId: '0'})];
+  mock.native.getEvents.mockImplementation(async () => {
+    mock.handler(event('assistant.turn_start', {turnId: '1'}));
+    mock.handler(event('assistant.message', {messageId: 'buffered-final', content: 'Buffered final answer'}));
+    mock.handler(event('assistant.turn_end', {turnId: '1'})); return history;
+  });
+  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: false});
+  const {provider, session} = await open(); const seen = await collect(session); await provider.dispose(); await seen.done;
+  const completion = seen.values.findIndex(v => v.type === 'observation' && v.event.type === 'turn_completed');
+  const final = seen.values.findIndex(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'assistant_message');
+  expect(completion).toBeGreaterThan(final);
+  expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'turn_started')).toHaveLength(1);
+  expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'turn_completed')).toHaveLength(1);
+}, 10000);
+it('preserves native deny and location approval receipts when completion wins the RPC response race', async () => {
+  const {provider, session} = await open(); const seen = await collect(session);
+  mock.handler(event('permission.requested', {requestId: 'deny', permissionRequest: {kind: 'shell'}}));
+  mock.native.rpc.permissions.handlePendingPermissionRequest.mockImplementation(async () => {
+    mock.handler(event('permission.completed', {requestId: 'deny', result: {kind: 'denied-interactively-by-user'}})); return {success: true};
+  });
+  await session.respondToInteraction('deny', {kind: 'tool_approval', decision: 'deny'});
+  expect(mock.native.rpc.permissions.handlePendingPermissionRequest).toHaveBeenCalledWith({requestId: 'deny', result: {kind: 'reject'}});
+  mock.handler(event('permission.requested', {requestId: 'location', permissionRequest: {kind: 'shell'}}));
+  mock.handler(event('permission.completed', {requestId: 'location', result: {kind: 'approved-for-location'}}));
+  await provider.dispose(); await seen.done;
+  const receipts = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event.response] : []);
+  expect(receipts).toEqual([{kind: 'tool_approval', decision: 'deny'}, {kind: 'tool_approval', decision: 'allow', scope: 'once'}]);
 }, 10000);

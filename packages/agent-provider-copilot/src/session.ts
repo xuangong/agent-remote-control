@@ -21,6 +21,7 @@ export class CopilotAgentSession implements AgentSession {
   private closed = false;
   private observed = false;
   private revision = 0;
+  private foregroundRevision = 0;
   private native!: CopilotSession;
   private info: AgentRuntimeInfo;
   private constructor(private readonly config: AgentSessionConfig, private readonly options: CopilotAgentProviderOptions, private readonly onDispose: () => void) {
@@ -38,14 +39,26 @@ export class CopilotAgentSession implements AgentSession {
         if (self.closed) await self.call(native.disconnect(), 'Disconnect late Copilot session');
       }).catch(error => options.onDiagnostic?.(`Copilot late session cleanup: ${String(error)}`));
       self.native = await self.call(opening, 'Open Copilot session');
-      self.unsubscribe = self.native.on(event => { self.interactions.accept(event); if (self.buffered) self.buffered.push(event); else self.accept(event, 'live'); });
+      self.unsubscribe = self.native.on(event => {
+        if (!event.agentId && !record(event.data).parentToolCallId && ['assistant.turn_start', 'assistant.idle', 'abort', 'session.error'].includes(event.type)) self.foregroundRevision++;
+        self.interactions.accept(event); if (self.buffered) self.buffered.push(event); else self.accept(event, 'live'); });
       const history = await self.call(self.native.getEvents(), 'Read Copilot history');
-      self.projector.prepareHistory(history.filter(event => !event.agentId && !record(event.data).parentToolCallId));
+      for (const event of history) self.interactions.trackTool(event);
+      const activityRevision = self.foregroundRevision;
+      const {processing} = await self.call(self.rpc.metadata.isProcessing(), 'Copilot foreground activity');
+      const historicalIds = new Set(history.map(event => event.id));
+      const finals = new Set(history.filter(event => event.type === 'assistant.message').map(event => event.data.messageId));
+      const bufferedForeground = self.buffered!.some(event => !event.agentId && !record(event.data).parentToolCallId && !historicalIds.has(event.id)
+        && ['assistant.turn_start', 'assistant.turn_end', 'assistant.idle', 'assistant.message', 'assistant.message_delta', 'abort', 'session.error'].includes(event.type)
+        && !(event.type === 'assistant.message_delta' && finals.has(event.data.messageId)));
+      self.projector.prepareHistory(history.filter(event => !event.agentId && !record(event.data).parentToolCallId), !processing && !bufferedForeground);
+      self.info.status = processing ? 'running' : 'idle';
       for (const event of history) self.accept(event, 'history');
       self.stream.push({type: 'history_boundary'});
       const buffered = self.buffered!; self.buffered = undefined;
       for (const event of self.deferredEvents.splice(0)) self.emit(event);
       for (const event of buffered) self.accept(event, 'live');
+      if (!processing && self.foregroundRevision === activityRevision) self.accept({type: 'assistant.idle', id: `activity-idle:${randomUUID()}`, parentId: null, timestamp: new Date().toISOString(), ephemeral: true, data: {}} as SessionEvent, 'live');
       self.emit({type: 'thread_started', provider, sessionId: config.sessionId});
       await self.refreshControls(); await self.refreshChildren(); self.emitRuntime(); return self;
     } catch (error) { await self.dispose(); throw error; }

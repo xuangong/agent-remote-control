@@ -76,10 +76,10 @@ export async function controllerOptions(args, root, cwd, env = process.env) {
   return options;
 }
 
-export async function executablePath(name, env = process.env) {
+export async function executablePath(name, env = process.env, { readable = false } = {}) {
   const candidates = isAbsolute(name) ? [name] : (env.PATH ?? '').split(delimiter).map((directory) => join(directory, name));
   for (const candidate of candidates) {
-    try { await access(candidate, constants.X_OK); return resolve(candidate); } catch {}
+    try { await access(candidate, readable ? constants.R_OK : constants.X_OK); return resolve(candidate); } catch {}
   }
   throw new Error(`Executable not found: ${name}. Install it or provide its explicit path; use --help for options.`);
 }

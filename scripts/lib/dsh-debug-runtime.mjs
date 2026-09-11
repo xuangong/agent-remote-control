@@ -58,7 +58,7 @@ export async function waitFor(check, { timeoutMs = 60000, intervalMs = 500, sign
   throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
 }
 
-export function startProcess(command, args, { cwd, env, logFile, secrets = [], output = console.log, stopTimeoutMs = 3000 } = {}) {
+export function startProcess(command, args, { cwd, env, logFile, secrets = [], output = console.log, stopTimeoutMs = 3000, stopLeaderFirst = false } = {}) {
   const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   let running = true;
   let stopping;
@@ -72,10 +72,10 @@ export function startProcess(command, args, { cwd, env, logFile, secrets = [], o
     child.once('error', (error) => { running = false; accept({ code: 1, error }); });
     child.once('close', (code, signal) => { running = false; accept({ code, signal }); });
   });
-  function kill(signal) {
+  function kill(signal, leaderOnly = false) {
     if (!child.pid) return;
     try {
-      if (process.platform === 'win32') child.kill(signal);
+      if (leaderOnly || process.platform === 'win32') child.kill(signal);
       else process.kill(-child.pid, signal);
     } catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
@@ -85,11 +85,30 @@ export function startProcess(command, args, { cwd, env, logFile, secrets = [], o
     stop() {
       stopping ??= (async () => {
         if (!running) return;
+        async function waitForExit() {
+          let timer;
+          await Promise.race([finished, new Promise((accept) => { timer = setTimeout(accept, stopTimeoutMs); })]);
+          clearTimeout(timer);
+        }
+        if (stopLeaderFirst) {
+          kill('SIGTERM', true);
+          await waitForExit();
+        }
+        // Reap any descendants left behind even if the leader already exited.
         kill('SIGTERM');
-        let timer;
-        await Promise.race([finished, new Promise((accept) => { timer = setTimeout(accept, stopTimeoutMs); })]);
-        clearTimeout(timer);
-        if (running) { kill('SIGKILL'); await finished; }
+        if (process.platform !== 'win32') {
+          const deadline = Date.now() + stopTimeoutMs;
+          const groupAlive = () => {
+            try { process.kill(-child.pid, 0); return true; }
+            catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+          };
+          while ((running || groupAlive()) && Date.now() < deadline) await delay(20);
+          if (running || groupAlive()) kill('SIGKILL');
+        } else {
+          if (running) await waitForExit();
+          if (running) kill('SIGKILL');
+        }
+        if (running) await finished;
       })();
       return stopping;
     },

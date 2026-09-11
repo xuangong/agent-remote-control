@@ -68,7 +68,7 @@ test('an existing launcher lock is never replaced or removed', async (t) => {
   assert.equal(await readFile(join(directory, 'run.lock/owner.json'), 'utf8'), 'user-owned-lock');
 });
 
-async function workflow(t, failCatalog = false, providers, bundled = false, failHost = false) {
+async function workflow(t, failCatalog = false, providers, bundled = false, failHost = false, bareScript = false) {
   const directory = await temporary(t);
   const state = join(directory, 'state');
   await mkdir(join(directory, 'scripts/lib'), { recursive: true });
@@ -82,6 +82,7 @@ async function workflow(t, failCatalog = false, providers, bundled = false, fail
   }
   for (const name of ['pnpm', 'codex', 'claude', 'copilot', 'dsh']) await executable(join(directory, 'bin', name), name);
   await executable(join(directory, 'packages/agent-host/dist/cli.js'), 'host');
+  if (bareScript) await writeFile(join(directory, 'bin/copilot.mjs'), "console.log('GitHub Copilot CLI 1.0.83.');", { mode: 0o600 });
   await executable(join(state, 'dsh/tools', PNPM_VERSION, 'node_modules/.bin/pnpm'), 'pnpm');
   await mkdir(join(directory, 'packages/agent-remote-dsh'), { recursive: true });
   await writeFile(join(directory, 'packages/agent-remote-dsh/package.json'), '{"version":"0.1.0"}');
@@ -95,7 +96,7 @@ async function workflow(t, failCatalog = false, providers, bundled = false, fail
   }
   await Promise.all(probes.map((probe) => new Promise((accept) => probe.close(accept))));
   const config = { codex: './bin/codex', claude: './bin/claude', dsh: './bin/dsh', workspace: '.', stateDir: './state',
-    webPort: ports[0], relayPort: ports[1], dshPort: ports[2], ...(providers ? { providers, copilot: bundled ? undefined : './bin/copilot', copilotHome: './copilot-home',
+    webPort: ports[0], relayPort: ports[1], dshPort: ports[2], ...(providers ? { providers, copilot: bareScript ? 'copilot.mjs' : bundled ? undefined : './bin/copilot', copilotHome: './copilot-home',
       ...Object.fromEntries(['codex', 'claude', 'dsh'].filter((id) => !providers.split(',').includes(id)).map((id) => [id, './missing-' + id])),
       ...(!providers.includes('dsh') ? { dshPort: ports[0] } : {}) } : {}) };
   await writeFile(join(directory, 'config.json'), JSON.stringify(config));
@@ -125,6 +126,9 @@ test('builds, pairs each Host, waits for a slower Broker, and prints the ready c
   assert.ok(!(await readFile(ready.logFile, 'utf8')).includes('arc_fixture-private'));
   await child.stop();
   assert.equal((await child.finished).code, 0, output.join('\n'));
+  const stopped = (await readFile(join(directory, 'events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(stopped.some((event) => event.nativeClosedByHost));
+  assert.ok(!stopped.some((event) => event.prematureNativeTerm));
   await assert.rejects(readFile(join(state, 'ready.json')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(state, 'run.lock/owner.json')), { code: 'ENOENT' });
   for (const port of ports) await assert.rejects(fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(1000) }));
@@ -188,4 +192,16 @@ test('a native Host exit during readiness fails the launcher and cleans up owned
   await assert.rejects(readFile(join(state, 'ready.json')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(state, 'run.lock/owner.json')), { code: 'ENOENT' });
   for (const port of ports.slice(0, 2)) await assert.rejects(fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(1000) }));
+});
+
+test('resolves a bare readable Copilot JavaScript entry from PATH in the launcher', async (t) => {
+  const { directory, state, child, output } = await workflow(t, false, 'copilot', false, false, true);
+  await waitFor(async () => {
+    assert.equal(child.running, true, output.join('\n'));
+    try { return await readFile(join(state, 'ready.json')); } catch { return false; }
+  }, { timeoutMs: 10000, intervalMs: 30 });
+  const events = (await readFile(join(directory, 'events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(events.some((event) => event.copilot === join(directory, 'bin/copilot.mjs')));
+  await child.stop();
+  assert.equal((await child.finished).code, 0, output.join('\n'));
 });

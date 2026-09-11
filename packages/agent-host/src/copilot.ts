@@ -1,3 +1,6 @@
+import { access } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { CopilotAgentProvider, resolveCopilotExecutable } from '@borgee/agent-provider-copilot';
@@ -14,9 +17,19 @@ export interface CopilotHostRegistrationOptions {
 }
 
 export async function createCopilotHostRegistration(options: CopilotHostRegistrationOptions = {}): Promise<AgentHostProviderRegistration> {
-  const executable = options.executable ?? resolveCopilotExecutable();
-  const env = { ...process.env, ...options.env, ...(options.copilotHome ? { COPILOT_HOME: options.copilotHome } : {}) };
+  let executable = options.executable ?? resolveCopilotExecutable();
+  const env: NodeJS.ProcessEnv = { ...process.env, ...options.env, ...(options.copilotHome ? { COPILOT_HOME: options.copilotHome } : {}) };
   const nodeEntry = /\.(?:m?js|cjs)$/i.test(executable);
+  if (nodeEntry && !isAbsolute(executable) && !executable.includes('/') && !executable.includes('\\')) {
+    const name = executable;
+    let found: string | undefined;
+    for (const directory of (env.PATH ?? '').split(delimiter)) {
+      const candidate = resolve(join(directory, name));
+      try { await access(candidate, constants.R_OK); found = candidate; break; } catch {}
+    }
+    if (!found) throw new Error(`Copilot JavaScript entry not found on PATH: ${name}. Provide an explicit path.`);
+    executable = found;
+  }
   const { stdout } = await promisify(execFile)(nodeEntry ? process.execPath : executable,
     [...(nodeEntry ? [executable] : []), '--version'], { timeout: 5000, env });
   const match = /^GitHub Copilot CLI (\d+)\.(\d+)\.(\d+)\.?(?:\s|$)/.exec(stdout.trim());

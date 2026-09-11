@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { createServer, request } from 'node:http';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -74,7 +75,19 @@ if (mode === 'pnpm') {
   await register({ key: process.env.AGENT_HOST_REMOTE_KEY, id: 'native', name: process.env.AGENT_HOST_NAME,
     providers: process.env.AGENT_HOST_PROVIDERS.split(',') });
   record({ copilot: process.env.AGENT_HOST_COPILOT, copilotHome: process.env.AGENT_HOST_COPILOT_HOME, codex: process.env.AGENT_HOST_CODEX, claude: process.env.AGENT_HOST_CLAUDE, workspace: process.env.AGENT_HOST_WORKSPACE });
-  keep();
+  const native = spawn(process.execPath, ['-e', `
+    const { appendFileSync } = require('node:fs');
+    const record = event => appendFileSync(${JSON.stringify(join(root, 'events.jsonl'))}, JSON.stringify(event) + '\\n');
+    process.on('SIGTERM', () => { record({ prematureNativeTerm: true }); process.exit(1); });
+    process.on('message', () => { record({ nativeClosedByHost: true }); process.exit(0); });
+    process.send('ready'); setInterval(() => {}, 1000);
+  `], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  await new Promise((accept) => native.once('message', accept));
+  process.on('SIGTERM', () => {
+    record({ stoppingHost: true });
+    native.send('close');
+    native.once('exit', () => process.exit(0));
+  });
 } else if (mode === 'dsh') {
   if (args[0] === '--version') console.log('0.1.2-rc.1');
   else if (args[0] === 'plugin') record({ pluginInstalled: true, home: process.env.DSH_HOME });

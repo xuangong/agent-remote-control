@@ -1,6 +1,6 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCopilotHostRegistration } from './copilot.js';
 
@@ -24,6 +24,13 @@ describe('Copilot registration executable preflight', () => {
       expect(await registration.directory.workspaces()).toEqual([{ id: 'work', name: 'Work', path: '/work' }]);
       expect(process.env.COPILOT_HOME).toBe(previous);
     } finally { await registration.directory.close(); }
+  });
+  it('resolves a readable bare JavaScript entry through the selected PATH', async () => {
+    const executable = await entry("console.log('GitHub Copilot CLI 1.0.83.');");
+    const registration = await createCopilotHostRegistration({ executable: 'copilot.mjs', env: { PATH: dirname(executable) } });
+    try { expect(registration.adapter.descriptor.providerId).toBe('copilot'); }
+    finally { await registration.directory.close(); }
+    await expect(createCopilotHostRegistration({ executable: 'missing.mjs', env: { PATH: dirname(executable) } })).rejects.toThrow(/not found on PATH/);
   });
   it('accepts the official CLI version output including its sentence punctuation and update hint', async () => {
     const output = "GitHub Copilot CLI 1.0.83.\nRun 'copilot update' to check for updates.";

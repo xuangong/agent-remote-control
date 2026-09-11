@@ -121,7 +121,7 @@ async function main() {
       // Resolve the bundled CLI only after dependency installation and provider build.
       options.copilot ??= (await import(new URL('../packages/agent-provider-copilot/dist/index.js', import.meta.url))).resolveCopilotExecutable();
       const nodeEntry = /\.(?:m?js|cjs)$/i.test(options.copilot);
-      if (!nodeEntry) options.copilot = await executablePath(options.copilot, env);
+      options.copilot = await executablePath(options.copilot, env, { readable: nodeEntry });
       console.log(`copilot: ${await run('copilot version', nodeEntry ? process.execPath : options.copilot,
         [...(nodeEntry ? [options.copilot] : []), '--version'], 10000)}`);
     }
@@ -154,7 +154,7 @@ async function main() {
           ...(options.codexHome ? { AGENT_REMOTE_CODEX_HOME: options.codexHome } : {}),
           ...(options.copilotHome ? { AGENT_HOST_COPILOT_HOME: options.copilotHome } : {}),
           ...(options.claudeHome ? { AGENT_HOST_CLAUDE_HOME: options.claudeHome } : {}),
-        }, stopTimeoutMs: 10000,
+        }, stopTimeoutMs: 10000, stopLeaderFirst: true,
       });
       await ready(async () => (await reachable(`${options.serverUrl}/v1/remote/hosts`))?.hosts.find((host) => host.online && host.name === nativeName));
     }

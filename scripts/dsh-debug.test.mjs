@@ -128,3 +128,28 @@ const post = (path, body) => fetch(process.env.TEST_SERVER + path, {method:'POST
   await child.stop();
   assert.deepEqual(await requestJson(`${url}/v1/remote/hosts`), { hosts: [host] });
 });
+
+for (const mode of ['graceful', 'orphan', 'stubborn']) {
+  test(`leader-first stop preserves cleanup ordering and reaps descendants: ${mode}`, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), 'controller-stop-'));
+    const log = join(directory, 'events');
+    let childPid;
+    const managed = startProcess(process.execPath, [fileURLToPath(new URL('./fixtures/managed-process.mjs', import.meta.url)), mode, log], {
+      stopLeaderFirst: true, stopTimeoutMs: 150,
+      output: (line) => { childPid = JSON.parse(line).childPid; },
+    });
+    t.after(async () => {
+      await managed.stop();
+      if (childPid) { try { process.kill(childPid, 'SIGKILL'); } catch {} }
+      await rm(directory, { recursive: true, force: true });
+    });
+    await waitFor(() => childPid, { timeoutMs: 3000, intervalMs: 20 });
+    await managed.stop();
+    await waitFor(() => { try { process.kill(childPid, 0); return false; } catch (error) { return error.code === 'ESRCH'; } }, { timeoutMs: 3000, intervalMs: 20 });
+    assert.equal(managed.running, false);
+    const events = (await readFile(log, 'utf8')).trim().split('\n');
+    assert.equal(events[0], 'parent-term');
+    if (mode === 'graceful') assert.deepEqual(events, ['parent-term', 'child-clean']);
+    else assert.ok(events.includes('child-term'));
+  });
+}

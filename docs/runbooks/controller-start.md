@@ -37,7 +37,7 @@ cp docs/runbooks/controller-start.example.json .runtime/controller.json
 pnpm start --config .runtime/controller.json
 ```
 
-Paths in the JSON file are relative to that file. Paths supplied as CLI arguments are relative to the shell's current directory. Bare executable names are resolved through PATH. CLI options override JSON settings; JSON settings override supported native environment defaults. Unknown fields are rejected. Do not add credentials or pairing keys to this file.
+Paths in the JSON file are relative to that file. Paths supplied as CLI arguments are relative to the shell's current directory. Bare executable names are resolved through PATH, including readable JavaScript entry names such as `copilot.mjs`; JavaScript files need not have the executable permission bit. CLI options override JSON settings; JSON settings override supported native environment defaults. Unknown fields are rejected. Do not add credentials or pairing keys to this file.
 
 Use `codexHome`, `claudeHome`, `copilotHome`, or `dshHome` to explicitly select native profiles. `AGENT_HOST_CODEX`, `AGENT_HOST_CLAUDE`, `AGENT_REMOTE_CODEX_EXECUTABLE`, `AGENT_REMOTE_CODEX_HOME`, and `AGENT_HOST_CLAUDE_HOME` are supported defaults. Existing native `CODEX_HOME` and `CLAUDE_CONFIG_DIR` remain inherited. The launcher owns its Host state under `stateDir/agent-host`; it does not manage a separate daemon selected by `AGENT_HOST_STATE_DIR`.
 
@@ -51,7 +51,7 @@ pnpm start --config .runtime/controller.json \
   --web-port 6181 --relay-port 5916 --dsh-port 3086
 ```
 
-Keep the terminal open. Ctrl+C closes only the launcher's own DSH runtime, native Host sessions, Web, and Broker. A failed build or service exit also cleans up owned processes and exits with an error. Existing services are never killed, adopted, or reused. Do not select a DSH home that another DSH process is already using.
+Keep the terminal open. Ctrl+C closes only the launcher's own DSH runtime, native Host sessions, Web, and Broker. The native Host receives TERM first so it can close its SDK clients; bounded process-group TERM/KILL escalation cleans up any remaining descendants. DSH and pnpm services retain group-based cleanup. A failed build or service exit also cleans up owned processes and exits with an error. Existing services are never killed, adopted, or reused. Do not select a DSH home that another DSH process is already using.
 
 The default state directory is `.runtime/controller`. Homes, native session history, and private startup logs persist. `ready.json` exists only while the environment is ready and includes the controller URL and Host IDs without credentials. The `run.lock/owner.json` file prevents concurrent launchers from using the same state directory. After an ungraceful kill, inspect its PID and any remaining services before manually removing a stale lock; the launcher never guesses that a lock is safe to delete.
 

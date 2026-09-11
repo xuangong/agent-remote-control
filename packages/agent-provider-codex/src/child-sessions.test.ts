@@ -270,6 +270,38 @@ describe('Codex native children', () => {
     } finally { await h.parent.dispose(); }
   });
 
+  it('trims history coverage once and retains repeated fragments beyond a partial snapshot', async () => {
+    const h = await harness();
+    try {
+      h.addChild();
+      const history = (text: string) => [{ id: 'child-turn', status: 'inProgress', items: [{ id: 'child-message', type: 'agentMessage', text }] }];
+      h.threads.get('child')!.turns = history('e');
+      h.spawn();
+      await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.length).toBe(1);
+      const child = await h.provider.openChildSession('parent', 'child');
+      await child.dispose();
+      h.threads.get('child')!.turns = history('ee');
+      h.readReply.beforeReply = () => {
+        h.readReply.beforeReply = undefined;
+        for (const delta of ['ee', 'e']) h.notify('item/agentMessage/delta', {
+          threadId: 'child', turnId: 'child-turn', itemId: 'child-message', delta,
+        });
+        for (let replay = 0; replay < 2; replay++) h.notify('item/completed', {
+          threadId: 'child', turnId: 'child-turn', item: { type: 'agentMessage', id: 'child-message', text: 'eeee' },
+        });
+        h.notify('turn/completed', { threadId: 'child', turn: { id: 'child-turn', status: 'completed' } });
+      };
+      const reopened = await h.provider.openChildSession('parent', 'child');
+      expect(await observations(reopened, 5)).toMatchObject([
+        { delivery: 'history', event: { item: { text: 'ee' } } },
+        { type: 'history_boundary' },
+        { delivery: 'live', event: { item: { text: 'e' } } },
+        { delivery: 'live', event: { item: { text: 'e' } } },
+        { event: { type: 'turn_completed' } },
+      ]);
+    } finally { await h.parent.dispose(); }
+  });
+
   it('preserves root thread startup observations through the shared router', async () => {
     const h = await harness();
     try {

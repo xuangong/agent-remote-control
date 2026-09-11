@@ -115,7 +115,7 @@ describe('CodexAppServerSession', () => {
     await session.dispose();
   });
 
-  it('absorbs item notifications already represented by a concurrent thread read', async () => {
+  it.each([{ deltas: ['Hello'] }, { deltas: ['e', 'e'] }, { deltas: ['e', 'a', 'e', 'b'] }])('absorbs $deltas and matching completions already represented by a concurrent thread read', async ({ deltas }) => {
     const harness = createSessionHarness();
     const starting = CodexAppServerSession.resume(harness.transport, {
       providerId: 'codex', sessionId: 'thread-1', opaque: JSON.stringify({ cwd: '/workspace' }),
@@ -126,13 +126,17 @@ describe('CodexAppServerSession', () => {
     });
     const readRequest = await waitForRequest(harness, 'thread/read');
 
-    harness.child.stdout.write(`${JSON.stringify({ method: 'item/agentMessage/delta', params: {
-      threadId: 'thread-1', turnId: 'turn-overlap', itemId: 'overlap-message', delta: 'Hello',
+    for (const delta of deltas) harness.child.stdout.write(`${JSON.stringify({ method: 'item/agentMessage/delta', params: {
+      threadId: 'thread-1', turnId: 'turn-overlap', itemId: 'overlap-message', delta,
+    } })}\n`);
+    for (let replay = 0; replay < 2; replay++) harness.child.stdout.write(`${JSON.stringify({ method: 'item/completed', params: {
+      threadId: 'thread-1', turnId: 'turn-overlap',
+      item: { type: 'agentMessage', id: 'overlap-message', text: deltas.join('') },
     } })}\n`);
     respond(harness, readRequest.id, {
       thread: { id: 'thread-1', turns: [{
         id: 'turn-overlap', startedAt: 1, completedAt: 2,
-        items: [{ type: 'agentMessage', id: 'overlap-message', text: 'Hello' }],
+        items: [{ type: 'agentMessage', id: 'overlap-message', text: deltas.join('') }],
       }] },
     });
     const session = await starting;
@@ -150,7 +154,7 @@ describe('CodexAppServerSession', () => {
     } })}\n`);
     await expect(iterator.next()).resolves.toMatchObject({ value: {
       type: 'observation', delivery: 'live',
-      sourceKey: expect.stringMatching(/^item:live-message:assistant:delta:[0-9a-f]{8}$/),
+      sourceKey: expect.any(String),
       event: { type: 'timeline', item: { type: 'assistant_message', text: 'After boundary' } },
     } });
     await session.dispose();

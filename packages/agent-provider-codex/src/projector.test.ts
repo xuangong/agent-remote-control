@@ -88,20 +88,72 @@ describe('CodexEventProjector', () => {
     })).toBeNull();
   });
 
-  it('uses stable source identity when a native delta is delivered again', () => {
-    const projector = new CodexEventProjector('thread-1');
-    const params = {
-      threadId: 'thread-1', turnId: 'turn-1', itemId: 'assistant-1', delta: 'Hello',
-    };
+  it.each([
+    ['item/agentMessage/delta', 'agentMessage'],
+    ['item/plan/delta', 'plan'],
+    ['item/reasoning/summaryTextDelta', 'reasoning'],
+  ])('preserves every repeated occurrence of %s', (method, type) => {
+    for (const deltas of [['e', 'e'], ['e', 'a', 'e', 'b'], [' ', ' ', '.', '.', 'again', 'again']]) {
+      const projector = new CodexEventProjector('thread-1');
+      const observations = deltas.map(delta => projector.projectNotification(method, {
+        threadId: 'thread-1', turnId: 'turn-1', itemId: 'message', delta, summaryIndex: 0,
+      }));
+      expect(observations.map(observation => observation?.event)).toEqual(deltas.map(text => ({
+        type: 'timeline', provider: 'codex', turnId: 'turn-1',
+        item: type === 'reasoning' ? { type: 'reasoning', text } : { type: 'assistant_message', messageId: 'message', text },
+      })));
+      expect(new Set(observations.map(observation => observation?.sourceKey)).size).toBe(deltas.length);
+      const text = deltas.join('');
+      const completion = {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: type === 'reasoning' ? { type, id: 'message', summary: [text] } : { type, id: 'message', text },
+      };
+      expect(projector.projectNotification('item/completed', completion)).toBeNull();
+      expect(projector.projectNotification('item/completed', completion)).toBeNull();
+    }
+  });
 
-    const first = projector.projectNotification('item/agentMessage/delta', params);
-    const replay = projector.projectNotification('item/agentMessage/delta', params);
+  it.each(['agentMessage', 'plan', 'reasoning'])('finalizes %s once for matching, extended, corrected, and unstreamed text', (type) => {
+    for (const initial of ['hello', 'hel', 'helo', undefined]) {
+      const projector = new CodexEventProjector('thread-1');
+      if (initial !== undefined) projector.projectNotification(
+        type === 'reasoning' ? 'item/reasoning/summaryTextDelta' : type === 'plan' ? 'item/plan/delta' : 'item/agentMessage/delta',
+        { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message', delta: initial },
+      );
+      const completion = {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: type === 'reasoning' ? { type, id: 'message', summary: ['hello'] } : { type, id: 'message', text: 'hello' },
+      };
+      const first = projector.projectNotification('item/completed', completion);
+      if (initial === 'hello') expect(first).toBeNull();
+      else if (initial === 'helo') expect(first?.event).toMatchObject({
+        item: type === 'reasoning'
+          ? { type: 'error', message: expect.stringContaining('corrected streamed item') }
+          : { type: 'assistant_message', messageId: expect.stringContaining(':correction:'), text: 'hello' },
+      });
+      else expect(first?.event).toMatchObject({ item: { text: initial === 'hel' ? 'lo' : 'hello' } });
+      expect(projector.projectNotification('item/completed', completion)).toBeNull();
+    }
+  });
 
-    expect(replay?.sourceKey).toBe(first?.sourceKey);
-    expect(projector.projectNotification('item/completed', {
-      threadId: 'thread-1', turnId: 'turn-1',
-      item: { type: 'agentMessage', id: 'assistant-1', text: 'Hello' },
-    })).toBeNull();
+  it('keeps equal fragments distinct across items, turns, and projector lifetimes', () => {
+    const keys = new Set<string>();
+    for (let lifetime = 0; lifetime < 2; lifetime++) {
+      const projector = new CodexEventProjector('thread-1');
+      for (const turnId of ['turn-1', 'turn-2']) {
+        for (const itemId of ['message-1', 'message-2']) {
+          const observation = projector.projectNotification('item/agentMessage/delta', {
+            threadId: 'thread-1', turnId, itemId, delta: 'hello',
+          });
+          expect(observation?.event).toMatchObject({ turnId, item: { messageId: itemId, text: 'hello' } });
+          keys.add(observation!.sourceKey);
+          expect(projector.projectNotification('item/completed', {
+            threadId: 'thread-1', turnId, item: { type: 'agentMessage', id: itemId, text: 'hello' },
+          })).toBeNull();
+        }
+      }
+    }
+    expect(keys.size).toBe(8);
   });
 
   it.each([

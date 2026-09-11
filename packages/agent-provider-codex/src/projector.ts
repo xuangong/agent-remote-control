@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { codexToolResult } from './tool-result.js';
 import { CodexImageRegistry } from './images.js';
 import type {
@@ -57,7 +59,7 @@ export interface CodexEventProjectorOptions {
 export class CodexEventProjector {
   private readonly assistantText = new Map<string, string>();
   private readonly reasoningText = new Map<string, string>();
-  private readonly seenDeltaKeys = new Set<string>();
+  private readonly completedTextItems = new Set<string>();
   private readonly emittedUserItems = new Set<string>();
   private readonly now: () => number;
   private readonly delivery: 'history' | 'live';
@@ -199,12 +201,11 @@ export class CodexEventProjector {
     if (!itemId || delta === undefined) return null;
     const reasoning = method === 'item/reasoning/summaryTextDelta';
     const values = reasoning ? this.reasoningText : this.assistantText;
-    const sourceKey = `item:${itemId}:${reasoning ? 'reasoning' : 'assistant'}:delta:${nativeFingerprint(params)}`;
+    // Native deltas have no occurrence ID or offset; equal payloads still append.
+    // A fresh identity also avoids collisions when a history refresh rebuilds the projector.
+    const sourceKey = `item:${itemId}:${reasoning ? 'reasoning' : 'assistant'}:delta:${randomUUID()}`;
     const prior = values.get(itemId) ?? '';
-    if (!this.seenDeltaKeys.has(sourceKey)) {
-      values.set(itemId, prior + delta);
-      this.seenDeltaKeys.add(sourceKey);
-    }
+    values.set(itemId, prior + delta);
     const item: AgentTimelineItem = reasoning
       ? { type: 'reasoning', text: delta }
       : { type: 'assistant_message', messageId: itemId, text: delta };
@@ -262,6 +263,10 @@ export class CodexEventProjector {
     itemId: string,
     turnId: string | undefined,
   ): ProviderObservation | null {
+    const completionKey = JSON.stringify([turnId, itemId, item.type]);
+    if (this.completedTextItems.has(completionKey)) return null;
+    // Completion is terminal even when it emits no text or emits a correction.
+    this.completedTextItems.add(completionKey);
     const reasoning = item.type === 'reasoning';
     const finalText = reasoning
       ? this.readReasoningText(item)

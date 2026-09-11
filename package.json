@@ -18,7 +18,8 @@
     "compatibility:check": "node scripts/compatibility.mjs --check",
     "lint:docs": "bash scripts/lint-mermaid.sh docs",
     "bdb": "node packages/agent-remote-debugger/dist/cli.js",
-    "agent-host": "node packages/agent-host/dist/cli.js"
+    "agent-host": "node packages/agent-host/dist/cli.js",
+    "test:copilot": "node scripts/run-tests.mjs copilot"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

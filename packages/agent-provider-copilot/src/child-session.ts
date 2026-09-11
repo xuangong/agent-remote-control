@@ -45,8 +45,7 @@ export class CopilotChildSession implements AgentSession {
   }
   private project(event: SessionEvent, delivery: 'history' | 'live') {
     if (this.closed || this.seen.has(event.id)) return; this.seen.add(event.id);
-    const projected = this.projector.project(event, delivery);
-    if (projected) this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
+    for (const projected of this.projector.projectAll(event, delivery)) this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
   }
   updateTask(info: AgentChildSession, expectedGeneration?: number, nativeStatus?: string): void {
     if (this.closed || expectedGeneration !== this.activityGeneration) return;

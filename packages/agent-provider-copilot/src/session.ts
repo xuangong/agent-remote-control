@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import type { CopilotClient, CopilotSession, SessionConfig, SessionEvent } from '@github/copilot-sdk';
 import { validateCommandDirectory, validateSessionSetting, type AgentCapabilities, type AgentChildSession, type AgentCommand, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionConfig, type AgentStreamEvent, type ProviderStreamItem } from '@borgee/agent-provider-sdk';
 import type { CopilotAgentProviderOptions } from './provider.js';
@@ -75,14 +76,14 @@ export class CopilotAgentSession implements AgentSession {
     const d = record(event.data); const owner = event.agentId ?? (typeof d.parentToolCallId === 'string' ? d.parentToolCallId : undefined);
     if (owner) { for (const child of this.children.values()) child.accept(event, delivery); }
     else {
-      const projected = this.projector.project(event, delivery);
-      if (projected) this.stream.push({type: 'observation', sourceKey: `copilot:${this.config.sessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
+      for (const projected of this.projector.projectAll(event, delivery)) this.stream.push({type: 'observation', sourceKey: `copilot:${this.config.sessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
       if (delivery === 'live') {
         if (event.type === 'assistant.turn_start') this.info.status = 'running';
         if (event.type === 'assistant.idle' || event.type === 'session.idle' || event.type === 'abort') this.info.status = 'idle';
         if (event.type === 'session.error') this.info.status = 'failed';
       }
     }
+    if (delivery === 'live' && event.type === 'session.model_change') void this.refreshControls().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
     if (delivery === 'live' && (event.type.startsWith('subagent.') || event.type === 'assistant.idle' || event.type === 'session.task_complete')) void this.refreshChildren().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
   }
   async respondToInteraction(id: string, response: AgentInteractionResponse): Promise<void> {
@@ -106,7 +107,10 @@ export class CopilotAgentSession implements AgentSession {
   }
   async setSessionSetting(id: string, value: string): Promise<void> {
     this.assertOpen(); validateSessionSetting(this.info.settings, id, value);
-    await this.call(this.rpc.model.switchTo({modelId: value}), 'Copilot model switch'); await this.refreshControls(); this.emitRuntime();
+    if ((await this.call(this.rpc.metadata.isProcessing(), 'Copilot foreground activity')).processing) throw new Error('Copilot model changes require an idle session.');
+    const result = await this.call(this.rpc.model.switchTo({modelId: value}), 'Copilot model switch');
+    if (result.deferred) throw new Error('Copilot deferred the model change; confirmation is pending native application.');
+    await this.refreshControls(); this.emitRuntime();
   }
   async listCommands(): Promise<AgentCommand[]> {
     this.assertOpen(); await this.call(this.rpc.skills.ensureLoaded(), 'Load Copilot skills');
@@ -132,11 +136,29 @@ export class CopilotAgentSession implements AgentSession {
     throw new Error('Copilot skill requires unsupported subcommand selection.');
   }
   async readResource(locator: string) {
-    const path = this.resources.get(locator);
-    if (!path) return {status: 'unavailable' as const, reason: 'Unknown Copilot resource.'};
-    try { return {status: 'available' as const, bytes: await readFile(path), mediaType: 'text/markdown'}; }
-    catch { return {status: 'unavailable' as const, reason: 'Copilot skill document is unavailable.'}; }
+    this.assertOpen();
+    try {
+      await this.listCommands();
+      const path = this.resources.get(locator);
+      if (!path) return {status: 'unavailable' as const, reason: 'Unknown Copilot resource.'};
+      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const limit = 256 * 1024;
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > limit) throw new Error('Unsupported skill document.');
+        const bytes = Buffer.alloc(limit + 1);
+        let length = 0;
+        while (length < bytes.length) {
+          const read = await handle.read(bytes, length, bytes.length - length, null);
+          if (!read.bytesRead) break;
+          length += read.bytesRead;
+        }
+        if (length > limit) throw new Error('Skill document exceeds limit.');
+        return {status: 'available' as const, bytes: bytes.subarray(0, length), mediaType: 'text/markdown'};
+      } finally { await handle.close(); }
+    } catch { return {status: 'unavailable' as const, reason: 'Copilot skill document is unavailable.'}; }
   }
+
   async refreshChildren(): Promise<void> {
     try {
       const generations = new Map([...this.children].map(([id, child]) => [id, child.activityGeneration]));

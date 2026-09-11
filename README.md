@@ -1,6 +1,6 @@
 # Agent Remote Control
 
-An independent workbench for discovering, creating, connecting to, and debugging agent sessions. It includes the remote protocol, provider SDK, DSH, Codex, and Claude Code adapters, Node relay, browser client and renderer, terminal debugger, recorded scenarios, and an independent Agent Host runtime.
+An independent workbench for discovering, creating, connecting to, and debugging agent sessions. It includes the remote protocol, provider SDK, DSH, Codex, Claude Code, and Copilot adapters, Node relay, browser client and renderer, terminal debugger, recorded scenarios, and an independent Agent Host runtime.
 
 The workbench has no account system. Generate a temporary key locally, pair an Agent Host or DSH Host plugin with that key, and select an advertised Provider under the connected installation to browse its native sessions and workspaces. Chat, questions, approvals, Timeline, Trace, and Replica Inspector share the existing public protocol.
 
@@ -25,9 +25,9 @@ pnpm build
 pnpm dev
 ```
 
-Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` owns the labeled Recorded fixture and the Agent Host pairing broker. Native Codex and Claude Code run only in the independent Agent Host. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed. `AGENT_REMOTE_BIND` can expose the broker on an explicit interface; local management authorization remains unchanged.
+Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` owns the labeled Recorded fixture and the Agent Host pairing broker. Native Codex, Claude Code, and Copilot run only in the independent Agent Host. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed. `AGENT_REMOTE_BIND` can expose the broker on an explicit interface; local management authorization remains unchanged.
 
-The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.148.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-remote-lab/compatibility.json). The [Provider support baseline](docs/current/agent-remote/provider-support.md) compares DSH, Codex and Claude, including endpoint gaps, verification and workarounds; use its [onboarding checklist](docs/current/agent-remote/provider-onboarding.md) for a new Provider.
+The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.148.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-remote-lab/compatibility.json). The [Provider support baseline](docs/current/agent-remote/provider-support.md) compares DSH, Codex, Claude and Copilot, including endpoint gaps, verification and workarounds; use its [onboarding checklist](docs/current/agent-remote/provider-onboarding.md) for a new Provider.
 
 ## Connect a real Codex CLI
 
@@ -59,6 +59,12 @@ pnpm agent-host start
 Select **Claude Code · <Host name> · Online**. Claude Code must be version `2.1.247` or newer; the adapter pins `@anthropic-ai/claude-agent-sdk` to `0.3.247`. Set `AGENT_HOST_PROVIDERS=codex,claude` and `AGENT_HOST_CODEX` to advertise both providers under one Host. The default remains `codex`. All selected executables must be available; empty, duplicate, or unknown selections fail startup.
 
 `AGENT_HOST_CLAUDE_HOME` selects an optional native profile through `CLAUDE_CONFIG_DIR`. Native authentication and settings remain owned by Claude Code. See [Claude installation and debugging](docs/runbooks/claude-debug.md) for isolated installation, configuration, session lifetime, and supported controls. Use a different `AGENT_HOST_STATE_DIR` when keeping an existing daemon running alongside a separate Host.
+
+## Connect GitHub Copilot through its official SDK
+
+Copilot is opt-in: `pnpm start --providers copilot` uses the pinned installed CLI; pass `--copilot /absolute/path/to/copilot` to override. For a manually paired Host, set `AGENT_HOST_PROVIDERS=copilot`, `AGENT_HOST_SERVER`, `AGENT_HOST_REMOTE_KEY` and `AGENT_HOST_WORKSPACE`, then run `pnpm agent-host start`. `AGENT_HOST_COPILOT` overrides the executable and `AGENT_HOST_COPILOT_HOME` selects the native profile. Comma-separated Host selections may include `codex,claude,copilot`.
+
+The adapter uses official `@github/copilot-sdk` **1.0.11** and Copilot CLI **1.0.83**, through SDK stdio. It does not use ACP. Authentication remains in the native CLI profile/environment. Real SDK/CLI tests use an isolated local model endpoint, without cloud prompts. See the [Copilot audit](docs/current/agent-remote/copilot-support-audit.md) for supported input, history, parent-owned children, experimental APIs and remaining gaps. Run `pnpm test:copilot` for the bounded adapter and native loopback suite.
 
 ## Connect a real DSH installation
 

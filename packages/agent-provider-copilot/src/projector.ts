@@ -16,19 +16,41 @@ export class Projector {
   private readonly messages = new Map<string, string>();
   private turnId: string | undefined;
   private active = false;
+  private interactionId?: string;
   private readonly finalizedMessages = new Set<string>();
   private readonly historicalCompletions = new Set<string>();
   prepareHistory(events: SessionEvent[], trailingComplete = true): void {
     let lastEnd: string | undefined;
+    let interactionId: unknown;
     for (const event of events) {
-      if (event.type === 'user.message') {
+      const data = record(event.data);
+      if (event.type === 'user.message' && data.delivery !== 'steering' && (!data.interactionId || data.interactionId !== interactionId)) {
         if (lastEnd) this.historicalCompletions.add(lastEnd);
         lastEnd = undefined;
       }
+      if (data.interactionId) interactionId = data.interactionId;
       if (event.type === 'assistant.turn_end') lastEnd = event.id;
       if (event.type === 'abort' || event.type === 'session.error') lastEnd = undefined;
     }
     if (lastEnd && trailingComplete) this.historicalCompletions.add(lastEnd);
+  }
+  /** Native queue drain has one idle event; each delivered interaction still owns a public turn. */
+  projectAll(event: SessionEvent, delivery: 'history' | 'live' = 'live'): {key: string; event: AgentStreamEvent}[] {
+    const d = record(event.data);
+    const interactionId = typeof d.interactionId === 'string' ? d.interactionId : undefined;
+    const boundary = (event.type === 'user.message' || event.type === 'assistant.turn_start')
+      && d.delivery !== 'steering'
+      && ((interactionId && this.interactionId && interactionId !== this.interactionId)
+        || (event.type === 'user.message' && d.delivery === 'queued' && !interactionId));
+    const result: {key: string; event: AgentStreamEvent}[] = [];
+    if (this.active && boundary) {
+      result.push({key: `interaction-end:${event.id}`, event: {type: 'turn_completed', provider, turnId: this.turnId}});
+      this.active = false;
+    }
+    if (interactionId) this.interactionId = interactionId;
+    const projected = this.project(event, delivery);
+    if (projected) result.push(projected);
+    return result;
   }
   project(event: SessionEvent, delivery: 'history' | 'live' = 'live'): { key: string; event: AgentStreamEvent } | undefined {
     const d = record(event.data);
@@ -71,7 +93,9 @@ export class Projector {
       }
       case 'assistant.usage': return wrap({ type: 'usage_updated', provider, usage: { inputTokens: event.data.inputTokens, outputTokens: event.data.outputTokens, cachedInputTokens: event.data.cacheReadTokens }, turnId });
       case 'session.compaction_start': return timeline({type: 'compaction', status: 'loading'});
-      case 'session.compaction_complete': return timeline({type: 'compaction', status: 'completed'});
+      case 'session.compaction_complete': return event.data.success
+        ? timeline({type: 'compaction', status: 'completed'})
+        : timeline({type: 'error', message: `Copilot compaction failed: ${event.data.error ?? 'Unknown native error'}`});
       default: return undefined;
     }
   }

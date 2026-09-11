@@ -266,3 +266,40 @@ it('preserves native deny and location approval receipts when completion wins th
   const receipts = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event.response] : []);
   expect(receipts).toEqual([{kind: 'tool_approval', decision: 'deny'}, {kind: 'tool_approval', decision: 'allow', scope: 'once'}]);
 }, 10000);
+it('reads only current regular bounded skill documents without following final symlinks', async () => {
+ const {mkdtemp, writeFile, symlink, rm} = await import('node:fs/promises');
+ const {tmpdir} = await import('node:os'); const {join} = await import('node:path');
+ const home = await mkdtemp(join(tmpdir(), 'copilot-resource-'));
+ const {provider, session} = await open();
+ const path = join(home, 'SKILL.md');
+ const skill = {name: 'native', description: 'Native skill', userInvocable: true, enabled: true, path};
+ mock.native.rpc.skills.list.mockResolvedValue({skills: [skill]});
+ try {
+  await writeFile(path, 'Skill body');
+  expect(await session.readResource('copilot:skill:native')).toMatchObject({status: 'available', bytes: Buffer.from('Skill body')});
+  await writeFile(path, Buffer.alloc(256 * 1024 + 1));
+  expect((await session.readResource('copilot:skill:native')).status).toBe('unavailable');
+  await rm(path); await symlink(join(home, 'target'), path); await writeFile(join(home, 'target'), 'Secret');
+  expect((await session.readResource('copilot:skill:native')).status).toBe('unavailable');
+  mock.native.rpc.skills.list.mockResolvedValue({skills: [{...skill, path: home}]});
+  expect((await session.readResource('copilot:skill:native')).status).toBe('unavailable');
+  mock.native.rpc.skills.list.mockResolvedValue({skills: [{...skill, enabled: false}]});
+  expect((await session.readResource('copilot:skill:native')).status).toBe('unavailable');
+ } finally { await provider.dispose(); await rm(home, {recursive: true, force: true}); }
+}, 10000);
+
+it('rejects busy model changes and does not claim deferred writes are confirmed', async () => {
+ const {provider, session} = await open();
+ try {
+  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: true});
+  await expect(session.setSessionSetting('model', 'model-b')).rejects.toThrow('idle');
+  expect(mock.native.rpc.model.switchTo).not.toHaveBeenCalled();
+  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: false});
+  mock.native.rpc.model.switchTo.mockResolvedValue({deferred: true});
+  await expect(session.setSessionSetting('model', 'model-b')).rejects.toThrow('pending');
+  expect((await session.runtimeInfo()).model).toBe('model-a');
+  mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-b'});
+  mock.handler(event('session.model_change', {newModel: 'model-b'}));
+  await vi.waitFor(async () => expect((await session.runtimeInfo()).model).toBe('model-b'), {timeout: 1000});
+ } finally { await provider.dispose(); }
+}, 10000);

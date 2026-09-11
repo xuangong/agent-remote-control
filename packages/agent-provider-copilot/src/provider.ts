@@ -63,6 +63,7 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
       }
       const options = {...this.options, nativeSessionConfig: {...this.options.nativeSessionConfig, skillDirectories}};
       const session = await CopilotAgentSession.open(this.client, config, resume, options, () => this.sessions.delete(config.sessionId));
+      if (this.disposed) { await session.dispose(); throw new Error('Copilot provider is disposed.'); }
       this.sessions.set(config.sessionId, session); return session;
     } finally { this.loading.delete(config.sessionId); }
   }

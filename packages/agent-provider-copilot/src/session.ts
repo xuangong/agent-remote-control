@@ -1,21 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { CopilotClient, CopilotSession, SessionConfig, SessionEvent } from '@github/copilot-sdk';
-import { validateInteractionResponse, validateCommandDirectory, validateSessionSetting, type AgentCapabilities, type AgentChildSession, type AgentCommand, type AgentInteractionRequest, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionConfig, type AgentStreamEvent, type ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import { validateCommandDirectory, validateSessionSetting, type AgentCapabilities, type AgentChildSession, type AgentCommand, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionConfig, type AgentStreamEvent, type ProviderStreamItem } from '@borgee/agent-provider-sdk';
 import type { CopilotAgentProviderOptions } from './provider.js';
 import { Channel, deadline } from './channel.js';
 import { Projector, provider, record, detail } from './projector.js';
 import { CopilotChildSession } from './child-session.js';
+import { NativeInteractions } from './interactions.js';
 export class CopilotAgentSession implements AgentSession {
   readonly capabilities: AgentCapabilities = { history: true, sendMessage: true, queueMessage: true, steer: true, cancel: true, readResource: true, commands: false, sessionSettings: false, interactions: {question: true, toolApproval: true, planApproval: false} };
   readonly stream = new Channel<ProviderStreamItem>();
   private readonly projector = new Projector();
   private readonly seen = new Set<string>();
-  private readonly pending = new Map<string, { request: AgentInteractionRequest; nativeSessionId: string; resolve: (response: AgentInteractionResponse) => void; reject: (error: Error) => void }>();
+  private readonly interactions = new NativeInteractions(event => this.emit(event), () => this.rpc, (operation, label) => this.call(operation, label));
   private readonly children = new Map<string, CopilotChildSession>();
   private readonly resources = new Map<string, string>();
   private unsubscribe?: () => void;
   private buffered: SessionEvent[] | undefined = [];
+  private readonly deferredEvents: AgentStreamEvent[] = [];
   private closed = false;
   private observed = false;
   private revision = 0;
@@ -28,22 +30,21 @@ export class CopilotAgentSession implements AgentSession {
     const self = new CopilotAgentSession(config, options, onDispose);
     const nativeConfig: SessionConfig = { ...options.nativeSessionConfig, sessionId: config.sessionId, workingDirectory: config.cwd, model: config.model, reasoningEffort: reasoningEffort(config.reasoningEffort), streaming: true, includeSubAgentStreamingEvents: true,
       systemMessage: config.systemPrompt ? {mode: 'append', content: config.systemPrompt} : undefined,
-      onPermissionRequest: async (request, invocation) => {
-        const d = record(request); const id = randomUUID();
-        const response = await self.interact({kind: 'tool_approval', requestId: id, toolCallId: typeof d.toolCallId === 'string' ? d.toolCallId : id, toolName: request.kind, summary: JSON.stringify(request), detail: detail(request.kind, request), allowedDecisions: ['allow', 'deny'], allowScopes: ['once']}, invocation?.sessionId);
-        return response.kind === 'tool_approval' && response.decision === 'allow' ? {kind: 'approved'} : {kind: 'denied-interactively-by-user'};
-      },
-      onUserInputRequest: async (request, invocation) => {
-        const response = await self.interact({kind: 'question', requestId: randomUUID(), questions: [{questionId: 'answer', header: 'Copilot', prompt: request.question, required: true, selection: 'single', options: (request.choices ?? []).map(value => ({value, label: value})), allowCustomText: request.allowFreeform !== false, allowDismiss: false}]}, invocation?.sessionId);
-        if (response.kind !== 'question') throw new Error('Expected question response.');
-        const answer = response.answers[0]!; return {answer: answer.customText ?? answer.selectedValues[0]!, wasFreeform: answer.customText !== undefined};
-      }};
+      onPermissionRequest: async () => ({kind: 'no-result'}),
+      onUserInputRequest: request => self.interactions.bindQuestion(request)};
     try {
-      self.native = await self.call(resume ? client.resumeSession(config.sessionId, nativeConfig) : client.createSession(nativeConfig), 'Open Copilot session');
-      self.unsubscribe = self.native.on(event => { if (self.buffered) self.buffered.push(event); else self.accept(event, 'live'); });
-      for (const event of await self.call(self.native.getEvents(), 'Read Copilot history')) self.accept(event, 'history');
+      const opening = resume ? client.resumeSession(config.sessionId, nativeConfig) : client.createSession(nativeConfig);
+      void opening.then(async native => {
+        if (self.closed) await self.call(native.disconnect(), 'Disconnect late Copilot session');
+      }).catch(error => options.onDiagnostic?.(`Copilot late session cleanup: ${String(error)}`));
+      self.native = await self.call(opening, 'Open Copilot session');
+      self.unsubscribe = self.native.on(event => { self.interactions.accept(event); if (self.buffered) self.buffered.push(event); else self.accept(event, 'live'); });
+      const history = await self.call(self.native.getEvents(), 'Read Copilot history');
+      self.projector.prepareHistory(history.filter(event => !event.agentId && !record(event.data).parentToolCallId));
+      for (const event of history) self.accept(event, 'history');
       self.stream.push({type: 'history_boundary'});
       const buffered = self.buffered!; self.buffered = undefined;
+      for (const event of self.deferredEvents.splice(0)) self.emit(event);
       for (const event of buffered) self.accept(event, 'live');
       self.emit({type: 'thread_started', provider, sessionId: config.sessionId});
       await self.refreshControls(); await self.refreshChildren(); self.emitRuntime(); return self;
@@ -53,14 +54,15 @@ export class CopilotAgentSession implements AgentSession {
   get rpc(): CopilotSession['rpc'] { return this.native.rpc; }
   get isClosed() { return this.closed; }
   observe(): AsyncIterable<ProviderStreamItem> { if (this.observed) throw new Error('Copilot observation already attached.'); this.observed = true; return this.stream; }
-  emit(event: AgentStreamEvent): void { if (!this.closed) this.stream.push({type: 'observation', sourceKey: `copilot:local:${randomUUID()}`, occurredAt: Date.now(), delivery: 'live', event}); }
-  private emitRuntime() { this.emit({type: 'runtime_updated', provider, runtimeInfo: structuredClone(this.info)}); }
+  emit(event: AgentStreamEvent): void { if (this.buffered) { this.deferredEvents.push(event); return; } if (!this.closed) this.stream.push({type: 'observation', sourceKey: `copilot:local:${randomUUID()}`, occurredAt: Date.now(), delivery: 'live', event}); }
+  private emitRuntime() { this.emit({type: 'runtime_updated', provider, runtimeInfo: structuredClone({...this.info, status: this.interactions.waiting && !this.closed ? 'waiting' : this.info.status})}); }
   private accept(event: SessionEvent, delivery: 'history' | 'live'): void {
     if (this.closed || this.seen.has(event.id)) return; this.seen.add(event.id);
+    
     const d = record(event.data); const owner = event.agentId ?? (typeof d.parentToolCallId === 'string' ? d.parentToolCallId : undefined);
     if (owner) { for (const child of this.children.values()) child.accept(event, delivery); }
     else {
-      const projected = this.projector.project(event);
+      const projected = this.projector.project(event, delivery);
       if (projected) this.stream.push({type: 'observation', sourceKey: `copilot:${this.config.sessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
       if (delivery === 'live') {
         if (event.type === 'assistant.turn_start') this.info.status = 'running';
@@ -70,22 +72,14 @@ export class CopilotAgentSession implements AgentSession {
     }
     if (delivery === 'live' && (event.type.startsWith('subagent.') || event.type === 'assistant.idle' || event.type === 'session.task_complete')) void this.refreshChildren().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
   }
-  private interact(request: AgentInteractionRequest, nativeSessionId = this.config.sessionId): Promise<AgentInteractionResponse> {
-    if (this.closed) return Promise.reject(new Error('Copilot session is closed.'));
-    return new Promise((resolve, reject) => { this.pending.set(request.requestId, {request, nativeSessionId, resolve, reject}); this.info.status = 'waiting'; this.emit({type: 'interaction_requested', provider, request}); this.emitRuntime(); });
-  }
   async respondToInteraction(id: string, response: AgentInteractionResponse): Promise<void> {
-    const pending = this.pending.get(id); if (!pending) throw new Error('Unknown Copilot interaction.');
-    validateInteractionResponse(pending.request, response); this.pending.delete(id); pending.resolve(response);
-    this.emit({type: 'interaction_resolved', provider, requestId: id, response}); this.info.status = this.pending.size ? 'waiting' : 'running'; this.emitRuntime();
+    await this.interactions.respond(id, response); this.emitRuntime();
   }
   private assertOpen() { if (this.closed) throw new Error('Copilot session is closed.'); }
   async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> { this.assertOpen(); await this.call(this.native.send({prompt: text, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot input'); }
   async steer(text: string): Promise<void> { await this.sendMessage(text, {delivery: 'immediate'}); }
   async cancel(): Promise<void> { this.assertOpen(); await this.call(this.rpc.interruptMainTurn({}), 'Copilot cancellation');
-    for (const [id, pending] of this.pending) if (pending.nativeSessionId === this.config.sessionId) {
-      this.pending.delete(id); pending.reject(new Error('Copilot turn canceled.'));
-    }
+    this.interactions.cancelOwner(); this.emitRuntime();
   }
   private async refreshControls(): Promise<void> {
     try {
@@ -132,10 +126,13 @@ export class CopilotAgentSession implements AgentSession {
   }
   async refreshChildren(): Promise<void> {
     try {
+      const generations = new Map([...this.children].map(([id, child]) => [id, child.activityGeneration]));
       const listing = await this.call(this.rpc.tasks.list(), 'Copilot child sessions');
       this.info.childSessions = listing.tasks.filter(task => task.type === 'agent').map(task => ({ nativeSessionId: task.id, title: task.description || task.agentType, role: task.agentType, description: task.description, createdAt: task.startedAt, parentCallId: task.toolCallId, status: childStatus(task.status), observation: 'live' }));
+      for (const info of this.info.childSessions) this.children.get(info.nativeSessionId)?.updateTask(info, generations.get(info.nativeSessionId), listing.tasks.find(task => task.id === info.nativeSessionId)?.status);
     } catch (error) { this.options.onDiagnostic?.(`Copilot child directory unavailable: ${String(error)}`); }
   }
+  cancelChildInteractions(id: string): void { this.interactions.cancelOwner(id); this.emitRuntime(); }
   async openChildSession(id: string): Promise<AgentSession> {
     this.assertOpen(); await this.refreshChildren();
     const info = this.info.childSessions?.find(child => child.nativeSessionId === id);
@@ -144,11 +141,9 @@ export class CopilotAgentSession implements AgentSession {
     const child = new CopilotChildSession(this, info, () => this.children.delete(id)); this.children.set(id, child);
     try { await child.initialize(); return child; } catch (error) { await child.dispose(); throw error; }
   }
-  async runtimeInfo(): Promise<AgentRuntimeInfo> { return structuredClone(this.info); }
+  async runtimeInfo(): Promise<AgentRuntimeInfo> { return structuredClone({...this.info, status: this.interactions.waiting && !this.closed ? 'waiting' : this.info.status}); }
   async dispose(): Promise<void> {
-    if (this.closed) return; this.closed = true; this.unsubscribe?.();
-    for (const pending of this.pending.values()) pending.reject(new Error('Copilot session closed.'));
-    this.pending.clear(); await Promise.allSettled([...this.children.values()].map(child => child.dispose()));
+    if (this.closed) return; this.interactions.dispose(); this.closed = true; this.unsubscribe?.(); await Promise.allSettled([...this.children.values()].map(child => child.dispose()));
     this.info.status = 'closed'; this.stream.close(); this.onDispose();
     if (this.native) await this.call(this.native.disconnect(), 'Disconnect Copilot session');
   }

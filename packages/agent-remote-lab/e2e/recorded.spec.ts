@@ -40,7 +40,7 @@ test('sends a multiline conversation through the Relay and returns focus to an e
 test('covers recorded Snapshot, Timeline, interactions, replacement, and durable resources through the UI', async ({ page }, testInfo) => {
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Agent conversations' })).toBeVisible();
+  await expect(page.locator('.lab-app-bar')).toBeHidden();
   const context = contextRail(page, testInfo);
   await expect(context.getByText('Session intake')).toBeVisible();
   await expect(context.getByTestId('provider-select')).toBeVisible();
@@ -48,6 +48,7 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
   await page.getByTestId('session-create').click();
   if (isCompact(testInfo)) await expect(context).toHaveCount(0);
+  await toggleViewPanel(page, 'Header');
   const summary = page.getByTestId('connection-summary');
   await expect(summary).toContainText('Recorded semantic Provider');
   await expect(summary).toContainText('Ready');

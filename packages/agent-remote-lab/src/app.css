@@ -206,16 +206,20 @@ textarea {
 .lab-context-rail { border-right: 1px solid var(--obs-border); }
 .lab-inspector-rail { display: grid; align-content: start; border-left: 1px solid var(--obs-border); }
 
-.lab-rail-close {
+.lab-rail-mobile-heading {
   position: sticky;
   top: 0;
-  z-index: 2;
-  width: calc(100% - 24px);
-  min-height: 44px;
-  margin: 12px;
-  color: var(--obs-action);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--obs-border);
   background: var(--obs-surface);
 }
+.lab-rail-close { display: grid; place-items: center; flex: 0 0 44px; min-height: 44px; padding: 0; border-color: transparent; background: transparent; }
+.lab-rail-mobile-heading + .lab-rail-heading { display: none; }
 
 .lab-rail-heading {
   justify-content: space-between;
@@ -506,7 +510,7 @@ textarea {
     box-shadow: var(--obs-overlay-shadow);
   }
 
-  .lab-rail-close { top: env(safe-area-inset-top); }
+  .lab-rail-mobile-heading { top: 0; }
 }
 
 @media (max-width: 760px) {
@@ -745,7 +749,7 @@ textarea {
   .lab-app-bar { grid-template-areas: "summary views"; grid-template-columns: minmax(44px, 1fr) auto; gap: 4px; padding-block: env(safe-area-inset-top) 0; }
   .lab-brand { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .lab-session-summary > summary { min-height: 48px; }
-  .lab-session-summary > summary > span:not(.lab-status-dot):not(:last-child) { display: none; }
+  .lab-session-summary > summary > span:not(.lab-status-dot):not(.lab-connection-status):not(:last-child) { display: none; }
   .lab-session-summary .lab-connection-details { right: auto; left: 0; }
   .lab-workbench-heading { min-height: 44px; padding-block: 0; }
   .lab-chat-sessions-heading { min-height: 44px; }
@@ -801,6 +805,7 @@ textarea {
 .lab-side-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .lab-side-conversation .lab-side-close { order: 3; min-height: 28px; width: 28px; padding: 0; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 22px; line-height: 1; }
 .lab-side-conversation .lab-side-close:hover { background: var(--obs-surface-hover); }
+.lab-side-back-icon, .lab-side-back-label { display: none; }
 .lab-fork-entries { display: flex; gap: 8px; max-width: 900px; margin: 0 auto 5px; overflow-x: auto; }
 .lab-fork-entries button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 100%; min-height: 26px; border: 0; background: transparent; padding: 2px 0; font-size: 11px; color: var(--obs-action); }
 .lab-fork-entries button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -817,15 +822,40 @@ textarea {
 .lab-fork-reference-details code, .lab-fork-reference-details small { overflow-wrap: anywhere; color: var(--obs-text-secondary); }
 .lab-fork-reference-details button { justify-self: start; }
 @media (max-width: 1050px) {
-  .lab-has-side { flex-direction: column; }
-  .lab-has-side .lab-primary-conversation { flex: 1 1 50%; min-height: 180px; }
-  .lab-side-conversation { flex: 1 1 50%; min-width: 0; min-height: 220px; border-left: 0; border-top: 1px solid var(--obs-border); }
-  .lab-has-side .lab-command-details-open { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 600px) {
   .lab-has-side .lab-primary-conversation { display: none; }
-  .lab-side-conversation { flex: 1; border: 0; }
-  .lab-side-conversation .lab-side-close { min-height: 44px; width: 44px; }
+  .lab-side-conversation { flex: 1; min-width: 0; border: 0; }
+  .lab-has-side .lab-command-details-open { grid-template-columns: minmax(0, 1fr); }
+  .lab-side-conversation .lab-side-close { display: flex; align-items: center; gap: 2px; order: -1; min-height: 44px; width: auto; padding-right: 6px; font-size: 12px; }
+  .lab-side-back-icon, .lab-side-back-label { display: inline; }
+  .lab-side-close-icon { display: none; }
+  .lab-side-conversation .lab-workbench-heading > div { flex: 1; }
 }
 .lab-side-conversation .agent-session-toolbar [data-testid="session-model-button"] { max-width: 100px; }
 .lab-side-conversation .agent-session-toolbar [data-testid="session-permissions-button"] { max-width: 110px; }
+
+@media (max-width: 1180px) {
+  body { overflow: hidden; }
+  .lab-shell { position: fixed; inset-inline: 0; top: var(--lab-viewport-top, 0px); height: var(--lab-viewport-height, 100dvh); }
+  .lab-view-options { position: absolute; }
+  .lab-context-rail, .lab-inspector-rail { top: var(--lab-viewport-top, 0px); bottom: auto; height: var(--lab-viewport-height, 100dvh); }
+  .lab-composer-dock .agent-composer textarea { max-height: min(200px, calc(var(--lab-viewport-height, 100dvh) * .25)); }
+  .lab-composer-dock .agent-command-menu { max-height: min(260px, calc(var(--lab-viewport-height, 100dvh) * .4)); overscroll-behavior: contain; }
+  .lab-composer-dock .agent-session-panel { bottom: calc(100% + 48px); max-height: min(360px, calc(var(--lab-viewport-height, 100dvh) - 220px)); overscroll-behavior: contain; }
+  .lab-fork-reference-details { max-height: calc(var(--lab-viewport-height, 100dvh) * .45); overflow-y: auto; overscroll-behavior: contain; }
+}
+
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+  .lab-shell input:not([type="checkbox"]):not([type="radio"]), .lab-shell select, .lab-shell textarea { font-size: 16px; }
+  .lab-session-summary > summary { gap: 5px; }
+  .lab-connection-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lab-composer-dock .agent-session-controls { flex: 1 1 0; min-width: 0; }
+  .lab-composer-dock .agent-session-toolbar button { flex: 1 1 0; min-width: 44px; max-width: none; }
+  .lab-composer-dock .agent-session-toolbar button[aria-label="Status"] { flex: 0 0 44px; }
+  .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { flex: 0 0 44px; margin-left: 0; }
+  .lab-composer-dock .agent-composer-actions button { min-height: 44px; }
+  .lab-composer-dock .agent-activity[data-active="true"] { order: -1; flex-basis: 100%; justify-content: space-between; }
+  .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
+  .lab-fork-entries button, .lab-fork-reference summary { min-height: 44px; }
+  .lab-fork-entries { margin-bottom: 0; }
+  .lab-timeline-scroll { padding-bottom: 8px; }
+}

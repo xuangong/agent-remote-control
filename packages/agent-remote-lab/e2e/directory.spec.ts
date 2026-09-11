@@ -40,6 +40,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   await showContext();
   await expect(opened().locator('.lab-session-row')).toHaveCount(2);
   if (compact) await context().getByRole('button', { name: 'Close Context' }).click();
+  await toggleViewPanel(page, 'Header');
   await page.getByLabel('Connection details', { exact: true }).click();
   await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
@@ -58,14 +59,14 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
 test('creates a temporary pairing key through the workbench', async ({ page }, testInfo) => {
   await page.goto('/');
   const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
-  await expect(context.getByLabel('Connected Host')).toHaveValue('local');
-  await context.getByRole('button', { name: 'Pair DSH Host' }).click();
+  await expect(context.getByRole('region', { name: 'Remote Hosts' })).toBeVisible();
+  await context.getByRole('button', { name: 'Pair Agent Host' }).click();
   const responsePromise = page.waitForResponse((response) => response.url().endsWith('/v1/remote/pairings') && response.request().method() === 'POST');
   await context.getByRole('button', { name: 'Generate pairing key' }).click();
   const response = await responsePromise;
   expect(response.ok()).toBe(true);
   const invitation = await response.json();
-  await expect(context.getByLabel('DSH Host configuration')).toHaveValue(new RegExp(invitation.key));
+  await expect(context.getByLabel('Agent Host configuration')).toHaveValue(new RegExp(invitation.key));
   await expect(context.getByRole('button', { name: 'Copy configuration' })).toBeEnabled();
   await expect(context.getByText(/Key expires/)).toBeVisible();
 });

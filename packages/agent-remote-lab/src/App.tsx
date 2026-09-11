@@ -25,6 +25,7 @@ import {
   type RemoteSessionStatus,
 } from '@borgee/agent-remote-web';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
+import { useVisualViewport } from './hooks/useVisualViewport.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
 import { DirectoryError, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
@@ -89,6 +90,7 @@ export function App({
   actions,
   fixtureAction,
 }: AppProps) {
+  const shellRef = useVisualViewport();
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
   const [selectedHost, setSelectedHost] = useState<RemoteHost>({ id: 'local', name: 'Recorded fixture', online: true });
@@ -142,7 +144,7 @@ export function App({
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !initialState);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [headerHidden, setHeaderHidden] = useState(false);
+  const [headerHidden, setHeaderHidden] = useState(true);
   const [desktopContextVisible, setDesktopContextVisible] = useState(true);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
 
@@ -593,7 +595,7 @@ export function App({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
-  return <main className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -615,7 +617,7 @@ export function App({
       >
         <summary aria-label="Connection details" title="Connection details"><span className={`lab-status-dot lab-status-${state?.agent?.status ?? 'disconnected'}`} aria-hidden="true" />
         <span>{connectionProviderName}</span>
-        <span aria-live="polite">{connectionStatusLabel}</span><span aria-hidden="true">▾</span></summary>
+        <span className="lab-connection-status" aria-live="polite">{connectionStatusLabel}</span><span aria-hidden="true">▾</span></summary>
         <div className="lab-connection-details"><strong>{connectionProviderName}</strong><code>{connectionAgentId}</code>
         {directory && activeAgentId ? <button type="button" className="lab-session-reconnect" disabled={transitioning} onClick={() => {
           const saved = openedSessions.find((item) => item.agentId === activeAgentId);

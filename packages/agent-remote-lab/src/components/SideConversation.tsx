@@ -44,7 +44,10 @@ export function SideConversation({ session, transport, store, draft, onDraftChan
       visible={visible} actions={forkActions(actions, store, record, transport)} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       conversationPath={<span className="lab-side-title">{session.title}</span>}
-      sessionManager={<button className="lab-side-close" type="button" aria-label="Close side conversation" title="Close side conversation" onClick={onClose}>×</button>}
+      sessionManager={<button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>
+        <svg className="lab-side-back-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
+        <span className="lab-side-back-label" aria-hidden="true">Back</span><span className="lab-side-close-icon" aria-hidden="true">×</span>
+      </button>}
       composerAttachments={record ? <ForkReference fork={record} onOpen={onOpenSource} /> : undefined}
       composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.all().filter((fork) => fork.target && sessionKey(fork.source) === sessionKey(session))} onOpen={onOpenFork} /></>}
       consoleCommands={!initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}

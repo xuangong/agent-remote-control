@@ -242,7 +242,6 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
   test.skip(testInfo.project.name !== 'chromium-mobile');
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
-  await assertMinimumSize(page.locator('.lab-app-bar button'), 44);
   await assertMinimumSize(page.getByRole('button', { name: 'View options', exact: true, includeHidden: true }), 44);
   await assertMinimumSize(page.locator('.lab-provider-controls button'), 44);
 
@@ -250,6 +249,8 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
   await page.getByRole('button', { name: 'Load resource' }).click();
+  await toggleViewPanel(page, 'Header');
+  await assertMinimumSize(page.locator('.lab-app-bar button'), 44);
   const resourceLinks = page.getByRole('link', { name: /resource/ });
   await expect(resourceLinks.first()).toBeVisible();
   await assertMinimumSize(resourceLinks, 44);
@@ -268,6 +269,8 @@ async function openRecordedSession(page: Page): Promise<void> {
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
+  await expect(page.locator('.lab-app-bar')).toBeHidden();
+  await toggleViewPanel(page, 'Header');
 }
 
 async function assertKeyboardContained(page: Page, label: string, trigger: Locator): Promise<void> {

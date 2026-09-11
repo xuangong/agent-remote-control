@@ -82,7 +82,13 @@ export function SupportingRail({ id, label, className, compact, collapsible = fa
     aria-modal={compact ? true : undefined}
     onKeyDown={handleKeyDown}
   >
-    {compact ? <button ref={closeRef} className="lab-rail-close" type="button" onClick={close}>Close {label}</button> : null}
+    {compact ? <div className="lab-rail-mobile-heading">
+      <strong>{label === 'Context' ? 'Sessions & Hosts' : label}</strong>
+      <button ref={closeRef} className="lab-rail-close" type="button" onClick={close}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        <span className="agent-visually-hidden">Close {label}</span>
+      </button>
+    </div> : null}
     {children}
   </aside>;
 }

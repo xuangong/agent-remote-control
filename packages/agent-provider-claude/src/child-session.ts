@@ -10,8 +10,9 @@ export class ClaudeChildSession implements AgentSession {
   readonly capabilities = { history: true, sendMessage: false, steer: false, cancel: false, readResource: false,
     interactions: { question: false, toolApproval: false, planApproval: false } };
   private history: ProviderObservation[] = [];
-  private readonly projector: ClaudeEventProjector;
+  private projector: ClaudeEventProjector;
   private historyProjector: ClaudeEventProjector;
+  private nativeMessages: Record<string, unknown>[] = [];
   private pending: NativeFrame[] = [];
   private readonly savedBlocks = new Set<string>();
   private streamMessageId?: string;
@@ -34,6 +35,7 @@ export class ClaudeChildSession implements AgentSession {
     if (this.streamMessageId && index !== undefined && this.savedBlocks.has(blockKey(this.streamMessageId, index))) return;
     const frame = { message, ...(message.type === 'stream_event' ? { streamMessageId: this.streamMessageId, blockIndex: index } : {}) };
     this.pending.push(frame);
+    if (message.type !== 'stream_event') this.nativeMessages.push(message);
     if (typeof (message.message as { model?: unknown } | undefined)?.model === 'string') this.model = (message.message as { model: string }).model;
     this.history.push(...this.project(this.historyProjector, message));
     for (const observation of this.project(this.projector, message)) {
@@ -42,8 +44,10 @@ export class ClaudeChildSession implements AgentSession {
     }
   }
 
-  /** Replace future replay from native order; an existing append-only observer receives only a new suffix. */
+  /** Correct missing earlier rows through the existing Timeline replacement rail. */
   reconcileHistory(messages: Record<string, unknown>[]): void {
+    messages = mergeNativeMessages(this.nativeMessages, messages);
+    this.nativeMessages = messages;
     const uuids = new Map<string, number>();
     const blocks = new Map<string, number>();
     const blockCounts = new Map<string, number>();
@@ -70,15 +74,27 @@ export class ClaudeChildSession implements AgentSession {
     this.history = messages.flatMap((message) => this.project(this.historyProjector, message));
     this.pending = this.pending.filter((frame) => position(frame) === undefined);
     for (const frame of this.pending) this.history.push(...this.project(this.historyProjector, frame.message));
+    const appended: ProviderObservation[] = [];
+    let replace = false;
     messages.forEach((message, index) => {
-      // Seed deduplication for older messages without appending missing history behind live output.
       for (const observation of this.project(this.projector, message)) {
-        if (index < anchor) continue;
+        if (index < anchor) { replace = true; continue; }
         this.lastDelivered = { message };
-        this.output?.push(observation);
+        appended.push(observation);
       }
       if (record(message.message) && typeof message.message.model === 'string') this.model = message.message.model;
     });
+    if (replace) {
+      this.projector = new ClaudeEventProjector(this.descriptor.nativeSessionId);
+      this.lastDelivered = undefined;
+      for (const message of messages) {
+        if (this.project(this.projector, message).length) this.lastDelivered = { message };
+      }
+      for (const frame of this.pending) {
+        if (this.project(this.projector, frame.message).length) this.lastDelivered = frame;
+      }
+      this.output?.push({ type: 'timeline_replacement', observations: this.history.slice() });
+    } else for (const observation of appended) this.output?.push(observation);
   }
 
   private project(projector: ClaudeEventProjector, message: Record<string, unknown>): ProviderObservation[] {
@@ -108,4 +124,27 @@ export class ClaudeChildSession implements AgentSession {
         providerId: 'claude', sessionId: this.descriptor.nativeSessionId, status: this.descriptor.status, cwd: this.cwd, model: this.model ?? null } } });
   }
   async dispose(): Promise<void> { this.output?.close(); this.output = undefined; }
+}
+
+/** Preserve forwarded inputs omitted by the SDK chain, anchored to their next persisted message. */
+function mergeNativeMessages(previous: Record<string, unknown>[], saved: Record<string, unknown>[]): Record<string, unknown>[] {
+  const known = new Set(saved.map((message) => message.uuid).filter((id) => typeof id === 'string'));
+  const before = new Map<unknown, Record<string, unknown>[]>();
+  let anchor: unknown;
+  for (let index = previous.length - 1; index >= 0; index--) {
+    const message = previous[index]!;
+    if (typeof message.uuid !== 'string') continue;
+    if (known.has(message.uuid)) { anchor = message.uuid; continue; }
+    const group = before.get(anchor) ?? [];
+    group.push(message); before.set(anchor, group);
+  }
+  const result: Record<string, unknown>[] = [];
+  const seen = new Set<unknown>();
+  for (const message of [...saved, undefined]) {
+    for (const entry of [...(before.get(message?.uuid) ?? [])].reverse()) {
+      if (!seen.has(entry.uuid)) { seen.add(entry.uuid); result.push(entry); }
+    }
+    if (message && (typeof message.uuid !== 'string' || !seen.has(message.uuid))) { seen.add(message.uuid); result.push(message); }
+  }
+  return result;
 }

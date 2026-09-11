@@ -85,6 +85,7 @@ describe('recorded Lab Provider', () => {
       const next = await iterator.next();
       if (next.done) throw new Error('Recorded stream ended before its history boundary.');
       if (next.value.type === 'history_boundary') break;
+      if (next.value.type !== 'observation') throw new Error('Unexpected recorded Timeline replacement.');
       history.push(next.value);
     }
 

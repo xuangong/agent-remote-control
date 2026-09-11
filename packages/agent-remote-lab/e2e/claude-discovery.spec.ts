@@ -8,13 +8,20 @@ test('uses Claude settings, plan review, skills and a read-only native child thr
   const inputs: string[] = [];
   let spawned = 0;
   let saved = false;
+  let savedFollowup = false;
   const models = [{ value: 'fixture-a', displayName: 'Model A', description: 'Fixture model' }, { value: 'fixture-b', displayName: 'Model B', description: 'Fixture model' }];
   const selectedModels: string[] = [], permissionModes: string[] = [];
   let completeChild!: () => void;
+  let continueChild!: () => void;
+  let completeFollowup!: () => void;
   const childAnswer = { type: 'assistant' as const, uuid: 'child-answer', session_id: 'fixture', parent_tool_use_id: null, parent_agent_id: null,
     message: { id: 'child-answer', content: [{ type: 'text', text: 'CHILD_REVIEW_OK' }] } };
+  const followup = { type: 'user' as const, uuid: 'child-followup', session_id: 'fixture', parent_tool_use_id: null, parent_agent_id: null,
+    message: { content: 'CHILD_FOLLOWUP_PROMPT' } };
+  const secondAnswer = { ...childAnswer, uuid: 'child-second-answer', message: { id: 'child-second-answer', content: [{ type: 'text', text: 'CHILD_FOLLOWUP_OK' }] } };
   const provider = new ClaudeAgentProvider({ catalog: { list: async () => [], info: async () => undefined, messages: async () => [], childMessages: async () => saved ? [
     { type: 'user', uuid: 'child-prompt', session_id: 'fixture', parent_tool_use_id: null, message: { content: 'CHILD_TASK_PROMPT' }, parent_agent_id: null }, childAnswer,
+    ...(savedFollowup ? [followup, secondAnswer] : []),
   ] : [] },
     query({ prompt, options }) {
       spawned++;
@@ -25,6 +32,15 @@ test('uses Claude settings, plan review, skills and a read-only native child thr
       const push = (frame: any) => { frames.push({ ...frame, session_id: id }); wake?.(); };
       completeChild = () => {
         saved = true;
+        push({ type: 'system', subtype: 'task_notification', task_id: 'review', status: 'completed' });
+      };
+      continueChild = () => {
+        push({ type: 'system', subtype: 'task_started', task_id: 'review', task_type: 'local_agent', spawn_depth: 1,
+          is_backgrounded: true, tool_use_id: 'followup-call', description: 'Review implementation' });
+        push({ ...secondAnswer, parent_tool_use_id: 'followup-call' });
+      };
+      completeFollowup = () => {
+        savedFollowup = true;
         push({ type: 'system', subtype: 'task_notification', task_id: 'review', status: 'completed' });
       };
       void (async () => {
@@ -94,6 +110,14 @@ test('uses Claude settings, plan review, skills and a read-only native child thr
     await page.getByRole('button').filter({ hasText: 'Review implementation' }).first().click();
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toBeVisible();
     completeChild();
+    await expect(page.getByText('CHILD_TASK_PROMPT', { exact: true })).toBeVisible();
+    continueChild();
+    await expect(page.getByText('CHILD_FOLLOWUP_OK', { exact: true })).toBeVisible();
+    completeFollowup();
+    await expect(page.getByText('CHILD_FOLLOWUP_PROMPT', { exact: true })).toBeVisible();
+    await expect(page.locator('.agent-message-user, .agent-message-assistant')).toHaveText([
+      /CHILD_TASK_PROMPT/, /CHILD_REVIEW_OK/, /CHILD_FOLLOWUP_PROMPT/, /CHILD_FOLLOWUP_OK/,
+    ]);
     await expect(page.getByTestId('prompt-submit')).toBeDisabled();
     expect(spawned).toBe(1);
     await page.screenshot({ path: testInfo.outputPath('claude-child.png'), fullPage: true });
@@ -104,7 +128,9 @@ test('uses Claude settings, plan review, skills and a read-only native child thr
     await host.replaceUplink({ url: relayUrl.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: nextInvitation.key });
     await page.getByRole('button').filter({ hasText: 'Review implementation' }).first().click();
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toHaveCount(1);
-    await expect(page.getByText('CHILD_TASK_PROMPT', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('CHILD_TASK_PROMPT', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('CHILD_FOLLOWUP_PROMPT', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('CHILD_FOLLOWUP_OK', { exact: true })).toHaveCount(1);
     expect(spawned).toBe(1);
   } finally { await host.close(); }
 });

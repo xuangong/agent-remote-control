@@ -23,6 +23,35 @@ const capabilities: AgentCapabilities = {
 };
 
 describe('AgentManager Timeline and Snapshot', () => {
+  it('replaces late native history without losing session state or duplicating subsequent rows', async () => {
+    const stream = new ManualProviderStream();
+    const row = (sourceKey: string, text: string, type: 'user_message' | 'assistant_message' = 'assistant_message') => ({
+      type: 'observation' as const, sourceKey, occurredAt: 1, delivery: 'live' as const,
+      event: { type: 'timeline' as const, provider: 'codex', item: { type, text, messageId: sourceKey } },
+    });
+    stream.push({ type: 'history_boundary' });
+    const manager = await AgentManager.attach({ agentId: 'child', provider: { providerId: 'codex', displayName: 'Codex' }, session: sessionFor(stream), epoch: 'before' });
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event));
+    try {
+      await manager.ready;
+      stream.push(row('answer', 'SECOND'));
+      await expect.poll(() => events.filter((event) => event.type === 'agent_stream').length).toBe(1);
+      const before = manager.snapshot();
+      stream.push({ type: 'timeline_replacement', observations: [row('prompt', 'FOLLOW UP', 'user_message'), row('answer', 'SECOND')] });
+      await expect.poll(() => events.some((event) => event.type === 'timeline_replacement')).toBe(true);
+      const epoch = events.find((event) => event.type === 'timeline_replacement')!.epoch;
+      await expect.poll(() => manager.fetchTimeline({ requestId: 'history', agentId: 'child', epoch, direction: 'tail', limit: 20 }).payload.entries.length).toBe(2);
+      stream.push(row('answer', 'SECOND'));
+      stream.push(row('third', 'THIRD'));
+      await expect.poll(() => manager.fetchTimeline({ requestId: 'history', agentId: 'child', epoch, direction: 'tail', limit: 20 }).payload.entries.map((entry) => entry.item)).toEqual([
+        { type: 'user_message', text: 'FOLLOW UP', messageId: 'prompt' },
+        { type: 'assistant_message', text: 'SECOND', messageId: 'answer' },
+        { type: 'assistant_message', text: 'THIRD', messageId: 'third' },
+      ]);
+      expect(manager.snapshot().payload.runtimeInfo).toEqual(before.payload.runtimeInfo);
+    } finally { await manager.close(); }
+  });
   it('publishes native child relationships and refreshed capabilities on the session wire', async () => {
     const stream = new ManualProviderStream();
     stream.push({ type: 'history_boundary' });

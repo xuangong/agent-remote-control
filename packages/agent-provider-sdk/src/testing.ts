@@ -7,6 +7,7 @@ export interface CollectedProviderStream {
   history: ProviderObservation[];
   live: ProviderObservation[];
   boundary: Extract<ProviderStreamItem, { type: 'history_boundary' }>;
+  replacements: Extract<ProviderStreamItem, { type: 'timeline_replacement' }>[];
 }
 
 export async function collectProviderStream(
@@ -15,9 +16,16 @@ export async function collectProviderStream(
 ): Promise<CollectedProviderStream> {
   const history: ProviderObservation[] = [];
   const live: ProviderObservation[] = [];
+  const replacements: CollectedProviderStream['replacements'] = [];
   let boundary: CollectedProviderStream['boundary'] | undefined;
 
   for await (const item of session.observe()) {
+    if (item.type === 'timeline_replacement') {
+      if (!boundary) throw new Error('Provider replaced Timeline before history readiness.');
+      if (item.observations.some((observation) => observation.event.type !== 'timeline')) throw new Error('Provider Timeline replacement contains non-Timeline state.');
+      replacements.push(item);
+      continue;
+    }
     if (item.type === 'history_boundary') {
       if (boundary) throw new Error('Provider emitted more than one history boundary.');
       boundary = item;
@@ -38,7 +46,7 @@ export async function collectProviderStream(
   if (live.length < liveCount) {
     throw new Error(`Provider stream ended before ${liveCount} live observation was collected.`);
   }
-  return { history, live, boundary };
+  return { history, live, boundary, replacements };
 }
 
 export function validateAgentSessionCapabilities(session: AgentSession): void {

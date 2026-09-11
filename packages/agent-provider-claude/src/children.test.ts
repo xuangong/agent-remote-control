@@ -126,7 +126,34 @@ async function childHistory(view: ClaudeChildSession): Promise<any[]> {
   return events;
 }
 
-it('keeps a live observer append-only when saved history leads or trails forwarded text', async () => {
+it('backfills repeated native inputs in order without dropping a forwarded prompt omitted by the SDK', async () => {
+  const view = new ClaudeChildSession({ nativeSessionId: 'child', title: 'Task', createdAt: '', status: 'running', observation: 'live' });
+  const first = { type: 'user', uuid: 'first-input', message: { content: 'AGAIN' } };
+  const answer = { type: 'assistant', uuid: 'first-answer', message: { id: 'answer-1', content: [{ type: 'text', text: 'ONE' }] } };
+  const second = { type: 'user', uuid: 'second-input', message: { content: 'AGAIN' } };
+  const reply = { type: 'assistant', uuid: 'second-answer', message: { id: 'answer-2', content: [{ type: 'text', text: 'TWO' }] } };
+  view.accept(first); view.accept(answer);
+  const output = view.observe()[Symbol.asyncIterator]();
+  try {
+    while ((await output.next()).value?.type !== 'history_boundary') {}
+    view.accept(reply);
+    expect((await output.next()).value).toMatchObject({ event: { item: { text: 'TWO' } } });
+    view.reconcileHistory([answer, second, reply]);
+    expect((await output.next()).value).toMatchObject({ type: 'timeline_replacement', observations: [
+      { event: { item: { type: 'user_message', text: 'AGAIN', messageId: 'first-input' } } },
+      { event: { item: { text: 'ONE' } } },
+      { event: { item: { type: 'user_message', text: 'AGAIN', messageId: 'second-input' } } },
+      { event: { item: { text: 'TWO' } } },
+    ] });
+    view.reconcileHistory([answer, second, reply]);
+    view.changed();
+    expect((await output.next()).value).toMatchObject({ event: { type: 'runtime_updated' } });
+    await view.dispose(); await output.return!();
+    expect((await childHistory(view)).map((event) => event.item.text)).toEqual(['AGAIN', 'ONE', 'AGAIN', 'TWO']);
+  } finally { await view.dispose(); }
+}, 10000);
+
+it('corrects late input history while retaining a partially streamed answer', async () => {
   const view = new ClaudeChildSession({ nativeSessionId: 'child', title: 'Task', createdAt: new Date().toISOString(), status: 'running', observation: 'live' });
   const stream = (event: any) => view.accept({ type: 'stream_event', event });
   const prompt = { type: 'user', uuid: 'prompt', message: { content: 'PROMPT' } };
@@ -139,6 +166,10 @@ it('keeps a live observer append-only when saved history leads or trails forward
     stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'ANS' } });
     expect((await observer.next()).value).toMatchObject({ event: { item: { text: 'ANS' } } });
     view.reconcileHistory([prompt]);
+    expect((await observer.next()).value).toMatchObject({ type: 'timeline_replacement', observations: [
+      { event: { item: { type: 'user_message', text: 'PROMPT' } } },
+      { event: { item: { type: 'assistant_message', text: 'ANS' } } },
+    ] });
     // A later snapshot may already contain the full assistant message before its final stream delta arrives.
     view.reconcileHistory([prompt, answer]);
     expect((await observer.next()).value).toMatchObject({ event: { item: { text: 'WER' } } });

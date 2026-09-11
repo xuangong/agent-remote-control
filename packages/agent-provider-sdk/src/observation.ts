@@ -105,4 +105,10 @@ export interface ProviderHistoryBoundary {
   type: 'history_boundary';
 }
 
-export type ProviderStreamItem = ProviderObservation | ProviderHistoryBoundary;
+/** Complete, ordered Timeline correction after readiness. Runtime state is unaffected. */
+export interface ProviderTimelineReplacement {
+  type: 'timeline_replacement';
+  observations: ProviderObservation[];
+}
+
+export type ProviderStreamItem = ProviderObservation | ProviderHistoryBoundary | ProviderTimelineReplacement;

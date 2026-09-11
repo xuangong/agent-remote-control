@@ -41,6 +41,24 @@ function sessionFor(items: ProviderStreamItem[], overrides: Partial<AgentSession
 }
 
 describe('provider history boundary', () => {
+  it('rejects Timeline replacement before readiness and rejects runtime state in a replacement', async () => {
+    await expect(collectProviderStream(sessionFor([{ type: 'timeline_replacement', observations: [] }]), 1)).rejects.toThrow('before history readiness');
+    await expect(collectProviderStream(sessionFor([{ type: 'history_boundary' }, { type: 'timeline_replacement', observations: [{
+      type: 'observation', sourceKey: 'state', occurredAt: 1, delivery: 'live', event: { type: 'turn_started', provider: 'codex' },
+    }] }]), 1)).rejects.toThrow('non-Timeline state');
+  });
+  it('collects ordered replacement snapshots separately from initial history and live events', async () => {
+    const initial = { type: 'observation' as const, sourceKey: 'answer', occurredAt: 1, delivery: 'history' as const,
+      event: { type: 'timeline' as const, provider: 'codex', item: { type: 'assistant_message' as const, text: 'ANSWER' } } };
+    const replacement = { type: 'timeline_replacement' as const, observations: [
+      { ...initial, sourceKey: 'prompt', event: { ...initial.event, item: { type: 'user_message' as const, text: 'PROMPT' } } }, initial,
+    ] };
+    const live = { ...initial, sourceKey: 'next', delivery: 'live' as const };
+    const collected = await collectProviderStream(sessionFor([initial, { type: 'history_boundary' }, replacement, live]), 1);
+    expect(collected.history).toEqual([initial]);
+    expect(collected.replacements).toEqual([replacement]);
+    expect(collected.live).toEqual([live]);
+  });
   it('requires setPlanning when the session advertises planning control', () => {
     const session = sessionFor([], { capabilities: { ...capabilities, planning: true } });
     expect(() => validateAgentSessionCapabilities(session)).toThrow('setPlanning');

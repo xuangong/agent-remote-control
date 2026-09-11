@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@borgee/agent-provider-sdk';
 import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@borgee/agent-provider-sdk';
 import type {
@@ -355,6 +355,13 @@ export class AgentManager {
     try {
       for await (const item of this.session.observe()) {
         if (this.closed) break;
+        if (item.type === 'timeline_replacement') {
+          if (!this.boundarySeen) throw new Error('Provider replaced Timeline before history readiness.');
+          if (item.observations.some((observation) => observation.event.type !== 'timeline')) throw new Error('Provider Timeline replacement contains non-Timeline state.');
+          this.replaceTimeline(randomUUID());
+          for (const observation of item.observations) await this.applyObservation(observation);
+          continue;
+        }
         if (item.type === 'history_boundary') {
           if (this.boundarySeen) throw new Error('Provider emitted more than one history boundary.');
           this.boundarySeen = true;

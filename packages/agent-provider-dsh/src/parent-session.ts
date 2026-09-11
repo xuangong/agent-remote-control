@@ -47,7 +47,7 @@ export function withDshChildren(source: DshChildSessions, parentId: string, base
           for await (const item of base.observe()) {
             if (closed) break;
             if (item.type === 'history_boundary') { queue.push(item); live = true; void update(); }
-            else if (item.event.type === 'runtime_updated') queue.push({ ...item, event: { ...item.event, runtimeInfo: { ...item.event.runtimeInfo, childSessions: children } } });
+            else if (item.type === 'observation' && item.event.type === 'runtime_updated') queue.push({ ...item, event: { ...item.event, runtimeInfo: { ...item.event.runtimeInfo, childSessions: children } } });
             else queue.push(item);
           }
           queue.close();

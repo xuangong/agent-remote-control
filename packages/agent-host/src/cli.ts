@@ -7,7 +7,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAgentHost, type AgentHost } from './host.js';
-import { createCodexHostRegistration } from './codex.js';
+import { createHostRegistrations } from './registrations.js';
 
 interface DaemonState { pid: number; token: string; socket: string; startedAt: string }
 const args = process.argv.slice(2);
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-host <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_CODEX,\nAGENT_HOST_WORKSPACE, AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. A rejected key requires pairing again, then running pair.\n`);
+  process.stdout.write(`Usage: agent-host <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME,\nAGENT_HOST_WORKSPACE, AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select claude or codex,claude explicitly.\nA rejected key requires pairing again, then running pair.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
@@ -44,13 +44,10 @@ async function serve(daemon: boolean): Promise<void> {
   const remoteKey = requiredEnv('AGENT_HOST_REMOTE_KEY');
   await privateDirectory();
   const installationId = await installation();
-  const executable = process.env.AGENT_HOST_CODEX ?? process.env.AGENT_REMOTE_CODEX_EXECUTABLE;
-  const workspace = process.env.AGENT_HOST_WORKSPACE ?? process.env.AGENT_REMOTE_WORKSPACE;
   const diagnosticSecrets = new Set([remoteKey, process.env.AGENT_HOST_MANAGEMENT_TOKEN ?? '']);
-  const registration = await createCodexHostRegistration({ executable, codexHome: process.env.AGENT_REMOTE_CODEX_HOME,
-    env: process.env, workspaces: workspace ? [{ id: workspace, name: workspace, path: workspace }] : [],
-    onDiagnostic: (line) => process.stderr.write(daemonDiagnosticLine(line, diagnosticSecrets)) });
-  const host = createAgentHost({ registrations: [registration], installationId, name: process.env.AGENT_HOST_NAME?.trim() || hostname(),
+  const registrations = await createHostRegistrations(process.env,
+    (line) => process.stderr.write(daemonDiagnosticLine(line, diagnosticSecrets)));
+  const host = createAgentHost({ registrations, installationId, name: process.env.AGENT_HOST_NAME?.trim() || hostname(),
     uplink: { url: uplinkUrl(serverUrl), remoteKey }, shutdownTimeoutMs: shutdownTimeout() });
   if (!daemon) {
     process.stdout.write('Agent Host is running in the foreground.\n');

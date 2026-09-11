@@ -31,6 +31,8 @@ describe('Agent Remote compatibility manifest', () => {
       providers: [
         { providerId: 'dsh' },
         { providerId: 'codex' },
+        { providerId: 'claude', native: { name: 'claude-code', version: '2.1.247', revision: null },
+          sdk: { name: '@anthropic-ai/claude-agent-sdk', version: '0.3.247' } },
       ],
     });
   });
@@ -52,7 +54,7 @@ describe('Agent Remote compatibility manifest', () => {
     expect(() => loadCompatibilityManifest()).not.toThrow();
   });
 
-  it('requires exactly the DSH and Codex Provider entries', () => {
+  it('requires exactly the Claude, Codex, and DSH Provider entries', () => {
     process.env[manifestEnvironment] = writeManifest(validManifest({ omitCodex: true }));
 
     expect(() => loadCompatibilityManifest()).toThrow('exact Provider set');
@@ -103,6 +105,36 @@ describe('Agent Remote compatibility manifest', () => {
     expect(() => loadCompatibilityManifest()).toThrow('Codex degradation');
   });
 
+  it.each(['missing', 'unknown', 'duplicate'] as const)('rejects a %s Provider in the complete matrix', (kind) => {
+    const manifest = validManifest();
+    if (kind === 'missing') manifest.providers = manifest.providers.filter(({ providerId }) => providerId !== 'claude');
+    else if (kind === 'unknown') manifest.providers.push({ ...manifest.providers[0]!, providerId: 'unknown' });
+    else manifest.providers.push(manifest.providers[0]!);
+    process.env[manifestEnvironment] = writeManifest(manifest);
+    expect(() => loadCompatibilityManifest()).toThrow(kind === 'duplicate' ? 'unique Provider' : 'exact Provider set');
+  });
+
+  it.each([
+    { claudeName: 'another-cli' }, { claudeVersion: '2.1.246' }, { claudeVersion: '2.1.248' },
+    { claudeRevision: 'unexpected-revision' }, { claudeSdkName: 'another-sdk' }, { claudeSdkVersion: '0.3.248' }, { omitClaudeSdk: true },
+  ])('rejects incompatible Claude native or SDK pins: %j', (overrides) => {
+    process.env[manifestEnvironment] = writeManifest(validManifest(overrides));
+    expect(() => loadCompatibilityManifest()).toThrow('Claude');
+  });
+
+  it.each([
+    'events.subagent.navigation', 'events.tool-result.resources', 'controls.queue-steer-commands-settings',
+    'interactions.restart-recovery', 'sessions.empty-persistence',
+  ])('requires the evidenced Claude %s degradation', (capability) => {
+    process.env[manifestEnvironment] = writeManifest(validManifest({ omitClaudeDegradation: capability }));
+    expect(() => loadCompatibilityManifest()).toThrow('Claude degradation');
+  });
+
+  it.each(['duplicate', 'extra', 'wrong-status', 'malformed'] as const)('rejects %s Claude degradation declarations', (kind) => {
+    process.env[manifestEnvironment] = writeManifest(validManifest({ invalidClaudeDegradation: kind }));
+    expect(() => loadCompatibilityManifest()).toThrow(/degradation/);
+  });
+
   function writeManifest(manifest: object, files: Record<string, string> = { 'implementation.txt': 'implementation\n' }): string {
     const root = mkdtempSync(join(tmpdir(), 'borgee-compatibility-'));
     roots.push(root);
@@ -114,6 +146,14 @@ describe('Agent Remote compatibility manifest', () => {
 });
 
 function validManifest(overrides: {
+  claudeName?: string;
+  claudeVersion?: string;
+  claudeRevision?: string;
+  claudeSdkName?: string;
+  claudeSdkVersion?: string;
+  omitClaudeSdk?: boolean;
+  omitClaudeDegradation?: string;
+  invalidClaudeDegradation?: 'duplicate' | 'extra' | 'wrong-status' | 'malformed';
   implementationDigest?: string;
   implementationScope?: string[];
   omitCodex?: boolean;
@@ -125,7 +165,7 @@ function validManifest(overrides: {
   codexFormStatus?: 'unsupported' | 'degraded';
   duplicateDshTitle?: boolean;
   extraCodexDegradation?: boolean;
-} = {}): object {
+} = {}) {
   const dshDegradations = [
     ...(!overrides.omitDshTitle ? [{
       capability: 'events.session/title', status: 'degraded',
@@ -155,6 +195,17 @@ function validManifest(overrides: {
       capability: 'events.unknown', status: 'degraded', reason: 'Undeclared degradation.',
     }] : []),
   ];
+  const claudeDegradations = [
+    { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Nested agents remain parent tool summaries.' },
+    { capability: 'events.tool-result.resources', status: 'degraded', reason: 'Binary resources are not exposed.' },
+    { capability: 'controls.queue-steer-commands-settings', status: 'degraded', reason: 'No mid-turn input or command menus.' },
+    { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Permission callbacks are process-local.' },
+    { capability: 'sessions.empty-persistence', status: 'degraded', reason: 'An empty session may not be persisted.' },
+  ].filter(({ capability }) => capability !== overrides.omitClaudeDegradation);
+  if (overrides.invalidClaudeDegradation === 'duplicate') claudeDegradations.push({ ...claudeDegradations[0]! });
+  if (overrides.invalidClaudeDegradation === 'extra') claudeDegradations.push({ capability: 'events.unknown', status: 'degraded', reason: 'Undeclared.' });
+  if (overrides.invalidClaudeDegradation === 'wrong-status') claudeDegradations[0]!.status = 'unsupported';
+  if (overrides.invalidClaudeDegradation === 'malformed') claudeDegradations[0]!.reason = '';
   const providers = [
     {
       providerId: 'dsh',
@@ -169,6 +220,12 @@ function validManifest(overrides: {
       native: { name: 'codex-cli', version: '0.148.0', revision: null },
       degradations: codexDegradations,
     }]),
+    {
+      providerId: 'claude',
+      native: { name: overrides.claudeName ?? 'claude-code', version: overrides.claudeVersion ?? '2.1.247', revision: overrides.claudeRevision ?? null },
+      ...(!overrides.omitClaudeSdk ? { sdk: { name: overrides.claudeSdkName ?? '@anthropic-ai/claude-agent-sdk', version: overrides.claudeSdkVersion ?? '0.3.247' } } : {}),
+      degradations: claudeDegradations,
+    },
   ];
   return {
     schemaVersion: 1,

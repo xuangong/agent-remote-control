@@ -1,6 +1,6 @@
 # Agent Remote Control
 
-An independent workbench for discovering, creating, connecting to, and debugging agent sessions. It includes the remote protocol, provider SDK, DSH and Codex adapters, Node relay, browser client and renderer, terminal debugger, recorded scenarios, and an independent Agent Host runtime.
+An independent workbench for discovering, creating, connecting to, and debugging agent sessions. It includes the remote protocol, provider SDK, DSH, Codex, and Claude Code adapters, Node relay, browser client and renderer, terminal debugger, recorded scenarios, and an independent Agent Host runtime.
 
 The workbench has no account system. Generate a temporary key locally, pair an Agent Host or DSH Host plugin with that key, and select an advertised Provider under the connected installation to browse its native sessions and workspaces. Chat, questions, approvals, Timeline, Trace, and Replica Inspector share the existing public protocol.
 
@@ -14,7 +14,7 @@ pnpm build
 pnpm dev
 ```
 
-Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` owns the labeled Recorded fixture and the Agent Host pairing broker. Native Codex runs only in the independent Agent Host. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed. `AGENT_REMOTE_BIND` can expose the broker on an explicit interface; local management authorization remains unchanged.
+Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` owns the labeled Recorded fixture and the Agent Host pairing broker. Native Codex and Claude Code run only in the independent Agent Host. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed. `AGENT_REMOTE_BIND` can expose the broker on an explicit interface; local management authorization remains unchanged.
 
 The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.148.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-remote-lab/compatibility.json).
 
@@ -31,6 +31,23 @@ pnpm agent-host start
 ```
 
 Select **Codex · <Host name> · Online** in Session intake. The verified CLI version is `0.148.0`; older versions are rejected with an actionable message. `AGENT_REMOTE_CODEX_HOME`, `AGENT_REMOTE_CODEX_EXECUTABLE`, and `AGENT_REMOTE_WORKSPACE` remain supported aliases. See [Codex installation and debugging](docs/runbooks/codex-debug.md) for an isolated Tencent-registry install and the process/session boundaries.
+
+## Connect Claude Code, or both native providers
+
+Start the workbench and generate a temporary key through **Pair Agent Host**. For Claude alone:
+
+```bash
+export AGENT_HOST_SERVER=http://127.0.0.1:5910
+export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
+export AGENT_HOST_PROVIDERS=claude
+export AGENT_HOST_CLAUDE=/absolute/path/to/claude
+export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
+pnpm agent-host start
+```
+
+Select **Claude Code · <Host name> · Online**. Claude Code must be version `2.1.247` or newer; the adapter pins `@anthropic-ai/claude-agent-sdk` to `0.3.247`. Set `AGENT_HOST_PROVIDERS=codex,claude` and `AGENT_HOST_CODEX` to advertise both providers under one Host. The default remains `codex`. All selected executables must be available; empty, duplicate, or unknown selections fail startup.
+
+`AGENT_HOST_CLAUDE_HOME` selects an optional native profile through `CLAUDE_CONFIG_DIR`. Native authentication and settings remain owned by Claude Code. See [Claude installation and debugging](docs/runbooks/claude-debug.md) for isolated installation, configuration, session lifetime, and supported controls. Use a different `AGENT_HOST_STATE_DIR` when keeping an existing daemon running alongside a separate Host.
 
 ## Connect a real DSH installation
 
@@ -81,7 +98,7 @@ pnpm lint:docs
 
 Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing. Run `pnpm compatibility:update` after source changes, then `pnpm compatibility:check` to verify the declared implementation digest.
 
-`pnpm dev` runs the Recorded-backed workbench and pairing broker. `pnpm agent-host start` starts native Codex in the managed Host daemon so a later `pnpm agent-host pair` can replace its uplink without stopping native sessions. `pnpm agent-host foreground` is an attached debugging mode without daemon pairing control. `pnpm dev codex-fixture` remains a clearly labeled direct fixture composition for adapter validation; `pnpm dev recorded` runs the Recorded fixture and broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
+`pnpm dev` runs the Recorded-backed workbench and pairing broker. `pnpm agent-host start` starts the selected native providers in the managed Host daemon so a later `pnpm agent-host pair` can replace its uplink without stopping native sessions. `pnpm agent-host foreground` is an attached debugging mode without daemon pairing control. `pnpm dev codex-fixture` remains a clearly labeled direct fixture composition for adapter validation; `pnpm dev recorded` runs the Recorded fixture and broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
 
 ## Package boundaries
 

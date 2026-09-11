@@ -2,17 +2,17 @@
 
 ## Role
 
-The Provider layer terminates Provider-native protocols and exposes the common Agent Remote session contract; it is the only layer that interprets DSH or Codex event names (`packages/agent-provider-sdk/src/provider.ts:17-53`, `packages/agent-provider-sdk/src/observation.ts:53-84`).
+The Provider layer terminates Provider-native protocols and exposes the common Agent Remote session contract; it is the only layer that interprets DSH, Codex, or Claude event names (`packages/agent-provider-sdk/src/provider.ts`, `packages/agent-provider-sdk/src/observation.ts`).
 
 ## Boundary
 
-`@borgee/agent-provider-sdk` owns the adapter/Session contract and `AgentStreamEvent`; `@borgee/agent-provider-dsh` and `@borgee/agent-provider-codex` own their native projection, response mapping, and runtime lifecycle (`packages/agent-provider-sdk/src/provider.ts:4-58`, `packages/agent-provider-dsh/src/index.ts:1-20`, `packages/agent-provider-codex/src/index.ts:1-6`).
+`@borgee/agent-provider-sdk` owns the adapter/Session contract and `AgentStreamEvent`; `@borgee/agent-provider-dsh`, `@borgee/agent-provider-codex`, and `@borgee/agent-provider-claude` own their native projection, response mapping, and runtime lifecycle.
 
 ## Collaborators
 
 | Module | Direction | Responsibility |
 | --- | --- | --- |
-| Native DSH or Codex runtime | Native runtime → Provider adapter | Produces native history, live notifications, and native interaction requests. |
+| Native DSH, Codex, or Claude runtime | Native runtime → Provider adapter | Produces native history, live notifications, and native interaction requests. |
 | Provider SDK | Provider SDK → Adapter | Requires session lifecycle, observation, capability, control, and resource-reader shapes. |
 | Relay | Provider adapter → Relay | Consumes `ProviderObservation` and creates/resumes provider sessions without interpreting native protocol values. |
 | Lab | Lab → Provider adapter | Selects compatible adapters and verifies the declared version before construction. |
@@ -53,6 +53,10 @@ Relay delays readiness until it observes the single history boundary, buffers ea
 The process launcher verifies an explicitly selected working directory before spawning Codex. Missing directories and paths that are not directories produce workspace-specific errors; the launcher does not substitute another project (`packages/agent-provider-codex/src/native.ts`).
 
 The independent Agent Host composes the real Codex Provider and owns one app-server process per opened root session tree. The default Lab backend composes Recorded and the Host broker without constructing Codex. Codex receives JSONL events over stdio, retains a bounded stderr tail for exit diagnostics, and uses the selected native home and login. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-host/src/directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
+
+## Claude process and native directory
+
+Agent Host can register Codex and Claude together through `AGENT_HOST_PROVIDERS=codex,claude`. The Claude adapter owns a persistent official Agent SDK Query per opened session. Its catalog helper reads native metadata/history under the selected Claude configuration root without modifying the parent environment. History precedes the public history boundary; native partial/final messages are deduplicated, and nested agent output cannot impersonate root messages. Permission callbacks map to existing question/tool-approval interactions with one-time decisions. Unsupported controls remain absent from capabilities. See [Claude Provider](../../../packages/agent-provider-claude/README.md) and the [Claude runbook](../../runbooks/claude-debug.md).
 
 ## Invariants
 
@@ -152,3 +156,9 @@ The Codex runtime routes notifications and original server requests by native th
 Native `canAcceptDirectInput` governs child input availability. Unknown or prohibited direct input is not enabled by the Remote UI. Runtime disconnection is not inferred to be a successful child completion. Native creation, shutdown and resumption tools are not exposed as invented Remote lifecycle actions. This integration does not add DSH child control capabilities.
 
 An unloaded child with persisted turns opens as read-only saved history through `thread/read`; an unloaded ephemeral child without history reports unavailable. Native reactivation restores live observation and supported controls. Initial child model and permission values remain unknown when native reads omit them; parent settings are not presented as child settings. Planning requires a known child model.
+
+## Claude commands and native child sessions
+
+Claude reuses the same `list_commands`, `execute_command`, `runtimeInfo.childSessions`, and Host `child/attach` paths as Codex. The Query reloads skills before reading its validated command directory and revalidates each execution. Native slash invocations preserve argument text. Known unsupported control menus are filtered; no resource locator is inferred from a skill name.
+
+The root Query owns direct native agent tasks. Task lifecycle announcements and parent tool IDs determine identity, status and routing; shell tasks, housekeeping and grandchildren are excluded. Child views are independent read-only AgentSession projections. Their disposal releases only observation, and parent turn completion does not stop background children. Runtime failure freezes observations as saved history. Official SDK catalog helpers restore persisted child transcripts with parent ownership checks; a saved child never starts an independent native Query. Existing Timeline and session-tree rendering needs no Claude-specific branch or public protocol change.

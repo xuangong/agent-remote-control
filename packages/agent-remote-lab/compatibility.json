@@ -16,6 +16,10 @@
         "packages/agent-host/package.json",
         "packages/agent-host/src",
         "packages/agent-host/tsconfig.json",
+        "packages/agent-provider-claude/README.md",
+        "packages/agent-provider-claude/package.json",
+        "packages/agent-provider-claude/src",
+        "packages/agent-provider-claude/tsconfig.json",
         "packages/agent-provider-codex/LICENSE",
         "packages/agent-provider-codex/NOTICE",
         "packages/agent-provider-codex/README.md",
@@ -68,7 +72,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:1793f67a16fa68b813582938c7c6701da0f32330284319bb612c8ee558bbebea"
+      "digest": "sha256:80be8603b5e54ca6100d95b73b7aaf0287fe5e47589a44e4512aeea6c0e63fc8"
     }
   },
   "providers": [
@@ -124,6 +128,45 @@
           "capability": "events.subagent.navigation",
           "status": "degraded",
           "reason": "Parent tool lifecycle and result summaries are normalized; child session navigation and orchestration are not exposed."
+        }
+      ]
+    },
+    {
+      "providerId": "claude",
+      "native": {
+        "name": "claude-code",
+        "version": "2.1.247",
+        "revision": null
+      },
+      "sdk": {
+        "name": "@anthropic-ai/claude-agent-sdk",
+        "version": "0.3.247"
+      },
+      "degradations": [
+        {
+          "capability": "events.subagent.navigation",
+          "status": "degraded",
+          "reason": "Direct native children expose independent read-only history and live observation. Existing live projections do not insert missed historical prefixes. Independent child input, cancellation and approval are not exposed; permissions stay with the owning parent."
+        },
+        {
+          "capability": "events.tool-result.resources",
+          "status": "degraded",
+          "reason": "Tool results retain bounded text. Binary resources and attachments are not exposed through resource reads."
+        },
+        {
+          "capability": "controls.queue-steer-commands-settings",
+          "status": "degraded",
+          "reason": "Native skill discovery/invocation and compact reuse command controls. Mid-turn queue/steering, model settings UI and unsupported session-control menus are not advertised."
+        },
+        {
+          "capability": "interactions.restart-recovery",
+          "status": "degraded",
+          "reason": "Pending permission callbacks are process-local. Native transcript resume does not revive unanswered callbacks or an in-progress turn."
+        },
+        {
+          "capability": "sessions.empty-persistence",
+          "status": "degraded",
+          "reason": "An initialized Query remains in the Host directory before its first native transcript write; an empty session may not survive Host restart."
         }
       ]
     }

@@ -36,6 +36,50 @@ function fixture(providerId: string) {
 }
 
 describe('Agent Host runtime', () => {
+  it('advertises Codex and Claude over real WebSockets and preserves provider-scoped identities across re-pair', async () => {
+    const first = await uplinkBroker('first'); const second = await uplinkBroker('second');
+    const codex = fixture('codex'); const claude = fixture('claude');
+    codex.directory.list = async () => [summary('codex', 'shared-native')];
+    let claudeCatalogFailed = false;
+    claude.directory.list = async () => {
+      if (claudeCatalogFailed) throw new Error('Claude catalog unavailable');
+      return [summary('claude', 'shared-native')];
+    };
+    const host = createAgentHost({ registrations: [codex, claude], installationId: 'installation', name: 'Host',
+      uplink: { url: first.url, remoteKey: 'first-key' } });
+    try {
+      await host.ready;
+      expect(first.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX' }, { providerId: 'claude', displayName: 'CLAUDE' }]);
+      for (const providerId of ['codex', 'claude']) {
+        const catalog = await first.rpc('GET', `/remote/catalog?providerId=${providerId}`);
+        expect(JSON.parse(catalog.body).items).toEqual([summary(providerId, 'shared-native')]);
+        const attached = await first.rpc('POST', '/remote/attach', `${providerId}-relay`, { providerId, nativeSessionId: 'shared-native' });
+        expect(JSON.parse(attached.body)).toEqual({ agentId: `${providerId}-relay`, nativeSessionId: 'shared-native' });
+        const created = await first.rpc('POST', '/remote/create', `${providerId}-created`, { providerId, requestId: 'same-request' });
+        expect(JSON.parse(created.body)).toEqual({ agentId: `${providerId}-created`, nativeSessionId: `${providerId}-1` });
+      }
+      expect((await first.rpc('POST', '/remote/attach', 'codex-relay', { providerId: 'claude', nativeSessionId: 'another' })).status).toBe(409);
+      expect(codex.sessions.get('shared-native')).not.toBe(claude.sessions.get('shared-native'));
+      await host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
+      expect(second.advertisedProviders()).toEqual(first.advertisedProviders());
+      for (const provider of [codex, claude]) {
+        const providerId = provider.adapter.descriptor.providerId;
+        const attached = await second.rpc('POST', '/remote/attach', `${providerId}-new-proposal`, { providerId, nativeSessionId: 'shared-native' });
+        expect(JSON.parse(attached.body).agentId).toBe(`${providerId}-relay`);
+        const recovered = await second.rpc('POST', '/remote/create', `${providerId}-new-created`, { providerId, requestId: 'same-request' });
+        expect(JSON.parse(recovered.body).agentId).toBe(`${providerId}-created`);
+        expect(provider.createCount()).toBe(1);
+        expect(provider.sessions.get('shared-native')!.observeCount).toBe(1);
+        expect(provider.sessions.get('shared-native')!.disposed).toBe(false);
+      }
+      claudeCatalogFailed = true;
+      expect((await second.rpc('GET', '/remote/catalog?providerId=claude')).status).toBe(503);
+      expect((await second.rpc('GET', '/remote/catalog?providerId=codex')).status).toBe(200);
+    } finally { await host.close(); await first.close(); await second.close(); }
+    expect(codex.sessions.get('shared-native')!.disposed).toBe(true);
+    expect(claude.sessions.get('shared-native')!.disposed).toBe(true);
+  });
+
   it('disposes a Codex session whose persistence result arrives after bounded shutdown', async () => {
     const codex = fixture('codex');
     let releaseInfo!: () => void;
@@ -237,13 +281,15 @@ async function uplinkBroker(hostId: string, autoRegister = true) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>((resolve) => server.once('listening', resolve));
   let socket: WebSocket | undefined;
+  let providers: unknown;
   let resolveConnected!: () => void;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
   server.on('connection', (connection) => {
     socket = connection;
     resolveConnected();
     connection.on('message', (data) => {
-      const message = JSON.parse(data.toString()) as { type: string };
+      const message = JSON.parse(data.toString()) as { type: string; providers?: unknown };
+      if (message.type === 'register') providers = message.providers;
       if (message.type === 'register' && autoRegister) connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId }));
     });
   });
@@ -252,6 +298,7 @@ async function uplinkBroker(hostId: string, autoRegister = true) {
   return {
     url: `ws://127.0.0.1:${address.port}/ws/remote-host`,
     connected,
+    advertisedProviders: () => providers,
     register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId })); },
     rpc(method: 'GET' | 'POST', path: string, sessionId?: string, body?: unknown): Promise<{ status: number; body: string }> {
       const requestId = `rpc-${++sequence}`;

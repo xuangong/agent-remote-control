@@ -1,0 +1,13 @@
+# Claude commands and native child views
+
+Reuse Remote protocol 1.4.0 and the existing Codex paths: session command discovery/execution, runtime childSessions, Host child/attach, and the shared session tree and Timeline. No new public schemas or Claude-specific UI transport.
+
+Discover the current Query's commands through the official SDK, refreshing skills before discovery. Validate and deduplicate descriptors and use opaque provider-owned identifiers. Execution revalidates the directory, preserves user arguments, and submits a native slash invocation. Serialize execution with message and planning changes. Classify known native session commands separately from skills as Paseo does. Do not fabricate filesystem documentation locators from command names.
+
+The root Query owns direct Claude tasks. Track task_started/updated/notification, retaining task-to-tool aliases across turns. Filter housekeeping, shell/workflow tasks and grandchildren. Namespace child identities by their parent session. Forward nested text into independent read-only AgentSession projections, never the parent's transcript. Map terminal tasks to closed/failed and saved_history; background tasks survive the parent turn ending. Ending the root Query freezes child views without claiming tasks are still live.
+
+Use official listSubagents/getSubagentMessages in the existing environment-isolated catalog helper for cold history. Exclude descendants identified by parent_agent_id. Saved children are read-only and never resumed as independent native Queries. Loaded parent ownership is required for attachment. Disposing a child view only releases its observer; the root owns native process shutdown. Re-pair reuses the existing Host projection.
+
+Validate native skill discovery/invocation and a real native child against a deterministic loopback Messages service; verify child identity/history after resume. Unit regressions cover stale commands, concurrency, foreign/nested tasks, aliases, background lifetime, read-only controls, isolation and cleanup. Exercise existing command and child navigation UI over a real Host uplink. Run full regressions with pinned Codex/Claude executables, then compatibility update/check.
+
+Reserve loaded parent identities across asynchronous resume; reject concurrent loads and release failed reservations. Canonical saved transcripts replace future child replay in native order, with UUID/message identity preserving unsaved streaming tails. Existing Host projections stay append-only: only a confirmed new suffix is emitted, never a missed historical prefix. Re-pair/navigation preserve that partial live projection; complete historical replay requires a fresh Host attachment.

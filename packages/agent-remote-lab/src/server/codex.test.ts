@@ -127,6 +127,18 @@ describe('Codex Lab composition', () => {
             },
           ],
         },
+        {
+          providerId: 'claude',
+          native: { name: 'claude-code', version: '2.1.247', revision: null },
+          sdk: { name: '@anthropic-ai/claude-agent-sdk', version: '0.3.247' },
+          degradations: [
+            { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Nested agents remain parent tool summaries.' },
+            { capability: 'events.tool-result.resources', status: 'degraded', reason: 'Binary resources are not exposed.' },
+            { capability: 'controls.queue-steer-commands-settings', status: 'degraded', reason: 'No mid-turn input or command menus.' },
+            { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Permission callbacks are process-local.' },
+            { capability: 'sessions.empty-persistence', status: 'degraded', reason: 'An empty session may not be persisted.' },
+          ],
+        },
       ],
     }));
     return manifest;

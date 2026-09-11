@@ -5,11 +5,18 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
 
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
-const requiredProviderIds = ['codex', 'dsh'] as const;
+const requiredProviderIds = ['claude', 'codex', 'dsh'] as const;
 const requiredDegradations: Record<
   (typeof requiredProviderIds)[number],
   ReadonlyArray<{ capability: string; status: ProviderCompatibility['degradations'][number]['status'] }>
 > = {
+  claude: [
+    { capability: 'events.subagent.navigation', status: 'degraded' },
+    { capability: 'events.tool-result.resources', status: 'degraded' },
+    { capability: 'controls.queue-steer-commands-settings', status: 'degraded' },
+    { capability: 'interactions.restart-recovery', status: 'degraded' },
+    { capability: 'sessions.empty-persistence', status: 'degraded' },
+  ],
   dsh: [
     { capability: 'events.session/title', status: 'degraded' },
     { capability: 'events.user-message.unknown-source', status: 'degraded' },
@@ -32,6 +39,7 @@ export interface NativeCompatibility {
 export interface ProviderCompatibility {
   providerId: string;
   native: NativeCompatibility;
+  sdk?: { name: string; version: string };
   degradations: Array<{
     capability: string;
     status: 'unsupported' | 'degraded';
@@ -82,7 +90,7 @@ export function loadCompatibilityManifest(path?: string): CompatibilityManifest 
   const providerIds = providers.map(({ providerId }) => providerId).sort();
   if (providerIds.length !== requiredProviderIds.length
     || providerIds.some((providerId, index) => providerId !== requiredProviderIds[index])) {
-    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: codex and dsh.');
+    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: claude, codex, and dsh.');
   }
   for (const provider of providers) validateRequiredDegradations(provider);
   verifyImplementationDigest(manifestPath, borgee);
@@ -110,10 +118,23 @@ function parseProviderCompatibility(value: unknown): ProviderCompatibility {
     || !Array.isArray(value.degradations)) {
     throw new Error('Agent Remote compatibility manifest contains an invalid Provider entry.');
   }
+  if (value.providerId === 'claude' && (value.native.name !== 'claude-code' || value.native.version !== '2.1.247'
+    || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@anthropic-ai/claude-agent-sdk'
+    || value.sdk.version !== '0.3.247')) {
+    throw new Error('Agent Remote compatibility manifest must pin Claude Code 2.1.247 and @anthropic-ai/claude-agent-sdk 0.3.247.');
+  }
+  let sdk: ProviderCompatibility['sdk'];
+  if (value.sdk !== undefined) {
+    if (!isRecord(value.sdk) || !isNonEmptyString(value.sdk.name) || !isNonEmptyString(value.sdk.version)) {
+      throw new Error('Agent Remote compatibility manifest contains an invalid Provider SDK entry.');
+    }
+    sdk = { name: value.sdk.name, version: value.sdk.version };
+  }
   const degradations = value.degradations.map(parseDegradation);
   return {
     providerId: value.providerId,
     native: value.native,
+    ...(sdk ? { sdk } : {}),
     degradations,
   };
 }
@@ -155,8 +176,8 @@ function parseDegradation(value: unknown): ProviderCompatibility['degradations']
 }
 
 function validateRequiredDegradations(provider: ProviderCompatibility): void {
-  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex') return;
-  const displayName = provider.providerId === 'dsh' ? 'DSH' : 'Codex';
+  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex' && provider.providerId !== 'claude') return;
+  const displayName = provider.providerId === 'dsh' ? 'DSH' : provider.providerId === 'codex' ? 'Codex' : 'Claude';
   const actual = new Map(provider.degradations.map((entry) => [entry.capability, entry.status]));
   if (actual.size !== provider.degradations.length) {
     throw new Error(`Agent Remote compatibility manifest must contain unique degradation capabilities for ${displayName}.`);

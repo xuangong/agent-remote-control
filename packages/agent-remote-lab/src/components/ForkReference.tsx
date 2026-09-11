@@ -1,4 +1,5 @@
 import type { OpenedSession } from '../directory-client.js';
+import { sessionKey } from '../session-tree.js';
 import type { SessionFork } from '../session-forks.js';
 
 export function ForkIcon() {
@@ -21,7 +22,11 @@ export function ForkReference({ fork, onOpen }: { fork: SessionFork; onOpen(sess
     </div>
   </details>;
 }
-export function ForkEntries({ forks, onOpen }: { forks: readonly SessionFork[]; onOpen(fork: SessionFork): void }) {
+export function ForkEntries({ forks, onOpen, selectedChild }: { forks: readonly SessionFork[]; onOpen(fork: SessionFork): void; selectedChild?: string | null }) {
   if (!forks.length) return null;
-  return <nav className="lab-fork-entries" aria-label="Forked sessions">{forks.map((fork) => <button type="button" key={fork.id} onClick={() => onOpen(fork)}><ForkIcon /><span>Forked session · {fork.target?.title}</span></button>)}</nav>;
+  return <nav className="lab-fork-entries" aria-label="Forked sessions"><span className="lab-side-list-label">Sides · {forks.length}</span>{forks.map((fork, index) => {
+    const label = `Side ${index + 1} · ${fork.firstInput?.trim().slice(0, 72) || fork.target?.title || 'New session'}`;
+    return <button type="button" key={fork.id} aria-pressed={!!fork.target && selectedChild === sessionKey(fork.target)}
+      title={label} onClick={() => onOpen(fork)}><ForkIcon /><span>{label}</span></button>;
+  })}</nav>;
 }

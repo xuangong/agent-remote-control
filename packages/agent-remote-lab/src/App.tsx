@@ -37,6 +37,8 @@ import { LabWorkbench } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
 import { captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
+import { CollapsedConversations } from './components/CollapsedConversations.js';
+import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
 import type { QuestionDraft } from '@borgee/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
@@ -104,7 +106,10 @@ export function App({
   const forkStore = useMemo(() => new ForkStore(baseUrl), [baseUrl]);
   const [, setForkRevision] = useState(0);
   useEffect(() => forkStore.subscribe(() => setForkRevision((value) => value + 1)), [forkStore]);
-  const [sideSession, setSideSession] = useState<OpenedSession>();
+  const [sideSessions, setSideSessions] = useState<OpenedSession[]>([]);
+  const [sideSelections, setSideSelections] = useState<SideSelections>({});
+  const [sideFocus, setSideFocus] = useState<string>();
+  const sideRequests = useRef(new Map<string, number>());
   const forkReservation = useRef<{ key: string; record: SessionFork }>();
   const forkBusy = useRef(false);
   const [forkInputStatus, setForkInputStatus] = useState<{ agentId: string; pending: boolean; error?: string }>();
@@ -343,7 +348,7 @@ export function App({
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
       rememberSession({ ...prior, ...item, hostId, agentId: result.agentId });
       setProviderName(providerConnectionName(hostId, item.providerId));
-      if (sideSession?.nativeSessionId === item.nativeSessionId && sideSession.providerId === item.providerId && (sideSession.hostId ?? 'local') === hostId) setSideSession(undefined);
+      setSideFocus(undefined);
       attach(result.agentId);
     } catch (error) { setFailure(message(error, 'Session could not be connected.')); }
     finally { transitionRef.current = false; setTransitioning(false); }
@@ -509,9 +514,51 @@ export function App({
   } : undefined));
   const boundFork = activeFork && activeAgentId ? { ...activeFork, target: { ...activeFork.target!, agentId: activeAgentId } } : undefined;
 
+  const stackRoot = activeOpened ?? (state?.agent?.runtimeInfo.sessionId ? {
+    agentId: state.agent.id, nativeSessionId: state.agent.runtimeInfo.sessionId,
+    providerId: state.agent.providerId, hostId: 'local', title: 'Conversation',
+  } : undefined);
+  const stackPath = sidePath(stackRoot, sideSessions, sideSelections).map((session) => ({
+    ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title,
+  }));
+  const stackRange = expandedSideRange(stackPath, sideFocus, compactLayout ? 1 : 2);
+  const expandedKeys = new Set(stackPath.slice(stackRange.start, stackRange.end + 1).map(sessionKey));
+  const focusedWindow = stackPath[stackRange.end];
+  const primaryExpanded = stackRange.start === 0;
+
+  function nextSideRequest(source: OpenedSession): number {
+    const key = sessionKey(source);
+    const request = (sideRequests.current.get(key) ?? 0) + 1;
+    sideRequests.current.set(key, request);
+    return request;
+  }
+  function selectSide(source: OpenedSession, session: OpenedSession): void {
+    nextSideRequest(source);
+    setSideSessions((current) => [...current.filter((entry) => sessionKey(entry) !== sessionKey(session)), session]);
+    setSideSelections((current) => ({ ...current, [sessionKey(source)]: sessionKey(session) }));
+    setSideFocus(undefined);
+  }
+  function revealSession(session: OpenedSession): void {
+    if (stackPath.some((entry) => sessionKey(entry) === sessionKey(session))) setSideFocus(sessionKey(session));
+    else void openSession(session);
+  }
+  function closeSide(session: OpenedSession): void {
+    const record = forkStore.find(session);
+    if (!record) return;
+    nextSideRequest(record.source);
+    setSideSelections((current) => ({ ...current, [sessionKey(record.source)]: null }));
+    setSideFocus(sessionKey(record.source));
+  }
+  useEffect(() => {
+    if (stackRange.end === 0 && sideFocus && activeView === 'workbench') {
+      workbenchPanelRef.current?.querySelector<HTMLTextAreaElement>('.lab-primary-conversation textarea')?.focus({ preventScroll: true });
+    }
+  }, [sideFocus, stackRange.end, activeView]);
+
   async function openFork(record: SessionFork): Promise<void> {
     if (!record.target || !directory) return;
     const saved = record.target;
+    const request = nextSideRequest(record.source);
     const target = (saved.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, saved.hostId);
     try {
       const result = await target.attach(saved.providerId, saved.nativeSessionId);
@@ -519,8 +566,10 @@ export function App({
       forkStore.bind(record.id, session);
       await configureFork(transport, forkStore, forkStore.get(record.id));
       rememberSession(session);
-      if (session.agentId !== activeAgentId) setSideSession(session);
-    } catch (error) { setFailure(message(error, 'Forked session could not be opened.')); }
+      if (sideRequests.current.get(sessionKey(record.source)) === request && session.agentId !== activeAgentId) selectSide(record.source, session);
+    } catch (error) {
+      if (sideRequests.current.get(sessionKey(record.source)) === request) setFailure(message(error, 'Forked session could not be opened.'));
+    }
   }
 
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
@@ -555,7 +604,7 @@ export function App({
       rememberSession(source); rememberSession(session);
       setDirectoryRevision((value) => value + 1);
       if (args.trim()) setMessageDrafts((current) => ({ ...current, [session.agentId]: args.trim() }));
-      if (id === 'console:side') setSideSession(session);
+      if (id === 'console:side') selectSide(source, session);
       if (args.trim() && forkStore.get(record.id).delivery !== 'sent') {
         setForkInputStatus({ agentId: session.agentId, pending: true });
         try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
@@ -700,14 +749,15 @@ export function App({
         hidden={activeView !== 'workbench'}
       >
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
-        <div className={`lab-conversation-split${sideSession ? ' lab-has-side' : ''}`}>
-        <div className="lab-primary-conversation">
+        <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
+        <CollapsedConversations sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
+        <div className="lab-primary-conversation" hidden={!primaryExpanded}>
         <LabWorkbench
-          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : {}} visible={activeView === 'workbench'}
+          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : {}} visible={activeView === 'workbench' && primaryExpanded}
           consoleCommands={directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
           onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
-          composerAttachments={boundFork ? <ForkReference fork={boundFork} onOpen={(session) => void openSession(session)} /> : undefined}
-          composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} onOpen={(fork) => void openFork(fork)} />}
+          composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
+          composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
           sessionManager={directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : undefined}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
@@ -725,12 +775,17 @@ export function App({
           })) : undefined}
         />
         </div>
-        {sideSession ? <SideConversation key={sessionKey(sideSession)} session={sideSession} transport={transport} store={forkStore}
-          initialInput={forkInputStatus?.agentId === sideSession.agentId ? forkInputStatus : undefined}
-          visible={activeView === 'workbench'} draft={messageDrafts[sideSession.agentId] ?? ''}
-          onDraftChange={(text) => setMessageDrafts((current) => ({ ...current, [sideSession.agentId]: text }))}
-          onClose={() => { setSideSession(undefined); workbenchPanelRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true }); }}
-          onOpenSource={(session) => void openSession(session)} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} /> : null}
+        {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
+          key={sessionKey(session)} session={session} transport={transport} store={forkStore}
+          position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}
+          expanded={expandedKeys.has(sessionKey(session))}
+          focused={focusedWindow !== undefined && sessionKey(focusedWindow) === sessionKey(session)}
+          selectedChild={sideSelections[sessionKey(session)]}
+          initialInput={forkInputStatus?.agentId === session.agentId ? forkInputStatus : undefined}
+          visible={activeView === 'workbench'} draft={messageDrafts[session.agentId] ?? ''}
+          onDraftChange={(text) => setMessageDrafts((current) => ({ ...current, [session.agentId]: text }))}
+          onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
+        <CollapsedConversations sessions={stackPath.slice(stackRange.end + 1)} offset={stackRange.end + 1} onExpand={revealSession} />
         </div>
       </section>
       <section

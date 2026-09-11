@@ -8,6 +8,17 @@ The workbench has no account system. Generate a temporary key locally, pair an A
 
 Use Node 22 or later and pnpm 10.34.5. All commands run from this repository root.
 
+To build and start the complete controller with Codex, Claude, and DSH:
+
+```bash
+pnpm start --codex /absolute/path/to/codex --claude /absolute/path/to/claude \
+  --dsh /absolute/path/to/dsh
+```
+
+The launcher builds Agent Host and Web, installs the DSH Host plugin, starts both native Hosts, pairs them automatically, and prints the controller URL after all three providers are ready. Keep the terminal open; Ctrl+C stops this environment. Use `pnpm start --config .runtime/controller.json` for repeatable configuration, or `--dsh-repo` for a DSH source checkout. See the [complete startup guide](docs/runbooks/controller-start.md) for profiles, ports, configuration, and lifecycle.
+
+To start only the workbench and pair Hosts manually:
+
 ```bash
 pnpm install --frozen-lockfile
 pnpm build

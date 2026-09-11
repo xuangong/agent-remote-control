@@ -58,7 +58,7 @@ export async function waitFor(check, { timeoutMs = 60000, intervalMs = 500, sign
   throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
 }
 
-export function startProcess(command, args, { cwd, env, logFile, secrets = [], output = console.log } = {}) {
+export function startProcess(command, args, { cwd, env, logFile, secrets = [], output = console.log, stopTimeoutMs = 3000 } = {}) {
   const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   let running = true;
   let stopping;
@@ -87,7 +87,7 @@ export function startProcess(command, args, { cwd, env, logFile, secrets = [], o
         if (!running) return;
         kill('SIGTERM');
         let timer;
-        await Promise.race([finished, new Promise((accept) => { timer = setTimeout(accept, 3000); })]);
+        await Promise.race([finished, new Promise((accept) => { timer = setTimeout(accept, stopTimeoutMs); })]);
         clearTimeout(timer);
         if (running) { kill('SIGKILL'); await finished; }
       })();

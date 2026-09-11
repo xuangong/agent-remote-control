@@ -1,0 +1,11 @@
+{
+  "codex": "codex",
+  "claude": "claude",
+  "dsh": "dsh",
+  "workspace": "..",
+  "stateDir": "controller",
+  "webPort": 6175,
+  "relayPort": 5910,
+  "dshPort": 3081,
+  "name": "Remote Controller"
+}

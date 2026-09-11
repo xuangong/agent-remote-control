@@ -68,7 +68,7 @@ test('an existing launcher lock is never replaced or removed', async (t) => {
   assert.equal(await readFile(join(directory, 'run.lock/owner.json'), 'utf8'), 'user-owned-lock');
 });
 
-async function workflow(t, failCatalog = false) {
+async function workflow(t, failCatalog = false, providers, bundled = false) {
   const directory = await temporary(t);
   const state = join(directory, 'state');
   await mkdir(join(directory, 'scripts/lib'), { recursive: true });
@@ -80,13 +80,13 @@ async function workflow(t, failCatalog = false) {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, `#!${process.execPath}\nprocess.env.CONTROLLER_FIXTURE_MODE = ${JSON.stringify(mode)};\nimport(${JSON.stringify(tool)});\n`, { mode: 0o755 });
   }
-  for (const name of ['pnpm', 'codex', 'claude', 'dsh']) await executable(join(directory, 'bin', name), name);
+  for (const name of ['pnpm', 'codex', 'claude', 'copilot', 'dsh']) await executable(join(directory, 'bin', name), name);
   await executable(join(directory, 'packages/agent-host/dist/cli.js'), 'host');
   await executable(join(state, 'dsh/tools', PNPM_VERSION, 'node_modules/.bin/pnpm'), 'pnpm');
   await mkdir(join(directory, 'packages/agent-remote-dsh'), { recursive: true });
   await writeFile(join(directory, 'packages/agent-remote-dsh/package.json'), '{"version":"0.1.0"}');
   await mkdir(join(directory, 'node_modules'), { recursive: true });
-  await writeFile(join(directory, 'node_modules/.modules.yaml'), '');
+  if (!bundled) await writeFile(join(directory, 'node_modules/.modules.yaml'), '');
   const ports = [];
   const probes = [];
   for (let i = 0; i < 3; i++) {
@@ -95,7 +95,9 @@ async function workflow(t, failCatalog = false) {
   }
   await Promise.all(probes.map((probe) => new Promise((accept) => probe.close(accept))));
   const config = { codex: './bin/codex', claude: './bin/claude', dsh: './bin/dsh', workspace: '.', stateDir: './state',
-    webPort: ports[0], relayPort: ports[1], dshPort: ports[2] };
+    webPort: ports[0], relayPort: ports[1], dshPort: ports[2], ...(providers ? { providers, copilot: bundled ? undefined : './bin/copilot', copilotHome: './copilot-home',
+      ...Object.fromEntries(['codex', 'claude', 'dsh'].filter((id) => !providers.split(',').includes(id)).map((id) => [id, './missing-' + id])),
+      ...(!providers.includes('dsh') ? { dshPort: ports[0] } : {}) } : {}) };
   await writeFile(join(directory, 'config.json'), JSON.stringify(config));
   const output = [];
   const child = startProcess(process.execPath, [join(directory, 'scripts/start.mjs'), '--config', join(directory, 'config.json')], {
@@ -135,4 +137,45 @@ test('a provider catalog failure prevents readiness and cleans up every owned li
   assert.ok(!output.some((line) => line.startsWith('Remote Controller:')));
   await assert.rejects(readFile(join(state, 'ready.json')), { code: 'ENOENT' });
   for (const port of ports) await assert.rejects(fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(1000) }));
+});
+
+for (const providers of ['copilot', 'dsh', 'codex,claude,copilot,dsh']) {
+  test(`starts only selected providers: ${providers}`, async (t) => {
+    const { directory, state, child, output } = await workflow(t, false, providers);
+    const ready = await waitFor(async () => {
+      assert.equal(child.running, true, output.join('\n'));
+      try { return JSON.parse(await readFile(join(state, 'ready.json'), 'utf8')); } catch { return false; }
+    }, { timeoutMs: 10000, intervalMs: 30 });
+    assert.deepEqual(ready.hosts.flatMap((host) => host.providers), providers.split(','));
+    const events = (await readFile(join(directory, 'events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.equal(events.some((event) => event.pluginInstalled), providers.includes('dsh'));
+    if (providers.includes('copilot')) {
+      assert.ok(events.some((event) => event.copilot === join(directory, 'bin/copilot') && event.copilotHome === join(directory, 'copilot-home')));
+    }
+    if (!providers.includes('dsh')) assert.equal(ready.dshUrl, undefined);
+    await child.stop();
+    assert.equal((await child.finished).code, 0, output.join('\n'));
+  });
+}
+
+test('provider selections reject unknown, duplicate and empty entries', async () => {
+  const { controllerOptions } = await import('./lib/controller-options.mjs');
+  for (const providers of ['', 'copilot,copilot', 'unknown', 'copilot,']) {
+    await assert.rejects(controllerOptions(['--providers', providers], '/tmp', '/tmp', {}), /provider/i);
+  }
+});
+
+test('resolves bundled Copilot only after fresh dependency installation and build', async (t) => {
+  const { directory, state, child, output } = await workflow(t, false, 'copilot', true);
+  await waitFor(async () => {
+    assert.equal(child.running, true, output.join('\n'));
+    try { return await readFile(join(state, 'ready.json')); } catch { return false; }
+  }, { timeoutMs: 10000, intervalMs: 30 });
+  const events = (await readFile(join(directory, 'events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const installed = events.findIndex((event) => event.installed);
+  const built = events.findIndex((event) => event.built);
+  const version = events.findIndex((event) => event.version === 'copilot');
+  assert.ok(installed >= 0 && built > installed && version > built);
+  await child.stop();
+  assert.equal((await child.finished).code, 0, output.join('\n'));
 });

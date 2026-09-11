@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@borgee/agent-provider-claude": "workspace:*",
+    "@borgee/agent-provider-copilot": "workspace:*",
     "@borgee/agent-provider-codex": "workspace:*",
     "@borgee/agent-provider-sdk": "workspace:*",
     "@borgee/agent-remote-protocol": "workspace:*",

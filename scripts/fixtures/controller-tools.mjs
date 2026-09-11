@@ -19,7 +19,12 @@ const register = async (body) => {
 
 if (mode === 'pnpm') {
   if (args[0] === '--version') console.log('10.34.5');
+  else if (args[0] === 'install') { record({ installed: true }); }
   else if (args[0] === 'build') {
+    record({ built: true });
+    const copilot = join(root, 'packages/agent-provider-copilot/dist/index.js');
+    mkdirSync(dirname(copilot), { recursive: true });
+    writeFileSync(copilot, `export function resolveCopilotExecutable() { return ${JSON.stringify(join(root, 'bin/copilot'))}; }`);
     const relay = join(root, 'packages/agent-remote-relay/dist/index.js');
     mkdirSync(dirname(relay), { recursive: true }); writeFileSync(relay, '');
     writeFileSync(join(root, 'built'), 'yes');
@@ -59,13 +64,14 @@ if (mode === 'pnpm') {
     }).listen(port, '127.0.0.1');
     keep();
   }
-} else if (mode === 'codex' || mode === 'claude') {
-  console.log(mode === 'codex' ? 'codex-cli 0.148.0' : '2.1.247 (Claude Code)');
+} else if (mode === 'codex' || mode === 'claude' || mode === 'copilot') {
+  record({ version: mode });
+  console.log(mode === 'copilot' ? 'GitHub Copilot CLI 1.0.83' : mode === 'codex' ? 'codex-cli 0.148.0' : '2.1.247 (Claude Code)');
 } else if (mode === 'host') {
   if (!existsSync(join(root, 'built'))) throw new Error('The Host was not built.');
   await register({ key: process.env.AGENT_HOST_REMOTE_KEY, id: 'native', name: process.env.AGENT_HOST_NAME,
     providers: process.env.AGENT_HOST_PROVIDERS.split(',') });
-  record({ codex: process.env.AGENT_HOST_CODEX, claude: process.env.AGENT_HOST_CLAUDE, workspace: process.env.AGENT_HOST_WORKSPACE });
+  record({ copilot: process.env.AGENT_HOST_COPILOT, copilotHome: process.env.AGENT_HOST_COPILOT_HOME, codex: process.env.AGENT_HOST_CODEX, claude: process.env.AGENT_HOST_CLAUDE, workspace: process.env.AGENT_HOST_WORKSPACE });
   keep();
 } else if (mode === 'dsh') {
   if (args[0] === '--version') console.log('0.1.2-rc.1');

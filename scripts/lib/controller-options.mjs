@@ -5,13 +5,13 @@ import { parseArgs } from 'node:util';
 import { createServer } from 'node:net';
 
 const fields = {
-  'state-dir': 'stateDir', workspace: 'workspace', codex: 'codex', claude: 'claude', dsh: 'dsh',
-  'codex-home': 'codexHome', 'claude-home': 'claudeHome', 'dsh-home': 'dshHome', 'dsh-repo': 'dshRepo',
+  'state-dir': 'stateDir', workspace: 'workspace', codex: 'codex', claude: 'claude', copilot: 'copilot', providers: 'providers', dsh: 'dsh',
+  'codex-home': 'codexHome', 'claude-home': 'claudeHome', 'copilot-home': 'copilotHome', 'dsh-home': 'dshHome', 'dsh-repo': 'dshRepo',
   'web-port': 'webPort', 'relay-port': 'relayPort', 'dsh-port': 'dshPort', registry: 'registry', name: 'name',
   'build-dsh': 'buildDsh',
 };
-const paths = ['stateDir', 'workspace', 'codexHome', 'claudeHome', 'dshHome', 'dshRepo'];
-const executables = ['codex', 'claude', 'dsh'];
+const paths = ['stateDir', 'workspace', 'codexHome', 'claudeHome', 'copilotHome', 'dshHome', 'dshRepo'];
+const executables = ['codex', 'claude', 'copilot', 'dsh'];
 function resolvePaths(values, cwd) {
   for (const key of paths) if (values[key]) values[key] = resolve(cwd, values[key]);
   for (const key of executables) {
@@ -44,21 +44,27 @@ export async function controllerOptions(args, root, cwd, env = process.env) {
   const options = {
     stateDir: join(root, '.runtime/controller'), workspace: cwd,
     codex: env.AGENT_HOST_CODEX ?? env.AGENT_REMOTE_CODEX_EXECUTABLE ?? 'codex',
-    claude: env.AGENT_HOST_CLAUDE ?? 'claude',
+    claude: env.AGENT_HOST_CLAUDE ?? 'claude', copilot: env.AGENT_HOST_COPILOT, copilotHome: env.AGENT_HOST_COPILOT_HOME,
+    providers: 'codex,claude,dsh',
     codexHome: env.AGENT_REMOTE_CODEX_HOME, claudeHome: env.AGENT_HOST_CLAUDE_HOME,
     webPort: 6175, relayPort: 5910, dshPort: 3081,
     registry: 'https://mirrors.cloud.tencent.com/npm/', name: 'Remote Controller', buildDsh: false,
     ...config, ...overrides,
   };
+  options.providers = options.providers.split(',').map((id) => id.trim());
+  if (options.providers.some((id) => !['codex', 'claude', 'copilot', 'dsh'].includes(id)) || new Set(options.providers).size !== options.providers.length) {
+    throw new Error('Providers must be a nonempty, duplicate-free selection of codex, claude, copilot, dsh.');
+  }
   resolvePaths(options, cwd);
   options.dshHome ??= join(options.stateDir, 'dsh/home');
-  for (const key of ['webPort', 'relayPort', 'dshPort']) {
+  const portKeys = ['webPort', 'relayPort', ...(options.providers.includes('dsh') ? ['dshPort'] : [])];
+  for (const key of portKeys) {
     options[key] = Number(options[key]);
     if (!Number.isInteger(options[key]) || options[key] < 1 || options[key] > 65535) throw new Error(`${key} must be an integer from 1 to 65535.`);
   }
-  if (new Set([options.webPort, options.relayPort, options.dshPort]).size !== 3) throw new Error('Web, Relay, and DSH require distinct ports.');
-  if (options.dsh && options.dshRepo) throw new Error('Choose either --dsh or --dsh-repo.');
-  if (options.buildDsh && !options.dshRepo) throw new Error('--build-dsh requires --dsh-repo.');
+  if (new Set(portKeys.map((key) => options[key])).size !== portKeys.length) throw new Error('Web, Relay, and DSH require distinct ports.');
+  if (options.providers.includes('dsh') && options.dsh && options.dshRepo) throw new Error('Choose either --dsh or --dsh-repo.');
+  if (options.providers.includes('dsh') && options.buildDsh && !options.dshRepo) throw new Error('--build-dsh requires --dsh-repo.');
   for (const key of [...paths, ...executables, 'name']) {
     if (options[key] !== undefined && !options[key].trim()) throw new Error(`${key} must not be empty.`);
   }

@@ -43,6 +43,9 @@ importers:
       '@borgee/agent-provider-codex':
         specifier: workspace:*
         version: link:../agent-provider-codex
+      '@borgee/agent-provider-copilot':
+        specifier: workspace:*
+        version: link:../agent-provider-copilot
       '@borgee/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk

@@ -154,7 +154,7 @@ export class CopilotAgentSession implements AgentSession {
           length += read.bytesRead;
         }
         if (length > limit) throw new Error('Skill document exceeds limit.');
-        return {status: 'available' as const, bytes: bytes.subarray(0, length), mediaType: 'text/markdown'};
+        return {status: 'available' as const, bytes: bytes.subarray(0, length), mediaType: 'text/plain'};
       } finally { await handle.close(); }
     } catch { return {status: 'unavailable' as const, reason: 'Copilot skill document is unavailable.'}; }
   }

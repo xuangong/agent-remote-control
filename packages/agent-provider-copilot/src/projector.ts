@@ -10,7 +10,7 @@ export function detail(name: string, value: unknown): AgentToolDetail {
   if (typeof path === 'string') return { type: /edit|patch/i.test(name) ? 'edit' : /write|create/i.test(name) ? 'write' : 'read', filePath: path };
   return { type: 'other', description: name };
 }
-/** Durable messages replace streaming snapshots through the same source key. */
+/** Assistant text observations are append-only; durable messages contribute only an unsent suffix. */
 export class Projector {
   private readonly tools = new Map<string, { name: string; detail: AgentToolDetail }>();
   private readonly messages = new Map<string, string>();
@@ -71,11 +71,22 @@ export class Projector {
       case 'user.message': return timeline({ type: 'user_message', text: event.data.content, messageId: event.id });
       case 'assistant.message_delta': {
         const { messageId, deltaContent } = event.data;
-        if (this.finalizedMessages.has(messageId)) return undefined;
+        if (this.finalizedMessages.has(messageId) || !deltaContent) return undefined;
         const text = (this.messages.get(messageId) ?? '') + deltaContent;
-        this.messages.set(messageId, text); return timeline({ type: 'assistant_message', text, messageId }, `message:${messageId}`);
+        this.messages.set(messageId, text); return timeline({ type: 'assistant_message', text: deltaContent, messageId }, `message:${messageId}`);
       }
-      case 'assistant.message': this.finalizedMessages.add(event.data.messageId); this.messages.delete(event.data.messageId); return timeline({ type: 'assistant_message', text: event.data.content, messageId: event.data.messageId }, `message:${event.data.messageId}`);
+      case 'assistant.message': {
+        const {messageId, content} = event.data;
+        if (this.finalizedMessages.has(messageId)) return undefined;
+        const streamed = this.messages.get(messageId) ?? '';
+        this.finalizedMessages.add(messageId); this.messages.delete(messageId);
+        if (!content || content === streamed) return undefined;
+        if (!content.startsWith(streamed)) {
+          // A corrected final cannot replace an append-only stream; preserve it as a separate message.
+          return timeline({type: 'assistant_message', text: content, messageId: `${messageId}:correction`}, `message:${messageId}:correction`);
+        }
+        return timeline({type: 'assistant_message', text: content.slice(streamed.length), messageId}, `message:${messageId}`);
+      }
       case 'assistant.reasoning': return timeline({ type: 'reasoning', text: event.data.content });
       case 'assistant.turn_start':
         if (this.active) return undefined;

@@ -2,12 +2,12 @@ import {expect, it} from 'vitest';
 import type {SessionEvent} from '@github/copilot-sdk';
 import {Projector} from './projector.js';
 function event(type: string, data: unknown): SessionEvent {return {type, data, id: Math.random().toString(), timestamp: new Date().toISOString(), parentId: null} as SessionEvent;}
-it('replaces streamed message snapshots with durable text and preserves tool identity', () => {
+it('appends native deltas without duplicating durable text and preserves tool identity', () => {
  const projector = new Projector();
  const first = projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Hel'}))!;
  const second = projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'lo'}))!;
- const final = projector.project(event('assistant.message', {messageId: 'm', content: 'Hello'}))!;
- expect(first.key).toBe(final.key); expect(second.event).toMatchObject({item: {text: 'Hello'}});
+ const final = projector.project(event('assistant.message', {messageId: 'm', content: 'Hello'}));
+ expect(first.key).toBe(second.key); expect(first.event).toMatchObject({item: {text: 'Hel'}}); expect(second.event).toMatchObject({item: {text: 'lo'}}); expect(final).toBeUndefined();
  projector.project(event('tool.execution_start', {toolCallId: 't', toolName: 'bash', arguments: {command: 'pwd'}}));
  expect(projector.project(event('tool.execution_complete', {toolCallId: 't', success: false, error: {message: 'No'}, result: {content: 'stderr'}}))?.event).toMatchObject({item: {name: 'bash', detail: {type: 'shell', command: 'pwd'}, status: 'failed', error: 'No'}});
 }, 10000);
@@ -49,4 +49,17 @@ it('assigns input after a completed ordinary turn to its new turn', () => {
  const starts = projected.filter(e => e.type === 'turn_started');
  expect(users.map(e => e.turnId)).toEqual(starts.map(e => e.turnId));
  expect(starts[0]!.turnId).not.toBe(starts[1]!.turnId);
+}, 10000);
+
+it('emits only an unsent final suffix and suppresses late deltas and duplicate finals', () => {
+ const projector = new Projector();
+ projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Hello'}));
+ expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Hello world'}))?.event).toMatchObject({item: {messageId: 'm', text: ' world'}});
+ expect(projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: ' world'}))).toBeUndefined();
+ expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Hello world'}))).toBeUndefined();
+}, 10000);
+it('preserves a non-prefix final correction under a separate message identity', () => {
+ const projector = new Projector();
+ projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Draft'}));
+ expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Corrected'}))?.event).toMatchObject({item: {messageId: 'm:correction', text: 'Corrected'}});
 }, 10000);

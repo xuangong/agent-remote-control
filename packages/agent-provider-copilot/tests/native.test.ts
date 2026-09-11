@@ -1,4 +1,6 @@
 import {expect, it} from 'vitest';
+import {ResourceIngestor} from '../../agent-remote-relay/src/resources/resource-ingestor.js';
+import {InMemoryResourceStore} from '../../agent-remote-relay/src/resources/resource-store.js';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import type {ServerResponse} from 'node:http';
@@ -35,6 +37,10 @@ it.each(['next_turn', 'immediate'] as const)('native SDK preserves %s interactio
    const users = events.filter(e => e.type === 'timeline' && e.item.type === 'user_message');
    expect(users.map(e => e.turnId)).toEqual([starts[0]!.turnId, starts[count - 1]!.turnId]);
   }
+  for (const observation of [seen, history]) {
+   expect(observation.timeline().filter(e => e.item.type === 'assistant_message').map(e => e.item.type === 'assistant_message' ? e.item.text : '')).toEqual(delivery === 'next_turn' ? ['FIRST_REPLY', 'SECOND_REPLY'] : ['SECOND_REPLY']);
+   if (delivery === 'immediate') expect(observation.timeline().find(e => e.item.type === 'tool_call')?.item).toMatchObject({status: 'completed', result: {content: expect.arrayContaining([expect.objectContaining({text: expect.stringContaining('STEERING_OK')})])}});
+  }
   expect(f.errors).toEqual([]);
  } finally { await f.close(); }
 }, 45000);
@@ -47,6 +53,10 @@ it('native skills expand body and arguments; multi-step questions and approvals 
   const session = await f.provider.createSession({sessionId: 'public', cwd: f.cwd, model: 'gpt-4.1'}); const seen = observe(session);
   expect((await session.listCommands!()).some(c => c.id === 'probe')).toBe(true);
   const resource = await session.readResource!('copilot:skill:probe'); expect(resource.status).toBe('available');
+  const ingestor = new ResourceIngestor({store: new InMemoryResourceStore()});
+  const acquired = ingestor.acquire({agentId: 'native-root', locator: 'skill.md', readLocator: 'copilot:skill:probe', reader: locator => session.readResource!(locator)});
+  expect(acquired).toBeDefined(); await acquired!.settled;
+  expect(ingestor.readResponse('read', 'native-root', acquired!.binding.resourceId).payload.state).toMatchObject({status: 'available', mediaType: 'text/plain', contentBase64: Buffer.from('---\nname: probe\ndescription: Fixture skill\n---\nSKILL_BODY_MARKER\n').toString('base64')});
   await session.executeCommand!('probe', 'SKILL_ARG_MARKER');
   await waitFor(() => seen.events().some(e => e.type === 'interaction_requested'));
   let request = seen.events().find(e => e.type === 'interaction_requested')!;
@@ -96,6 +106,12 @@ it('native child repeat input and successful child tool approval survive root ca
   await waitFor(() => history.items.some(i => i.type === 'history_boundary'));
   expect(history.events().filter(e => e.type === 'turn_started')).toHaveLength(2);
   expect(history.events().filter(e => e.type === 'turn_completed')).toHaveLength(2);
+  for (const observation of [childSeen, history]) {
+   const messages = observation.timeline().filter(e => e.item.type === 'assistant_message');
+   expect(messages).toHaveLength(2);
+   for (const message of messages) expect(message.item).toMatchObject({text: expect.stringMatching(/^REPLY_\d+$/)});
+   expect(observation.timeline().find(e => e.item.type === 'tool_call' && e.item.name === 'bash')?.item).toMatchObject({status: 'completed', result: {content: expect.arrayContaining([expect.objectContaining({text: expect.stringContaining('CHILD_PERMISSION_OK')})])}});
+  }
   expect(f.errors).toEqual([]);
  } finally { await f.close(); }
 }, 45000);

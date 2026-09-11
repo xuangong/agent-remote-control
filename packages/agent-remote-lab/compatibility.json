@@ -72,7 +72,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:80be8603b5e54ca6100d95b73b7aaf0287fe5e47589a44e4512aeea6c0e63fc8"
+      "digest": "sha256:11d6791dbe651cae0109a202d92732af63b6f2d787289b522157fc2f8020a1a1"
     }
   },
   "providers": [
@@ -93,6 +93,16 @@
           "capability": "events.user-message.unknown-source",
           "status": "degraded",
           "reason": "Unknown injected sources remain visible as diagnostics instead of impersonating the user; known plugin, skill-catalog, and agent-instructions context is consumed without a Timeline item."
+        },
+        {
+          "capability": "events.subagent.navigation",
+          "status": "degraded",
+          "reason": "Native direct children have service-gated independent live/prepared observations and provider-scoped plugin attachment. Only live continuable children with matching resident lifecycle and native interruptByParent support cancel. Input/steer/queue/settings/commands remain unavailable; saved and one-shot views cannot cancel. Observer disposal never closes native work."
+        },
+        {
+          "capability": "events.compaction.failure",
+          "status": "degraded",
+          "reason": "Native start/end identity is paired; only success emits completed. Failure and interruption emit errors because the public compaction item has no failed terminal replacement state."
         }
       ]
     },
@@ -127,7 +137,7 @@
         {
           "capability": "events.subagent.navigation",
           "status": "degraded",
-          "reason": "Parent tool lifecycle and result summaries are normalized; child session navigation and orchestration are not exposed."
+          "reason": "Direct native children support independent navigation and history on the owning app-server. Direct input controls require native canAcceptDirectInput; saved children are read-only and unavailable ephemeral history is rejected. Generic spawn/stop/resume orchestration is not exposed."
         }
       ]
     },
@@ -151,12 +161,12 @@
         {
           "capability": "events.tool-result.resources",
           "status": "degraded",
-          "reason": "Tool results retain bounded text. Binary resources and attachments are not exposed through resource reads."
+          "reason": "Root sessions expose bounded embedded PNG/JPEG/GIF/WebP tool-result bytes with immutable resource references. No path/URL fetching, uploads or child resources. Native JSON requires unambiguous tool-result ownership."
         },
         {
           "capability": "controls.queue-steer-commands-settings",
           "status": "degraded",
-          "reason": "Native skill discovery/invocation and compact reuse command controls. Mid-turn queue/steering, model settings UI and unsupported session-control menus are not advertised."
+          "reason": "Public native model/permission setters, typed plan review and skill/compact commands are supported. Live effort has no public setter. Priority input may outlive the active turn and survive public interrupt; steer/queue remain disabled."
         },
         {
           "capability": "interactions.restart-recovery",
@@ -167,6 +177,11 @@
           "capability": "sessions.empty-persistence",
           "status": "degraded",
           "reason": "An initialized Query remains in the Host directory before its first native transcript write; an empty session may not survive Host restart."
+        },
+        {
+          "capability": "interactions.form.schema",
+          "status": "degraded",
+          "reason": "The pinned native CLI drops pattern/multipleOf and sensitive markers before onElicitation while retaining defaults. Form and unverified URL completion mappings remain disabled; no partial-schema workaround is advertised."
         }
       ]
     }

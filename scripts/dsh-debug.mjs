@@ -231,7 +231,7 @@ async function main() {
       const result = await requestJson(`${options.serverUrl}/v1/remote/hosts`);
       return result.hosts.find((item) => item.online && item.name === options.name);
     }, { timeoutMs: 90000, signal: controller.signal });
-    await requestJson(`${options.serverUrl}/v1/remote/hosts/${encodeURIComponent(host.id)}/workspaces`);
+    await requestJson(`${options.serverUrl}/v1/remote/hosts/${encodeURIComponent(host.id)}/workspaces?providerId=dsh`);
     const visible = await requestJson(`${options.consoleUrl}/v1/remote/hosts`);
     if (!visible.hosts?.some((item) => item.id === host.id && item.online)) throw new Error('The workbench is connected to a different Relay. Check --console-url and --server-url.');
     const webResponse = await fetch(dshWebUrl, { redirect: 'manual', signal: AbortSignal.timeout(5000) });

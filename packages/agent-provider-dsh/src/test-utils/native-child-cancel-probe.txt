@@ -1,0 +1,43 @@
+it('SubagentRuntime.interrupt integrates the child adapter with the native parent-address service', async () => {
+  const { DshChildSessions } = await import(__CHILD_ADAPTER_PATH__);
+  const hold = Promise.withResolvers<undefined>();
+  const adapter = new GatedAdapter([{ chunks: textResponse('working'), gate: hold.promise }]);
+  const { ctx, parent } = await setupWith(adapter);
+  const started = await ctx.subagents.startContinuable(startSpec(parent));
+  await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1); });
+  const child = ctx.agents.get(started.childId)!;
+  await queuePrompt(ctx, parent, started.childId, message('parked follow-up'));
+  const view = await new DshChildSessions(ctx).open(parent.id, started.childId);
+  const events: any[] = [];
+  const pump = (async () => { for await (const item of view.observe()) events.push(item); })();
+  const get = ctx.agents.get.bind(ctx.agents);
+  let lookup: ReturnType<typeof vi.spyOn> | undefined;
+  try {
+    await vi.waitFor(() => { expect(events.some(item => item.type === 'history_boundary')).toBe(true); });
+    expect(view.capabilities).toMatchObject({ cancel: true, sendMessage: false, queueMessage: false, steer: false });
+    // Model parent-offline registry visibility while retaining the real native child Activation.
+    lookup = vi.spyOn(ctx.agents, 'get').mockImplementation(id => id === parent.id ? undefined : get(id));
+    expect(ctx.agents.get(parent.id)).toBeUndefined();
+    expect(() => ctx.subagents.interruptByParent(started.childId, SessionId('foreign-parent'), 'continuable'))
+      .toThrow(expect.objectContaining({ code: 'subagent/unauthorized' }));
+    const cancel = view.cancel!();
+    expect(adapter.requests[0]!.signal!.aborted).toBe(true);
+    expect(child.session.snapshotEvents().filter(event => event.type === 'turn/end')).toHaveLength(0);
+    await cancel;
+    expect(events.some(item => item.type === 'observation' && ['turn_canceled', 'turn_completed'].includes(item.event.type))).toBe(false);
+    expect(child.inbox.nextTurn).toHaveLength(1);
+    hold.resolve(undefined);
+    await child.whenIdle();
+    expect(child.session.snapshotEvents().filter(event => event.type === 'turn/end').map(event => event.data.reason.kind)).toEqual(['aborted']);
+    await vi.waitFor(() => { expect(events.some(item => item.type === 'observation' && item.event.type === 'turn_canceled')).toBe(true); });
+    expect(events.some(item => item.type === 'observation' && item.event.type === 'turn_completed')).toBe(false);
+    expect(child.inbox.nextTurn).toHaveLength(1);
+    expect(adapter.requests).toHaveLength(1);
+  } finally {
+    lookup?.mockRestore();
+    await view.dispose();
+    await pump;
+    hold.resolve(undefined);
+    await drainManager(ctx);
+  }
+});

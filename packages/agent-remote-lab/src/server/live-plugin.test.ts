@@ -21,7 +21,8 @@ vi.mock('@deepseek-ai/dsh-agent', () => ({
   installModelSelection: composition.installModelSelection,
 }));
 
-vi.mock('@borgee/agent-provider-dsh', () => ({
+vi.mock('@borgee/agent-provider-dsh', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@borgee/agent-provider-dsh')>(),
   createDshWebInteractionAdapter: () => composition.interactions,
 }));
 

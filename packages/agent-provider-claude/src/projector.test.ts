@@ -60,3 +60,26 @@ describe('Claude event projection', () => {
     expect(first[0]).toMatchObject({ delivery: 'history', event: { type: 'timeline', item: { text: 'Saved answer' } } });
   });
 });
+
+it('keeps native structured tool output bounded, correlated, and deduplicated alongside readable text', () => {
+  const projector = new ClaudeEventProjector('session');
+  projector.project(assistant('structured-tool', [{ type: 'tool_use', id: 'structured', name: 'Bash', input: { command: 'printf hello' } }]));
+  const frame = { ...envelope, type: 'user', uuid: 'structured-result', tool_use_result: { stdout: 'hello', exitCode: 0, nativeFlag: true },
+    message: { content: [{ type: 'tool_result', tool_use_id: 'structured', content: 'hello' }] } };
+  expect(projector.project(frame)[0]?.event).toMatchObject({ type: 'timeline', item: { callId: 'structured', result: { content: [
+    { type: 'text', text: 'hello' }, { type: 'json', value: { stdout: 'hello', exitCode: 0, nativeFlag: true } },
+  ] } } });
+  expect(projector.project(frame)).toEqual([]);
+  const large = projector.project({ ...frame, uuid: 'large-result', tool_use_result: { data: 'x'.repeat(70000) } })[0]?.event;
+  expect(large).toMatchObject({ type: 'timeline', item: { result: { truncated: true } } });
+  if (large?.type !== 'timeline' || large.item.type !== 'tool_call') throw new Error('Missing tool result');
+  expect(large.item.result!.content.reduce((sum, content) => sum + (content.type === 'text' ? content.text.length : JSON.stringify(content.value).length), 0)).toBeLessThanOrEqual(65536);
+});
+
+it('does not assign an uncorrelated structured payload to multiple tool results', () => {
+  const events = new ClaudeEventProjector('session').project({ ...envelope, type: 'user', uuid: 'ambiguous', tool_use_result: { oneToolOnly: true },
+    message: { content: [{ type: 'tool_result', tool_use_id: 'one', content: 'first' }, { type: 'tool_result', tool_use_id: 'two', content: 'second' }] } });
+  expect(events.map(({ event }) => event.type === 'timeline' && event.item.type === 'tool_call' ? event.item.result?.content : [])).toEqual([
+    [{ type: 'text', text: 'first' }], [{ type: 'text', text: 'second' }],
+  ]);
+});

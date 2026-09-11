@@ -20,3 +20,5 @@ export { createDshWebInteractionAdapter, type DshWebInteractionAdapter } from '.
 export { DshTraceRecorder } from './trace/recorder.js';
 export { DshRecordingPlugin } from './trace/recording-plugin.js';
 export { dshTraceFormat, type DshTrace, type DshTraceHeader, type DshTraceNativeRecord, type DshTraceRuntimeInfo, type JsonValue } from './trace/schema.js';
+
+export { DshChildSessions, type DshChildContext } from './children.js';

@@ -16,9 +16,11 @@ export class Channel<T> implements AsyncIterable<T> {
   }
 }
 
+export class DeadlineError extends Error {}
+
 export async function deadline<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { return await Promise.race([operation, new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out.`)), timeoutMs);
+    timer = setTimeout(() => reject(new DeadlineError(`${label} timed out.`)), timeoutMs);
   })]); } finally { clearTimeout(timer); }
 }

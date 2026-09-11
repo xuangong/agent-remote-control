@@ -1,4 +1,5 @@
-import { boundToolResult, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@borgee/agent-provider-sdk';
+import { boundToolResult, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@borgee/agent-provider-sdk';
+import type { ClaudeImageRegistry } from './images.js';
 
 export function record(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -25,7 +26,7 @@ export class ClaudeEventProjector {
   private activeMessage = '';
   private sequence = 0;
 
-  constructor(private readonly sessionId: string, private readonly delivery: 'history' | 'live' = 'live') {}
+  constructor(private readonly sessionId: string, private readonly delivery: 'history' | 'live' = 'live', private readonly images?: ClaudeImageRegistry) {}
 
   project(value: unknown): ProviderObservation[] {
     if (!record(value) || value.parent_tool_use_id || value.session_id && value.session_id !== this.sessionId) return [];
@@ -46,13 +47,22 @@ export class ClaudeEventProjector {
       const events: ProviderObservation[] = [];
       const text = content.filter((block: unknown) => record(block) && block.type === 'text').map((block: any) => block.text).join('\n');
       if (text && !value.isSynthetic) events.push(this.item(key, { type: 'user_message', text, messageId: value.uuid }));
-      for (const block of content) if (record(block) && block.type === 'tool_result') {
+      const toolResults = content.filter((block: unknown) => record(block) && block.type === 'tool_result');
+      const structured = toolResults.length === 1 ? toolResultJson(imageMetadata(value.tool_use_result, toolResults[0].content)) : undefined;
+      for (const block of toolResults) {
         const tool = this.tools.get(block.tool_use_id) ?? { name: 'Tool', detail: { type: 'other', description: 'Native tool result' } as const };
         const output = typeof block.content === 'string' ? block.content : Array.isArray(block.content)
           ? block.content.filter((part: unknown) => record(part) && part.type === 'text').map((part: any) => part.text).join('\n') : '';
-        const result = boundToolResult({ content: [{ type: 'text', text: output }] });
+        const result = boundToolResult({ content: [{ type: 'text', text: output },
+          ...(structured === undefined ? [] : [{ type: 'json' as const, value: structured }])] });
         events.push(this.item(`${key}:tool:${block.tool_use_id}`, { type: 'tool_call', callId: block.tool_use_id, ...tool, result,
           ...(block.is_error ? { status: 'failed' as const, error: output.slice(0, 1024) || 'Tool failed' } : { status: 'completed' as const, error: null }) }));
+        if (typeof block.tool_use_id === 'string' && Array.isArray(block.content)) {
+          for (const [index, part] of block.content.entries()) {
+            const image = this.images?.project(block.tool_use_id, index, part);
+            if (image) events.push({ ...this.item(`${key}:tool:${block.tool_use_id}:image:${index}`, image.item), resourceReferences: image.resourceReferences });
+          }
+        }
       }
       return events;
     }
@@ -125,4 +135,26 @@ export class ClaudeEventProjector {
   private observation(sourceKey: string, event: AgentStreamEvent): ProviderObservation {
     return { type: 'observation', sourceKey: `claude:${this.sessionId}:${sourceKey}`, occurredAt: Date.now(), delivery: this.delivery, event };
   }
+}
+
+function imageMetadata(value: unknown, content: unknown): unknown {
+  if (!record(value) || value.type !== 'image' || !record(value.file) || typeof value.file.base64 !== 'string' || !Array.isArray(content)) return value;
+  const file = value.file;
+  const correlated = content.some((part: unknown) => record(part) && part.type === 'image' && record(part.source)
+    && part.source.type === 'base64' && part.source.data === file.base64 && part.source.media_type === file.type);
+  if (!correlated) return value;
+  // Native Read repeats its image bytes in structured output; only the resource reader carries them.
+  const { base64: _bytes, ...metadata } = file;
+  return { ...value, file: metadata };
+}
+
+function toolResultJson(value: unknown): AgentToolResultJson | undefined {
+  if (value === undefined) return;
+  try {
+    return JSON.parse(JSON.stringify(value, (_key, entry: unknown) => {
+      if (typeof entry === 'number' && !Number.isFinite(entry)
+        || !['string', 'number', 'boolean', 'object'].includes(typeof entry)) throw new Error('Non-JSON tool result.');
+      return entry;
+    })) as AgentToolResultJson;
+  } catch { return; }
 }

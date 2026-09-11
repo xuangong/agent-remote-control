@@ -124,7 +124,7 @@ describe('Agent Remote compatibility manifest', () => {
 
   it.each([
     'events.subagent.navigation', 'events.tool-result.resources', 'controls.queue-steer-commands-settings',
-    'interactions.restart-recovery', 'sessions.empty-persistence',
+    'interactions.restart-recovery', 'sessions.empty-persistence', 'interactions.form.schema',
   ])('requires the evidenced Claude %s degradation', (capability) => {
     process.env[manifestEnvironment] = writeManifest(validManifest({ omitClaudeDegradation: capability }));
     expect(() => loadCompatibilityManifest()).toThrow('Claude degradation');
@@ -167,6 +167,8 @@ function validManifest(overrides: {
   extraCodexDegradation?: boolean;
 } = {}) {
   const dshDegradations = [
+    { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Conditional cancel only; input remains unavailable.' },
+    { capability: 'events.compaction.failure', status: 'degraded', reason: 'Failed compaction has no terminal replacement card.' },
     ...(!overrides.omitDshTitle ? [{
       capability: 'events.session/title', status: 'degraded',
       reason: 'The adapter recognizes the title but the Agent Snapshot has no title field.',
@@ -201,6 +203,7 @@ function validManifest(overrides: {
     { capability: 'controls.queue-steer-commands-settings', status: 'degraded', reason: 'No mid-turn input or command menus.' },
     { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Permission callbacks are process-local.' },
     { capability: 'sessions.empty-persistence', status: 'degraded', reason: 'An empty session may not be persisted.' },
+    { capability: 'interactions.form.schema', status: 'degraded', reason: 'Native schema loss prevents form support.' },
   ].filter(({ capability }) => capability !== overrides.omitClaudeDegradation);
   if (overrides.invalidClaudeDegradation === 'duplicate') claudeDegradations.push({ ...claudeDegradations[0]! });
   if (overrides.invalidClaudeDegradation === 'extra') claudeDegradations.push({ capability: 'events.unknown', status: 'degraded', reason: 'Undeclared.' });

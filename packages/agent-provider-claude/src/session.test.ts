@@ -106,3 +106,91 @@ describe('Claude persistent session', () => {
     expect(native.closed).toBe(true);
   });
 });
+
+it('does not finish a later turn on duplicate results and reports per-turn Query cost deltas', async () => {
+  const native = runtime();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'root' }, { query: native.factory });
+  const output = session.observe()[Symbol.asyncIterator]();
+  try {
+    await session.sendMessage('First');
+    const first = (await native.nextInput()).value;
+    const completed = { type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: 'result-one', user_message_uuid: first.uuid,
+      usage: { input_tokens: 10, output_tokens: 2 }, total_cost_usd: 2, modelUsage: { root: { contextWindow: 200000 } } };
+    native.push(completed);
+    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: first.uuid, usage: { inputTokens: 10, totalCostUsd: 2, contextWindowMaxTokens: 200000 } });
+    await session.sendMessage('Second');
+    const second = (await native.nextInput()).value;
+    native.push(completed);
+    native.push({ ...completed, uuid: 'replayed-other-envelope' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect((await session.runtimeInfo()).status).toBe('running');
+    native.push({ ...completed, uuid: 'result-two', user_message_uuid: second.uuid, total_cost_usd: 3 });
+    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: second.uuid, usage: { inputTokens: 10, totalCostUsd: 1 } });
+  } finally { await session.dispose(); }
+});
+
+it('keeps native inline context usage and final accounting in the same turn', async () => {
+  const native = runtime();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'root' }, { query: native.factory });
+  const output = session.observe()[Symbol.asyncIterator]();
+  try {
+    await session.sendMessage('/context');
+    const input = (await native.nextInput()).value;
+    native.push({ type: 'assistant', session_id: 'native', uuid: 'context-result', context_usage: { model: 'root', total_tokens: 123, raw_max_tokens: 200000 },
+      message: { id: 'context-message', content: [{ type: 'text', text: 'Context table' }] } });
+    native.push({ type: 'result', subtype: 'success', session_id: 'native', uuid: 'context-done', user_message_uuid: input.uuid, usage: {}, total_cost_usd: 0 });
+    expect(await nextEvent(output, 'usage_updated')).toMatchObject({ turnId: input.uuid, usage: { contextWindowUsedTokens: 123, contextWindowMaxTokens: 200000 } });
+    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: input.uuid, usage: { contextWindowUsedTokens: 123, contextWindowMaxTokens: 200000 } });
+  } finally { await session.dispose(); }
+});
+
+it('holds the permission mutation gate until a canceled plan approval settles natively', async () => {
+  const native = runtime();
+  let confirm!: () => void;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', planning: true }, { query: (args) => ({
+    ...native.factory(args), setPermissionMode: () => new Promise<void>((resolve) => { confirm = resolve; }),
+  }) });
+  const output = session.observe()[Symbol.asyncIterator]();
+  try {
+    await session.sendMessage('Plan a change');
+    const decision = native.options.canUseTool!('ExitPlanMode', { plan: 'Make the change.' }, {
+      signal: new AbortController().signal, toolUseID: 'exit-plan',
+    });
+    const request = await nextEvent(output, 'interaction_requested');
+    if (request.type !== 'interaction_requested') throw new Error('Missing plan request');
+    const approval = session.respondToInteraction(request.request.requestId, { kind: 'plan_approval', action: 'approve_and_resume' });
+    const settled = approval.catch((error: unknown) => error);
+    await session.cancel();
+    await nextEvent(output, 'turn_canceled');
+    expect((await session.runtimeInfo()).status).toBe('idle');
+    await expect(session.sendMessage('Racing work')).rejects.toThrow(/setting change/);
+    await expect(session.setSessionSetting('permissions', 'dontAsk')).rejects.toThrow(/idle/);
+    await expect(session.setPlanning(false)).rejects.toThrow(/idle/);
+    await expect(decision).resolves.toMatchObject({ behavior: 'deny', interrupt: true });
+    confirm(); expect(await settled).toMatchObject({ message: expect.stringMatching(/no longer active/) });
+    expect((await session.runtimeInfo()).planning?.active).toBe(false);
+    await session.sendMessage('After confirmation');
+  } finally { confirm?.(); await session.dispose(); }
+});
+
+it('revokes native image reads after transport failure', async () => {
+  const native = runtime();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory }, [{
+    type: 'user', uuid: 'image-result', session_id: 'native', parent_tool_use_id: null, parent_agent_id: null,
+    message: { content: [{ type: 'tool_result', tool_use_id: 'read', content: [{ type: 'image', source: {
+      type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=',
+    } }] }] },
+  }]);
+  try {
+    expect(session.capabilities.readResource).toBe(true);
+    let locator = '';
+    for await (const item of session.observe()) {
+      if (item.type === 'history_boundary') break;
+      if (item.type === 'observation' && item.resourceReferences?.length) locator = item.resourceReferences[0]!.readLocator;
+    }
+    expect(await session.readResource(locator)).toMatchObject({ status: 'available' });
+    native.push(new Error('Transport ended'));
+    await expect.poll(async () => (await session.runtimeInfo()).status).toBe('failed');
+    expect(await session.readResource(locator)).toMatchObject({ status: 'unavailable' });
+  } finally { await session.dispose(); }
+});

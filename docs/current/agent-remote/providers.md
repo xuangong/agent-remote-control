@@ -1,5 +1,7 @@
 # Agent Remote Providers — Replaceable Native Adapters
 
+For the implementation inventory and new-Provider target, see the [support baseline](provider-support.md), [onboarding checklist](provider-onboarding.md), and [Claude audit](claude-support-audit.md).
+
 ## Role
 
 The Provider layer terminates Provider-native protocols and exposes the common Agent Remote session contract; it is the only layer that interprets DSH, Codex, or Claude event names (`packages/agent-provider-sdk/src/provider.ts`, `packages/agent-provider-sdk/src/observation.ts`).

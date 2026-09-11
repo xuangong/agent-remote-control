@@ -45,6 +45,7 @@ export class DshProjector {
   private readonly state = new DshSessionState();
   private readonly sessionId: string;
   private closed = false;
+  private compaction: { id: string; turnId: string | undefined; sourceCommandId: string | undefined } | undefined;
 
   constructor(private readonly options: DshProjectorOptions) {
     this.sessionId = nonEmptyString(options.sessionId) ?? 'unknown-session';
@@ -91,6 +92,10 @@ export class DshProjector {
       case 'tool/result': return this.toolResult(data, revisionKey);
       case 'todo/write': return this.todo(data);
       case 'plan/mode': return this.planningChanged(data);
+      case 'compaction/start': return this.compactionChanged(data, 'loading');
+      case 'compaction/end': return this.compactionChanged(data, 'completed');
+      case 'compaction/summary':
+      case 'compaction/prune':
       case 'command/run': return { events: [] };
       case 'command/done': return this.commandCompleted(data);
       case 'request/header': return this.requestModelChanged(data);
@@ -117,6 +122,30 @@ export class DshProjector {
       }
       default: return { events: [this.error(`Unsupported DSH event ${type}.`)] };
     }
+  }
+
+  private compactionChanged(data: NativeRecord, status: 'loading' | 'completed'): Projection {
+    const id = nonEmptyString(data.compactionId);
+    const turnId = dshIdentifier(data.turn);
+    const sourceCommandId = nonEmptyString(data.sourceCommandId);
+    if (!id || (data.turn !== null && !turnId)
+      || (data.sourceCommandId !== undefined && !sourceCommandId)
+      || (data.error !== undefined && typeof data.error !== 'string')) {
+      return { events: [this.error('Malformed DSH compaction event.', turnId)] };
+    }
+    if (status === 'loading') {
+      if (this.compaction) return { events: [this.error(`DSH compaction ${id} started while ${this.compaction.id} is active.`, turnId)] };
+      this.compaction = { id, turnId, sourceCommandId };
+    } else {
+      if (this.compaction?.id !== id || this.compaction.turnId !== turnId || this.compaction.sourceCommandId !== sourceCommandId) {
+        return { events: [this.error(`DSH compaction ${id} ended without a matching start.`, turnId)] };
+      }
+      this.compaction = undefined;
+    }
+    if (status === 'completed' && data.error !== undefined) {
+      return { events: [this.error(`DSH compaction ${id} failed: ${readError(data.error)}`, turnId)] };
+    }
+    return { events: [this.timeline({ type: 'compaction', status, ...(sourceCommandId ? { trigger: 'manual' as const } : {}) }, turnId)] };
   }
 
   private requestModelChanged(data: NativeRecord): Projection {

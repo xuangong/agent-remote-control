@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { AgentSession, AgentSessionConfig } from '@borgee/agent-provider-sdk';
-import type { LiveDshProvider } from '@borgee/agent-provider-dsh';
+import { DshChildSessions, type LiveDshProvider } from '@borgee/agent-provider-dsh';
 import { createNativeSessionCatalog, type NativeSessionCatalogServices } from './native-session-catalog.js';
 import type { RemoteSessionSummary } from './remote-host-catalog.js';
 import type { DshSharedWebServices } from './shared-web-session.js';
@@ -14,6 +14,7 @@ export interface DshDirectoryContext extends NativeSessionCatalogServices {
 }
 
 export function createDshSessionDirectory(context: DshDirectoryContext, provider: LiveDshProvider) {
+  const children = new DshChildSessions(context as never);
   const liveRoots = (): readonly RemoteSessionSummary[] => context.agents.roots()
     .filter((agent) => agent.session.header.origin !== 'subagent')
     .map((agent) => {
@@ -49,13 +50,14 @@ export function createDshSessionDirectory(context: DshDirectoryContext, provider
       if (created.sessionId !== nativeSessionId) throw new Error('DSH returned an unexpected native session identity.');
       return nativeSessionId;
     },
+    openChild: (parentNativeSessionId: string, nativeSessionId: string) => children.open(parentNativeSessionId, nativeSessionId),
     async open(nativeSessionId: string): Promise<AgentSession> {
       const live = context.agents.roots().find((agent) => String(agent.session.id) === nativeSessionId);
       const resolved = live ? { agent: live } : await context.sessionController.resolveAgent(nativeSessionId);
       if (!('agent' in resolved) || resolved.agent.session.header.origin === 'subagent') {
         throw new Error('The native DSH session is unavailable.');
       }
-      return provider.borrowSession(resolved.agent);
+      return children.decorate(nativeSessionId, await provider.borrowSession(resolved.agent));
     },
   };
 }

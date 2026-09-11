@@ -12,7 +12,8 @@ This package adapts the native `codex app-server` JSON-RPC protocol to `@borgee/
 | Command and file-change approval | Native decisions, cancellation, session scopes, and explicit policy amendments |
 | MCP form and URL elicitation | Flat typed forms and explicit HTTP(S) action acknowledgment |
 | Granular permission approval | Whole-request filesystem/network grants, with turn or session scope |
-| Parent-session subagent activity | Passive tool rows with bounded results |
+| Parent-session subagent activity | Native tool rows with bounded results and direct-child relationship summaries |
+| Independent child sessions | Same-runtime navigation, history and interactions; direct controls require native `canAcceptDirectInput`; saved children are read-only |
 | Planning and plan approval | Supported when native collaboration modes are available |
 | Steer and cancel | Supported with the active native turn ID |
 | Provider command directory | Native enabled skills and custom prompts, plus model, permissions, and compact adapters |
@@ -26,7 +27,7 @@ Set `BORGEE_CODEX_TEST_EXECUTABLE` to select the exact Codex executable used by 
 
 The default standalone workbench registers this Provider alongside Recorded and paired DSH Hosts. See the [Codex runbook](../../docs/runbooks/codex-debug.md) for a real CLI installation, native login, session import, and process ownership.
 
-Each open session owns one `codex app-server` child. JSONL on stdin/stdout carries commands, notifications, and approval responses. A bounded stderr tail is included in unexpected-process-exit diagnostics. History comes from `thread/read`; no terminal scraping or file-log polling is required. Closing the session disposes its owned child without terminating other Codex installations.
+Each opened root owns one `codex app-server` process. Its native child session views share that runtime and do not spawn another process. JSONL on stdin/stdout carries commands, notifications, and approval responses. A bounded stderr tail is included in unexpected-process-exit diagnostics. History comes from `thread/read`; no terminal scraping or file-log polling is required. Closing the session disposes its owned child without terminating other Codex installations.
 
 Native `imageView` and `imageGeneration` completions share one image registry across history and live projection. The adapter preserves native `path`, `savedPath`, and result-file references, resolves relative paths against the session working directory, and supports embedded base64 or raster data URLs. Public Markdown contains opaque `codex-image` locators; the reader rejects arbitrary path requests and never fetches remote URLs. PNG, JPEG, GIF, and WebP signatures are checked before serving bytes. Each image is limited to 16 MiB, with separate 64 MiB budgets for registered embedded data and materialized bytes. The first read result is retained until disposal, including unavailable outcomes, so changing a file cannot change an already materialized replay resource. Missing, failed, unsupported, or oversized images remain explicit unavailable references or diagnostics.
 
@@ -41,3 +42,5 @@ Plan review is synthesized from completed plan items and is process-local. Persi
 The command directory refreshes enabled skills through `skills/list` with `forceReload` and the session working directory. Execution refreshes the directory again and rejects removed commands. Skills retain their native name/path input and pass arguments unchanged to `turn/start`. The model command opens a model question followed by the selected model’s reasoning efforts; permissions opens approval-policy or sandbox choices. These controls wait for native setting confirmation and preserve Planning. Compact calls `thread/compact/start`. Commands require an idle session and serialize against pending interactions, message submission, and setting changes.
 
 Custom prompts are top-level Markdown files in `CODEX_HOME/prompts`, using the Provider environment override before the process environment or `~/.codex` default. Discovery ignores symlinks and files above 256 KiB, validates names, and limits directory scans to 1,024 entries. Prompt frontmatter supplies `description` and `argument-hint`. Expansion preserves raw `$ARGUMENTS`; named, positional, escaped-dollar, and braced placeholders fail explicitly. Arguments for a prompt without `$ARGUMENTS` are rejected. The input hint names this grammar limit. This directory is adapter-owned native discovery, not terminal menu scraping; additional TUI commands and goal controls are not exposed.
+
+See the [Provider support baseline](../../docs/current/agent-remote/provider-support.md) for per-endpoint support, conditional child controls and explicit degradation boundaries.

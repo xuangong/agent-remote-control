@@ -16,10 +16,13 @@ const requiredDegradations: Record<
     { capability: 'controls.queue-steer-commands-settings', status: 'degraded' },
     { capability: 'interactions.restart-recovery', status: 'degraded' },
     { capability: 'sessions.empty-persistence', status: 'degraded' },
+    { capability: 'interactions.form.schema', status: 'degraded' },
   ],
   dsh: [
     { capability: 'events.session/title', status: 'degraded' },
     { capability: 'events.user-message.unknown-source', status: 'degraded' },
+    { capability: 'events.subagent.navigation', status: 'degraded' },
+    { capability: 'events.compaction.failure', status: 'degraded' },
   ],
   codex: [
     { capability: 'interactions.form.schema', status: 'degraded' },

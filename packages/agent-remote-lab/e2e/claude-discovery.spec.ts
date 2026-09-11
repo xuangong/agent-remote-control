@@ -2,12 +2,14 @@ import { expect, test } from '@playwright/test';
 import { createAgentHost, createClaudeSessionDirectory } from '@borgee/agent-host';
 import { ClaudeAgentProvider } from '../../agent-provider-claude/dist/index.js';
 
-test('uses Claude skills and opens a read-only native child through the Host', async ({ page, request }, testInfo) => {
+test('uses Claude settings, plan review, skills and a read-only native child through the Host', async ({ page, request }, testInfo) => {
   const relayUrl = `http://127.0.0.1:${process.env.AGENT_REMOTE_TEST_RELAY_PORT ?? 5910}`;
   const invitation = await (await request.post(`${relayUrl}/v1/remote/pairings`, { data: {} })).json();
   const inputs: string[] = [];
   let spawned = 0;
   let saved = false;
+  const models = [{ value: 'fixture-a', displayName: 'Model A', description: 'Fixture model' }, { value: 'fixture-b', displayName: 'Model B', description: 'Fixture model' }];
+  const selectedModels: string[] = [], permissionModes: string[] = [];
   let completeChild!: () => void;
   const childAnswer = { type: 'assistant' as const, uuid: 'child-answer', session_id: 'fixture', parent_tool_use_id: null, parent_agent_id: null,
     message: { id: 'child-answer', content: [{ type: 'text', text: 'CHILD_REVIEW_OK' }] } };
@@ -29,16 +31,23 @@ test('uses Claude skills and opens a read-only native child through the Host', a
         for await (const message of prompt) {
           if (closed) return;
           inputs.push(String(message.message.content));
+          if (message.message.content === 'Review the plan') {
+            const result = await options.canUseTool!('ExitPlanMode', { plan: '# Native review\nExecute the verified plan.' }, { toolUseID: 'plan-review', signal: new AbortController().signal } as any);
+            expect(result?.behavior).toBe('allow');
+            push({ type: 'result', uuid: 'plan-result', user_message_uuid: message.uuid, subtype: 'success', is_error: false, usage: {}, total_cost_usd: 0 });
+            continue;
+          }
           push({ type: 'system', subtype: 'task_started', task_id: 'review', task_type: 'local_agent', spawn_depth: 1,
             is_backgrounded: true, tool_use_id: 'review-call', description: 'Review implementation', subagent_type: 'Explore' });
           push({ ...childAnswer, parent_tool_use_id: 'review-call' });
           push({ type: 'assistant', uuid: 'parent-answer', message: { id: 'parent-answer', content: [{ type: 'text', text: 'PARENT_REVIEW_OK' }] } });
-          push({ type: 'result', subtype: 'success', is_error: false, usage: {}, total_cost_usd: 0 });
+          push({ type: 'result', uuid: 'skill-result', user_message_uuid: message.uuid, subtype: 'success', is_error: false, usage: {}, total_cost_usd: 0 });
         }
       })();
       return {
         async *[Symbol.asyncIterator]() { while (!closed) { if (frames.length) yield frames.shift(); else await new Promise<void>((resolve) => { wake = resolve; }); } },
-        initializationResult: async () => ({}), interrupt: async () => {}, setPermissionMode: async () => {},
+        initializationResult: async () => ({ models }), interrupt: async () => {}, setPermissionMode: async (mode: string) => { permissionModes.push(mode); },
+        supportedModels: async () => models, setModel: async (model: string) => { selectedModels.push(model); },
         reloadSkills: async () => ({ skills: [] }),
         supportedCommands: async () => [{ name: 'review-fixture', description: 'Review through a native child', argumentHint: '<request>' }],
         close() { closed = true; wake?.(); },
@@ -57,13 +66,30 @@ test('uses Claude skills and opens a read-only native child through the Host', a
     await context.getByTestId('session-create').click();
     const input = page.getByTestId('prompt-input');
     await expect(input).toBeEnabled();
+    await page.getByTestId('session-model-button').click();
+    await page.getByTestId('session-setting-model').selectOption('fixture-b');
+    await expect(page.getByTestId('session-setting-model')).toHaveValue('fixture-b');
+    expect(selectedModels).toEqual(['fixture-b']);
+    await page.getByTestId('session-permissions-button').click();
+    await page.getByTestId('session-setting-permissions').selectOption('acceptEdits');
+    await expect(page.getByTestId('session-setting-permissions')).toHaveValue('acceptEdits');
+    await page.getByRole('button', { name: 'Status', exact: true }).click();
+    await page.getByRole('switch', { name: 'Planning mode' }).click();
+    await expect(page.getByRole('switch', { name: 'Planning mode' })).toBeChecked();
+    await page.getByRole('button', { name: 'Close session controls' }).click();
+    await input.fill('Review the plan');
+    await input.press('Enter');
+    await expect(page.getByText('Execute the verified plan.', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Approve and execute', exact: true }).click();
+    await expect(page.getByText('Approved and resumed', { exact: true })).toBeVisible();
+    expect(permissionModes).toEqual(['acceptEdits', 'plan', 'acceptEdits']);
     await input.fill('/review');
     await page.getByRole('option').filter({ hasText: '/review-fixture' }).click();
     await expect(page.getByRole('button', { name: 'View skill review-fixture' })).toBeVisible();
     await input.fill('Check the implementation');
     await input.press('Enter');
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'PARENT_REVIEW_OK' })).toBeVisible();
-    expect(inputs).toEqual(['/review-fixture Check the implementation']);
+    expect(inputs).toEqual(['Review the plan', '/review-fixture Check the implementation']);
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toHaveCount(0);
     await page.getByRole('button').filter({ hasText: 'Review implementation' }).first().click();
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toBeVisible();

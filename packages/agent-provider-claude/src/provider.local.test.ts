@@ -138,5 +138,5 @@ describe('Claude Code native process', () => {
       expect((await session.runtimeInfo()).status).toBe('idle');
     } catch (error) { throw new Error(`${error instanceof Error ? error.stack : error}\nNative diagnostics: ${diagnostic.join('\n').slice(-4000)}`); }
     finally { await session?.dispose(); await api.close(); await rm(home, { recursive: true, force: true }); await rm(cwd, { recursive: true, force: true }); }
-  }, 60_000);
+  }, 10_000);
 });

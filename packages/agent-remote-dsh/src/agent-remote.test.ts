@@ -108,6 +108,33 @@ async function startRemoteHost(native: ReturnType<typeof remoteNativeHost>, over
 }
 
 describe('DSH Remote Host plugin', () => {
+  it('attaches native children through the provider Host route and keeps their view read-only', async () => {
+    const native = remoteNativeHost();
+    native.addRoot('parent');
+    const child = native.addRoot('child', { origin: 'subagent', parentSession: 'parent', events: [
+      native.event('subagent/descriptor', 1, {}),
+      native.event('user/message', 2, { id: 'child-prompt', source: { kind: 'user' }, content: [{ type: 'text', text: 'Child history' }] }),
+    ] });
+    const remote = await startRemoteHost(native);
+    expect(remote.registrations).toEqual([expect.objectContaining({ providers: [{ providerId: 'dsh', displayName: 'DeepSeek Harness' }] })]);
+    const parent = await remote.request('/remote/attach', 'parent-binding', JSON.stringify({ providerId: 'dsh', nativeSessionId: 'parent' }));
+    expect(await parent.json()).toMatchObject({ agentId: 'parent-binding', nativeSessionId: 'parent' });
+    const snapshot = await remote.request('/v1/sessions/parent-binding/snapshot?protocolVersion=1.4.0', 'parent-binding');
+    expect(JSON.stringify(await snapshot.json())).toContain('child');
+    const body = JSON.stringify({ providerId: 'dsh', parentNativeSessionId: 'parent', nativeSessionId: 'child' });
+    const attached = await remote.request('/remote/child/attach', 'child-binding', body);
+    expect(await attached.json()).toMatchObject({ agentId: 'child-binding', nativeSessionId: 'child' });
+    const childSnapshot = await remote.request('/v1/sessions/child-binding/snapshot?protocolVersion=1.4.0', 'child-binding');
+    const projected = await childSnapshot.json();
+    expect(projected.payload.capabilities).toMatchObject({ sendMessage: false, cancel: false, steer: false });
+    expect((await remote.request('/remote/child/attach', 'bad-binding', JSON.stringify({ providerId: 'dsh', parentNativeSessionId: 'foreign', nativeSessionId: 'child' }))).status).toBeGreaterThanOrEqual(400);
+    expect((await remote.request('/remote/attach', 'bad-root-binding', JSON.stringify({ providerId: 'dsh', nativeSessionId: 'child' }))).status).toBeGreaterThanOrEqual(400);
+    native.append(child, native.event('user/message', 3, { id: 'later', source: { kind: 'user' }, content: [{ type: 'text', text: 'Later child text' }] }));
+    await remote.host.close();
+    expect(native.disposed).toEqual([]);
+    expect(native.createCalls).toEqual([]);
+  });
+
   it('hot-replaces the Remote Host without recreating its native interaction adapter', async () => {
     const native = remoteNativeHost();
     const broker = new WebSocketServer({ port: 0, host: '127.0.0.1' });
@@ -195,21 +222,21 @@ describe('DSH Remote Host plugin', () => {
     expect(remote.registrations).toEqual([expect.objectContaining({ name: hostname() })]);
   });
 
-  it('projects only exact top-level native Agents and retains them after Remote Host transport closure', async () => {
+  it.each([false, true])('projects exact top-level native Agents across replacement (modern=%s)', async (modern) => {
     const native = remoteNativeHost();
     const oldAgent = native.addRoot('native-one');
     const remote = await startRemoteHost(native);
     expect(remote.credentials).toEqual(['Bearer remote-test-key']);
-    expect(remote.registrations).toEqual([expect.objectContaining({ installationId: expect.any(String), name: 'Test DSH', providerId: 'dsh' })]);
+    expect(remote.registrations).toEqual([expect.objectContaining({ installationId: expect.any(String), name: 'Test DSH', providers: [{ providerId: 'dsh', displayName: 'DeepSeek Harness' }] })]);
     const identityPath = join(remote.identityHome, 'agent-remote-control', 'identity.json');
     expect(JSON.parse(await readFile(identityPath, 'utf8'))).toEqual({ installationId: remote.registrations[0] && expect.any(String) });
     expect((await stat(identityPath)).mode & 0o777).toBe(0o600);
-    expect((await remote.request('/remote/attach', 'binding-one', JSON.stringify({ nativeSessionId: 'native-one' }))).status).toBe(200);
+    expect((await remote.request('/remote/attach', 'binding-one', JSON.stringify({ nativeSessionId: 'native-one', ...(modern ? { providerId: 'dsh' } : {}) }))).status).toBe(200);
     expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.4.0', 'binding-one')).status).toBe(200);
     expect(native.createCalls).toEqual([]);
 
     const replacement = native.replaceRoot('native-one');
-    expect((await remote.request('/remote/attach', 'binding-one', JSON.stringify({ nativeSessionId: 'native-one' }))).status).toBe(200);
+    expect((await remote.request('/remote/attach', 'binding-one', JSON.stringify({ nativeSessionId: 'native-one', ...(modern ? { providerId: 'dsh' } : {}) }))).status).toBe(200);
     native.dispose(oldAgent);
     expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.4.0', 'binding-one')).status).toBe(200);
     native.dispose(replacement);
@@ -256,11 +283,47 @@ describe('DSH Remote Host plugin', () => {
     await remote.host.close();
   });
 
+  it('closes a pending borrowed projection without breaking a subsequent pairing', async () => {
+    const native = remoteNativeHost();
+    native.addRoot('parent');
+    let lookupStarted = false;
+    let finish!: (entries: never[]) => void;
+    native.context.subagents.listChildren = async () => { lookupStarted = true; return new Promise<never[]>((resolve) => { finish = resolve; }); };
+    const remote = await startRemoteHost(native);
+    const attaching = remote.request('/remote/attach', 'pending-binding', JSON.stringify({ providerId: 'dsh', nativeSessionId: 'parent' })).catch(() => undefined);
+    await vi.waitFor(() => expect(lookupStarted).toBe(true));
+    await remote.host.close();
+    finish([]);
+    expect(native.disposed).toEqual([]);
+    const next = await startRemoteHost(native);
+    await next.host.close();
+    await attaching;
+  });
+
+  it('preserves modern create identity across retries, native replacement and re-pairing', async () => {
+    const native = remoteNativeHost();
+    const first = await startRemoteHost(native);
+    const body = JSON.stringify({ providerId: 'dsh', requestId: 'create-once', workspaceId: 'workspace-one' });
+    const created = await (await first.request('/remote/create', 'first-binding', body)).json();
+    expect(native.createCalls).toHaveLength(1);
+    const old = native.context.agents.get(created.nativeSessionId)!;
+    native.replaceRoot(created.nativeSessionId);
+    expect(await (await first.request('/remote/create', 'retry-binding', body)).json()).toEqual(created);
+    native.dispose(old);
+    expect((await first.request(`/v1/sessions/${created.agentId}/snapshot?protocolVersion=1.4.0`, created.agentId)).status).toBe(200);
+    await first.host.close();
+    const second = await startRemoteHost(native);
+    const repeated = await (await second.request('/remote/create', 'second-binding', body)).json();
+    expect(repeated.nativeSessionId).toBe(created.nativeSessionId);
+    expect(native.createCalls.every((call) => call.sessionId === created.nativeSessionId)).toBe(true);
+    expect((await second.request('/remote/create', 'conflicting', JSON.stringify({ providerId: 'dsh', requestId: 'create-once', workspaceId: 'another' }))).status).toBe(409);
+  });
+
   it('creates an opaque native session through DSH Web before borrowing it and preserves binding conflicts', async () => {
     const native = remoteNativeHost();
     const remote = await startRemoteHost(native);
     const create = () => remote.request('/remote/create', 'binding-one', JSON.stringify({ nativeSessionId: 'native-created', workspaceId: 'workspace-one' }));
-    expect(await (await create()).json()).toEqual({ nativeSessionId: 'native-created' });
+    expect(await (await create()).json()).toEqual({ nativeSessionId: 'native-created', agentId: 'binding-one' });
     expect(native.createCalls).toEqual([{ sessionId: 'native-created', workspaceId: 'workspace-one' }]);
     expect((await remote.request('/remote/attach', 'binding-two', JSON.stringify({ nativeSessionId: 'native-created' }))).status).toBe(409);
     expect(await (await remote.request('/remote/workspaces')).json()).toEqual({ workspaces: [{ id: 'workspace-one', name: 'Workspace one', path: '/tmp/workspace-one' }] });
@@ -417,7 +480,7 @@ function remoteNativeHost() {
     options: Record<string, never>;
     session: {
       id: string;
-      header: { createdAt: number; cwd?: string; origin?: string };
+      header: { id: string; createdAt: number; cwd?: string; origin?: string; parentSession?: string };
       readonly events: readonly NativeEvent[];
       snapshotEvents(): readonly NativeEvent[];
       requestHeader(): { config: { model: string } } | undefined;
@@ -442,6 +505,7 @@ function remoteNativeHost() {
     createdAt?: number;
     cwd?: string;
     origin?: string;
+    parentSession?: string;
     status?: 'idle' | 'running';
     model?: string;
     events?: NativeEvent[];
@@ -460,7 +524,7 @@ function remoteNativeHost() {
       id: sessionId, status: options.status ?? 'idle', options: {},
       session: {
         id: sessionId,
-        header: { createdAt: options.createdAt ?? 0, ...(options.cwd === undefined ? {} : { cwd: options.cwd }), ...(options.origin === undefined ? {} : { origin: options.origin }) },
+        header: { id: sessionId, parentSession: options.parentSession, createdAt: options.createdAt ?? 0, ...(options.cwd === undefined ? {} : { cwd: options.cwd }), ...(options.origin === undefined ? {} : { origin: options.origin }) },
         get events() { return events; },
         snapshotEvents() { return events; },
         requestHeader: () => options.model === undefined ? undefined : { config: { model: options.model } },
@@ -511,9 +575,14 @@ function remoteNativeHost() {
       listeners.set(event, eventListeners);
       return () => eventListeners.delete(listener);
     },
-    agents: { roots: () => [...roots.values()] },
+    agents: { roots: () => [...roots.values()], get: (id: string) => roots.get(id) },
+    subagents: { listChildren: async (parentId: string) => [...roots.values()].filter((agent) => agent.session.header.origin === 'subagent' && agent.session.header.parentSession === parentId).map((agent) => ({ kind: 'child', id: agent.id, mode: 'continuable', label: 'Child', activity: 'running' })) },
     sessions: { flush: async () => undefined },
     sessionQuery: {
+      async observeSession(id: string) {
+        const agent = roots.get(id); if (!agent) throw new Error('Missing native session');
+        return { header: agent.session.header, events: agent.session.snapshotEvents(), source: 'live', inheritedEventCount: 0, projections: { values: { subagent: { mode: 'continuable', seq: 0 } } }, [Symbol.dispose]() {} };
+      },
       async listSessions() {
         return [...coldSessions].map(([id, options]) => ({
           header: { version: 0, id, isSeeded: false, createdAt: options.createdAt ?? 0, cwd: options.cwd },

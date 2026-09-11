@@ -3,18 +3,23 @@ import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sd
 import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@borgee/agent-provider-sdk';
 import { record, toolDetail } from './projector.js';
 
-interface Pending { request: AgentInteractionRequest; input: Record<string, unknown>; resolve(result: PermissionResult): void; cleanup(): void }
+interface Pending { responding?: boolean; request: AgentInteractionRequest; input: Record<string, unknown>; resolve(result: PermissionResult): void; cleanup(): void }
 
 export class ClaudeInteractions {
   private readonly pending = new Map<string, Pending>();
   private closed = false;
-  constructor(private readonly emit: (event: AgentStreamEvent) => void) {}
+  constructor(private readonly emit: (event: AgentStreamEvent) => void, private readonly approvePlan?: () => Promise<void>) {}
   get size(): number { return this.pending.size; }
 
   readonly request: CanUseTool = async (name, input, options) => {
     if (this.closed || options.signal.aborted) return { behavior: 'deny', message: 'Permission request is no longer active.' };
     const requestId = `claude:${options.toolUseID}:${randomUUID()}`;
-    const request = name === 'AskUserQuestion' ? questions(requestId, input) : undefined;
+    if (name === 'ExitPlanMode' && (typeof input.plan !== 'string' || !input.plan.trim() || !this.approvePlan)) {
+      return { behavior: 'deny', message: 'A native plan body and permission transition are required for review.' };
+    }
+    const request: AgentInteractionRequest | undefined = name === 'ExitPlanMode'
+      ? { kind: 'plan_approval', requestId, plan: input.plan as string, allowedActions: ['approve_and_resume', 'reject'] }
+      : name === 'AskUserQuestion' ? questions(requestId, input) : undefined;
     if (name === 'AskUserQuestion' && !request) return { behavior: 'deny', message: 'Unsupported question format.' };
     const normalized: AgentInteractionRequest = request ?? { kind: 'tool_approval', requestId, toolCallId: options.toolUseID,
       toolName: name, summary: options.title || options.decisionReason || `Allow ${name}?`, detail: toolDetail(name, input),
@@ -28,10 +33,19 @@ export class ClaudeInteractions {
     });
   };
 
-  respond(requestId: string, response: AgentInteractionResponse): void {
+  respond(requestId: string, response: AgentInteractionResponse): void | Promise<void> {
     const pending = this.pending.get(requestId);
     if (!pending) throw new Error('Claude permission request is no longer active.');
+    if (pending.responding) throw new Error('Claude permission response is already in progress.');
     validateInteractionResponse(pending.request, response);
+    if (response.kind === 'plan_approval') {
+      if (response.action === 'reject') {
+        this.finish(requestId, response, { behavior: 'deny', message: response.feedback || 'The user rejected the plan.' });
+        return;
+      }
+      pending.responding = true;
+      return this.resolvePlan(requestId, pending, response);
+    }
     let result: PermissionResult;
     if (response.kind === 'tool_approval') {
       result = response.decision === 'allow' ? { behavior: 'allow', updatedInput: pending.input }
@@ -48,13 +62,23 @@ export class ClaudeInteractions {
     this.finish(requestId, response, result);
   }
 
+  private async resolvePlan(id: string, pending: Pending, response: AgentInteractionResponse): Promise<void> {
+    try {
+      await this.approvePlan!();
+      if (this.pending.get(id) !== pending) throw new Error('Claude permission request is no longer active.');
+      this.finish(id, response, { behavior: 'allow', updatedInput: pending.input });
+    } finally { pending.responding = false; }
+  }
+
   cancelAll(): void { for (const id of [...this.pending.keys()]) this.cancel(id); }
   close(): void { this.closed = true; this.cancelAll(); }
   private cancel(id: string): void {
     const pending = this.pending.get(id);
     if (!pending) return;
     const response: AgentInteractionResponse = pending.request.kind === 'question'
-      ? { kind: 'question', answers: [], dismissed: true } : { kind: 'tool_approval', decision: 'cancel' };
+      ? { kind: 'question', answers: [], dismissed: true } : pending.request.kind === 'plan_approval'
+        ? { kind: 'plan_approval', action: 'reject', feedback: 'The plan review was canceled.' }
+        : { kind: 'tool_approval', decision: 'cancel' };
     this.finish(id, response, { behavior: 'deny', message: 'The permission request was canceled.', interrupt: true });
   }
   private finish(id: string, response: AgentInteractionResponse, result: PermissionResult): void {

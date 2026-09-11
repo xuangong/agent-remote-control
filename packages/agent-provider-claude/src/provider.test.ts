@@ -49,3 +49,26 @@ it('reserves a native parent during resume, releases failed loads, and keeps the
   const reopened = await provider.resumeSession(handle);
   try { expect(queries).toBe(3); } finally { await reopened.dispose(); }
 }, 10000);
+
+it('resumes the selected native permission mode and retains it across a saved planning session', async () => {
+  const launched: any[] = [];
+  const modes: string[] = [];
+  const provider = new ClaudeAgentProvider({ catalog: { list: async () => [], info: async () => ({ cwd: process.cwd() }) as any,
+    messages: async () => [], children: async () => [] }, query: ({ options }) => {
+    launched.push(options);
+    const events = new Channel<any>();
+    return { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](), initializationResult: async () => ({ models: [] }),
+      setPermissionMode: async (mode: string) => { modes.push(mode); }, close: () => events.close() } as any;
+  } });
+  const first = await provider.createSession({ sessionId: 'proposed' });
+  await first.setSessionSetting!('permissions', 'acceptEdits');
+  await first.setPlanning!(true);
+  const handle = (await first.runtimeInfo()).persistence!;
+  await first.dispose();
+  const resumed = await provider.resumeSession(handle);
+  try {
+    expect(launched[1].permissionMode).toBe('plan');
+    await resumed.setPlanning!(false);
+    expect(modes).toEqual(['acceptEdits', 'plan', 'acceptEdits']);
+  } finally { await resumed.dispose(); }
+});

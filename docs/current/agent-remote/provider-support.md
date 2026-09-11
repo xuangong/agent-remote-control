@@ -1,0 +1,187 @@
+# Provider support baseline
+
+This is the comparison target for adding a Provider, and the implementation inventory for DSH, Codex and Claude. Read it with the [onboarding checklist](provider-onboarding.md), the [Claude audit](claude-support-audit.md), and the [Paseo comparison and gap ledger](provider-gap-analysis.md). The [architecture](providers.md) describes how the adapters work; this document states exactly what consumers can rely on.
+
+## Baseline and interpretation
+
+Source audit: **2026-09-11**, initial implementation commit **`614d9fe`**, updated by the native parity implementation following **`821d1c6`**, branch **`feat/claude-provider`**. At audit time `main` was `b016e46`; this is a feature-branch inventory, not a claim that all changes are on main or published. Public Remote protocol is **1.4.0**, Remote Host uplink is **2**. Native targets come from [compatibility.json](../../../packages/agent-remote-lab/compatibility.json): DSH `0.1.2-rc.1` / `a66e4702047846cdaa10c66c9d3df3951f5ea70d`, Codex CLI `0.148.0`, Claude Code `2.1.247` with Agent SDK `0.3.247`. Newer native releases are not covered automatically.
+
+DSH means the live adapter **through the standalone DSH plugin**, currently `packages/agent-remote-dsh` (`@agent-remote-control/dsh`). It does not mean Recorded fixtures, an uncompleted `plugins/dsh` move, or Borgee's separate integration. Codex and Claude mean their adapters through Agent Host. Native product capabilities that have no exposed Remote path are not counted.
+
+| Mark | Meaning |
+| --- | --- |
+| S — supported | The stated behavior is implemented within this row's scope. It does not mean full native-product parity. |
+| C — conditional | Implemented only when the explicitly named native service, state or permission is present. Absence must remain visible through capabilities/descriptors/errors. |
+| P — partial | Some of the target is implemented; omitted semantics or provenance are named. A workaround does not promote this to S. |
+| N — unavailable | No supported adapter/integration path for this behavior. A schema or native API alone is insufficient. |
+| U — unverified | Evidence has not established the claimed behavior. Use this in a new Provider record rather than guessing. |
+
+**Implementation preference:** use the corresponding native client or native service directly. Adapter normalization and bounded storage of native-provided bytes are implementation responsibilities; private methods, Query replacement, synthetic queues, guessed metadata and text impersonating typed interactions are not native parity. A documented workaround never earns a support mark.
+
+Implementation degree and verification are separate. `S` is not a live-service certification. Evidence below distinguishes source inspection, automated fixtures, a native process against a loopback model endpoint, browser transport tests, and a deployed live service.
+
+The target is the **union of currently useful DSH and Codex behaviors**, constrained by the existing protocol. It is not an instruction to emulate every native feature. `Core` rows are admission invariants or basic conversation behavior. `Parity` rows are comparison objectives: implement them faithfully or record a bounded gap with capabilities disabled. `Optional` rows remain useful extensions; no Provider is presumed to support them. A read-only historical child has its own capability set and is not evaluated as a writable root.
+
+## Gap cause and implementation path
+
+`N` means unavailable in this implementation, not impossible in the native runtime. Keep support degree separate from feasibility. The [gap ledger](provider-gap-analysis.md) records four causes: adapter gap, conditional native capability, cross-layer change, and evidence gap. Each entry names native/Paseo evidence, affected endpoints, acceptance gates and remaining limits; proposed paths do not change the support marks below.
+
+| Provider / affected baseline IDs | Gap cause / implementation path |
+| --- | --- |
+| Claude C1/C2, I2/I5, X3 | Model/permissions and typed plan review now use public Query methods. Native steering equivalence failed: `priority: next` can outlive the active turn and public interrupt retains queued input. Effort remains creation-only; no Query replacement workaround. See G1–G3/G5. |
+| Claude I3/I4, X1/X2/X5/X7, C3–C6, A3/A6 | Native queue equivalence, permission scope/sensitivity, skill provenance and task-stop semantics need separate evidence; no general child orchestration inference. See G4/G7/G10/G11. |
+| Claude X4/X6, T3–T5, R1/R2 | Native structured results, bounded embedded raster resources and per-turn usage/context mapping are implemented. MCP form normalization loses constraints/sensitive markers before the public callback, so form remains disabled. See G6/G8/G9. |
+| Claude A4/A5/H2 | Existing projection and native callback lifetime impose recovery limits; see G12. |
+| DSH A1–A5/H3 | Native direct-child discovery, live/saved observations and conditional cancel pass through plugin child attachment. Native FIFO prompt is not immediate input; send/steer/queue remain disabled. See G13/G14. |
+| DSH C1/T4/S5 | Model-specific effort and exact compaction lifecycle are mapped. Default-save failure is visible only in the native log; creation overrides still require a native atomic/session-only path. See G15–G17. |
+| DSH X4–X6/T3/T5/T6/H2; shared S3/T6/A6/H2 | Missing native mappings or shared contract/lifecycle limits; see G18 and the shared-boundary record. |
+| Debugger C1–C5/I3/A1–A3 | Missing CLI entry points are independent of adapter/Web support; see G19. |
+
+## Session, input and conversation matrix
+
+| ID / target | DSH plugin | Codex Host | Claude Host |
+| --- | --- | --- | --- |
+| S1 Core — native identity, create and workspace selection | S: `sessionController.create`; native UUID; workspace registry. | S: `thread/start`; workspace resolved by Host. | S: initialize one Query with native UUID; workspace resolved by Host. |
+| S2 Core — native catalog and saved resume | S: live roots plus persisted catalog; resolve/borrow through DSH controller. | S: paged `thread/list`, `thread/resume`, `thread/read`. | P: SDK catalog/resume; empty initialized sessions are only process-local until a transcript is written. |
+| S3 Parity — attach to work already running in the native UI | S: borrow the exact live DSH root shared with DSH Web. | N: opening saved identity is not attaching to another terminal's process. Existing Host-owned runtime is reused. | N: SDK resume is not attachment to an independently running Claude terminal. Existing Host Query is reused. |
+| S4 Core — closing an observer versus owning native lifetime | S: plugin borrows DSH roots; closing Remote does not dispose the native root. Adapter-created roots have a separate owned lifecycle. | S: root owns app-server; child borrows it; child view disposal does not cancel native work. | S: root owns Query; child is a read-only view; child disposal only releases observation. |
+| S5 Parity — model, effort, planning at creation | N: plugin rejects these overrides; shared DSH Web settings are authoritative. Direct SDK-owned creation separately maps model and conditional planning, but not reasoning effort. | C: model/effort and native collaboration mode; planning requires advertised native modes. | C: model and accepted effort values are passed to Query; planning maps to native permission mode. No native model catalog is exposed. |
+| I1 Core — idle text input | S: native `followup`. | S: native `turn/start`. | S: streaming-input Query. |
+| I2 Parity — immediate input while busy | C: native `steer`; reject if steering unavailable. | S: `turn/steer` against current native turn; bounded retry only on proven non-delivery/mismatch. | N: active-turn input is rejected. Real native probes show `priority: next` may start another turn and survive interruption; no scheduling workaround. |
+| I3 Parity — explicit next-turn queue | S: `delivery: next_turn` uses native `followup`, including a turn-boundary race. | N: app-server has no exposed native queue; TUI queue is not reused. | N: no exposed native queue. |
+| I4 Core — cancel the active turn | C: native cancellation, not process termination; requires runtime support. | S: interrupt active native turn. | S: Query `interrupt`; root remains reusable. |
+| I5 Core — operation acceptance versus completion | S: shared ACK means native acceptance; lifecycle remains authoritative. | S: no retry after an ambiguous timeout; ACK does not mean turn completion. | S: input acceptance and result are distinct; uncertain input is not resent automatically. |
+| T1 Core — separate history/live stream, deduplication and recovery | S: subscribe before snapshot; native sequence validation and exact overlap dedupe. | S: `thread/read` plus buffered native events and item identity. | S for root: SDK saved messages before boundary, then stream/final dedupe. Child limitations are in A4. |
+| T2 Core — user/assistant text, reasoning, tools, turn outcomes | S: native event projector and source-aware user messages. | S: app-server item/lifecycle projector. | S: native message/content-block projector, tool IDs and result lifecycle. |
+| T3 Parity — bounded structured tool results | S: ordered text/JSON plus native metadata when present. | S: command, file, MCP and collaboration result snapshots; optional exit/duration when present. | P: bounded text plus native `tool_use_result` JSON when exactly one tool result identifies its owner. Ambiguous multi-result metadata is omitted. |
+| T4 Parity — todos and compaction state | P: native `todo/write`; compaction start/success-end paired by native identity. Failure/interruption emits an error, never successful completion; no failed-card replacement rail. | S: todo/plan items and compaction loading/completed mapping. | P: `TodoWrite` only; completed compact boundary. Other task tools are not automatically a todo list; no loading state claim. |
+| T5 Parity — usage and context meter | P: input/output/cache-read tokens; no context-window size or cost mapping. | P: token and context-window counters when native supplies them; no cost mapping. | P: per-turn main-loop tokens; Query cumulative USD cost is differenced. Exact-model native context capacity and `/context` occupancy only when supplied; no inferred occupancy or multi-model capacity sum. |
+| T6 Optional — session titles and detailed terminal control | P: title is directory metadata; Snapshot has no title. No public PTY/stdin control. | P: same title boundary; terminal interaction side-channel is not normalized terminal control. | P: SDK catalog title; no public PTY/stdin control. |
+
+Source/behavior anchors: [SDK], [D-runtime], [D-live], [D-directory], [D-projector], [C-session], [C-runtime], [C-projector], [A-session], [A-provider], [A-projector]. Input is text-only at the current SDK/wire boundary: output image support does not imply image/file upload support.
+
+## Interactions, settings, commands and resources
+
+| ID / target | DSH plugin | Codex Host | Claude Host |
+| --- | --- | --- | --- |
+| X1 Core — typed questions and validated answers | C: scoped question tool or command picker plus shared Web interaction bridge. | S: native request IDs, options, custom answers and sensitive receipts. | P: `AskUserQuestion` through `canUseTool`; single/multiple choices, custom text and dismissal. No native sensitive-question marker mapping. |
+| X2 Core — tool approval and exact response routing | C: shared Web bridge exposes allow/deny, **once** only; native cancellation belongs to its caller. | C: native advertised decisions including cancellation; **once/session/policy** only when supplied. | C: `canUseTool` callback; allow/deny/cancel, **once** only. Native auto-allow/deny rules remain authoritative. |
+| X3 Parity — planning toggle and typed plan review | C: scoped plan mode and `exit_plan_mode`; review offers approve-and-resume/reject. | C: native collaboration modes; completed plan item produces process-local review. | C: public permission mode plus typed `ExitPlanMode` review only with an actual plan body. Approve-and-resume waits for restoration of the selected permission mode; reject returns feedback. |
+| X4 Parity — typed MCP forms | N: no live form mapping. | P: bounded flat primitive forms only; unsupported/nested schemas and sensitive defaults declined. | N: native CLI drops pattern/multipleOf and sensitivity markers before public callback, including sensitive defaults; strict end-to-end form semantics cannot be preserved. |
+| X5 Parity — granular filesystem/network grants | N: permission presets/tool approval are not granular grants. | C: exact native request, whole-request grant with native turn/session scope. | N: one-time tool approval is not a granular permission grant. |
+| X6 Parity — external action URL plus explicit completion | N: no live external-action mapping. | C: supported HTTP(S) elicitation with explicit completion/decline/cancel. | N: no external-action mapping. |
+| X7 Core — pending requests, receipts and privacy | C: shared Web/Remote request journal, first accepted answer wins; process-local pending requests. | C: live native RPCs and synthesized review persist only in the owning runtime. Sensitive values redacted in public receipts. | C: callbacks live in root Query; canceled/closed callbacks cannot be answered again. Shared redaction works only when sensitivity is identified; see X1. |
+| C1 Parity — live model and reasoning selection | C: native model catalog and model-specific effort choices; selection has **session_and_default** scope. Session selection is authoritative; default-save failure is only in the native log. | C: native catalog and confirmed setting update; model plus effort via commands, session scope. | P: idle model picker uses `supportedModels`/`setModel` with confirmed state; live effort has no public setter and remains creation-only. |
+| C2 Parity — permission-setting selection | C: native registered `/permission` and presets; missing command makes descriptor read-only. Session scope. | C: native approval/sandbox choices, confirmed update, session scope. | C: idle `setPermissionMode` via settings; default/acceptEdits/dontAsk/plan choices. No bypassPermissions; native launch/admin restrictions remain authoritative. |
+| C3 Parity — command directory and execution | C: installed scoped native registry; revalidate each execution; preserve result text and errors. | S: enabled skills, bounded custom prompts and explicit model/permissions/compact adapters. | P: SDK reload/list/revalidate; compact plus entries classified as skills after known session controls are filtered. Flat native list lacks structured provenance. |
+| C4 Parity — skills discovery and native invocation | C: user-invocable scoped skills **and** native skill tool; leading slash gesture triggers native hook. Registered command name wins collisions. | S: fresh `skills/list`, enabled skills, native name/path plus unchanged args. | S within SDK-advertised scope: `reloadSkills`/`supportedCommands`, opaque ID, slash invocation and unchanged args. Classification limits in C3. |
+| C5 Parity — preview current skill documentation | C: `skills.get` content for a currently advertised skill, at most 256 KiB. | C: fresh skill lookup and bounded regular-file read, no final symlink. | N: SDK list has no trustworthy documentation locator; description is not the full skill body. |
+| C6 Optional — custom prompt files and compact | C: only installed commands/skills; no Codex-style prompt-file expansion or guaranteed compact command. | P: top-level bounded `CODEX_HOME/prompts`; raw `$ARGUMENTS` only. Compact uses native RPC. | P: compact when listed; no adapter-owned prompt-file grammar. No general native-menu passthrough. |
+| R1 Parity — referenced output images and resource reads | C: complete session image attachments and successful session-owned generated text revisions; installed attachment/skill service gates `readResource`. | C: explicitly referenced local/embedded PNG/JPEG/GIF/WebP images; no arbitrary filesystem read or remote fetch. | C for root sessions: native tool-result embedded PNG/JPEG/GIF/WebP base64 only; session-owned immutable registry. No path/URL fetching, upload or child resource access. |
+| R2 Core — bounded, replay-safe resources and results | S within R1: opaque binding and per-revision generated bytes; unavailable stays explicit. | S within R1: bounded resources and retained first read outcome. | S within R1: stable references, cloned immutable bytes, explicit unavailable outcomes; 16 MiB/image, 64 MiB/session, 1,024 images. Native persisted bytes can reconstruct root history resources. |
+
+All tool result adapters use the common maximum of **65,536 characters / 128 content blocks**. Truncation is an explicit preview, not an implicit full-result download. Model IDs, command IDs, setting values and policy choices remain Provider-owned opaque values.
+
+Source/behavior anchors: [D-interactions], [D-settings], [D-commands], [D-resources], [C-interactions], [C-forms], [C-permissions], [C-commands], [C-images], [A-interactions], [A-commands], [A-projector], [SDK-interactions], [SDK-results]. A tool named `Agent`, `Task` or `AskUserQuestion` is not by itself evidence of the corresponding public capability.
+
+## Native children and recovery
+
+| ID / target | DSH plugin | Codex Host | Claude Host |
+| --- | --- | --- | --- |
+| A1 Parity — discover direct children, identity, status and provenance | C: native `listChildren` plus validated own descriptor and lifecycle; direct-child status, mode, title and native creation time. Missing native services disable discovery. | S: native thread parentage and spawn provenance; shared runtime routes early child events. | P: direct `local_agent` tasks only; task/tool aliases and parent-scoped IDs; depth > 1, ambient and housekeeping excluded. Creation time is first discovery when no native time is available. |
+| A2 Parity — independent child Timeline and navigation | C: plugin provider-scoped `child/attach`, separate native observation and Timeline; exact parent relation required. | S: existing parent runtime, normal child Agent identity, resources and typed requests. | S within direct children: separate read-only view via existing `child/attach`; child output is excluded from root text. |
+| A3 Parity — native-authorized direct child controls | C: cancel only for live continuable children, matching lifecycle and installed `interruptByParent`. Native current-work admission; no send/steer/queue/settings/commands/approval. Saved and one-shot views cannot cancel. | C: `canAcceptDirectInput === true` gates send/steer/cancel/commands/settings. Child interactions route by original native thread/request; unknown input permission remains disabled. | N: no independent child send/cancel/commands/settings/approval; callbacks are handled through the parent. |
+| A4 Parity — saved child history and live/snapshot races | C: native `sessionQuery.observeSession` live/prepared cuts without Agent activation; subscribe-before-cut, exact sequence dedupe, lifecycle/gap rejection and bounded lookup. | C: `thread/read` without spawning another server; unavailable ephemeral history rejected; bounded overlapping-snapshot retries. | P: SDK direct-child transcripts, UUID/content-block reconciliation; fresh saved attachment has canonical order. Existing Host projection cannot insert a missing old prefix. Reopening/re-pair keeps that same partial projection. |
+| A5 Core when children exist — root ownership and failure | S: observation lease disposal never closes native work; optional child lookup failure cannot interrupt parent history/input. Stale lifecycle and unavailable history fail explicitly. | S: child release never shuts down shared app-server; disconnection does not mean successful completion. | P: root shutdown freezes child views; foreground observation ends at root result, background tasks follow native terminal events. Frozen observation is not proof of successful native completion. |
+| A6 Optional — generic remote spawn/stop/resume orchestration | N. | N: native agent tools own these actions; no public orchestration commands. | N: native agent tools own these actions; no public orchestration commands. |
+| H1 Core — browser reconnect / uplink replacement | S while DSH runtime/plugin owns session state. | S while Host/runtime lives; no duplicate native session on re-pair. | S while Host/Query lives; no duplicate Query on re-pair. |
+| H2 Core — cold restart boundary | P: native persisted session can be resolved; plugin journal/pending Web callbacks are not durable receipts. | P: native saved turns/configuration restored; pending RPCs and synthesized plan reviews are not reconstructed. | P: persisted transcript and direct child history restored; no pending callback/in-progress turn resurrection; empty unsaved sessions can disappear. |
+| H3 Core — provider and parent ownership isolation | S: provider-scoped root/child bindings, exact direct-parent checks and borrow/dispose ownership; canonical root replacement refreshes the native Agent. | S: provider-scoped bindings, native parent ownership, ambiguous runtime rejected. | S: provider-scoped bindings, loaded parent required, concurrent same-parent resume reserved/rejected. |
+
+Source/behavior anchors: [D-directory], [D-interactions], [C-runtime], [C-children-tests], [A-children], [A-child-view], [A-children-tests], [Host]. These relationships are direct, not flattened ancestry. The public contract has no arbitrary adapter-history prepend/reset operation after `history_boundary`; public replica recovery does not reconstruct native facts the adapter never emitted.
+
+## Implementation by endpoint
+
+| Endpoint | Implemented responsibility | Explicit boundary / missing surface |
+| --- | --- | --- |
+| Provider SDK | Session capabilities, text delivery modes, observations, settings/commands, six interaction kinds, resources and child descriptors. | A TypeScript method/schema does not implement a native feature. Optional false/absent capabilities mean unavailable; root and child capabilities may differ. |
+| Public protocol 1.4.0 | Strict schemas, exact negotiation, correlated commands, separate Snapshot/Timeline, epochs/cursors, typed resources and interactions. | No per-provider native payloads, arbitrary PTY, attachment upload, generic child orchestration, or native fork operation. Host uplink version is independent. |
+| Relay `AgentManager` / session wire | Validate capabilities and request-specific answers; keep canonical Timeline, pending requests and resource bindings; refresh capabilities from runtime. | One history boundary, then live observations. Command ACK is acceptance, not execution completion. In-memory recovery is not durable native session or approval storage. |
+| Agent Host | Multi-provider registrations, per-provider directories/workspaces, native ownership, child attachment, duplicate projection prevention and re-pair. | Default executable registry selects Codex; Claude is explicit or alongside Codex. No built-in DSH executable registration; DSH uses its plugin. Only read/write controls supplied by the directory/adapter exist. |
+| DSH plugin | DSH shared roots plus native child observation, catalog/controller/workspace registry, shared interaction bridge and provider-scoped outbound uplink. | Root creation and direct-child attachment are distinct; create-time model/effort/planning overrides remain rejected. Closing Remote releases observers, including pending bindings. Native service installation gates children/settings. |
+| Local pairing broker / Lab server | Temporary process-local pairing, Host/provider discovery, create/attach routing, public virtual streams. | No accounts, durable credentials, native interpretation, or automatic restoration of broker bindings after process restart. Re-pair is explicit. |
+| Web headless client / replica | Public wire validation, recovery, correlation; send/delivery, steer, cancel, settings, planning, commands, answers and resources. | No native methods. Host catalog/child attachment is a separate directory client, not a ProviderSession operation. |
+| Shared React renderer/composer | Readable text/reasoning/tools/results, six typed interaction cards, images/resources, command/skill menu and docs, settings, planning, Working/elapsed/Interrupt and native queue button. | Capability/state gated. A flag does not guarantee an idle state; Claude busy text still reaches adapter rejection. No native provider-specific control implementation. |
+| Lab application | Host/provider/workspace selection, session creation/import, native child cards/tree, local fork/side conversation ledger, Trace and Replica Inspector. | Child navigation depends on the chosen directory. Fork/side is a client context-transfer workaround, not native lineage or subagent control. |
+| Debugger CLI (`bdb`) | Provider list, direct session create/resume, inspect/timeline/observe/trace, send/steer/cancel/planning, typed interaction answer, resource get, deadlines and sensitive-output redaction. | No CLI entry for Host pairing/catalog/child attach, `list_commands`, provider `execute_command`, `set_session_setting`, or `delivery: next_turn`. It can inspect/control an already bound child by public Agent ID only as its capabilities allow. Use Lab/headless client for missing entry points. |
+
+Sources: [SDK], [Wire], [Relay], [Host], [D-directory], [D-plugin], [Broker], [Client], [Composer], [Lab], [Debugger]. Renderer and CLI support are recorded independently of adapter support.
+
+## Workaround ledger
+
+| ID / affected rows | Available route | Preconditions and non-equivalence |
+| --- | --- | --- |
+| W1 — I2/I3 on Claude; I3 on Codex | Wait for idle or explicitly interrupt and submit a new message. | This is not native next-step/next-turn scheduling. No automatic replay after ambiguous acceptance and no hidden client/Relay queue. Interruption may abandon current work. |
+| W2 — C1/C2/S5 | Claude effort: choose at new-session creation. Existing model and permission settings now have native Remote controls. DSH plugin: choose initial shared settings in DSH Web. | Creation-only effort does not mutate an existing Query. Native configuration may have a wider scope; changing files is not confirmation of adoption. DSH model/effort selection attempts to save defaults. |
+| W3 — C5 on Claude | Read the actual skill file in its native workspace using native tooling. | Manual inspection only, outside Remote's resource contract. A command description or guessed path is not a verified skill body; do not publish a fabricated locator. |
+| W4 — A1–A4 | DSH: use native tools for input or controls beyond the conditional native cancel operation. Claude: use parent permission cards; fresh Host attachment can read saved child history. | Neither creates direct child controls. Existing Claude binding stays append-only; page navigation/re-pair does not fill an old prefix. Do not stop an active user Host solely to obtain complete history. |
+| W5 — R1/T3 | Use native tools to inspect outputs or manually export bounded text. | No in-Remote binary read/download, full truncated-result recovery, or attachment input is implied. Do not reinterpret arbitrary filenames as allowed resource IDs. |
+| W6 — H1/H2/X7 | Re-pair a surviving Host/plugin after broker restart; cold-resume persisted native history after owner restart. | Re-pair only reconnects a surviving owner. Cold resume does not restore old pending request callbacks, receipt identities, or unsaved sessions. Never replay an old approval against a new request. |
+| W7 — native fork / side conversation | Lab `/fork`, `/side`, `/btw`: create an independent root, capture bounded visible conversation context and prefix the first input. | Browser-local ledger; same directory/workspace, not an isolated Git worktree or native branch. Includes shortened tool-detail/result summaries; does not transfer native tool execution state, resource bytes, reasoning, pending approvals or runtime snapshots. Only supported session-scope settings can be inherited; uncertainty is checked before first-input retry. No child ownership or automatic result merge. |
+| W8 — debugger surface gaps | Use Lab or the public headless/directory clients, then inspect the resulting public Agent ID with `bdb`. | Do not treat sending slash text as equivalent to `execute_command`, or opening an Agent ID as native child discovery. Each path retains its normal capabilities and validation. |
+| W9 — X3–X6 partial/unavailable mappings | Use the supported native workflow outside Remote, or keep the capability disabled and return an explicit unsupported result. | Generic text or an ordinary tool-approval card is not a typed plan/form/grant/external-action substitute. Native availability must be independently checked before documenting a workflow as usable. |
+
+W7 implementation and tests: [fork-actions.ts](../../../packages/agent-remote-lab/src/fork-actions.ts), [session-forks.ts](../../../packages/agent-remote-lab/src/session-forks.ts), [session-forks.spec.ts](../../../packages/agent-remote-lab/e2e/session-forks.spec.ts). The limits of the workaround remain part of the support record even when its tests pass.
+
+## Evidence and maintenance
+
+| Evidence class | What it establishes | What it does not establish |
+| --- | --- | --- |
+| Source audit at the baseline | Paths, flags, mappings, ownership and declared limits in this table. | Runtime availability of a user's optional services or credentials. |
+| Adapter/plugin behavior tests | DSH scoped commands/settings, overlap, interactions and delivery; Codex routing/children/settings; Claude discovery/children/races; Host isolation/re-pair. | An online production model or every native version. See tests colocated with each source anchor. |
+| Native process tests | `provider.local.test.ts` for Codex/Claude and Codex `child-session.local.test.ts` run the selected real executable with controlled native/model fixtures. | Unrestricted live-service acceptance, terminal attachment, or durable callbacks. |
+| Browser tests | `claude-discovery.spec.ts`, `host-provider.spec.ts`, shared interaction/composer tests exercise the public transport/UI in their configured modes. | Every Provider's live native implementation merely because the shared widget exists. |
+| Gated native DSH browser tests | `live-dsh.spec.ts` and `dsh-delivery.spec.ts` require explicit native runtime/fixture configuration and evidence. | A skipped test is not a pass; ordinary fixture tests do not certify the deployed DSH installation. |
+
+The preceding implementation validation at `614d9fe` reported 1,241 tests passed / 6 skipped, conformance 13 passed, and selected desktop/mobile browser tests 6 passed. Those are a baseline aggregate, not per-cell live acceptance. This documentation audit reruns the adapter/plugin/Host suites and records its actual result in the [Claude audit](claude-support-audit.md). No deployed DSH or online model-service certification is inferred. See the [native parity validation record](provider-native-parity.md) for the subsequent implementation and its direct-client evidence.
+
+When behavior changes: update the affected row IDs, the Provider audit and tests, then the narrow degradation record in `compatibility.json`; regenerate/check its digest. This inventory is the comparison baseline, not a replacement schema or a new protocol. Do not infer support from the number of capability flags or produce an aggregate percentage that hides conditional paths.
+
+[SDK]: ../../../packages/agent-provider-sdk/src/provider.ts
+[SDK-interactions]: ../../../packages/agent-provider-sdk/src/interactions.ts
+[SDK-results]: ../../../packages/agent-provider-sdk/src/tool-result.ts
+[D-runtime]: ../../../packages/agent-provider-dsh/src/runtime.ts
+[D-live]: ../../../packages/agent-provider-dsh/src/live-session.ts
+[D-directory]: ../../../packages/agent-remote-dsh/src/session-directory.ts
+[D-projector]: ../../../packages/agent-provider-dsh/src/projector.ts
+[D-interactions]: ../../../packages/agent-provider-dsh/src/web-interactions.ts
+[D-settings]: ../../../packages/agent-provider-dsh/src/session-settings.ts
+[D-commands]: ../../../packages/agent-provider-dsh/src/commands.ts
+[D-resources]: ../../../packages/agent-provider-dsh/src/generated-resource.ts
+[D-plugin]: ../../../packages/agent-remote-dsh/src/agent-remote.ts
+[C-session]: ../../../packages/agent-provider-codex/src/session.ts
+[C-runtime]: ../../../packages/agent-provider-codex/src/runtime.ts
+[C-projector]: ../../../packages/agent-provider-codex/src/projector.ts
+[C-interactions]: ../../../packages/agent-provider-codex/src/tool-approval.ts
+[C-commands]: ../../../packages/agent-provider-codex/src/commands.ts
+[C-images]: ../../../packages/agent-provider-codex/src/images.ts
+[C-children-tests]: ../../../packages/agent-provider-codex/src/child-sessions.test.ts
+[A-session]: ../../../packages/agent-provider-claude/src/session.ts
+[A-provider]: ../../../packages/agent-provider-claude/src/provider.ts
+[A-projector]: ../../../packages/agent-provider-claude/src/projector.ts
+[A-interactions]: ../../../packages/agent-provider-claude/src/interactions.ts
+[A-commands]: ../../../packages/agent-provider-claude/src/commands.ts
+[A-children]: ../../../packages/agent-provider-claude/src/children.ts
+[A-child-view]: ../../../packages/agent-provider-claude/src/child-session.ts
+[A-children-tests]: ../../../packages/agent-provider-claude/src/children.test.ts
+[Wire]: ../../../packages/agent-remote-protocol/src/messages.ts
+[Relay]: ../../../packages/agent-remote-relay/src/agent-manager.ts
+[Host]: ../../../packages/agent-host/src/host.ts
+[Broker]: ../../../packages/agent-remote-lab/src/server/remote-host-broker.ts
+[Client]: ../../../packages/agent-remote-web/src/client/remote-session-client.ts
+[Composer]: ../../../packages/agent-remote-web/src/react/AgentComposer.tsx
+[Lab]: ../../../packages/agent-remote-lab/src/App.tsx
+[Debugger]: ../../../packages/agent-remote-debugger/src/commands.ts
+
+[C-forms]: ../../../packages/agent-provider-codex/src/elicitation.ts
+[C-permissions]: ../../../packages/agent-provider-codex/src/permissions.ts

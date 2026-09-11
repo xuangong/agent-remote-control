@@ -78,12 +78,12 @@ test('guided setup installs into one home, pairs, starts, and preserves a reused
     response.setHeader('content-type', 'application/json');
     if (request.url === '/v1/remote/pairings') response.end(JSON.stringify({ key }));
     else if (request.url === '/v1/remote/hosts') response.end(JSON.stringify({ hosts: host ? [host] : [] }));
-    else if (request.url === '/v1/remote/hosts/native/workspaces') response.end(JSON.stringify({ workspaces: [] }));
+    else if (request.url === '/v1/remote/hosts/native/workspaces?providerId=dsh') response.end(JSON.stringify({ workspaces: [] }));
     else if (request.url === '/installed') { installation = body; response.end('{}'); }
     else if (request.url === '/register') {
       assert.equal(body.key, key);
       assert.equal(body.home, join(directory, 'home'));
-      host = { id: 'native', name: body.name, online: true }; response.end('{}');
+      host = { id: 'native', name: body.name, online: true, providers: [{ providerId: 'dsh', displayName: 'DeepSeek Harness' }] }; response.end('{}');
     } else { response.statusCode = 404; response.end('{}'); }
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');

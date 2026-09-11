@@ -161,6 +161,8 @@ describe('live DSH launcher', () => {
           },
           degradations: [
             { capability: 'events.session/title', status: 'degraded', reason: 'Not represented in the snapshot.' },
+            { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Conditional cancel only; input remains unavailable.' },
+            { capability: 'events.compaction.failure', status: 'degraded', reason: 'Failed compaction has no terminal replacement card.' },
             {
               capability: 'events.user-message.unknown-source', status: 'degraded',
               reason: 'Unknown sources are diagnostic.',
@@ -194,6 +196,7 @@ describe('live DSH launcher', () => {
             { capability: 'controls.queue-steer-commands-settings', status: 'degraded', reason: 'No mid-turn input or command menus.' },
             { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Permission callbacks are process-local.' },
             { capability: 'sessions.empty-persistence', status: 'degraded', reason: 'An empty session may not be persisted.' },
+            { capability: 'interactions.form.schema', status: 'degraded', reason: 'Native schema loss prevents form support.' },
           ],
         },
       ],

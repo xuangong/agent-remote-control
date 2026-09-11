@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@borgee/agent-provider-sdk';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
-import { ClaudeAgentSession, type ClaudeSessionOptions } from './session.js';
+import { ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
 import { record } from './projector.js';
 
 export interface ClaudeSessionSummary {
@@ -75,12 +75,13 @@ async function workspace(cwd?: string): Promise<string> {
   if (!(await stat(path)).isDirectory()) throw new Error('Claude workspace must be a directory.');
   return path;
 }
-function readConfig(opaque: string): Partial<AgentSessionConfig> {
+function readConfig(opaque: string): Partial<ClaudeSessionConfig> {
   let value: unknown;
   try { value = JSON.parse(opaque); } catch { throw new Error('Invalid Claude persistence configuration.'); }
   if (!record(value)) throw new Error('Invalid Claude persistence configuration.');
-  const config: Partial<AgentSessionConfig> = {};
+  const config: Partial<ClaudeSessionConfig> = {};
   for (const key of ['cwd', 'model', 'reasoningEffort', 'systemPrompt'] as const) if (typeof value[key] === 'string') config[key] = value[key];
   if (typeof value.planning === 'boolean') config.planning = value.planning;
+  if (typeof value.permissionMode === 'string' && ['default', 'acceptEdits', 'dontAsk'].includes(value.permissionMode)) config.permissionMode = value.permissionMode as ClaudeSessionConfig['permissionMode'];
   return config;
 }

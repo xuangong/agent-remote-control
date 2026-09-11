@@ -19,7 +19,7 @@ const session = await provider.createSession({ sessionId: 'caller-proposal', cwd
 - Observations contain saved messages before a single history boundary, followed by live text/reasoning deltas, tool calls/results, usage, compaction, interactions, and turn outcomes.
 - Tool approval and `AskUserQuestion` callbacks await validated Remote answers. Only one-time tool approvals are advertised. Native rules that allow or deny a tool without prompting remain authoritative.
 - Cancel interrupts the current turn and retains the Query. Dispose ends input and closes the Query. Native failure requires explicitly resuming the saved session; uncertain messages are never resent automatically.
-- Planning uses native permission mode; leaving plan mode uses the native approval path.
+- Idle model and permission settings call public Query methods and publish confirmed state. Planning restores the selected permission mode. An actual `ExitPlanMode.plan` becomes typed plan review; approval waits for native permission confirmation before execution.
 
 ## Skills and native children
 
@@ -33,7 +33,9 @@ A first attachment after persistence receives canonical transcript order. An alr
 
 ## Limits
 
-No direct child controls, resource attachments/readback, model settings UI, steering, or follow-up queue is advertised. Nested agent messages are not inserted into the root transcript; their parent tool call/result remains visible. Tool results retain bounded text; non-text native content is not exposed as a downloadable resource. Pending permission callbacks cannot survive Host restart. Catalog discovery describes persisted sessions, not attachment to an already-running Claude terminal process.
+No direct child controls, live effort setting, steering, or follow-up queue is advertised. Native priority input can outlive the target turn and survive public interruption. MCP forms remain disabled because the pinned native client strips constraints and sensitive markers before its public callback. Nested agent messages are not inserted into the root transcript; their parent tool call/result remains visible. Tool results retain bounded text and native JSON with unambiguous tool ownership. Per-turn native tokens and Query cost increments are mapped separately from exact-model context metadata; `/context` provides actual native occupancy when available. Pending permission callbacks cannot survive Host restart. Catalog discovery describes persisted sessions, not attachment to an already-running Claude terminal process.
+
+Root sessions expose bounded native tool-result embedded PNG/JPEG/GIF/WebP images through immutable session-owned resources. Limits: 16 MiB per image, 64 MiB per session and 1,024 images. Native transcript resume reconstructs available embedded bytes; disposal revokes reads. No arbitrary paths, remote URLs, uploads or child image-resource access.
 
 ## Verification
 

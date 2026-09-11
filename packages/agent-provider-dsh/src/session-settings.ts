@@ -2,7 +2,12 @@ import { validateSessionSetting, type AgentSessionSetting, type AgentSessionSett
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { isRecord, nonEmptyString } from './native.js';
 
-interface ModelSelection { provider: string; model: string; }
+interface ModelSelection { provider: string; model: string; reasoningEffort?: string; }
+interface ModelOption extends AgentSessionSettingOption {
+  selection: ModelSelection;
+  efforts: Array<AgentSessionSettingOption & { selection: ModelSelection }>;
+}
+const MODEL_SCOPE_DESCRIPTION = 'DSH applies the selection to the next session request and attempts to save it as the default for future sessions. A default-save failure is reported only in the native DSH log.';
 interface ModelController {
   modelCatalog(): Promise<unknown>;
   selectModel(input: ModelSelection & { sessionId: string }): Promise<unknown>;
@@ -19,7 +24,7 @@ interface NativeCommands {
 }
 
 export class DshSessionSettings {
-  private models: Array<AgentSessionSettingOption & { selection: ModelSelection }> = [];
+  private models: ModelOption[] = [];
   private loading: Promise<void> | undefined;
   private failure: string | undefined;
 
@@ -47,8 +52,15 @@ export class DshSessionSettings {
         return group.models.flatMap((model) => {
           if (!isRecord(model) || !nonEmptyString(model.id)) return [];
           const selection = { provider: String(group.id), model: String(model.id) };
+          const reasoning = isRecord(model.reasoning) ? model.reasoning : undefined;
+          const efforts = Array.isArray(reasoning?.efforts) ? reasoning.efforts.flatMap((effort) => {
+            if (!isRecord(effort) || !nonEmptyString(effort.id)) return [];
+            const effortSelection = { ...selection, reasoningEffort: String(effort.id) };
+            return [{ value: effortValue(effortSelection), label: nonEmptyString(effort.name) ?? String(effort.id),
+              ...(nonEmptyString(effort.description) ? { description: String(effort.description) } : {}), selection: effortSelection }];
+          }) : [];
           return [{ value: modelValue(selection), label: `${nonEmptyString(group.name) ?? group.id} / ${nonEmptyString(model.name) ?? model.id}`,
-            ...(nonEmptyString(model.description) ? { description: String(model.description) } : {}), selection }];
+            ...(nonEmptyString(model.description) ? { description: String(model.description) } : {}), selection, efforts }];
         });
       });
       this.failure = undefined;
@@ -65,10 +77,19 @@ export class DshSessionSettings {
     const selection = this.selection();
     const settings: AgentSessionSetting[] = [{
       id: 'model', category: 'model', label: 'Model', value: selection ? modelValue(selection) : null,
-      options: this.models.map(({ selection: _selection, ...option }) => option),
+      options: this.models.map(({ selection: _selection, efforts: _efforts, ...option }) => option),
       mutable: this.controller() !== undefined && this.models.length > 0, scope: 'session_and_default',
-      description: this.failure ?? 'DSH applies the selection to this session and saves it as the default for future sessions.',
+      description: this.failure ?? MODEL_SCOPE_DESCRIPTION,
     }];
+    const model = selection && this.models.find(({ value }) => value === modelValue(selection));
+    if (model && model.efforts.length > 0) {
+      settings.push({
+        id: 'effort', category: 'model', label: 'Reasoning effort',
+        value: selection?.reasoningEffort ? effortValue(selection) : null,
+        options: model.efforts.map(({ selection: _selection, ...option }) => option),
+        mutable: this.controller() !== undefined, scope: 'session_and_default', description: MODEL_SCOPE_DESCRIPTION,
+      });
+    }
     const presets = this.presets();
     if (presets) {
       const commands = this.commands();
@@ -95,6 +116,11 @@ export class DshSessionSettings {
       await this.controller()!.selectModel({ sessionId: this.agent.session.id, ...selected.selection });
       return;
     }
+    if (id === 'effort') {
+      const selected = this.models.flatMap((model) => model.efforts).find((effort) => effort.value === value)!;
+      await this.controller()!.selectModel({ sessionId: this.agent.session.id, ...selected.selection });
+      return;
+    }
     if (id === 'permissions') {
       const execution = await this.commands()!.execute(this.agent, `/permission ${value}`, [], new AbortController().signal);
       if (execution?.result.kind !== 'success') throw new Error(execution?.result.text ?? 'Native permission command rejected.');
@@ -111,6 +137,8 @@ export class DshSessionSettings {
     if (isRecord(state)) {
       const pending = selectionOf(state.pending);
       if (pending) return pending;
+      const lastUsed = selectionOf(state.lastUsed);
+      if (lastUsed) return lastUsed;
     }
     const session = this.agent.session as unknown as { requestHeader?(): unknown };
     const header = session.requestHeader?.();
@@ -135,6 +163,10 @@ export class DshSessionSettings {
 }
 
 function selectionOf(value: unknown): ModelSelection | undefined {
-  return isRecord(value) && nonEmptyString(value.provider) && nonEmptyString(value.model) ? { provider: String(value.provider), model: String(value.model) } : undefined;
+  return isRecord(value) && nonEmptyString(value.provider) && nonEmptyString(value.model) ? {
+    provider: String(value.provider), model: String(value.model),
+    ...(nonEmptyString(value.reasoningEffort) ? { reasoningEffort: String(value.reasoningEffort) } : {}),
+  } : undefined;
 }
 function modelValue(selection: ModelSelection): string { return JSON.stringify([selection.provider, selection.model]); }
+function effortValue(selection: ModelSelection): string { return JSON.stringify([selection.provider, selection.model, selection.reasoningEffort]); }

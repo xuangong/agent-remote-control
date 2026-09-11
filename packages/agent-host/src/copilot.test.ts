@@ -25,6 +25,16 @@ describe('Copilot registration executable preflight', () => {
       expect(process.env.COPILOT_HOME).toBe(previous);
     } finally { await registration.directory.close(); }
   });
+  it('accepts the official CLI version output including its sentence punctuation and update hint', async () => {
+    const output = "GitHub Copilot CLI 1.0.83.\nRun 'copilot update' to check for updates.";
+    const registration = await createCopilotHostRegistration({ executable: await entry(`console.log(${JSON.stringify(output)});`) });
+    try { expect(registration.adapter.descriptor.providerId).toBe('copilot'); }
+    finally { await registration.directory.close(); }
+  });
+  it.each(['GitHub Copilot CLI 1.0.39.', 'GitHub Copilot CLI 1.0.82.', 'GitHub Copilot CLI 1.0.83.1', 'Other CLI 9.0.0.'])(
+    'rejects unsupported or malformed version output: %s', async (output) => {
+      await expect(createCopilotHostRegistration({ executable: await entry(`console.log(${JSON.stringify(output)});`) })).rejects.toThrow(/1\.0\.83 or newer/);
+    });
   it('rejects unavailable and invalid CLI executables before registration', async () => {
     await expect(createCopilotHostRegistration({ executable: '/nonexistent/copilot' })).rejects.toThrow();
     await expect(createCopilotHostRegistration({ executable: await entry("console.log('wrong program')") })).rejects.toThrow(/version/);

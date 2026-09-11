@@ -68,7 +68,7 @@ test('an existing launcher lock is never replaced or removed', async (t) => {
   assert.equal(await readFile(join(directory, 'run.lock/owner.json'), 'utf8'), 'user-owned-lock');
 });
 
-async function workflow(t, failCatalog = false, providers, bundled = false) {
+async function workflow(t, failCatalog = false, providers, bundled = false, failHost = false) {
   const directory = await temporary(t);
   const state = join(directory, 'state');
   await mkdir(join(directory, 'scripts/lib'), { recursive: true });
@@ -102,7 +102,7 @@ async function workflow(t, failCatalog = false, providers, bundled = false) {
   const output = [];
   const child = startProcess(process.execPath, [join(directory, 'scripts/start.mjs'), '--config', join(directory, 'config.json')], {
     env: { ...process.env, PATH: join(directory, 'bin') + ':' + process.env.PATH, CONTROLLER_FIXTURE_ROOT: directory,
-      CONTROLLER_FIXTURE_FAIL_CATALOG: failCatalog ? '1' : '0' },
+      CONTROLLER_FIXTURE_FAIL_CATALOG: failCatalog ? '1' : '0', CONTROLLER_FIXTURE_FAIL_HOST: failHost ? '1' : '0' },
     output: (line) => output.push(line), stopTimeoutMs: 12000,
   });
   t.after(() => child.stop());
@@ -178,4 +178,14 @@ test('resolves bundled Copilot only after fresh dependency installation and buil
   assert.ok(installed >= 0 && built > installed && version > built);
   await child.stop();
   assert.equal((await child.finished).code, 0, output.join('\n'));
+});
+
+test('a native Host exit during readiness fails the launcher and cleans up owned listeners', async (t) => {
+  const { child, output, state, ports } = await workflow(t, false, 'copilot', false, true);
+  assert.equal((await child.finished).code, 1, output.join('\n'));
+  assert.match(output.join('\n'), /Agent Host exited/);
+  assert.ok(!output.some((line) => line.startsWith('Remote Controller:')));
+  await assert.rejects(readFile(join(state, 'ready.json')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(state, 'run.lock/owner.json')), { code: 'ENOENT' });
+  for (const port of ports.slice(0, 2)) await assert.rejects(fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(1000) }));
 });

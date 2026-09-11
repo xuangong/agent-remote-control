@@ -19,7 +19,7 @@ export async function createCopilotHostRegistration(options: CopilotHostRegistra
   const nodeEntry = /\.(?:m?js|cjs)$/i.test(executable);
   const { stdout } = await promisify(execFile)(nodeEntry ? process.execPath : executable,
     [...(nodeEntry ? [executable] : []), '--version'], { timeout: 5000, env });
-  const match = /^GitHub Copilot CLI (\d+)\.(\d+)\.(\d+)(?:\s|$)/.exec(stdout.trim());
+  const match = /^GitHub Copilot CLI (\d+)\.(\d+)\.(\d+)\.?(?:\s|$)/.exec(stdout.trim());
   const supported = match && (Number(match[1]) > 1 || Number(match[1]) === 1 &&
     (Number(match[2]) > 0 || Number(match[2]) === 0 && Number(match[3]) >= 83));
   if (!supported) throw new Error(`Copilot executable must be GitHub Copilot CLI version 1.0.83 or newer; got ${stdout.trim() || 'unknown'}.`);

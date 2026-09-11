@@ -199,6 +199,10 @@ async function main() {
       else controller.signal.addEventListener('abort', accept, { once: true });
     });
     controller.signal.throwIfAborted();
+  } catch (error) {
+    // Timers may wrap the abort reason; preserve service failures as errors.
+    if (controller.signal.aborted) throw controller.signal.reason;
+    throw error;
   } finally {
     controller.abort();
     console.log('Stopping processes started by this launcher...');

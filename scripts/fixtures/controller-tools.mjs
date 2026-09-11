@@ -67,6 +67,8 @@ if (mode === 'pnpm') {
 } else if (mode === 'codex' || mode === 'claude' || mode === 'copilot') {
   record({ version: mode });
   console.log(mode === 'copilot' ? 'GitHub Copilot CLI 1.0.83' : mode === 'codex' ? 'codex-cli 0.148.0' : '2.1.247 (Claude Code)');
+} else if (mode === 'host' && process.env.CONTROLLER_FIXTURE_FAIL_HOST === '1') {
+  setTimeout(() => process.exit(1), 40);
 } else if (mode === 'host') {
   if (!existsSync(join(root, 'built'))) throw new Error('The Host was not built.');
   await register({ key: process.env.AGENT_HOST_REMOTE_KEY, id: 'native', name: process.env.AGENT_HOST_NAME,

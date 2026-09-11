@@ -536,7 +536,7 @@ export function App({
     nextSideRequest(source);
     setSideSessions((current) => [...current.filter((entry) => sessionKey(entry) !== sessionKey(session)), session]);
     setSideSelections((current) => ({ ...current, [sessionKey(source)]: sessionKey(session) }));
-    setSideFocus(undefined);
+    setSideFocus(sessionKey(session));
   }
   function revealSession(session: OpenedSession): void {
     if (stackPath.some((entry) => sessionKey(entry) === sessionKey(session))) setSideFocus(sessionKey(session));

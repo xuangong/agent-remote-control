@@ -9,6 +9,8 @@ import { loadCompatibilityManifest } from './compatibility.js';
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
 const implementationDigest = 'sha256:d8fdc7cc1b3b4a412e46aaacede0afa478eee509c99e48f2d684e2ede8ee5a15';
 
+const copilotCapabilities = ['native.experimental-rpc', 'controls.settings', 'events.subagent.navigation', 'interactions.callback-identity', 'events.resources-usage', 'controls.immediate-input'];
+
 describe('Agent Remote compatibility manifest', () => {
   const roots: string[] = [];
   const originalManifest = process.env[manifestEnvironment];
@@ -33,6 +35,7 @@ describe('Agent Remote compatibility manifest', () => {
         { providerId: 'codex' },
         { providerId: 'claude', native: { name: 'claude-code', version: '2.1.247', revision: null },
           sdk: { name: '@anthropic-ai/claude-agent-sdk', version: '0.3.247' } },
+        { providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'} },
       ],
     });
   });
@@ -54,7 +57,7 @@ describe('Agent Remote compatibility manifest', () => {
     expect(() => loadCompatibilityManifest()).not.toThrow();
   });
 
-  it('requires exactly the Claude, Codex, and DSH Provider entries', () => {
+  it('requires exactly the Claude, Codex, Copilot, and DSH Provider entries', () => {
     process.env[manifestEnvironment] = writeManifest(validManifest({ omitCodex: true }));
 
     expect(() => loadCompatibilityManifest()).toThrow('exact Provider set');
@@ -132,6 +135,40 @@ describe('Agent Remote compatibility manifest', () => {
 
   it.each(['duplicate', 'extra', 'wrong-status', 'malformed'] as const)('rejects %s Claude degradation declarations', (kind) => {
     process.env[manifestEnvironment] = writeManifest(validManifest({ invalidClaudeDegradation: kind }));
+    expect(() => loadCompatibilityManifest()).toThrow(/degradation/);
+  });
+
+  it.each(['missing', 'native-name', 'native-version', 'newer-native', 'native-revision', 'sdk-name', 'sdk-version', 'missing-sdk'] as const)('rejects incompatible Copilot identity: %s', kind => {
+    const manifest = validManifest();
+    const copilot = manifest.providers.find(p => p.providerId === 'copilot')!;
+    if (kind === 'missing') manifest.providers = manifest.providers.filter(p => p !== copilot);
+    if (kind === 'native-name') copilot.native.name = 'another-cli';
+    if (kind === 'native-version') copilot.native.version = '1.0.82';
+    if (kind === 'newer-native') copilot.native.version = '1.0.84';
+    if (kind === 'native-revision') copilot.native.revision = 'unexpected';
+    if (kind === 'sdk-name') copilot.sdk!.name = 'another-sdk';
+    if (kind === 'sdk-version') copilot.sdk!.version = '1.0.12';
+    if (kind === 'missing-sdk') delete copilot.sdk;
+    process.env[manifestEnvironment] = writeManifest(manifest);
+    expect(() => loadCompatibilityManifest()).toThrow(kind === 'missing' ? 'exact Provider set' : 'Copilot');
+  });
+
+  it.each(copilotCapabilities)('requires the evidenced Copilot %s degradation', capability => {
+    const manifest = validManifest();
+    const copilot = manifest.providers.find(p => p.providerId === 'copilot')!;
+    copilot.degradations = copilot.degradations.filter(d => d.capability !== capability);
+    process.env[manifestEnvironment] = writeManifest(manifest);
+    expect(() => loadCompatibilityManifest()).toThrow('Copilot degradation');
+  });
+
+  it.each(['duplicate', 'extra', 'wrong-status', 'malformed'] as const)('rejects %s Copilot degradation declarations', kind => {
+    const manifest = validManifest();
+    const entries = manifest.providers.find(p => p.providerId === 'copilot')!.degradations;
+    if (kind === 'duplicate') entries.push({...entries[0]!});
+    if (kind === 'extra') entries.push({capability: 'unknown', status: 'degraded', reason: 'Unknown'});
+    if (kind === 'wrong-status') entries[0]!.status = 'unsupported';
+    if (kind === 'malformed') entries[0]!.reason = '';
+    process.env[manifestEnvironment] = writeManifest(manifest);
     expect(() => loadCompatibilityManifest()).toThrow(/degradation/);
   });
 
@@ -229,6 +266,7 @@ function validManifest(overrides: {
       ...(!overrides.omitClaudeSdk ? { sdk: { name: overrides.claudeSdkName ?? '@anthropic-ai/claude-agent-sdk', version: overrides.claudeSdkVersion ?? '0.3.247' } } : {}),
       degradations: claudeDegradations,
     },
+    {providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'}, degradations: copilotCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Accepted bounded native integration scope.'}))},
   ];
   return {
     schemaVersion: 1,

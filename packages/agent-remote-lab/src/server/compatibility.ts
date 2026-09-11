@@ -5,11 +5,19 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
 
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
-const requiredProviderIds = ['claude', 'codex', 'dsh'] as const;
+const requiredProviderIds = ['claude', 'codex', 'copilot', 'dsh'] as const;
 const requiredDegradations: Record<
   (typeof requiredProviderIds)[number],
   ReadonlyArray<{ capability: string; status: ProviderCompatibility['degradations'][number]['status'] }>
 > = {
+  copilot: [
+    {capability: 'native.experimental-rpc', status: 'degraded'},
+    {capability: 'controls.settings', status: 'degraded'},
+    {capability: 'events.subagent.navigation', status: 'degraded'},
+    {capability: 'interactions.callback-identity', status: 'degraded'},
+    {capability: 'events.resources-usage', status: 'degraded'},
+    {capability: 'controls.immediate-input', status: 'degraded'},
+  ],
   claude: [
     { capability: 'events.subagent.navigation', status: 'degraded' },
     { capability: 'events.tool-result.resources', status: 'degraded' },
@@ -93,7 +101,7 @@ export function loadCompatibilityManifest(path?: string): CompatibilityManifest 
   const providerIds = providers.map(({ providerId }) => providerId).sort();
   if (providerIds.length !== requiredProviderIds.length
     || providerIds.some((providerId, index) => providerId !== requiredProviderIds[index])) {
-    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: claude, codex, and dsh.');
+    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: claude, codex, copilot, and dsh.');
   }
   for (const provider of providers) validateRequiredDegradations(provider);
   verifyImplementationDigest(manifestPath, borgee);
@@ -125,6 +133,11 @@ function parseProviderCompatibility(value: unknown): ProviderCompatibility {
     || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@anthropic-ai/claude-agent-sdk'
     || value.sdk.version !== '0.3.247')) {
     throw new Error('Agent Remote compatibility manifest must pin Claude Code 2.1.247 and @anthropic-ai/claude-agent-sdk 0.3.247.');
+  }
+  if (value.providerId === 'copilot' && (value.native.name !== 'github-copilot-cli' || value.native.version !== '1.0.83'
+    || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@github/copilot-sdk'
+    || value.sdk.version !== '1.0.11')) {
+    throw new Error('Agent Remote compatibility manifest must pin Copilot CLI 1.0.83 and @github/copilot-sdk 1.0.11.');
   }
   let sdk: ProviderCompatibility['sdk'];
   if (value.sdk !== undefined) {
@@ -179,8 +192,8 @@ function parseDegradation(value: unknown): ProviderCompatibility['degradations']
 }
 
 function validateRequiredDegradations(provider: ProviderCompatibility): void {
-  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex' && provider.providerId !== 'claude') return;
-  const displayName = provider.providerId === 'dsh' ? 'DSH' : provider.providerId === 'codex' ? 'Codex' : 'Claude';
+  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex' && provider.providerId !== 'claude' && provider.providerId !== 'copilot') return;
+  const displayName = provider.providerId === 'dsh' ? 'DSH' : provider.providerId === 'codex' ? 'Codex' : provider.providerId === 'copilot' ? 'Copilot' : 'Claude';
   const actual = new Map(provider.degradations.map((entry) => [entry.capability, entry.status]));
   if (actual.size !== provider.degradations.length) {
     throw new Error(`Agent Remote compatibility manifest must contain unique degradation capabilities for ${displayName}.`);

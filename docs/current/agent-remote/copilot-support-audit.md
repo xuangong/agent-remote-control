@@ -1,6 +1,6 @@
 # Copilot support audit
 
-This records core admission on `feat/copilot-provider`, following native adapter and Host commits through `1748d4d`. It is not a full-parity or published-release claim. The [baseline](provider-support.md) includes all 40 Copilot S/I/T/X/C/R/A/H cells. Public protocol remains 1.4.0 and Host uplink remains 2.
+This records core admission on `feat/copilot-provider`, with final native integration and launcher lifecycle validation through `2fd9c1a`. It is not a full-parity or published-release claim. The [baseline](provider-support.md) includes all 40 Copilot S/I/T/X/C/R/A/H cells. Public protocol remains 1.4.0 and Host uplink remains 2.
 
 ## Native boundary and comparison
 
@@ -38,3 +38,15 @@ Run `NODE_OPTIONS=--no-experimental-webstorage pnpm test:copilot`. Unit cases ha
 Host registration/directory/launcher behavior is covered in their existing Copilot tests. Generic `host-provider.spec.ts` additionally selects Copilot over a real Host uplink using Recorded responses: this verifies provider-neutral UI routing, not native model behavior. Whole-branch build, full suite and browser acceptance are recorded separately by the branch controller.
 
 Accepted limits include no MCP forms, typed plan review, granular grants, external-action completion, output-image resource registry, todo mapping, context capacity/cost meter or PTY control. Native saved history does not resurrect process-local callbacks, running task ownership or broker bindings after a cold restart. An external native terminal remains a separate runtime. Debugger lacks the same Host/command/settings/queue entry points documented in the baseline; use existing Lab/headless paths where supported, without treating manual native operation as Remote parity.
+
+
+## Branch acceptance (2026-09-12)
+
+- Whole-repository `pnpm test` at `9714aea`: **1,384 passed, 7 skipped**, with Codex CLI 0.148.0 and Claude Code 2.1.247 selected explicitly. Copilot **37/37** includes the four real SDK/CLI loopback scenarios. Whole-repository typecheck and build passed.
+- `pnpm test:e2e host-provider.spec.ts`: **6/6**, covering Codex, Claude and Copilot selection on desktop and mobile over the real Host uplink with Recorded responses.
+- A separate browser exercise used real Copilot SDK/CLI, Host, Broker and built Web with an isolated loopback model. Root responses appeared exactly once; skill documentation opened and native invocation executed; the native child view showed its initial history and second input before its second answer, each exactly once. The temporary model/profile were removed afterward. No cloud-account model prompt was submitted.
+- Final launcher fixes at `2fd9c1a`: Host executable tests **8/8**, setup tests **24/24**, followed by **4/4** focused process-order checks after the final fallback adjustment. Host typecheck and compatibility checks passed. The complete earlier suite is separate evidence from these final covering checks.
+- Real rebuilt Copilot launcher startup and PID-only SIGTERM passed: exit 0, no SDK stream/forced-shutdown error, all ten recorded owned processes exited, both listeners were released, and readiness/lock files were removed. The controller was started again for manual testing. Existing unrelated services were preserved.
+- Independent task reviews, whole-branch review and the final scoped fix review are complete with no remaining code-review blockers. Public Remote protocol and Host uplink versions remain unchanged.
+
+The callback ambiguity limitation above is intentional: SDK 1.0.11 does not provide enough callback identity to safely route identical simultaneous unbound questions. Those requests fail explicitly; independent child controls, cloud authentication/model switching and the other unavailable capabilities above are not implied by these passing checks.

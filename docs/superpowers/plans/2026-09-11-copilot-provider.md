@@ -48,4 +48,4 @@
 - [x] Validate real SDK-to-CLI transport, create/resume/history and deterministic local model requests where available.
 - [x] Document implemented support, experimental APIs and unverified limits without implying type declarations prove runtime support.
 - [x] Run provider build/typecheck, relevant bounded suites and compatibility update/check.
-- [ ] Controller: whole-repository build/tests, browser acceptance and whole-branch review.
+- [x] Controller: whole-repository build/tests, browser acceptance and whole-branch review.

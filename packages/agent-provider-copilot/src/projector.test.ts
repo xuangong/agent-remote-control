@@ -35,7 +35,18 @@ it.each(['live', 'history'] as const)('keeps queued interactions distinct and st
  expect(projected.filter(e => e.type === 'turn_started' || e.type === 'turn_completed').map(e => e.type)).toEqual(['turn_started', 'turn_completed', 'turn_started', 'turn_completed']);
  const starts = projected.filter(e => e.type === 'turn_started');
  expect(starts[0]?.turnId).not.toBe(starts[1]?.turnId);
+ const users = projected.filter(e => e.type === 'timeline' && e.item.type === 'user_message');
+ expect(users.map(e => e.turnId)).toEqual([starts[0]!.turnId, starts[0]!.turnId, starts[1]!.turnId]);
 }, 10000);
 it('reports compaction failure without claiming completion or failing the turn', () => {
  expect(new Projector().project(event('session.compaction_complete', {success: false, error: 'context unavailable'}))?.event).toMatchObject({type: 'timeline', item: {type: 'error', message: expect.stringContaining('context unavailable')}});
+}, 10000);
+
+it('assigns input after a completed ordinary turn to its new turn', () => {
+ const projector = new Projector();
+ const projected = [event('user.message', {content: 'First'}), event('assistant.turn_start', {turnId: '0'}), event('assistant.idle', {}), event('user.message', {content: 'Second'}), event('assistant.turn_start', {turnId: '0'})].flatMap(e => projector.projectAll(e)).map(p => p.event);
+ const users = projected.filter(e => e.type === 'timeline' && e.item.type === 'user_message');
+ const starts = projected.filter(e => e.type === 'turn_started');
+ expect(users.map(e => e.turnId)).toEqual(starts.map(e => e.turnId));
+ expect(starts[0]!.turnId).not.toBe(starts[1]!.turnId);
 }, 10000);

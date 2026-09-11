@@ -16,6 +16,7 @@ export class Projector {
   private readonly messages = new Map<string, string>();
   private turnId: string | undefined;
   private active = false;
+  private inputTurnId?: string;
   private interactionId?: string;
   private readonly finalizedMessages = new Set<string>();
   private readonly historicalCompletions = new Set<string>();
@@ -55,7 +56,14 @@ export class Projector {
   project(event: SessionEvent, delivery: 'history' | 'live' = 'live'): { key: string; event: AgentStreamEvent } | undefined {
     const d = record(event.data);
     // Native child loops reuse numeric turn IDs on follow-up; event IDs remain unique.
-    if (event.type === 'assistant.turn_start' && !this.active) this.turnId = `turn:${event.id}`;
+    if (event.type === 'user.message' && !this.active) {
+      this.inputTurnId = `turn:${event.id}`;
+      this.turnId = this.inputTurnId;
+    }
+    if (event.type === 'assistant.turn_start' && !this.active) {
+      this.turnId = this.inputTurnId ?? `turn:${event.id}`;
+      this.inputTurnId = undefined;
+    }
     const turnId = this.turnId;
     const wrap = (value: AgentStreamEvent, key = event.id) => ({ key, event: value });
     const timeline = (item: Extract<AgentStreamEvent, {type: 'timeline'}>['item'], key?: string) => wrap({ type: 'timeline', provider, item, turnId }, key);
@@ -79,8 +87,8 @@ export class Projector {
       case 'assistant.idle':
         if (!this.active) return undefined;
         this.active = false; return wrap({ type: 'turn_completed', provider, turnId });
-      case 'abort': this.active = false; return wrap({ type: 'turn_canceled', provider, reason: 'Native turn aborted', turnId });
-      case 'session.error': this.active = false; return wrap({ type: 'turn_failed', provider, error: event.data.message, turnId });
+      case 'abort': this.active = false; this.inputTurnId = undefined; return wrap({ type: 'turn_canceled', provider, reason: 'Native turn aborted', turnId });
+      case 'session.error': this.active = false; this.inputTurnId = undefined; return wrap({ type: 'turn_failed', provider, error: event.data.message, turnId });
       case 'tool.execution_start': {
         const tool = { name: event.data.toolName, detail: detail(event.data.toolName, event.data.arguments) };
         this.tools.set(event.data.toolCallId, tool);

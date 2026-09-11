@@ -24,12 +24,17 @@ it.each(['next_turn', 'immediate'] as const)('native SDK preserves %s interactio
   expect(seen.events().filter(e => e.type === 'turn_started')).toHaveLength(count);
   expect(JSON.stringify(f.requests.at(-1)?.messages)).toContain('SECOND_INPUT');
   const persistence = (await session.runtimeInfo()).persistence!;
-  expect((await f.provider.listSessions()).some(s => s.nativeSessionId === persistence.sessionId)).toBe(true);
+  await waitFor(async () => (await f.provider.listSessions()).some(s => s.nativeSessionId === persistence.sessionId));
   await session.dispose(); await seen.done;
   const resumed = await f.provider.resumeSession(persistence); const history = observe(resumed);
   await waitFor(() => history.items.some(i => i.type === 'history_boundary'));
   expect(history.events().filter(e => e.type === 'turn_started')).toHaveLength(count);
   expect(history.events().filter(e => e.type === 'turn_completed')).toHaveLength(count);
+  for (const events of [seen.events(), history.events()]) {
+   const starts = events.filter(e => e.type === 'turn_started');
+   const users = events.filter(e => e.type === 'timeline' && e.item.type === 'user_message');
+   expect(users.map(e => e.turnId)).toEqual([starts[0]!.turnId, starts[count - 1]!.turnId]);
+  }
   expect(f.errors).toEqual([]);
  } finally { await f.close(); }
 }, 45000);

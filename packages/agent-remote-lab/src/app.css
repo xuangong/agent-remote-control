@@ -874,3 +874,8 @@ textarea {
   .lab-fork-entries { margin-bottom: 0; }
   .lab-timeline-scroll { padding-bottom: 8px; }
 }
+
+.gateway-access { max-width: 40rem; margin: 15vh auto; padding: 1.5rem; }
+.gateway-access h1 { font-size: 1.75rem; }
+.gateway-access p { line-height: 1.6; }
+.gateway-access a { display: inline-block; margin-top: 1rem; }

@@ -3,6 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@borgee/agent-remote-protocol';
+import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@borgee/agent-remote-relay';
 import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
 type RpcResponse = { status: number; body: string };
@@ -17,7 +18,15 @@ type Binding = { hostId: string; providerId: string; nativeSessionId: string; ag
 class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
-export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?: number; keyLifetimeMs?: number }) {
+export interface RemoteHostBrokerOptions {
+  origin: string; rpcTimeoutMs?: number; keyLifetimeMs?: number;
+  accessPolicy?: AgentRemoteRequestAccessPolicy;
+  mutationPolicy?: AgentRemoteHttpMutationPolicy;
+  publicUrl?: string;
+  onPairing?(key: string, expiresAt: number): void;
+  connectionExpiresAt?(request: IncomingMessage): number | undefined;
+}
+export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
   const origin = new URL(options.origin).origin;
   const keys = new Map<string, { expires: number; installationId?: string }>();
   const hosts = new Map<string, Host>();
@@ -26,6 +35,13 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
   const attached = new Map<string, Promise<Binding>>();
   const creations = new Map<string, { fingerprint: string; result: Promise<Binding> }>();
   const websockets = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+  const permitted = async (request: IncomingMessage) => options.accessPolicy
+    ? await options.accessPolicy.authorize(request) === true : local(request, origin);
+  function expire(client: WebSocket, expiresAt?: number) {
+    if (expiresAt === undefined) return;
+    const timer = setTimeout(() => client.close(1008, 'Credential expired'), Math.max(0, expiresAt - Date.now()));
+    timer.unref(); client.once('close', () => clearTimeout(timer));
+  }
   const keyHash = (key: string) => createHash('sha256').update(key).digest('hex');
   const requireHost = (id: string) => {
     const host = hosts.get(id);
@@ -66,6 +82,7 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
     socket.on('error', () => undefined);
     socket.on('close', () => { clearTimeout(timer); if (host) disconnected(host, socket); });
     socket.on('message', (raw, binary) => {
+      if (options.connectionExpiresAt && credential.expires <= Date.now()) return socket.close(1008, 'Credential expired');
       const decoded = binary ? undefined : decodeRemoteHostUplinkMessage(raw.toString());
       if (!decoded || decoded.status !== 'ok') return socket.close(1008, 'Invalid uplink envelope');
       const message = decoded.value;
@@ -207,10 +224,10 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
     return existing.result;
   }
   async function handle(request: IncomingMessage, response: ServerResponse, url: URL) {
-    if (!local(request, origin)) throw new BrokerError(403, 'forbidden', 'This endpoint is available only to the local application.');
+    if (!await permitted(request)) throw new BrokerError(403, 'forbidden', 'This endpoint is available only to the local application.');
     response.setHeader('cache-control', 'no-store');
     if (request.method === 'POST') {
-      const access = createLocalLabMutationPolicy(origin).validate(request);
+      const access = (options.mutationPolicy ?? createLocalLabMutationPolicy(origin)).validate(request);
       if (access.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
     if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: [...hosts.values()].map(({ id, name, providers, legacyDsh, socket }) => ({ id, name, online: socket?.readyState === WebSocket.OPEN, providers,
@@ -221,8 +238,9 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
       if (keys.size >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
       const key = `arc_${randomBytes(32).toString('base64url')}`; const expires = Date.now() + (options.keyLifetimeMs ?? 24 * 60 * 60 * 1000);
       keys.set(keyHash(key), { expires });
+      options.onPairing?.(key, expires);
       const address = request.socket.localAddress?.includes(':') ? `[${request.socket.localAddress}]` : request.socket.localAddress;
-      return json(response, 201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: `http://${address}:${request.socket.localPort}` });
+      return json(response, 201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: options.publicUrl ?? `http://${address}:${request.socket.localPort}` });
     }
     const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {
@@ -248,21 +266,24 @@ export function createRemoteHostBroker(options: { origin: string; rpcTimeoutMs?:
       const header = request.headers.authorization;
       const key = header?.startsWith('Bearer ') ? keys.get(keyHash(header.slice(7))) : undefined;
       if (!key || key.expires <= Date.now()) return rejectUpgrade(socket, 401);
-      return websockets.handleUpgrade(request, socket, head, (client) => register(client, key));
+      return websockets.handleUpgrade(request, socket, head, (client) => { if (options.connectionExpiresAt) expire(client, key.expires); register(client, key); });
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
     const binding = match && bindings.get(match[1]!);
-    if (!binding || !local(request, origin) || request.headers.origin !== origin) return rejectUpgrade(socket, 403);
+    if (!binding || !await permitted(request) || request.headers.origin !== origin) return rejectUpgrade(socket, 403);
     let host: Host;
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); } catch { return rejectUpgrade(socket, 503); }
     if (host.streams.size >= 128) return rejectUpgrade(socket, 429);
     websockets.handleUpgrade(request, socket, head, (client) => {
+      const expiresAt = options.connectionExpiresAt?.(request);
+      expire(client, expiresAt);
       const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { socket: client, ready: false, buffered: [] };
       host.streams.set(streamId, stream);
       const opening = setTimeout(() => client.close(1013, 'Remote stream opening timed out'), options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
       client.on('error', () => undefined);
       client.on('message', (raw, binary) => {
+        if (expiresAt !== undefined && expiresAt <= Date.now()) return client.close(1008, 'Credential expired');
         if (binary) return client.close(1003, 'Text protocol required');
         if (!stream.ready) {
           if (stream.buffered.length >= 32 || stream.buffered.reduce((sum, value) => sum + Buffer.byteLength(value), 0) + Buffer.byteLength(raw.toString()) > 1024 * 1024) return client.close(1013, 'Remote stream is not ready');

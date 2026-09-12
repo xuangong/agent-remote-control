@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { GatewayController } from './GatewayController.js';
 import { App } from './App.js';
 import './app.css';
 import '@borgee/agent-remote-web/styles.css';
@@ -17,4 +18,7 @@ const fixtureAction = fixtureEndpoint ? async (
   if (!response.ok) throw new Error(`Lab scenario action failed with HTTP ${response.status}.`);
 } : undefined;
 
-createRoot(root).render(<StrictMode><App fixtureAction={fixtureAction} /></StrictMode>);
+const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
+createRoot(root).render(<StrictMode>{gatewayMode
+  ? <GatewayController>{baseUrl => <App baseUrl={baseUrl} />}</GatewayController>
+  : <App fixtureAction={fixtureAction} />}</StrictMode>);

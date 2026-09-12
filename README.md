@@ -149,3 +149,5 @@ pnpm bdb protocol trace SESSION_ID --jsonl --until idle --timeout 10000
 Use the public session ID shown by the workbench. `--relay` and `--origin` override the standalone defaults `http://127.0.0.1:5910` and `http://127.0.0.1:6175`. Environment settings are `AGENT_REMOTE_URL` and `AGENT_REMOTE_ORIGIN`; the older `BORGEE_REMOTE_URL` and `BORGEE_REMOTE_ORIGIN` aliases remain accepted. `bdb --help` lists creation, resume, observation, steer, cancel, planning, interaction, resource, and wait commands.
 
 The live Codex process tests require `codex-cli 0.148.0`. Set `BORGEE_CODEX_TEST_EXECUTABLE` to an executable from an isolated installation of that exact version when the default `codex` executable differs. This does not require changing a global Codex installation.
+
+Optional authenticated hosting: see [Gateway Relay](docs/current/agent-remote/gateway-relay.md) for gateway login, isolated user brokers and deployment.

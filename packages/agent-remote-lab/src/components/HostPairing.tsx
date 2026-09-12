@@ -39,7 +39,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
     <label htmlFor="remote-host">Connected Host</label>
     <select id="remote-host" value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
-      {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}</option>) : <option value="local">Recorded fixture</option>}
+      {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}</option>) : <option value="local">No connected Hosts</option>}
     </select>
     {onNewSession ? <button type="button" onClick={onNewSession}>New session</button> : null}
     <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>

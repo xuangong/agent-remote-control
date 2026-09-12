@@ -26,6 +26,11 @@
         "packages/agent-provider-codex/package.json",
         "packages/agent-provider-codex/src",
         "packages/agent-provider-codex/tsconfig.json",
+        "packages/agent-provider-copilot/README.md",
+        "packages/agent-provider-copilot/package.json",
+        "packages/agent-provider-copilot/src",
+        "packages/agent-provider-copilot/tests",
+        "packages/agent-provider-copilot/tsconfig.json",
         "packages/agent-provider-dsh/fixtures",
         "packages/agent-provider-dsh/package.json",
         "packages/agent-provider-dsh/scripts",
@@ -72,7 +77,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:e838d980026fa7b52144ec8fba85048110354d34b57717ea78a44a234c546662"
+      "digest": "sha256:f6f42150419e6b802b3dbeb3c32d79b96cbd395315afae0d0ed943d55c015aac"
     }
   },
   "providers": [
@@ -182,6 +187,50 @@
           "capability": "interactions.form.schema",
           "status": "degraded",
           "reason": "The pinned native CLI drops pattern/multipleOf and sensitive markers before onElicitation while retaining defaults. Form and unverified URL completion mappings remain disabled; no partial-schema workaround is advertised."
+        }
+      ]
+    },
+    {
+      "providerId": "copilot",
+      "native": {
+        "name": "github-copilot-cli",
+        "version": "1.0.83",
+        "revision": null
+      },
+      "sdk": {
+        "name": "@github/copilot-sdk",
+        "version": "1.0.11"
+      },
+      "degradations": [
+        {
+          "capability": "native.experimental-rpc",
+          "status": "degraded",
+          "reason": "Public SDK model, skills, commands, tasks, metadata, permissions, interruptMainTurn and eventLog APIs are experimental; only CLI 1.0.83 is native-loopback verified. No ACP or private RPC transport."
+        },
+        {
+          "capability": "controls.settings",
+          "status": "degraded",
+          "reason": "Model catalog is native/auth dependent and changes require idle state. Deferred writes remain unconfirmed until native application. Effort is creation-only; planning and permission-mode controls are unavailable."
+        },
+        {
+          "capability": "events.subagent.navigation",
+          "status": "degraded",
+          "reason": "Children are task/eventLog views under the loaded parent. Repeated task input and cancellation are supported; approvals/questions stay on parent. No independent child queue, settings, resources, cold root resume or external spawn API."
+        },
+        {
+          "capability": "interactions.callback-identity",
+          "status": "degraded",
+          "reason": "SDK question callbacks omit native request/agent IDs. Only unique complete-payload event matches bind; identical concurrent unbound questions fail explicitly. Pending callbacks are process-local; no sensitivity/form/plan/grant/external-action mapping."
+        },
+        {
+          "capability": "events.resources-usage",
+          "status": "degraded",
+          "reason": "Tool output is bounded native text; skill Markdown uses refreshed native locators and bounded regular-file reads. Output images, todos, context capacity, cost and terminal control are not mapped."
+        },
+        {
+          "capability": "controls.immediate-input",
+          "status": "degraded",
+          "reason": "SDK immediate input may become native queued delivery after the active interaction has ended. Native interactionId/delivery determine public turn grouping; adapter does not synthesize a queue."
         }
       ]
     }

@@ -1,6 +1,6 @@
 # New Provider comparison and acceptance checklist
 
-Use the stable row IDs in [Provider support baseline](provider-support.md) before adding a Provider. The target is faithful normalization plus explicit gaps, not a clone of another runtime's CLI. [Claude's audit](claude-support-audit.md) is a completed example. Do not change public semantics to make a support cell look complete.
+Use the stable row IDs in [Provider support baseline](provider-support.md) before adding a Provider. The target is faithful normalization plus explicit gaps, not a clone of another runtime's CLI. [Claude's audit](claude-support-audit.md) and [Copilot's core admission audit](copilot-support-audit.md) provide examples at different implementation scopes. Do not change public semantics to make a support cell look complete.
 
 ## Admission contract
 

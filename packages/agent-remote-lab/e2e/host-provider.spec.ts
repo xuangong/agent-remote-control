@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@borgee/agent-remote-relay';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
 
-for (const selected of [{ id: 'codex', name: 'Codex CLI' }, { id: 'claude', name: 'Claude Code' }]) {
+for (const selected of [{ id: 'codex', name: 'Codex CLI' }, { id: 'claude', name: 'Claude Code' }, { id: 'copilot', name: 'Copilot' }]) {
 test(`selects ${selected.name} on a paired Host and creates through its real uplink`, async ({ page, request }, testInfo) => {
   const relayUrl = `http://127.0.0.1:${process.env.AGENT_REMOTE_TEST_RELAY_PORT ?? 5910}`;
   const invitation = await (await request.post(`${relayUrl}/v1/remote/pairings`, { data: {} })).json();
@@ -17,7 +17,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     relay, url: relayUrl.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: invitation.key,
     installationId: `browser-${testInfo.project.name}`, name: `Browser DSH ${testInfo.project.name}`,
     providers: [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }, { providerId: 'codex', displayName: 'Codex CLI' },
-      { providerId: 'claude', displayName: 'Claude Code' }],
+      { providerId: 'claude', displayName: 'Claude Code' }, { providerId: 'copilot', displayName: 'Copilot' }],
     resolveSession: (id) => agents.has(id) ? relay.requireAgent(id) : undefined,
     async control(control) {
       if (control.path.startsWith('/remote/catalog')) return { status: 200, body: JSON.stringify({ items: [], hasMore: false, revision: '1' }) };

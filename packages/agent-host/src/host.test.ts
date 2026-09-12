@@ -36,8 +36,10 @@ function fixture(providerId: string) {
 }
 
 describe('Agent Host runtime', () => {
-  it('advertises Codex and Claude over real WebSockets and preserves provider-scoped identities across re-pair', async () => {
+  it('advertises Codex, Claude and Copilot over real WebSockets and preserves provider-scoped identities across re-pair', async () => {
     const first = await uplinkBroker('first'); const second = await uplinkBroker('second');
+    const copilot = fixture('copilot');
+    copilot.directory.list = async () => [summary('copilot', 'shared-native')];
     const codex = fixture('codex'); const claude = fixture('claude');
     codex.directory.list = async () => [summary('codex', 'shared-native')];
     let claudeCatalogFailed = false;
@@ -45,12 +47,12 @@ describe('Agent Host runtime', () => {
       if (claudeCatalogFailed) throw new Error('Claude catalog unavailable');
       return [summary('claude', 'shared-native')];
     };
-    const host = createAgentHost({ registrations: [codex, claude], installationId: 'installation', name: 'Host',
+    const host = createAgentHost({ registrations: [codex, claude, copilot], installationId: 'installation', name: 'Host',
       uplink: { url: first.url, remoteKey: 'first-key' } });
     try {
       await host.ready;
-      expect(first.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX' }, { providerId: 'claude', displayName: 'CLAUDE' }]);
-      for (const providerId of ['codex', 'claude']) {
+      expect(first.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX' }, { providerId: 'claude', displayName: 'CLAUDE' }, { providerId: 'copilot', displayName: 'COPILOT' }]);
+      for (const providerId of ['codex', 'claude', 'copilot']) {
         const catalog = await first.rpc('GET', `/remote/catalog?providerId=${providerId}`);
         expect(JSON.parse(catalog.body).items).toEqual([summary(providerId, 'shared-native')]);
         const attached = await first.rpc('POST', '/remote/attach', `${providerId}-relay`, { providerId, nativeSessionId: 'shared-native' });
@@ -62,7 +64,7 @@ describe('Agent Host runtime', () => {
       expect(codex.sessions.get('shared-native')).not.toBe(claude.sessions.get('shared-native'));
       await host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
       expect(second.advertisedProviders()).toEqual(first.advertisedProviders());
-      for (const provider of [codex, claude]) {
+      for (const provider of [codex, claude, copilot]) {
         const providerId = provider.adapter.descriptor.providerId;
         const attached = await second.rpc('POST', '/remote/attach', `${providerId}-new-proposal`, { providerId, nativeSessionId: 'shared-native' });
         expect(JSON.parse(attached.body).agentId).toBe(`${providerId}-relay`);
@@ -78,6 +80,7 @@ describe('Agent Host runtime', () => {
     } finally { await host.close(); await first.close(); await second.close(); }
     expect(codex.sessions.get('shared-native')!.disposed).toBe(true);
     expect(claude.sessions.get('shared-native')!.disposed).toBe(true);
+    expect(copilot.sessions.get('shared-native')!.disposed).toBe(true);
   });
 
   it('disposes a Codex session whose persistence result arrives after bounded shutdown', async () => {

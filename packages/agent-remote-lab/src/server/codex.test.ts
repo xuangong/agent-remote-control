@@ -130,6 +130,50 @@ describe('Codex Lab composition', () => {
           ],
         },
         {
+          "providerId": "copilot",
+          "native": {
+            "name": "github-copilot-cli",
+            "version": "1.0.83",
+            "revision": null
+          },
+          "sdk": {
+            "name": "@github/copilot-sdk",
+            "version": "1.0.11"
+          },
+          "degradations": [
+            {
+              "capability": "native.experimental-rpc",
+              "status": "degraded",
+              "reason": "Public SDK model, skills, commands, tasks, metadata, permissions, interruptMainTurn and eventLog APIs are experimental; only CLI 1.0.83 is native-loopback verified. No ACP or private RPC transport."
+            },
+            {
+              "capability": "controls.settings",
+              "status": "degraded",
+              "reason": "Model catalog is native/auth dependent and changes require idle state. Deferred writes remain unconfirmed until native application. Effort is creation-only; planning and permission-mode controls are unavailable."
+            },
+            {
+              "capability": "events.subagent.navigation",
+              "status": "degraded",
+              "reason": "Children are task/eventLog views under the loaded parent. Repeated task input and cancellation are supported; approvals/questions stay on parent. No independent child queue, settings, resources, cold root resume or external spawn API."
+            },
+            {
+              "capability": "interactions.callback-identity",
+              "status": "degraded",
+              "reason": "SDK question callbacks omit native request/agent IDs. Only unique complete-payload event matches bind; identical concurrent unbound questions fail explicitly. Pending callbacks are process-local; no sensitivity/form/plan/grant/external-action mapping."
+            },
+            {
+              "capability": "events.resources-usage",
+              "status": "degraded",
+              "reason": "Tool output is bounded native text; skill Markdown uses refreshed native locators and bounded regular-file reads. Output images, todos, context capacity, cost and terminal control are not mapped."
+            },
+            {
+              "capability": "controls.immediate-input",
+              "status": "degraded",
+              "reason": "SDK immediate input may become native queued delivery after the active interaction has ended. Native interactionId/delivery determine public turn grouping; adapter does not synthesize a queue."
+            }
+          ]
+        },
+        {
           providerId: 'claude',
           native: { name: 'claude-code', version: '2.1.247', revision: null },
           sdk: { name: '@anthropic-ai/claude-agent-sdk', version: '0.3.247' },

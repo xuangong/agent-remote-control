@@ -72,3 +72,7 @@ Tests use per-test and outer deadlines. Validation starts separate services on c
 - Relay conformance passed all 13 tests. The final desktop/mobile browser rerun passed all 6 Claude discovery and Host provider tests, using separate free ports.
 - Native-process validation used Codex 0.148.0 and Claude Code 2.1.247. The opt-in DSH probe passed 9 selected native cases; 107 unrelated upstream cases were deselected. Its parent-offline check controls registry visibility, not a complete parent-process exit.
 - Compatibility metadata regeneration/check and whitespace validation passed before the local commit. Existing running consoles were preserved; they are not claimed to have loaded this implementation.
+
+## Copilot core admission
+
+The official SDK integration on `feat/copilot-provider` adds bounded core admission rather than a full native parity claim. [Copilot's audit](copilot-support-audit.md) records SDK 1.0.11 / CLI 1.0.83, native loopback tests, authoritative queue/steering interaction grouping, parent-owned child callbacks and current skill resource bounds. All Copilot baseline rows are explicit, including unavailable modes/forms/resources and experimental model/task RPC limits. The Paseo ACP comparison is source evidence only; Agent Remote retains its official SDK transport.

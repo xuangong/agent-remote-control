@@ -879,3 +879,18 @@ textarea {
 .gateway-access h1 { font-size: 1.75rem; }
 .gateway-access p { line-height: 1.6; }
 .gateway-access a { display: inline-block; margin-top: 1rem; }
+.gateway-sign-out { position: fixed; z-index: 29; top: calc(3px + env(safe-area-inset-top)); left: max(80px, calc(env(safe-area-inset-left) + 72px)); min-width: 68px; min-height: 32px; padding: 0 8px; border-color: transparent; border-radius: 6px; color: var(--obs-text-secondary); background: var(--obs-surface); font-size: 12px; }
+.gateway-sign-out ~ .gateway-private > .lab-shell .lab-app-bar { padding-left: max(156px, calc(env(safe-area-inset-left) + 148px)); }
+@media (min-width: 1181px) {
+  .gateway-sign-out ~ .gateway-private > .lab-header-hidden:not(.lab-context-hidden) .lab-context-rail > .lab-rail-heading,
+  .gateway-sign-out ~ .gateway-private > .lab-header-hidden.lab-context-hidden .lab-workbench-heading { padding-left: 156px; }
+}
+@media (max-width: 1180px) {
+  .gateway-sign-out ~ .gateway-private > .lab-header-hidden .lab-workbench-heading { padding-left: max(156px, calc(env(safe-area-inset-left) + 148px)); }
+}
+@media (max-width: 760px), (pointer: coarse) {
+  .gateway-sign-out { min-height: 44px; }
+}
+
+.gateway-private { display: contents; }
+.gateway-private[hidden] { display: none; }

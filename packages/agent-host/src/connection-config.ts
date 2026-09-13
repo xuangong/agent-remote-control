@@ -1,0 +1,48 @@
+import { randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+export interface HostConnection { serverUrl: string; remoteKey: string; environment: NodeJS.ProcessEnv }
+const restartSettings = [
+  'AGENT_HOST_PROVIDERS', 'AGENT_HOST_CODEX', 'AGENT_HOST_CLAUDE', 'AGENT_HOST_CLAUDE_HOME',
+  'AGENT_HOST_COPILOT', 'AGENT_HOST_COPILOT_HOME', 'AGENT_HOST_WORKSPACE', 'AGENT_HOST_NAME',
+  'AGENT_REMOTE_CODEX_EXECUTABLE', 'AGENT_REMOTE_CODEX_HOME', 'AGENT_REMOTE_WORKSPACE',
+] as const;
+function retainedEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(restartSettings.flatMap(name => typeof env[name] === 'string' ? [[name, env[name]]] : []));
+}
+async function readSaved(stateDir: string): Promise<HostConnection | undefined> {
+  let text: string;
+  try { text = await readFile(join(stateDir, 'connection.json'), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('Could not read private Agent Host connection settings.'); }
+  try {
+    const value = JSON.parse(text) as HostConnection;
+    if (!value || typeof value.serverUrl !== 'string' || !value.serverUrl.trim() || typeof value.remoteKey !== 'string' || !value.remoteKey.trim() || !value.environment || typeof value.environment !== 'object') throw new Error();
+    return { serverUrl: value.serverUrl, remoteKey: value.remoteKey, environment: retainedEnvironment(value.environment) };
+  } catch { throw new Error('Private Agent Host connection settings are invalid. Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together to pair again.'); }
+}
+export async function resolveHostConnection(stateDir: string, env: NodeJS.ProcessEnv): Promise<HostConnection> {
+  const hasServer = env.AGENT_HOST_SERVER !== undefined;
+  const hasKey = env.AGENT_HOST_REMOTE_KEY !== undefined;
+  if (hasServer !== hasKey) throw new Error('Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together; saved credentials cannot be mixed with connection overrides.');
+  let saved: HostConnection | undefined;
+  try { saved = await readSaved(stateDir); } catch (error) { if (!hasServer) throw error; }
+  const serverUrl = (hasServer ? env.AGENT_HOST_SERVER : saved?.serverUrl)?.trim();
+  const remoteKey = (hasKey ? env.AGENT_HOST_REMOTE_KEY : saved?.remoteKey)?.trim();
+  if (!serverUrl || !remoteKey) throw new Error('AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required for the first pairing.');
+  const environment = { ...saved?.environment, ...env };
+  if (env.AGENT_REMOTE_WORKSPACE !== undefined && env.AGENT_HOST_WORKSPACE === undefined) delete environment.AGENT_HOST_WORKSPACE;
+  if (env.AGENT_REMOTE_CODEX_EXECUTABLE !== undefined && env.AGENT_HOST_CODEX === undefined) delete environment.AGENT_HOST_CODEX;
+  return { serverUrl, remoteKey, environment };
+}
+export async function saveRegisteredConnection<T>(stateDir: string, connection: HostConnection, accepted: Promise<T>): Promise<T> {
+  const registered = await accepted;
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  await chmod(stateDir, 0o700);
+  const temporary = join(stateDir, `.connection-${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, environment: retainedEnvironment(connection.environment) }), { mode: 0o600, flag: 'wx' });
+    await rename(temporary, join(stateDir, 'connection.json'));
+  } finally { await rm(temporary, { force: true }); }
+  return registered;
+}

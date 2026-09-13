@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { homedir } from 'node:os';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createGatewayStaticPages } from './gateway-static.js';
 
@@ -9,6 +10,7 @@ function required(name: string): string {
   return value;
 }
 const server = createGatewayRelay({
+  stateFile: join(process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay'), 'state.json'),
   origin: required('AGENT_REMOTE_RELAY_URL'), issuer: required('AGENT_REMOTE_ISSUER'),
   secret: required('AGENT_REMOTE_SIGNING_SECRET'),
   servePage: await createGatewayStaticPages(process.env.AGENT_REMOTE_WEB_DIST ?? fileURLToPath(new URL('../../dist', import.meta.url))),

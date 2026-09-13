@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 
-export interface GatewayGrant { subject: string; namespace: string; expiresAt: number; ticket: string; nonce: string }
+export interface GatewayGrant { subject: string; namespace: string; expiresAt: number; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number }
 export interface GatewayAuthOptions { origin: string; issuer: string; secret: string }
 export function validateGatewayOrigin(value: string): string {
   const url = new URL(value);
@@ -12,7 +12,7 @@ export function validateGatewayOrigin(value: string): string {
   return url.origin;
 }
 export function verifyGatewayGrant(ticket: unknown, options: GatewayAuthOptions): GatewayGrant | undefined {
-  if (typeof ticket !== 'string' || ticket.length > 4096) return undefined;
+  if (typeof ticket !== 'string' || ticket.length > 8192) return undefined;
   const parts = ticket.split('.');
   if (parts.length !== 3 || parts.some(part => !/^[A-Za-z0-9_-]+$/.test(part))) return undefined;
   const [header, payload, signature] = parts as [string, string, string];
@@ -30,7 +30,10 @@ export function verifyGatewayGrant(ticket: unknown, options: GatewayAuthOptions)
       typeof value.jti !== 'string' || !value.jti || value.jti.length > 128 ||
       !Number.isSafeInteger(value.iat) || !Number.isSafeInteger(value.exp) ||
       value.iat > now || value.exp <= now || value.exp <= value.iat || value.exp - value.iat > 900) return undefined;
-    return { subject: value.sub, namespace: createHash('sha256').update(JSON.stringify([value.iss, value.sub])).digest('hex'), expiresAt: value.exp * 1000, ticket, nonce: value.nonce };
+    if ((value.continuation !== undefined || value.sessionExpiresAt !== undefined) &&
+      (typeof value.continuation !== 'string' || !value.continuation || value.continuation.length > 6000 ||
+        !Number.isSafeInteger(value.sessionExpiresAt) || value.sessionExpiresAt <= Date.now())) return undefined;
+    return { continuation: value.continuation, sessionExpiresAt: value.sessionExpiresAt, subject: value.sub, namespace: createHash('sha256').update(JSON.stringify([value.iss, value.sub])).digest('hex'), expiresAt: value.exp * 1000, ticket, nonce: value.nonce };
   } catch { return undefined; }
 }
 export function authenticateGatewayRequest(request: IncomingMessage, options: GatewayAuthOptions): GatewayGrant | undefined {

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -50,7 +50,7 @@ try {
   const issuer = launch('bun', ['packages/gateway/tests/fixtures/agent-remote-gateway.ts'], join(gateway, 'vnext'), { ...env, PORT: String(gatewayPort), AGENT_REMOTE_READY_FILE: gatewayReady });
   await ready(gatewayReady, issuer);
   const relayReady = join(temporary, 'relay.json');
-  const relay = launch(process.execPath, ['--import', 'tsx/esm', 'src/server/gateway.ts'], join(root, 'packages/agent-remote-lab'), { ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_READY_FILE: relayReady });
+  let relay = launch(process.execPath, ['--import', 'tsx/esm', 'src/server/gateway.ts'], join(root, 'packages/agent-remote-lab'), { ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_READY_FILE: relayReady, AGENT_REMOTE_STATE_DIR: join(temporary, 'state') });
   await ready(relayReady, relay);
   browser = await chromium.launch({ headless: true, ...(process.env.AGENT_REMOTE_TEST_BROWSER ? { executablePath: process.env.AGENT_REMOTE_TEST_BROWSER } : {}) });
   const context = await browser.newContext(); const page = await context.newPage();
@@ -59,25 +59,30 @@ try {
   await page.getByRole('link', { name: 'Sign in through gateway' }).waitFor();
   await context.addCookies([{ name: 'session_token', value: 'ses_agent_remote_alice', url: gatewayUrl }]);
   await page.goto(gatewayUrl + '/agent-remote');
-  await page.getByRole('button', { name: 'Open remote controller' }).click();
   await page.waitForURL(relayUrl + '/');
   await page.getByRole('button', { name: 'Pair Agent Host', exact: true }).waitFor();
   assert.equal(new URL(page.url()).hash, '');
   const state = await page.evaluate(async () => (await fetch('/auth/status')).json());
   const pairing = await page.evaluate(async base => (await fetch(base + 'v1/remote/pairings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json(), state.basePath);
   assert.equal(pairing.serverUrl, relayUrl);
-  const host = new WebSocket(relayUrl.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } }); sockets.push(host);
-  await once(host, 'open'); const registered = once(host, 'message');
-  host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'integration-host', name: 'Integration Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-  const hostId = JSON.parse((await registered)[0].toString()).hostId;
-  host.on('message', raw => {
-    const message = JSON.parse(raw.toString());
-    if (message.type !== 'rpc_request') return;
-    const body = message.path.startsWith('/remote/catalog/revision') ? { revision: '1' }
-      : message.path.startsWith('/remote/catalog') ? { items: [{ nativeSessionId: 'test-native', providerId: 'codex', title: 'Private test session', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: 'idle' }], revision: '1', hasMore: false }
-      : message.path.startsWith('/remote/workspaces') ? { workspaces: [] } : { models: [] };
-    host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify(body) }));
-  });
+  async function connectHost() {
+    const host = new WebSocket(relayUrl.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } }); sockets.push(host);
+    await once(host, 'open'); const registered = once(host, 'message');
+    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'integration-host', name: 'Integration Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+    const hostId = JSON.parse((await registered)[0].toString()).hostId;
+    host.on('message', raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.type !== 'rpc_request') return;
+      const body = message.path.startsWith('/remote/catalog/revision') ? { revision: '1' }
+        : message.path.startsWith('/remote/catalog') ? { items: [{ nativeSessionId: 'test-native', providerId: 'codex', title: 'Private test session', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: 'idle' }], revision: '1', hasMore: false }
+        : message.path === '/remote/attach' ? { agentId: 'test-agent', nativeSessionId: 'test-native' }
+        : message.path.startsWith('/v1/sessions/') ? { restored: true }
+        : message.path.startsWith('/remote/workspaces') ? { workspaces: [] } : { models: [] };
+      host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify(body) }));
+    });
+    return { host, hostId };
+  }
+  const { hostId } = await connectHost();
   await page.reload();
   await page.getByRole('option', { name: 'Integration Host · Online', exact: true }).waitFor({ state: 'attached' });
   const hosts = await page.evaluate(async base => (await fetch(base + 'v1/remote/hosts')).json(), state.basePath);
@@ -86,7 +91,7 @@ try {
   await page.getByText('Private test session', { exact: true }).first().waitFor();
   const bob = await browser.newContext(); const other = await bob.newPage(); other.setDefaultTimeout(10_000);
   await bob.addCookies([{ name: 'session_token', value: 'ses_agent_remote_bob', url: gatewayUrl }]);
-  await other.goto(gatewayUrl + '/agent-remote'); await other.getByRole('button', { name: 'Open remote controller' }).click(); await other.waitForURL(relayUrl + '/');
+  await other.goto(gatewayUrl + '/agent-remote'); await other.waitForURL(relayUrl + '/');
   const isolation = await other.evaluate(async alicePath => {
     const own = await (await fetch('/auth/status')).json();
     return { own: await (await fetch(own.basePath + 'v1/remote/hosts')).json(), forbidden: (await fetch(alicePath + 'v1/remote/hosts')).status, basePath: own.basePath };
@@ -105,9 +110,30 @@ try {
   assert.equal(retained.basePath, state.basePath, 'A forwarded grant must not switch the victim account');
   await page.goto(relayUrl);
   await page.getByRole('option', { name: 'Integration Host · Online', exact: true }).waitFor({ state: 'attached' });
+  const refreshed = await page.evaluate(async () => { const response = await fetch('/auth/refresh', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); return { status: response.status, value: await response.json() }; });
+  assert.equal(refreshed.status, 200); assert.equal(refreshed.value.basePath, state.basePath);
+  const attached = await page.evaluate(async ({ base, hostId }) => (await fetch(base + `v1/remote/hosts/${hostId}/attach`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'test-native' }) })).json(), { base: state.basePath, hostId });
+  assert.equal(attached.agentId, 'test-agent');
+  const exited = once(relay, 'exit'); process.kill(-relay.pid, 'SIGTERM'); await exited;
+  await rm(relayReady, { force: true });
+  relay = launch(process.execPath, ['--import', 'tsx/esm', 'src/server/gateway.ts'], join(root, 'packages/agent-remote-lab'), { ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_READY_FILE: relayReady, AGENT_REMOTE_STATE_DIR: join(temporary, 'state') });
+  await ready(relayReady, relay);
+  const restored = await connectHost(); assert.equal(restored.hostId, hostId);
+  await page.reload();
+  await page.getByRole('option', { name: 'Integration Host · Online', exact: true }).waitFor({ state: 'attached' });
+  const snapshot = await page.evaluate(async base => (await fetch(base + 'v1/sessions/test-agent/snapshot')).json(), state.basePath);
+  assert.deepEqual(snapshot, { restored: true });
   await page.screenshot({ path: join(temporary, 'controller.png'), fullPage: true });
+  await page.locator('#remote-host').selectOption(hostId);
+  await page.getByRole('button', { name: 'Revoke Host', exact: true }).click();
+  const hostClosed = once(restored.host, 'close');
+  await page.getByRole('button', { name: 'Confirm revoke', exact: true }).click(); await hostClosed;
+  const revoked = await page.evaluate(async base => (await fetch(base + 'v1/remote/hosts')).json(), state.basePath);
+  assert.deepEqual(revoked, { hosts: [] });
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.getByRole('link', { name: 'Sign in through gateway' }).waitFor();
   await bob.close(); await context.close();
-  console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected. No CLI agents started.');
+  console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected; renewal, process restart with stable device/binding, device revoke and logout verified. No CLI agents started.');
   console.log(`Evidence: ${temporary}`);
 } catch (error) {
   await writeFile(join(temporary, 'failure.log'), logs.join(''));

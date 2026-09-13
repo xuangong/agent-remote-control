@@ -49,13 +49,19 @@ From this checkout, with Node 22+ and pnpm 10:
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
-AGENT_REMOTE_BIND=127.0.0.1 AGENT_REMOTE_PORT=5910 pnpm start:gateway-relay
+AGENT_REMOTE_BIND=127.0.0.1 AGENT_REMOTE_PORT=5910 \
+  AGENT_REMOTE_STATE_DIR=/var/lib/agent-remote-relay pnpm start:gateway-relay
 ```
 
 The three authentication variables above must already be exported. `AGENT_REMOTE_WEB_DIST`
 can override the built controller directory; the default is
 `packages/agent-remote-lab/dist`. `AGENT_REMOTE_READY_FILE` optionally writes a
-non-secret JSON readiness record for supervisors.
+non-secret JSON readiness record for supervisors. Hosted mode persists state in
+`AGENT_REMOTE_STATE_DIR/state.json`; the default directory is
+`~/.agent-remote-control/gateway-relay`. Mount this directory on durable storage.
+Only one Relay process may own it. The snapshot contains device credential hashes,
+browser session records and native bindings, never transcript content. Writes are
+atomic, mode 0600, authenticated to the signing secret and configured origins.
 
 Put a TLS reverse proxy in front of this single Relay process, forwarding HTTP
 and WebSocket upgrades for the entire Relay origin. Preserve the browser Origin
@@ -65,7 +71,7 @@ restrict network exposure at the ingress. The configured public Relay origin is
 returned in pairing invitations even when Node listens on loopback/private ports.
 
 No provider CLI needs to run on the Relay. Sign in to the gateway, open
-`/agent-remote`, and press **Open remote controller**. In the controller choose
+`/agent-remote`, or use **Agent Remote** in the gateway navigation. The login handoff proceeds automatically; a manual button remains as a fallback. In the controller choose
 **Pair Agent Host** and generate a key. On the workstation:
 
 ```sh
@@ -77,7 +83,11 @@ pnpm agent-host start
 ```
 
 Use the existing DSH Host plugin configuration with the same `serverUrl` and
-`remoteKey` for DSH. A running Host can update its uplink with `pnpm agent-host pair`.
+`remoteKey` for DSH. A running Host can update its uplink with `pnpm agent-host pair`. Successful
+managed Host registration saves private connection/provider settings in its state
+directory. Subsequent `pnpm agent-host start` can reuse them without exporting the
+key again. Server/key overrides must be supplied together. Explicit re-pairing of
+the same installation rotates its credential and rejects the previous key.
 After the Host appears, choose a provider and attach or create a session.
 
 ## Authentication and lifecycle boundaries
@@ -85,17 +95,25 @@ After the Host appears, choose a provider and attach or create a session.
 | Surface | Boundary |
 | --- | --- |
 | User authorization | Gateway checks its authoritative session and enabled-user records when issuing a grant. |
-| Browser credential | HS256 JWT, fixed `arc-relay+jwt` type, issuer, Relay audience and user subject; valid at most 15 minutes and never beyond the gateway session expiry. |
-| Login handoff | One-time SHA-256 challenge bound to an HttpOnly verifier cookie, valid for five minutes. A forwarded launch link cannot change another browser's user. |
-| Cookie | HttpOnly, SameSite=Strict, `__Host-` prefix and Secure on HTTPS; grant removed from URL fragment before exchange. No query-key authentication or credential localStorage. |
-| Browser access | Authenticated HTTP and exact-Origin WebSockets; user namespace checked before dispatch. Each broker owns all Host/session IDs. |
-| Expiry and revocation | Browser UI unmounts and streams close at grant expiry. Disable/revoke blocks new grants; an issued grant stays valid until expiry. Return through the gateway to renew. No silent renewal. |
-| Pairing | Existing process-local key, one installation, 24-hour lifetime. Host connections also close at expiry. Host keys cannot authenticate browser routes; user grants cannot register Hosts. |
-| User disable and Hosts | An existing Host connection can survive until its pairing expiry. It cannot bypass browser authorization. This version does not implement immediate per-user Host revocation. |
-| Emergency revocation | Change the shared secret on both services and restart Relay; restarting also discards all pairing keys and closes connections. |
-| Restart | Relay loses pairings and bindings. Re-pair Hosts, then reattach their native sessions. Native session data stays on the workstation. |
-| Capacity | One process, up to 64 user brokers by default; existing per-broker Host, key, stream, payload and RPC limits apply. Expired tenant state is reclaimed. No multi-replica durability. |
-| Trust | Gateway and Relay share the signing secret and belong to the same trust boundary. Separate public hostnames are recommended; the Relay does not receive the gateway login cookie in that topology. |
+| Login handoff | Signed `arc-relay+jwt` grant with fixed issuer/audience/subject and browser challenge. It expires in at most 15 minutes and is consumed through the five-minute one-time verifier exchange. |
+| Browser credential | Random HttpOnly cookie; only its hash is persisted. An encrypted Gateway continuation allows server-side checks of the original login without forwarding a plaintext Gateway login token. |
+| Cookie | SameSite=Strict, `__Host-` prefix and Secure on HTTPS. No query-key authentication or credential localStorage. |
+| Automatic renewal | Relay rechecks authority every 60 seconds; access leases last at most 120 seconds. The browser refreshes without unmounting the controller or reconnecting valid streams. |
+| Browser sleep | On waking after lease expiry, hide and disable the mounted controller during a maximum five-second authority check. Success preserves draft/side state; denial, error or timeout clears the private view. |
+| Revocation | Logout deletes that Relay browser session and closes its streams. Gateway login revocation blocks the corresponding browser at the next authority check; user disable also blocks Hosts. The maximum existing-authority window is 120 seconds. |
+| Pairing | A new invitation expires after ten minutes. First registration binds the same opaque key to one installation as a durable device credential. Existing native Host and DSH clients keep their wire format. |
+| Devices | Choose a Host, then **Revoke Host** and confirm. Keys are removed before success, active connections close, and the device cannot reconnect with the old key. An explicit new pairing rotates credentials. Browser logout does not unpair devices. |
+| Authority outage | A failed check cannot extend a lease. Expired access stops; Host receives retryable 1013/503, allowing automatic recovery when Gateway returns. Actual denial uses terminal 1008/401 and requires operator action. |
+| Restart | Persisted Host IDs and native bindings survive. Existing Host clients reconnect; browser sessions are revalidated against Gateway; restored bindings reattach native sessions before forwarding. Native session content stays on the workstation. |
+| Emergency reset | Stop Relay, rotate the shared secret on both services and archive/remove the old Relay state before restarting. Old signed state and continuations intentionally fail validation with a new secret. All devices must pair again after this reset. |
+| Storage and capacity | Single process per state directory, default 64 tenant brokers, 1024 browser sessions and existing per-broker limits. No multi-replica or network-filesystem coordination. Keep the state directory private. |
+| Trust | Gateway and Relay share a root secret and are in one trust boundary. The continuation is opaque by protocol, not cryptographically isolated from a compromised service holding that secret. Separate public hostnames keep the Gateway login cookie off Relay. |
+
+State locking also serializes recovery of a dead process's lock. If a process is
+killed during the short recovery critical section, startup conservatively refuses
+the remaining `state.json.lock.recovery` file. Confirm no process owns that state
+directory before removing the stale recovery marker. An invalid snapshot, changed
+origin or wrong secret is a startup error, never an implicit empty-state reset.
 
 The local `pnpm start` / fixture workflow remains available without gateway auth.
 The authenticated server has no fallback route into that local fixture server.
@@ -113,12 +131,12 @@ AGENT_REMOTE_GATEWAY_CHECKOUT=/absolute/path/to/copilot-api-gateway-worktree \
 The harness starts an in-memory SQLite gateway and the actual Relay entrypoint on
 free loopback ports, opens Chromium, follows the real login handoff, connects a
 scripted WebSocket Host, reads its session catalog, and verifies isolation in a
-second browser context, including rejection of a forwarded login link. It enforces a 90-second process deadline and per-operation
+second browser context, including rejection of a forwarded login link, automatic entry, session renewal, actual Relay process restart, stable Host/native binding recovery, device revoke and logout. It enforces a 90-second process deadline and per-operation
 deadlines, cleans up child processes, and saves a screenshot in the reported
 temporary evidence directory. Install Playwright Chromium if the browser is not
 already available (`pnpm --filter agent-remote-lab exec playwright install chromium`).
 
 `gateway-relay.test.ts` additionally covers session attach, snapshot and bidirectional
 stream routing, tenant/Host identity collision, reconnect, role separation and
-credential expiry over real HTTP/WebSocket transports. Provider-native behavior
+credential expiry over real HTTP/WebSocket transports. Lifecycle tests also use the production Host uplink client to verify automatic recovery after authority failure, and a delayed-registration peer to verify revoked sockets cannot recover control. Provider-native behavior
 and cloud authentication are outside this integration's test scope.

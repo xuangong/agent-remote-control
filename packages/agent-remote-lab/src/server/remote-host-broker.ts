@@ -18,6 +18,12 @@ type Binding = { hostId: string; providerId: string; nativeSessionId: string; ag
 class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
+export interface RemoteHostBrokerState {
+  keys: Array<[string, { expires: number; installationId?: string }]>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh'>>;
+  bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
+  creations: Array<[string, { fingerprint: string; agentId: string }]>;
+}
 export interface RemoteHostBrokerOptions {
   origin: string; rpcTimeoutMs?: number; keyLifetimeMs?: number;
   accessPolicy?: AgentRemoteRequestAccessPolicy;
@@ -25,6 +31,10 @@ export interface RemoteHostBrokerOptions {
   publicUrl?: string;
   onPairing?(key: string, expiresAt: number): void;
   connectionExpiresAt?(request: IncomingMessage): number | undefined;
+  connectionExpiryCode?(request: IncomingMessage): number;
+  durable?: boolean;
+  initialState?: RemoteHostBrokerState;
+  onStateChange?(state: RemoteHostBrokerState): void;
 }
 export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
   const origin = new URL(options.origin).origin;
@@ -34,13 +44,40 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
   const nativeBindings = new Map<string, Binding>();
   const attached = new Map<string, Promise<Binding>>();
   const creations = new Map<string, { fingerprint: string; result: Promise<Binding> }>();
+  const completedCreations = new Map<string, { fingerprint: string; agentId: string }>();
+  for (const [hash, key] of options.initialState?.keys ?? []) if (key.expires > Date.now()) keys.set(hash, { ...key });
+  for (const item of options.initialState?.hosts ?? []) hosts.set(item.id, { ...item, generation: 0, pending: new Map(), streams: new Map() });
+  for (const item of options.initialState?.bindings ?? []) {
+    const binding = { ...item, generation: -1 };
+    bindings.set(binding.agentId, binding);
+    nativeBindings.set(JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId]), binding);
+    attached.set(JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId]), Promise.resolve(binding));
+  }
+  for (const [key, value] of options.initialState?.creations ?? []) {
+    const binding = bindings.get(value.agentId);
+    if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
+  }
+  function snapshot(): RemoteHostBrokerState {
+    return { keys: [...keys].map(([key, value]) => [key, { ...value }]),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh }) => ({ id, installationId, name, providers, legacyDsh })),
+      bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
+      creations: [...completedCreations] };
+  }
+  const persist = () => options.onStateChange?.(snapshot());
   const websockets = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
   const permitted = async (request: IncomingMessage) => options.accessPolicy
     ? await options.accessPolicy.authorize(request) === true : local(request, origin);
-  function expire(client: WebSocket, expiresAt?: number) {
-    if (expiresAt === undefined) return;
-    const timer = setTimeout(() => client.close(1008, 'Credential expired'), Math.max(0, expiresAt - Date.now()));
-    timer.unref(); client.once('close', () => clearTimeout(timer));
+  const expiryChecks = new Set<() => void>();
+  function expire(client: WebSocket, expiry: () => number | undefined, code: () => number = () => 1008) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      clearTimeout(timer);
+      const expiresAt = expiry();
+      if (expiresAt === undefined) return;
+      if (expiresAt <= Date.now()) { client.close(code(), 'Credential expired'); return; }
+      timer = setTimeout(check, Math.min(60_000, expiresAt - Date.now())); timer.unref();
+    };
+    expiryChecks.add(check); check(); client.once('close', () => { clearTimeout(timer); expiryChecks.delete(check); });
   }
   const keyHash = (key: string) => createHash('sha256').update(key).digest('hex');
   const requireHost = (id: string) => {
@@ -76,19 +113,25 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     for (const stream of host.streams.values()) stream.socket.close(1012, 'Remote Host disconnected');
     host.streams.clear();
   }
-  function register(socket: WebSocket, credential: { expires: number; installationId?: string }) {
+  function register(socket: WebSocket, credential: { expires: number; installationId?: string }, request: IncomingMessage, credentialHash: string) {
     let host: Host | undefined;
     const timer = setTimeout(() => socket.close(1008, 'Registration deadline exceeded'), 10_000);
     socket.on('error', () => undefined);
     socket.on('close', () => { clearTimeout(timer); if (host) disconnected(host, socket); });
     socket.on('message', (raw, binary) => {
-      if (options.connectionExpiresAt && credential.expires <= Date.now()) return socket.close(1008, 'Credential expired');
+      try {
+      if (socket.readyState !== WebSocket.OPEN || keys.get(credentialHash) !== credential) return socket.close(1008, 'Device credential revoked');
+      if (options.connectionExpiresAt && Math.min(credential.expires, options.connectionExpiresAt(request) ?? credential.expires) <= Date.now()) return socket.close(credential.expires <= Date.now() ? 1008 : (options.connectionExpiryCode?.(request) ?? 1008), 'Credential expired');
       const decoded = binary ? undefined : decodeRemoteHostUplinkMessage(raw.toString());
       if (!decoded || decoded.status !== 'ok') return socket.close(1008, 'Invalid uplink envelope');
       const message = decoded.value;
       if (!host) {
         if (message.type !== 'register' || credential.expires <= Date.now() || (credential.installationId && credential.installationId !== message.installationId)) return socket.close(1008, 'Registration is not authorized');
         credential.installationId = message.installationId;
+        if (options.durable) {
+          credential.expires = Number.MAX_SAFE_INTEGER;
+          for (const [hash, key] of keys) if (key !== credential && key.installationId === message.installationId) keys.delete(hash);
+        }
         host = [...hosts.values()].find((value) => value.installationId === message.installationId);
         if (!host) {
           if (hosts.size >= 128) return socket.close(1013, 'Host capacity reached');
@@ -101,6 +144,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
         host.socket = socket; host.name = message.name;
         host.providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
         host.legacyDsh = 'providerId' in message; host.generation += 1; clearTimeout(timer);
+        try { persist(); } catch { return socket.close(1011, 'Device state could not be saved'); }
         send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id }); return;
       }
       if (host.socket !== socket) return;
@@ -119,6 +163,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
       } else if (message.type === 'stream_close') {
         const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); stream?.socket.close(message.code, message.reason);
       } else socket.close(1008, 'Unexpected uplink message');
+      } catch { socket.close(1011, 'Host message could not be processed'); }
     });
   }
   async function recoverBinding(host: Host, binding: Binding): Promise<void> {
@@ -202,6 +247,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
       bindings.set(agentId, binding);
       nativeBindings.set(nativeKey, binding);
       attached.set(JSON.stringify([host.id, providerId, actualNativeSessionId]), Promise.resolve(binding));
+      persist();
       return binding;
     };
     if (attaching) {
@@ -221,7 +267,9 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
       if (creations.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local creation ledger is full.');
       existing = { fingerprint, result: operation() }; creations.set(key, existing);
     }
-    return existing.result;
+    const binding = await existing.result;
+    completedCreations.set(key, { fingerprint, agentId: binding.agentId }); persist();
+    await recoverBinding(host, binding); return binding;
   }
   async function handle(request: IncomingMessage, response: ServerResponse, url: URL) {
     if (!await permitted(request)) throw new BrokerError(403, 'forbidden', 'This endpoint is available only to the local application.');
@@ -230,17 +278,33 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
       const access = (options.mutationPolicy ?? createLocalLabMutationPolicy(origin)).validate(request);
       if (access.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
-    if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: [...hosts.values()].map(({ id, name, providers, legacyDsh, socket }) => ({ id, name, online: socket?.readyState === WebSocket.OPEN, providers,
+    if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: [...hosts.values()].map(({ id, name, providers, legacyDsh, socket }) => ({ id, name, online: socket?.readyState === WebSocket.OPEN, providers, ...(options.durable ? { managed: true } : {}),
       ...(legacyDsh ? { providerId: 'dsh' } : providers.length === 1 ? { providerId: providers[0]!.providerId } : {}) })) });
     if (url.pathname === '/v1/remote/pairings' && request.method === 'POST') {
       await readBody(request);
       for (const [hash, value] of keys) if (value.expires <= Date.now()) keys.delete(hash);
       if (keys.size >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
-      const key = `arc_${randomBytes(32).toString('base64url')}`; const expires = Date.now() + (options.keyLifetimeMs ?? 24 * 60 * 60 * 1000);
+      const key = `arc_${randomBytes(32).toString('base64url')}`; const expires = Date.now() + (options.keyLifetimeMs ?? (options.durable ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
       keys.set(keyHash(key), { expires });
-      options.onPairing?.(key, expires);
+      options.onPairing?.(key, expires); persist();
       const address = request.socket.localAddress?.includes(':') ? `[${request.socket.localAddress}]` : request.socket.localAddress;
-      return json(response, 201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: options.publicUrl ?? `http://${address}:${request.socket.localPort}` });
+      return json(response, 201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: options.publicUrl ?? `http://${address}:${request.socket.localPort}`,
+        ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\npnpm agent-host start` } : {}) });
+    }
+    const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);
+    if (options.durable && revoking && request.method === 'POST') {
+      await readBody(request);
+      const host = hosts.get(revoking[1]!);
+      if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
+      for (const [key, credential] of keys) if (credential.installationId === host.installationId) keys.delete(key);
+      for (const [id, binding] of bindings) if (binding.hostId === host.id) {
+        bindings.delete(id); const key = JSON.stringify([host.id, binding.providerId, binding.nativeSessionId]);
+        nativeBindings.delete(key); attached.delete(key);
+      }
+      for (const [key, value] of completedCreations) if (!bindings.has(value.agentId)) { completedCreations.delete(key); creations.delete(key); }
+      hosts.delete(host.id); persist();
+      if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(1008, 'Device revoked'); }
+      return json(response, 200, { ok: true });
     }
     const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {
@@ -266,7 +330,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
       const header = request.headers.authorization;
       const key = header?.startsWith('Bearer ') ? keys.get(keyHash(header.slice(7))) : undefined;
       if (!key || key.expires <= Date.now()) return rejectUpgrade(socket, 401);
-      return websockets.handleUpgrade(request, socket, head, (client) => { if (options.connectionExpiresAt) expire(client, key.expires); register(client, key); });
+      return websockets.handleUpgrade(request, socket, head, (client) => { if (options.connectionExpiresAt) expire(client, () => keys.has(keyHash(header!.slice(7))) ? Math.min(key.expires, options.connectionExpiresAt?.(request) ?? key.expires) : 0, () => !keys.has(keyHash(header!.slice(7))) || key.expires <= Date.now() ? 1008 : (options.connectionExpiryCode?.(request) ?? 1008)); register(client, key, request, keyHash(header!.slice(7))); });
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
     const binding = match && bindings.get(match[1]!);
@@ -275,14 +339,15 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); } catch { return rejectUpgrade(socket, 503); }
     if (host.streams.size >= 128) return rejectUpgrade(socket, 429);
     websockets.handleUpgrade(request, socket, head, (client) => {
-      const expiresAt = options.connectionExpiresAt?.(request);
-      expire(client, expiresAt);
+      const expiry = () => options.connectionExpiresAt?.(request);
+      expire(client, expiry);
       const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { socket: client, ready: false, buffered: [] };
       host.streams.set(streamId, stream);
       const opening = setTimeout(() => client.close(1013, 'Remote stream opening timed out'), options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
       client.on('error', () => undefined);
       client.on('message', (raw, binary) => {
+        const expiresAt = expiry();
         if (expiresAt !== undefined && expiresAt <= Date.now()) return client.close(1008, 'Credential expired');
         if (binary) return client.close(1003, 'Text protocol required');
         if (!stream.ready) {
@@ -302,6 +367,11 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     });
   }
   return {
+    snapshot,
+    enforceExpiry() { for (const check of expiryChecks) check(); },
+    disconnect(code = 1008) {
+      for (const host of hosts.values()) if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(code, code === 1008 ? 'Access revoked' : 'Authority temporarily unavailable'); }
+    },
     install(server: Server) {
       const requests = server.listeners('request'); const upgrades = server.listeners('upgrade');
       server.removeAllListeners('request'); server.removeAllListeners('upgrade');

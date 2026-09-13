@@ -52,4 +52,5 @@ export class RemoteHostClient implements HostPairingService {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
   pair(): Promise<PairingInvitation> { return this.request('pairings', 'POST'); }
+  async revoke(hostId: string): Promise<void> { await this.request(`hosts/${encodeURIComponent(hostId)}/revoke`, 'POST'); }
 }

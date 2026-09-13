@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAgentHost, type AgentHost } from './host.js';
 import { createHostRegistrations } from './registrations.js';
+import { resolveHostConnection, saveRegisteredConnection, type HostConnection } from './connection-config.js';
 
 interface DaemonState { pid: number; token: string; socket: string; startedAt: string }
 const args = process.argv.slice(2);
@@ -36,26 +37,29 @@ async function main(): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-host <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_WORKSPACE, AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nA rejected key requires pairing again, then running pair.\n`);
+  process.stdout.write(`Usage: agent-host <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_WORKSPACE, AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
-  const serverUrl = requiredEnv('AGENT_HOST_SERVER');
-  const remoteKey = requiredEnv('AGENT_HOST_REMOTE_KEY');
+  const configuration = await resolveHostConnection(stateDir, process.env);
+  const { serverUrl, remoteKey, environment } = configuration;
   await privateDirectory();
   const installationId = await installation();
   const diagnosticSecrets = new Set([remoteKey, process.env.AGENT_HOST_MANAGEMENT_TOKEN ?? '']);
-  const registrations = await createHostRegistrations(process.env,
+  const registrations = await createHostRegistrations(environment,
     (line) => process.stderr.write(daemonDiagnosticLine(line, diagnosticSecrets)));
-  const host = createAgentHost({ registrations, installationId, name: process.env.AGENT_HOST_NAME?.trim() || hostname(),
+  const host = createAgentHost({ registrations, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     uplink: { url: uplinkUrl(serverUrl), remoteKey }, shutdownTimeoutMs: shutdownTimeout() });
   if (!daemon) {
     process.stdout.write('Agent Host is running in the foreground.\n');
-    await host.ready;
+    await saveRegisteredConnection(stateDir, configuration, host.ready);
     process.stdout.write('Agent Host uplink is registered.\n');
     await waitForSignal(host);
     return;
   }
+  void saveRegisteredConnection(stateDir, configuration, host.ready).catch(error => {
+    process.stderr.write(daemonDiagnosticLine(error instanceof Error ? error.message : 'Could not save registered Host connection.', diagnosticSecrets));
+  });
   const token = process.env.AGENT_HOST_MANAGEMENT_TOKEN;
   if (!token) throw new Error('Daemon management token is missing.');
   const scope = createHash('sha256').update(stateDir).digest('hex').slice(0, 16);
@@ -65,7 +69,7 @@ async function serve(daemon: boolean): Promise<void> {
     let input = '';
     connection.setEncoding('utf8');
     connection.on('data', (chunk) => { input += chunk; if (input.length > 64 * 1024) connection.destroy(); });
-    connection.on('end', () => void handleManagement(input, token, host, diagnosticSecrets, connection));
+    connection.on('end', () => void handleManagement(input, token, host, configuration, diagnosticSecrets, connection));
   });
   await new Promise<void>((resolve, reject) => { management.once('error', reject); management.listen(socket, resolve); });
   await chmod(socket, 0o600);
@@ -79,7 +83,7 @@ async function serve(daemon: boolean): Promise<void> {
   await new Promise<void>(() => undefined);
 }
 
-async function handleManagement(input: string, token: string, host: AgentHost, diagnosticSecrets: Set<string>, connection: import('node:net').Socket): Promise<void> {
+async function handleManagement(input: string, token: string, host: AgentHost, configuration: HostConnection, diagnosticSecrets: Set<string>, connection: import('node:net').Socket): Promise<void> {
   try {
     const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string };
     if (request.token !== token) throw new Error('Unauthorized local management request.');
@@ -87,7 +91,8 @@ async function handleManagement(input: string, token: string, host: AgentHost, d
     else if (request.action === 'pair') {
       if (!request.server || !request.key) throw new Error('Repair requires a server and key.');
       diagnosticSecrets.add(request.key);
-      const registered = await host.replaceUplink({ url: uplinkUrl(request.server), remoteKey: request.key });
+      const registered = await saveRegisteredConnection(stateDir, { ...configuration, serverUrl: request.server, remoteKey: request.key },
+        host.replaceUplink({ url: uplinkUrl(request.server), remoteKey: request.key }));
       connection.end(JSON.stringify({ running: true, uplink: host.state, hostId: registered.hostId }));
     } else if (request.action === 'stop') { connection.end(JSON.stringify({ stopping: true })); process.kill(process.pid, 'SIGTERM'); }
     else throw new Error('Unknown local management action.');
@@ -95,7 +100,7 @@ async function handleManagement(input: string, token: string, host: AgentHost, d
 }
 
 async function start(): Promise<void> {
-  requiredEnv('AGENT_HOST_SERVER'); requiredEnv('AGENT_HOST_REMOTE_KEY');
+  await resolveHostConnection(stateDir, process.env);
   await privateDirectory();
   const lock = join(stateDir, 'startup.lock');
   await acquireStartupLock(lock);

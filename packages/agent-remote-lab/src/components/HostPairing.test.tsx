@@ -38,3 +38,26 @@ describe('HostPairing', () => {
     expect(container.textContent).toContain('reachable broker address');
   });
 });
+
+it('requires an explicit confirmation to revoke a managed Host and refreshes the list', async () => {
+  const removed: string[] = [];
+  let refreshes = 0;
+  const host = { id: 'managed-1', name: 'Studio Mac', online: false, managed: true };
+  const container = await render(<HostPairing service={{ hosts: async () => ({ hosts: [host] }), pair: async () => { throw new Error('unused'); }, revoke: async id => { removed.push(id); } }} selectedHostId={host.id} hosts={[host]} onSelect={() => undefined} onRetryHosts={() => { refreshes++; }} />);
+  const button = (label: string) => [...container.querySelectorAll('button')].find(element => element.textContent === label);
+  expect(button('Revoke Host')).toBeDefined();
+  await act(async () => button('Revoke Host')!.click());
+  expect(removed).toEqual([]);
+  expect(container.textContent).toContain('Studio Mac');
+  await act(async () => button('Confirm revoke')!.click());
+  expect(removed).toEqual(['managed-1']);
+  expect(refreshes).toBe(1);
+});
+
+it('does not visually select a managed Host when the active selection is absent from the list', async () => {
+  const host = { id: 'managed-1', name: 'Studio Mac', online: true, managed: true };
+  const container = await render(<HostPairing service={{ hosts: async () => ({ hosts: [host] }), pair: async () => { throw new Error('unused'); }, revoke: async () => undefined }} selectedHostId="local" hosts={[host]} onSelect={() => undefined} onRetryHosts={() => undefined} />);
+  const select = container.querySelector<HTMLSelectElement>('#remote-host')!;
+  expect(select.value).toBe('local');
+  expect(select.selectedOptions[0]?.textContent).toBe('Select a Host');
+});

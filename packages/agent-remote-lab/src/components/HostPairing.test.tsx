@@ -61,3 +61,14 @@ it('does not visually select a managed Host when the active selection is absent 
   expect(select.value).toBe('local');
   expect(select.selectedOptions[0]?.textContent).toBe('Select a Host');
 });
+
+it('labels shared Host access and cumulative usage without exposing owner revocation', async () => {
+  const host = { id: 'shared', name: 'Shared Studio', online: true, managed: true, access: 'shared' as const, sessionQuota: { used: 2, limit: 2 } };
+  const container = await render(<HostPairing service={{ hosts: async () => ({ hosts: [host] }), pair: async () => { throw new Error('unused'); }, revoke: async () => undefined }} selectedHostId={host.id} hosts={[host]} onSelect={() => undefined} onRetryHosts={() => undefined} onNewSession={() => undefined} />);
+  expect(container.querySelector<HTMLSelectElement>('#remote-host')?.selectedOptions[0]?.textContent).toContain('Shared');
+  expect(container.textContent).toContain('Shared with you');
+  expect(container.textContent).toContain('Session creation allowance used: 2 / 2');
+  expect(container.textContent).toContain('Existing sessions remain available');
+  expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Revoke Host')).toBe(false);
+  expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'New session')?.disabled).toBe(true);
+});

@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 
 export interface HostProvider { providerId: string; displayName: string }
-export interface RemoteHost { id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string }
+export interface RemoteHost {
+  id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
+  access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
+}
 export interface PairingInvitation { id?: string; key: string; expiresAt: string; serverUrl: string; command?: string }
 export interface HostPairingService {
   invitation?: PairingInvitation;
@@ -16,6 +19,8 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
   const [revokeTarget, setRevokeTarget] = useState<RemoteHost>();
   const [revoking, setRevoking] = useState(false);
   const selectedHost = hosts.find(host => host.id === selectedHostId);
+  const quota = selectedHost?.sessionQuota;
+  const quotaExhausted = quota !== undefined && quota.used >= quota.limit;
   const [failure, setFailure] = useState<string>();
   const [invitation, setInvitation] = useState<PairingInvitation | undefined>(service.invitation);
   const [pairing, setPairing] = useState(false);
@@ -53,15 +58,17 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     <label htmlFor="remote-host">Connected Host</label>
     <select id="remote-host" value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
       {hosts.length > 0 && !selectedHost ? <option value={selectedHostId}>Select a Host</option> : null}
-      {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}</option>) : <option value="local">No connected Hosts</option>}
+      {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}{host.access === 'shared' ? ' · Shared' : ''}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
     </select>
-    {selectedHost?.managed && service.revoke ? <button type="button" onClick={() => setRevokeTarget(selectedHost)}>Revoke Host</button> : null}
+    {selectedHost?.access ? <p className="lab-control-note">{selectedHost.access === 'shared' ? 'Shared with you' : 'You own this Host'}</p> : null}
+    {quota ? <p className="lab-control-note" role="status">Session creation allowance used: {quota.used} / {quota.limit}. This total does not reset when sessions finish.{quotaExhausted ? ' Creation limit reached. Existing sessions remain available.' : ''}</p> : null}
+    {selectedHost?.managed && selectedHost.access !== 'shared' && service.revoke ? <button type="button" onClick={() => setRevokeTarget(selectedHost)}>Revoke Host</button> : null}
     {revokeTarget ? <div role="group" aria-label="Confirm Host revocation">
       <p>Revoke {revokeTarget.name}? Its connection and sessions will close. Pair it again to restore access.</p>
       <button type="button" disabled={revoking} onClick={() => void revoke()}>{revoking ? 'Revoking…' : 'Confirm revoke'}</button>
       <button type="button" disabled={revoking} onClick={() => setRevokeTarget(undefined)}>Cancel</button>
     </div> : null}
-    {onNewSession ? <button type="button" onClick={onNewSession}>New session</button> : null}
+    {onNewSession ? <button type="button" disabled={quotaExhausted} onClick={onNewSession}>New session</button> : null}
     <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}

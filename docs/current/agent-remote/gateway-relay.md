@@ -140,3 +140,58 @@ already available (`pnpm --filter agent-remote-lab exec playwright install chrom
 stream routing, tenant/Host identity collision, reconnect, role separation and
 credential expiry over real HTTP/WebSocket transports. Lifecycle tests also use the production Host uplink client to verify automatic recovery after authority failure, and a delayed-registration peer to verify revoked sockets cannot recover control. Provider-native behavior
 and cloud authentication are outside this integration's test scope.
+
+## Shared Hosts and session creation allowance
+
+In the Gateway Dashboard, open **Agent Remote**, choose **Manage sharing** on an
+owned Host, enter an existing user's email and set a total session creation limit
+from 0 to 10000. The recipient sees the Host and its used/total allowance in both
+Gateway and Controller. Opening a Host preserves that selection through login.
+The Host continues to use one uplink; each browser session uses a logical stream.
+
+The allowance is cumulative per Host and recipient, across all providers. Each
+successful Remote `create` consumes one unit. This includes side conversations
+created by Controller. Existing sessions, reconnects and extra browser windows do
+not consume additional units. Completing a task, archiving a conversation, closing
+a page, revoking a share and granting it again never reset usage. Owners may raise
+or lower the total; lowering below usage blocks new creates without blocking
+existing sessions. The owner retains management access to the Host and its sessions.
+Recipients see only their own created sessions, not the owner's or other recipients'
+catalog. Native child sessions inherit their parent creator even when the Host
+owner opens the child first. Child attachment checks the parent's reported native
+children before dispatching it to the provider.
+
+The Relay persists a quota reservation before forwarding a creation request.
+Concurrent requests cannot overspend the final unit; retries with the same request
+ID and settings reuse the result. User request IDs are namespaced before forwarding
+to the Host. Known pre-creation rejection releases a reservation. An uncertain
+native or transport outcome retains its reservation, including after Relay
+restart, and returns `creation_outcome_unknown` on retry instead of creating a
+second session. Used allowance therefore includes unresolved reservations. There
+is currently no automatic orphan reconciliation or reservation-release UI; the
+owner can increase the total after investigating. A known completed binding can be
+recovered from the persisted creation journal without another native creation.
+
+Revoking a share blocks subsequent HTTP and stream traffic and closes only that
+recipient's streams, discarding buffered commands. It does not undo a native
+operation already accepted or stop its ongoing task. Unpairing a Host is a separate
+owner action which removes the device and its session bindings; pairing it again
+creates a new Host identity. Sharing cannot restrict the agent's filesystem or
+shell authority. The quota applies to user-created Remote sessions; provider-native
+automatic subagents and CLI activity outside Remote are not metered by this feature.
+
+Gateway control uses a separate, purpose-bound `arc-gateway-service+jwt` proof on
+`POST /gateway/control`, signed for the exact request body and valid for at most
+60 seconds. Browser cookies/origins, wrong direction/purpose and replayed proofs
+are rejected. Gateway resolves recipients and authenticates callers using the
+live user/session repositories. Grants, creator bindings and allowance state live
+in the Relay's existing signed state file; Gateway remains the user identity
+source and does not proxy session content. The feature keeps the existing
+single-process, single-state-directory deployment boundary. Existing broker capacity
+limits also apply: at most 4096 bound sessions per owner namespace, independently
+of a recipient's configured allowance.
+
+The cross-project browser harness also verifies sharing through actual Gateway
+APIs, selected-Host login, filtered recipient catalogs, cumulative quotas,
+idempotent retries, restart persistence and revoke/regrant. Provider CLI execution
+and a complete Host-wide activity inventory are outside this validation.

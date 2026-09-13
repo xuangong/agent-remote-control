@@ -2,6 +2,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { createGatewayControlVerifier } from './gateway-control.js';
+import { SharingError } from './host-sharing.js';
 import { openGatewayState } from './gateway-state.js';
 import { createGatewaySessions, type SavedGatewaySession } from './gateway-sessions.js';
 import { queryGatewayAuthority } from './gateway-authority.js';
@@ -21,7 +23,8 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
   const tenants = new Map<string, Tenant>();
   const pairings = new Map<string, { namespace: string; expiresAt: number }>();
-  const loginChallenges = new Map<string, number>();
+  const loginChallenges = new Map<string, { expiresAt: number; hostId?: string }>();
+  const verifyControl = createGatewayControlVerifier(auth);
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
   const accepted = new WeakMap<IncomingMessage, GatewayGrant>();
   const hostRequests = new WeakSet<IncomingMessage>();
@@ -61,7 +64,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   });
   const sweep = setInterval(() => {
     const now = Date.now();
-    for (const [challenge, expiresAt] of loginChallenges) if (expiresAt <= now) loginChallenges.delete(challenge);
+    for (const [challenge, value] of loginChallenges) if (value.expiresAt <= now) loginChallenges.delete(challenge);
     for (const [key, value] of pairings) if (value.expiresAt <= now) pairings.delete(key);
     for (const [namespace, value] of tenants) {
       if (!options.stateFile && value.expiresAt <= now) { tenants.delete(namespace); void value.broker.close(); }
@@ -84,13 +87,14 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       dispatcher.on('upgrade', (_, socket) => reject(socket, 404));
       const broker = createRemoteHostBroker({
         origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
+        ownerSubject: grant.subject, principalSubject: request => accepted.get(request)?.subject,
         durable: !!options.stateFile, initialState,
         onStateChange(value) {
           for (const [key, pairing] of pairings) if (pairing.namespace === grant.namespace) pairings.delete(key);
           for (const [key, credential] of value.keys) pairings.set(key, { namespace: grant.namespace, expiresAt: credential.expires });
           changed();
         },
-        accessPolicy: { authorize: request => accepted.get(request)?.namespace === grant.namespace && (accepted.get(request)?.expiresAt ?? 0) > Date.now() },
+        accessPolicy: { authorize: request => accepted.has(request) && (accepted.get(request)?.expiresAt ?? 0) > Date.now() },
         mutationPolicy: { validate: () => ({ status: 'allowed' }) },
         connectionExpiresAt: request => hostRequests.has(request) && options.stateFile
           ? (tenants.get(grant.namespace)?.authorityUntil ?? 0) : accepted.get(request)?.expiresAt,
@@ -122,13 +126,27 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
     response.setHeader('referrer-policy', 'no-referrer');
     response.setHeader('x-content-type-options', 'nosniff');
     if (url.pathname === '/health' && request.method === 'GET') return json(response, 200, { status: 'ok', service: 'agent-remote-gateway-relay' });
+    if (url.pathname === '/gateway/control') {
+      try {
+        const control = await verifyControl(request);
+        if (control.operation === 'hosts') return json(response, 200, { hosts: [...tenants.values()].flatMap(value => value.broker.visibleHosts(control.subject)) });
+        const target = [...tenants.values()].find(value => value.broker.hasHost(control.hostId!));
+        if (!target) return json(response, 404, { error: 'Host is unavailable.' });
+        return json(response, 200, target.broker.manageShares(control.subject, control.hostId!, control.operation, control.targetSubject, control.targetLabel, control.sessionLimit));
+      } catch (error) {
+        if (error instanceof SharingError) return json(response, error.status, { code: error.code, error: error.message });
+        throw error;
+      }
+    }
     if (url.pathname === '/auth/login' && request.method === 'GET') {
       if (loginChallenges.size >= 4096) return json(response, 429, { error: 'Too many pending sign-ins.' });
       const verifier = randomBytes(32).toString('base64url');
       const challenge = createHash('sha256').update(verifier).digest('base64url');
-      loginChallenges.set(challenge, Date.now() + 300_000);
+      const hostId = url.searchParams.get('host') ?? undefined;
+      if (hostId !== undefined && !/^[A-Za-z0-9_-]{1,256}$/.test(hostId)) return json(response, 400, { error: 'Invalid Host.' });
+      loginChallenges.set(challenge, { expiresAt: Date.now() + 300_000, ...(hostId ? { hostId } : {}) });
       response.setHeader('set-cookie', `${gatewayCookieName(auth.origin, 'login')}=${verifier}; ${cookieFlags}; Max-Age=300`);
-      response.writeHead(303, { location: `${auth.issuer}/agent-remote?challenge=${challenge}` }); response.end(); return;
+      response.writeHead(303, { location: `${auth.issuer}/agent-remote?challenge=${challenge}${hostId ? '&host=' + encodeURIComponent(hostId) : ''}` }); response.end(); return;
     }
     if (url.pathname === '/auth/session' && request.method === 'POST') {
       if (!originAllowed(request)) return json(response, 403, { error: 'Origin is not allowed.' });
@@ -138,9 +156,10 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       if (!grant) return json(response, 401, { error: 'Gateway grant is invalid or expired.' });
       const verifier = readGatewayCookie(request, gatewayCookieName(auth.origin, 'login'));
       const challenge = verifier && /^[A-Za-z0-9_-]{43}$/.test(verifier) ? createHash('sha256').update(verifier).digest('base64url') : undefined;
-      if (!challenge || challenge !== grant.nonce || (loginChallenges.get(challenge) ?? 0) <= Date.now()) return json(response, 401, { error: 'Start sign-in from this browser before opening the gateway.' });
+      if (!challenge || challenge !== grant.nonce || (loginChallenges.get(challenge)?.expiresAt ?? 0) <= Date.now()) return json(response, 401, { error: 'Start sign-in from this browser before opening the gateway.' });
       const owned = tenant(grant);
       if (!owned) return json(response, 429, { error: 'Relay tenant capacity reached.' });
+      const initialHost = loginChallenges.get(challenge)?.hostId;
       loginChallenges.delete(challenge);
       const exchange = await sessions.exchange(grant);
       if (exchange.status !== 'active') return json(response, exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Gateway access could not be renewed.' });
@@ -150,7 +169,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
         `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`,
         `${gatewayCookieName(auth.origin, 'login')}=; ${cookieFlags}; Max-Age=0`,
       ]);
-      return json(response, 200, state(exchange.grant));
+      return json(response, 200, { ...state(exchange.grant), ...(initialHost ? { hostId: initialHost } : {}) });
     }
     if (url.pathname === '/auth/status' && request.method === 'GET') {
       const grant = await authorize(request, response); if (grant) json(response, 200, state(grant)); return;
@@ -178,7 +197,17 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
     const owned = tenant(grant); if (!owned) return json(response, 429, { error: 'Relay tenant capacity reached.' });
     accepted.set(request, grant);
     request.url = '/' + url.pathname.slice(prefix.length) + url.search;
-    owned.server.emit('request', request, response);
+    const relative = new URL(request.url, auth.origin).pathname;
+    if (relative === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: [...tenants.values()].flatMap(value => value.broker.visibleHosts(grant.subject)) });
+    const destination = routeTenant(relative, grant.subject) ?? owned;
+    destination.server.emit('request', request, response);
+  }
+  function routeTenant(path: string, subject: string): Tenant | undefined {
+    const host = /^\/v1\/remote\/hosts\/([^/]+)/.exec(path);
+    if (host) return [...tenants.values()].find(value => value.broker.canAccessHost(host[1]!, subject));
+    const session = /^\/v1\/sessions\/([^/]+)/.exec(path);
+    if (session) return [...tenants.values()].find(value => value.broker.canAccessSession(session[1]!, subject));
+    return undefined;
   }
   async function upgrade(request: IncomingMessage, socket: Duplex, head: Buffer) {
     const url = new URL(request.url ?? '/', auth.origin);
@@ -201,7 +230,8 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
     if (!owned) return reject(socket, 404);
     accepted.set(request, grant);
     request.url = '/' + url.pathname.slice(prefix.length) + url.search;
-    owned.server.emit('upgrade', request, socket, head);
+    const destination = routeTenant(new URL(request.url, auth.origin).pathname, grant.subject) ?? owned;
+    destination.server.emit('upgrade', request, socket, head);
   }
   return {
     server,
@@ -244,7 +274,7 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   try { const value = JSON.parse(Buffer.concat(chunks).toString()); return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined; } catch { return undefined; }
 }
 function callback(response: ServerResponse) {
-  const script = `const ticket=new URLSearchParams(location.hash.slice(1)).get('ticket');history.replaceState(null,'','/auth/callback');fetch('/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ticket})}).then(r=>{if(!r.ok)throw Error();location.replace('/')}).catch(()=>{document.getElementById('status').textContent='Access expired or invalid. Return to the gateway to sign in.'});`;
+  const script = `const ticket=new URLSearchParams(location.hash.slice(1)).get('ticket');history.replaceState(null,'','/auth/callback');fetch('/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ticket})}).then(async r=>{if(!r.ok)throw Error();const state=await r.json();location.replace(state.hostId?'/?host='+encodeURIComponent(state.hostId):'/')}).catch(()=>{document.getElementById('status').textContent='Access expired or invalid. Return to the gateway to sign in.'});`;
   const digest = createHash('sha256').update(script).digest('base64');
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': `default-src 'none'; script-src 'sha256-${digest}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'` });
   response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Agent Remote</title><p id="status">Opening your controller…</p><a href="/auth/login">Sign in through gateway</a><script>${script}</script></html>`);

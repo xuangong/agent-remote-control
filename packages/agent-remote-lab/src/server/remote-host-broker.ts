@@ -4,6 +4,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@borgee/agent-remote-protocol';
 import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@borgee/agent-remote-relay';
+import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
 type RpcResponse = { status: number; body: string };
@@ -11,20 +12,23 @@ type ProviderDescriptor = { providerId: string; displayName: string };
 type Host = {
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: WebSocket;
   pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>;
-  streams: Map<string, { socket: WebSocket; ready: boolean; buffered: string[]; timer?: ReturnType<typeof setTimeout> }>;
+  streams: Map<string, { socket: WebSocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: ReturnType<typeof setTimeout> }>;
 };
 type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
-  parentNativeSessionId?: string; recovery?: Promise<void> };
+  creatorSubject?: string; parentNativeSessionId?: string; recovery?: Promise<void> };
 class BrokerError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+  constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false) { super(message); }
 }
 export interface RemoteHostBrokerState {
+  sharing?: HostSharingState;
   keys: Array<[string, { expires: number; installationId?: string }]>;
   hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
 export interface RemoteHostBrokerOptions {
+  ownerSubject?: string;
+  principalSubject?(request: IncomingMessage): string | undefined;
   origin: string; rpcTimeoutMs?: number; keyLifetimeMs?: number;
   accessPolicy?: AgentRemoteRequestAccessPolicy;
   mutationPolicy?: AgentRemoteHttpMutationPolicy;
@@ -58,12 +62,35 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
   function snapshot(): RemoteHostBrokerState {
-    return { keys: [...keys].map(([key, value]) => [key, { ...value }]),
+    return { ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh }) => ({ id, installationId, name, providers, legacyDsh })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
   const persist = () => options.onStateChange?.(snapshot());
+  const sharing = new HostSharing(options.initialState?.sharing, persist);
+  const sharedCreates = new Map<string, Promise<Binding>>();
+  const principal = (request: IncomingMessage) => options.principalSubject?.(request);
+  const owner = (subject?: string) => options.ownerSubject === undefined || subject === options.ownerSubject;
+  const hostAllowed = (hostId: string, subject?: string) => hosts.has(hostId) && (owner(subject) || (subject !== undefined && sharing.allowed(hostId, subject)));
+  const sessionAllowed = (binding: Binding, subject?: string) => hostAllowed(binding.hostId, subject) && (owner(subject) || binding.creatorSubject === subject);
+  function requireOwner(subject?: string) {
+    if (!owner(subject)) throw new SharingError(403, 'owner_required', 'Only the Host owner can manage this Host.');
+  }
+  function requireAccess(hostId: string, subject?: string) {
+    if (!hosts.has(hostId)) throw new SharingError(404, 'host_not_found', 'Host is unavailable.');
+    if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
+  }
+  function visibleHosts(subject?: string) {
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket }) => ({
+      id, name, online: socket?.readyState === WebSocket.OPEN, providers,
+      ...(options.durable && owner(subject) ? { managed: true } : {}),
+      ...(options.ownerSubject ? { access: owner(subject) ? 'owner' as const : 'shared' as const } : {}),
+      ...(!owner(subject) && subject ? { sessionQuota: sharing.quota(id, subject) } : {}),
+      ...(legacyDsh ? { providerId: 'dsh' } : providers.length === 1 ? { providerId: providers[0]!.providerId } : {}),
+    }));
+  }
+
   const websockets = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
   const permitted = async (request: IncomingMessage) => options.accessPolicy
     ? await options.accessPolicy.authorize(request) === true : local(request, origin);
@@ -83,16 +110,16 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
   const requireHost = (id: string) => {
     const host = hosts.get(id);
     if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
-    if (host.socket?.readyState !== WebSocket.OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.');
+    if (host.socket?.readyState !== WebSocket.OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
     return host;
   };
   function send(host: Host, message: RemoteHostUplinkMessage) {
-    if (host.socket?.readyState !== WebSocket.OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.');
-    if (host.socket.bufferedAmount > 8 * 1024 * 1024) throw new BrokerError(503, 'host_backpressure', 'The Remote Host connection is busy.');
+    if (host.socket?.readyState !== WebSocket.OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
+    if (host.socket.bufferedAmount > 8 * 1024 * 1024) throw new BrokerError(503, 'host_backpressure', 'The Remote Host connection is busy.', true);
     host.socket.send(JSON.stringify(message));
   }
   function rpc(host: Host, method: 'GET' | 'POST', path: string, sessionId?: string, body?: string): Promise<RpcResponse> {
-    if (host.pending.size >= 128) return Promise.reject(new BrokerError(429, 'host_busy', 'Too many pending Remote Host requests.'));
+    if (host.pending.size >= 128) return Promise.reject(new BrokerError(429, 'host_busy', 'Too many pending Remote Host requests.', true));
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -153,10 +180,10 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
         if (pending) { clearTimeout(pending.timer); host.pending.delete(message.requestId); pending.resolve(message); }
       } else if (message.type === 'stream_opened') {
         const stream = host.streams.get(message.streamId);
-        if (stream) { clearTimeout(stream.timer); stream.ready = true; for (const buffered of stream.buffered) send(host, { uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: buffered }); stream.buffered = []; }
+        if (stream && stream.socket.readyState === WebSocket.OPEN && stream.authorized?.() !== false) { clearTimeout(stream.timer); stream.ready = true; for (const buffered of stream.buffered) send(host, { uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: buffered }); stream.buffered = []; }
       } else if (message.type === 'stream_message') {
         const stream = host.streams.get(message.streamId);
-        if (stream?.socket.readyState === WebSocket.OPEN) {
+        if (stream?.socket.readyState === WebSocket.OPEN && stream.authorized?.() !== false) {
           if (stream.socket.bufferedAmount > 8 * 1024 * 1024) stream.socket.close(1013, 'Slow browser connection');
           else stream.socket.send(message.message);
         }
@@ -197,17 +224,18 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     }
     await binding.recovery;
   }
-  async function mutate(host: Host, action: string, body: Record<string, unknown>): Promise<Binding> {
+  async function mutate(host: Host, action: string, body: Record<string, unknown>, creatorSubject?: string): Promise<Binding> {
     const providerId = host.legacyDsh ? 'dsh' : required(body.providerId, 'providerId');
     if (!host.providers.some((provider) => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
     if (host.legacyDsh && action === 'create' && ['cwd', 'model', 'reasoningEffort', 'planning'].some((key) => body[key] !== undefined)) {
       throw new BrokerError(400, 'unsupported_configuration', 'This Host uses native model settings and a registered workspace.');
     }
     if (host.legacyDsh && action === 'child/attach') throw new BrokerError(400, 'unsupported_operation', 'This Host does not support native child attachment.');
-    if (bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.');
+    if (bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.', true);
     const attaching = action !== 'create';
     const nativeSessionId = attaching ? required(body.nativeSessionId, 'nativeSessionId') : randomUUID();
     const parentNativeSessionId = action === 'child/attach' ? required(body.parentNativeSessionId, 'parentNativeSessionId') : undefined;
+    if (parentNativeSessionId) creatorSubject ??= nativeBindings.get(JSON.stringify([host.id, providerId, parentNativeSessionId]))?.creatorSubject;
     const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.requestId, 'requestId') : nativeSessionId]);
     const operation = async () => {
       const proposedAgentId = randomUUID();
@@ -223,7 +251,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
       if (result.status >= 300) {
         let detail: Record<string, unknown> = {};
         try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
-        throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.');
+        throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.', result.status < 500 && ['invalid_request', 'invalid_provider', 'unsupported_configuration'].includes(String(detail.code)));
       }
       let returned: Record<string, unknown> = {};
       try { returned = JSON.parse(result.body); } catch {
@@ -241,8 +269,9 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
         throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity conflicts with an existing binding.');
       }
       const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
-        generation: host.generation, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+        generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
       if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
+      if (creatorSubject && binding.creatorSubject !== creatorSubject) throw new BrokerError(409, 'session_binding_conflict', 'The native session belongs to another user.');
       binding.generation = host.generation;
       bindings.set(agentId, binding);
       nativeBindings.set(nativeKey, binding);
@@ -264,13 +293,102 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     let existing = creations.get(key);
     if (existing && existing.fingerprint !== fingerprint) throw new BrokerError(409, 'request_conflict', 'This request identity was already used with different settings.');
     if (!existing) {
-      if (creations.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local creation ledger is full.');
+      if (creations.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local creation ledger is full.', true);
       existing = { fingerprint, result: operation() }; creations.set(key, existing);
     }
     const binding = await existing.result;
     completedCreations.set(key, { fingerprint, agentId: binding.agentId }); persist();
     await recoverBinding(host, binding); return binding;
   }
+  async function userMutation(host: Host, action: string, body: Record<string, unknown>, subject?: string): Promise<Binding> {
+    if (owner(subject)) return mutate(host, action, body);
+    requireAccess(host.id, subject);
+    const providerId = host.legacyDsh ? 'dsh' : required(body.providerId, 'providerId');
+    if (action !== 'create') {
+      const nativeSessionId = required(body.nativeSessionId, 'nativeSessionId');
+      const existing = nativeBindings.get(JSON.stringify([host.id, providerId, nativeSessionId]));
+      if (existing && sessionAllowed(existing, subject)) {
+        await recoverBinding(host, existing); return existing;
+      }
+      if (action === 'child/attach') {
+        const parentId = required(body.parentNativeSessionId, 'parentNativeSessionId');
+        const parent = nativeBindings.get(JSON.stringify([host.id, providerId, parentId]));
+        if (parent && sessionAllowed(parent, subject)) {
+          await recoverBinding(host, parent);
+          const result = await rpc(host, 'GET', `/v1/sessions/${encodeURIComponent(parent.agentId)}/snapshot`, parent.agentId);
+          const data = JSON.parse(result.body);
+          const children: unknown = data?.payload?.runtimeInfo?.childSessions;
+          if (result.status === 200 && Array.isArray(children) && children.some(child => child?.nativeSessionId === nativeSessionId)) {
+            requireAccess(host.id, subject);
+            if (existing && existing.creatorSubject !== subject) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+            return mutate(host, action, body, subject);
+          }
+        }
+      }
+      throw new SharingError(403, 'session_forbidden', 'Only your own sessions can be attached.');
+    }
+    if (!host.providers.some(provider => provider.providerId === providerId)) throw new SharingError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
+    if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
+    const requestId = required(body.requestId, 'requestId');
+    const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) });
+    const reservation = sharing.reserve(host.id, subject!, providerId, requestId, fingerprint);
+    if (!reservation.fresh) {
+      const completedId = reservation.agentId ?? completedCreations.get(JSON.stringify([host.id, providerId, reservation.nativeRequestId]))?.agentId;
+      const binding = completedId && bindings.get(completedId);
+      if (binding && sessionAllowed(binding, subject)) {
+        if (!reservation.agentId) sharing.complete(reservation.key, binding.agentId);
+        await recoverBinding(host, binding); return binding;
+      }
+      const pending = sharedCreates.get(reservation.key);
+      if (pending) return pending;
+      throw new SharingError(409, 'creation_outcome_unknown', 'A previous creation is unresolved. Its quota reservation is retained; ask the Host owner to reconcile it.');
+    }
+    const operation = mutate(host, action, { ...body, requestId: reservation.nativeRequestId }, subject).then(binding => {
+      sharing.complete(reservation.key, binding.agentId); return binding;
+    }).catch(error => {
+      // Transport and persistence failures may occur after native creation succeeded.
+      if (error instanceof BrokerError && error.creationRejected) {
+        creations.delete(JSON.stringify([host.id, providerId, reservation.nativeRequestId]));
+        sharing.release(reservation.key);
+      }
+      throw error;
+    });
+    sharedCreates.set(reservation.key, operation);
+    try { return await operation; } finally { sharedCreates.delete(reservation.key); }
+  }
+  async function sharedCatalog(host: Host, action: string, query: URLSearchParams, subject: string): Promise<RpcResponse> {
+    const providerId = host.legacyDsh ? 'dsh' : query.get('providerId');
+    const owned = [...bindings.values()].filter(binding => binding.hostId === host.id && binding.providerId === providerId && binding.creatorSubject === subject && !binding.parentNativeSessionId);
+    const revisionResult = await rpc(host, 'GET', `/remote/catalog/revision${query.size ? '?' + query : ''}`);
+    requireAccess(host.id, subject);
+    if (revisionResult.status !== 200) return revisionResult;
+    const revision = createHash('sha256').update(JSON.stringify([JSON.parse(revisionResult.body).revision, owned.map(value => value.nativeSessionId)])).digest('hex');
+    if (action === 'catalog/revision') return { status: 200, body: JSON.stringify({ revision }) };
+    if (host.legacyDsh) {
+      const result = await rpc(host, 'GET', `/remote/catalog${query.size ? '?' + query : ''}`);
+      requireAccess(host.id, subject);
+      if (result.status !== 200) return result;
+      const page = JSON.parse(result.body);
+      return { status: 200, body: JSON.stringify({ ...page, revision, items: Array.isArray(page.items) ? page.items.filter((item: { nativeSessionId?: string }) => owned.some(value => value.nativeSessionId === item.nativeSessionId)) : [] }) };
+    }
+    const offset = Number(query.get('cursor') ?? 0); const limit = Number(query.get('limit') ?? 30);
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new SharingError(400, 'invalid_cursor', 'Invalid session page.');
+    const items = [];
+    for (const binding of owned.slice(offset, offset + limit)) {
+      const parameters = new URLSearchParams({ providerId: binding.providerId, nativeSessionId: binding.nativeSessionId });
+      const result = await rpc(host, 'GET', `/remote/catalog/session?${parameters}`);
+      requireAccess(host.id, subject);
+      if (result.status === 404) continue;
+      if (result.status !== 200) return result;
+      const summary = JSON.parse(result.body);
+      if (summary.nativeSessionId !== binding.nativeSessionId || summary.providerId !== binding.providerId) throw new SharingError(502, 'invalid_host_response', 'Host returned a different session summary.');
+      items.push(summary);
+    }
+    requireAccess(host.id, subject);
+    const next = offset + limit;
+    return { status: 200, body: JSON.stringify({ items, hasMore: next < owned.length, ...(next < owned.length ? { nextCursor: String(next) } : {}), revision }) };
+  }
+
   async function handle(request: IncomingMessage, response: ServerResponse, url: URL) {
     if (!await permitted(request)) throw new BrokerError(403, 'forbidden', 'This endpoint is available only to the local application.');
     response.setHeader('cache-control', 'no-store');
@@ -278,9 +396,10 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
       const access = (options.mutationPolicy ?? createLocalLabMutationPolicy(origin)).validate(request);
       if (access.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
-    if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: [...hosts.values()].map(({ id, name, providers, legacyDsh, socket }) => ({ id, name, online: socket?.readyState === WebSocket.OPEN, providers, ...(options.durable ? { managed: true } : {}),
-      ...(legacyDsh ? { providerId: 'dsh' } : providers.length === 1 ? { providerId: providers[0]!.providerId } : {}) })) });
+    const subject = principal(request);
+    if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(response, 200, { hosts: visibleHosts(subject) });
     if (url.pathname === '/v1/remote/pairings' && request.method === 'POST') {
+      requireOwner(subject);
       await readBody(request);
       for (const [hash, value] of keys) if (value.expires <= Date.now()) keys.delete(hash);
       if (keys.size >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
@@ -293,6 +412,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     }
     const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);
     if (options.durable && revoking && request.method === 'POST') {
+      requireOwner(subject);
       await readBody(request);
       const host = hosts.get(revoking[1]!);
       if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
@@ -308,6 +428,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     }
     const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {
+      requireAccess(directory[1]!, subject);
       const host = requireHost(directory[1]!); const action = directory[2]!;
       if (action === 'models' && request.method === 'GET' && host.legacyDsh) return json(response, 200, { models: [] });
       if (['catalog', 'catalog/revision', 'workspaces', 'models'].includes(action) && request.method === 'GET') {
@@ -315,14 +436,26 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
         const providerId = query.get('providerId');
         if (!host.legacyDsh && (!providerId || !host.providers.some((provider) => provider.providerId === providerId))) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
         if (host.legacyDsh) query.delete('providerId');
+        if (!owner(subject) && action.startsWith('catalog')) {
+          return rawJson(response, await sharedCatalog(host, action, query, subject!));
+        }
         const result = await rpc(host, 'GET', `/remote/${action}${query.size ? '?' + query : ''}`);
+        requireAccess(host.id, subject);
         return rawJson(response, result);
       }
-      if (['attach', 'child/attach', 'create'].includes(action) && request.method === 'POST') { const binding = await mutate(host, action, await readBody(request)); return json(response, 200, { agentId: binding.agentId, nativeSessionId: binding.nativeSessionId }); }
+      if (['attach', 'child/attach', 'create'].includes(action) && request.method === 'POST') { const binding = await userMutation(host, action, await readBody(request), subject);
+        if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+        return json(response, 200, { agentId: binding.agentId, nativeSessionId: binding.nativeSessionId }); }
     }
     const session = /^\/v1\/sessions\/([^/]+)\/(snapshot|timeline)$/.exec(url.pathname);
     const binding = session && bindings.get(session[1]!);
-    if (binding && request.method === 'GET') { const host = requireHost(binding.hostId); await recoverBinding(host, binding); return rawJson(response, await rpc(host, 'GET', url.pathname + url.search, binding.agentId)); }
+    if (binding && request.method === 'GET') {
+      if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      const host = requireHost(binding.hostId); await recoverBinding(host, binding);
+      const result = await rpc(host, 'GET', url.pathname + url.search, binding.agentId);
+      if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      return rawJson(response, result);
+    }
     throw new BrokerError(404, 'route_not_found', 'Unknown Remote Host route.');
   }
   async function upgrade(request: IncomingMessage, socket: Duplex, head: Buffer, url: URL) {
@@ -334,14 +467,14 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
     const binding = match && bindings.get(match[1]!);
-    if (!binding || !await permitted(request) || request.headers.origin !== origin) return rejectUpgrade(socket, 403);
+    if (!binding || !sessionAllowed(binding, principal(request)) || !await permitted(request) || request.headers.origin !== origin) return rejectUpgrade(socket, 403);
     let host: Host;
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); } catch { return rejectUpgrade(socket, 503); }
     if (host.streams.size >= 128) return rejectUpgrade(socket, 429);
     websockets.handleUpgrade(request, socket, head, (client) => {
-      const expiry = () => options.connectionExpiresAt?.(request);
+      const expiry = () => sessionAllowed(binding, principal(request)) ? options.connectionExpiresAt?.(request) : 0;
       expire(client, expiry);
-      const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { socket: client, ready: false, buffered: [] };
+      const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { socket: client, subject: principal(request), authorized: () => { const end = expiry(); return end === undefined || end > Date.now(); }, ready: false, buffered: [] };
       host.streams.set(streamId, stream);
       const opening = setTimeout(() => client.close(1013, 'Remote stream opening timed out'), options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
@@ -368,6 +501,28 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
   }
   return {
     snapshot,
+    visibleHosts,
+    hasHost: (hostId: string) => hosts.has(hostId),
+    canAccessHost: hostAllowed,
+    canAccessSession: (agentId: string, subject: string) => { const binding = bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },
+    manageShares(subject: string, hostId: string, action: 'shares' | 'share' | 'revoke-share', targetSubject?: string, targetLabel?: string, sessionLimit?: number) {
+      requireOwner(subject);
+      if (!hosts.has(hostId)) throw new SharingError(404, 'host_not_found', 'Host is unavailable.');
+      if (action === 'shares') return { shares: sharing.list(hostId) };
+      if (!targetSubject || targetSubject === options.ownerSubject) throw new SharingError(400, 'invalid_recipient', 'Choose another user.');
+      if (action === 'share') sharing.set(hostId, targetSubject, targetLabel ?? targetSubject, sessionLimit!);
+      else {
+        sharing.revoke(hostId, targetSubject);
+        const host = hosts.get(hostId)!;
+        for (const [streamId, stream] of host.streams) if (stream.subject === targetSubject) {
+          host.streams.delete(streamId); stream.buffered = []; clearTimeout(stream.timer);
+          stream.socket.close(1008, 'Host share revoked');
+          try { send(host, { uplinkVersion: 2, type: 'stream_close', streamId, code: 1008, reason: 'Host share revoked' }); } catch { /* The Host may be offline. */ }
+        }
+      }
+      for (const check of expiryChecks) check();
+      return { ok: true };
+    },
     enforceExpiry() { for (const check of expiryChecks) check(); },
     disconnect(code = 1008) {
       for (const host of hosts.values()) if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(code, code === 1008 ? 'Access revoked' : 'Authority temporarily unavailable'); }
@@ -382,7 +537,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
           for (const handler of requests) handler.call(server, request, response); return;
         }
         void handle(request, response, url).catch((error) => {
-          if (error instanceof BrokerError) json(response, error.status, { code: error.code, error: error.message });
+          if (error instanceof BrokerError || error instanceof SharingError) json(response, error.status, { code: error.code, error: error.message });
           else json(response, 503, { code: 'host_operation_failed', error: error instanceof Error ? error.message : 'Remote Host operation failed.' });
         });
       });

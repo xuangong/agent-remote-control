@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it } from 'vitest';
@@ -159,3 +159,121 @@ it('consumes login challenges once and rejects another browser cookie', async ()
   expect((await exchange(first.cookie)).status).toBe(200);
   expect((await exchange(first.cookie)).status).toBe(401);
 }, 5000);
+
+async function control(url: string, value: Record<string, unknown>) {
+  const body = JSON.stringify(value); const iat = Math.floor(Date.now() / 1000);
+  const input = [{ alg: 'HS256', typ: 'arc-gateway-service+jwt' }, { iss: issuer, aud: url, op: 'control',
+    bodyHash: createHash('sha256').update(body).digest('base64url'), iat, exp: iat + 60, jti: crypto.randomUUID() }]
+    .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
+  return fetch(url + '/gateway/control', { method: 'POST', headers: { 'content-type': 'application/json',
+    authorization: `Bearer ${input}.${createHmac('sha256', secret).update(input).digest('base64url')}` }, body });
+}
+it('shares one Host with cumulative quotas and revokes only the recipient streams', async () => {
+  const f = await setup(); const alice = await f.login('alice'); const bob = await f.login('bob'); const eve = await f.login('eve');
+  const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  await once(host, 'open'); const registration = once(host, 'message');
+  host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'shared-host', name: 'Shared Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+  const hostId = JSON.parse((await registration)[0].toString()).hostId as string;
+  let creates = 0;
+  host.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type === 'rpc_request') {
+      const creating = message.path === '/remote/create'; if (creating) creates++;
+      const body = creating ? { agentId: `shared-agent-${creates}`, nativeSessionId: `native-${creates}` }
+        : message.path === '/remote/attach' ? { agentId: 'private-agent', nativeSessionId: 'private-native' }
+        : message.path === '/remote/child/attach' ? { agentId: 'child-agent', nativeSessionId: 'child-native' }
+        : message.path.startsWith('/v1/sessions/') ? { payload: { runtimeInfo: { childSessions: [{ nativeSessionId: 'child-native' }] } } }
+        : { title: 'Topic', nativeSessionId: 'native-1', providerId: 'codex', state: 'idle', createdAt: '2026-01-01', updatedAt: '2026-01-01' };
+      host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify(body) }));
+    }
+    if (message.type === 'stream_open') host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId }));
+  });
+  const share = { subject: 'alice', operation: 'share', hostId, targetSubject: 'bob', targetLabel: 'Bob', sessionLimit: 1 };
+  expect((await control(f.url, share)).status).toBe(200);
+  expect(await (await bob.request('v1/remote/hosts')).json()).toMatchObject({ hosts: [{ id: hostId, access: 'shared', sessionQuota: { limit: 1, used: 0 } }] });
+  expect((await control(f.url, { ...share, subject: 'bob', targetSubject: 'eve' })).status).toBe(403);
+  const create = (requestId: string) => bob.request(`v1/remote/hosts/${hostId}/create`, { providerId: 'codex', requestId });
+  const responses = await Promise.all([create('one'), create('two')]);
+  expect(responses.map(value => value.status).sort()).toEqual([200, 409]); expect(creates).toBe(1);
+  const index = responses.findIndex(value => value.status === 200); const binding = await responses[index]!.json() as { agentId: string; nativeSessionId: string };
+  expect((await create(index === 0 ? 'one' : 'two')).status).toBe(200); expect(creates).toBe(1);
+  expect((await bob.request(`v1/remote/hosts/${hostId}/attach`, { providerId: 'codex', nativeSessionId: 'private-native' })).status).toBe(403);
+  expect((await eve.request(`v1/sessions/${binding.agentId}/snapshot`)).status).toBe(404);
+  expect((await bob.request(`v1/sessions/${binding.agentId}/snapshot`)).status).toBe(200);
+  const childBody = { providerId: 'codex', nativeSessionId: 'child-native', parentNativeSessionId: binding.nativeSessionId };
+  expect((await alice.request(`v1/remote/hosts/${hostId}/child/attach`, childBody)).status).toBe(200);
+  expect((await bob.request(`v1/remote/hosts/${hostId}/child/attach`, childBody)).status).toBe(200);
+  expect((await bob.request('v1/sessions/child-agent/snapshot')).status).toBe(200);
+  const bobStream = new WebSocket((f.url + bob.state.basePath + `v1/sessions/${binding.agentId}/events`).replace('http:', 'ws:'), { headers: { cookie: bob.cookie, origin: f.url } });
+  await once(bobStream, 'open');
+  const ownerStream = new WebSocket((f.url + alice.state.basePath + `v1/sessions/${binding.agentId}/events`).replace('http:', 'ws:'), { headers: { cookie: alice.cookie, origin: f.url } });
+  await once(ownerStream, 'open'); const ended = once(bobStream, 'close');
+  expect((await control(f.url, { subject: 'alice', operation: 'revoke-share', hostId, targetSubject: 'bob' })).status).toBe(200);
+  expect((await ended)[0]).toBe(1008); expect(ownerStream.readyState).toBe(WebSocket.OPEN); expect(host.readyState).toBe(WebSocket.OPEN);
+  expect((await bob.request(`v1/sessions/${binding.agentId}/snapshot`)).status).toBe(404);
+  expect((await control(f.url, share)).status).toBe(200);
+  expect((await create('three')).status).toBe(409); expect(creates).toBe(1);
+  ownerStream.close(); host.close();
+}, 10000);
+
+async function sharedFixture() {
+  const f = await setup(); const owner = await f.login('owner'); const user = await f.login('user');
+  const pair = await (await owner.request('v1/remote/pairings', {})).json() as { key: string };
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  await once(host, 'open'); const registered = once(host, 'message');
+  host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'quota-host', name: 'Quota Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+  const hostId = JSON.parse((await registered)[0].toString()).hostId as string;
+  const setLimit = (limit: number) => control(f.url, { operation: 'share', subject: 'owner', hostId, targetSubject: 'user', targetLabel: 'User', sessionLimit: limit });
+  expect((await setLimit(1)).status).toBe(200);
+  const create = (requestId: string, settings = {}) => user.request(`v1/remote/hosts/${hostId}/create`, { providerId: 'codex', requestId, ...settings });
+  return { ...f, owner, user, host, hostId, create, setLimit };
+}
+it.each([{ status: 503, code: 'mutation_outcome_unknown' }, { status: 409, code: 'session_binding_conflict' }])('retains quota and never redispatches ambiguous native creation ($code)', async ({ status, code }) => {
+  const f = await sharedFixture(); let calls = 0;
+  f.host.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type !== 'rpc_request') return;
+    calls++;
+    f.host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status, body: JSON.stringify({ code, error: 'Native outcome cannot be proven.' }) }));
+  });
+  expect((await f.create('first')).status).toBe(status);
+  expect(await (await f.create('first')).json()).toMatchObject({ code: 'creation_outcome_unknown' });
+  expect(await (await f.create('second')).json()).toMatchObject({ code: 'session_quota_exceeded' });
+  expect(calls).toBe(1); f.host.close();
+}, 10000);
+
+it('releases definitively rejected creation and permits a safe same-request retry', async () => {
+  const f = await sharedFixture(); let calls = 0;
+  f.host.on('message', raw => {
+    const message = JSON.parse(raw.toString()); if (message.type !== 'rpc_request') return;
+    calls++;
+    f.host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: calls === 1 ? 400 : 200,
+      body: JSON.stringify(calls === 1 ? { code: 'invalid_request', error: 'Pre-creation validation rejected.' } : { agentId: 'retried', nativeSessionId: 'retried-native' }) }));
+  });
+  expect((await f.create('first')).status).toBe(400);
+  expect((await f.create('first')).status).toBe(200); expect(calls).toBe(2);
+  expect((await f.create('second')).status).toBe(409); f.host.close();
+}, 10000);
+
+it('drops buffered user commands when sharing is revoked before the Host acknowledges the stream', async () => {
+  const f = await sharedFixture(); let commands = 0; let streamId: string | undefined;
+  let opened!: () => void; const opening = new Promise<void>(resolve => { opened = resolve; });
+  f.host.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type === 'rpc_request') f.host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify({ agentId: 'buffered', nativeSessionId: 'buffered-native' }) }));
+    if (message.type === 'stream_open') { streamId = message.streamId; opened(); }
+    if (message.type === 'stream_message') commands++;
+  });
+  expect((await f.create('first')).status).toBe(200);
+  const browser = new WebSocket((f.url + f.user.state.basePath + 'v1/sessions/buffered/events').replace('http:', 'ws:'), { headers: { cookie: f.user.cookie, origin: f.url } });
+  await once(browser, 'open'); await opening;
+  browser.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message', payload: { agentId: 'buffered', requestId: 'message', text: 'queued command' } }));
+  const ended = once(browser, 'close');
+  expect((await control(f.url, { subject: 'owner', operation: 'revoke-share', hostId: f.hostId, targetSubject: 'user' })).status).toBe(200);
+  f.host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId }));
+  await ended;
+  // A ping/pong round trip is a processing barrier for earlier frames on the Host socket.
+  const pong = once(f.host, 'pong'); f.host.ping(); await pong;
+  expect(commands).toBe(0); expect(f.host.readyState).toBe(WebSocket.OPEN); f.host.close();
+}, 10000);

@@ -95,7 +95,10 @@ export function App({
   const shellRef = useVisualViewport();
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
-  const [selectedHost, setSelectedHost] = useState<RemoteHost>({ id: 'local', name: 'Recorded fixture', online: true });
+  const [requestedHostId] = useState(() => new URL(window.location.href).searchParams.get('host') || undefined);
+  const [selectedHost, setSelectedHost] = useState<RemoteHost>(() => requestedHostId
+    ? { id: requestedHostId, name: 'Requested Host', online: false, providers: [], providerId: '' }
+    : { id: 'local', name: 'Recorded fixture', online: true });
   const hostClient = useMemo(() => hostService ?? new RemoteHostClient(baseUrl), [baseUrl, hostService]);
   const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
   const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined);
@@ -155,6 +158,16 @@ export function App({
 
   useEffect(() => {
     if (restoredHostSelection.current || remoteHosts.length === 0) return;
+    if (requestedHostId) {
+      const host = remoteHosts.find((item) => item.id === requestedHostId);
+      if (!host) return;
+      restoredHostSelection.current = true;
+      const descriptor = host.providers?.[0];
+      const selectedProviderId = descriptor?.providerId ?? host.providerId ?? 'dsh';
+      setSelectedHost({ ...host, providerId: selectedProviderId });
+      setProviderName(descriptor ? `${descriptor.displayName} · ${host.name}` : selectedProviderId);
+      return;
+    }
     const activeId = state?.agent?.id ?? rememberedAgent();
     const saved = openedSessions.find((item) => item.agentId === activeId && item.hostId && item.hostId !== 'local');
     if (!saved) { restoredHostSelection.current = true; return; }
@@ -164,7 +177,7 @@ export function App({
     setSelectedHost({ ...host, providerId: saved.providerId });
     const descriptor = host.providers?.find((provider) => provider.providerId === saved.providerId);
     setProviderName(descriptor ? `${descriptor.displayName} · ${host.name}` : saved.providerId);
-  }, [openedSessions, remoteHosts, state?.agent?.id]);
+  }, [openedSessions, remoteHosts, requestedHostId, state?.agent?.id]);
 
   const loadProviders = useCallback(async (): Promise<void> => {
     const generation = providerRequestGenerationRef.current + 1;
@@ -205,6 +218,12 @@ export function App({
   ];
   const selectedProviderChoice = providerChoices.find((choice) => choice.hostId === selectedHost.id && choice.providerId === providerId);
   const selectedHostOffline = selectedHost.id !== 'local' && remoteHosts.find((host) => host.id === selectedHost.id)?.online !== true;
+  const selectedQuota = remoteHosts.find((host) => host.id === selectedHost.id)?.sessionQuota;
+  const creationQuotaExhausted = selectedQuota !== undefined && selectedQuota.used >= selectedQuota.limit && !creationReservation.current;
+  const requestedHostUnavailable = requestedHostId && !restoredHostSelection.current && !remoteHosts.some((host) => host.id === requestedHostId)
+    ? 'Requested Host is unavailable or is not shared with you. Retry Hosts or select another Host.' : undefined;
+  const creationUnavailableReason = requestedHostUnavailable ?? (selectedHostOffline ? 'This Host is offline. Reconnect it or select another Provider.'
+    : creationQuotaExhausted ? 'Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.' : undefined);
 
   function providerConnectionName(hostId: string, selectedProviderId: string): string {
     if (hostId === 'local') return providers.find((provider) => provider.providerId === selectedProviderId)?.displayName ?? selectedProviderId;
@@ -215,6 +234,7 @@ export function App({
 
   function selectHost(host: RemoteHost): void {
     if (creationLocked || transitionRef.current) return;
+    restoredHostSelection.current = true;
     if (host.id === 'local') setSelectedHost(host);
     else {
       const advertised = host.providers ?? (host.providerId ? [{ providerId: host.providerId, displayName: host.providerId }] : []);
@@ -276,6 +296,7 @@ export function App({
 
   useEffect(() => {
     if (initialState) return;
+    if (requestedHostId) return () => clientRef.current?.stop();
     const remembered = rememberedAgent();
     if (remembered) {
       const saved = openedSessionsRef.current.find((item) => item.agentId === remembered);
@@ -287,7 +308,7 @@ export function App({
       } else attach(remembered);
     }
     return () => clientRef.current?.stop();
-  }, [attach, baseUrl, initialState]);
+  }, [attach, baseUrl, initialState, requestedHostId]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -380,7 +401,7 @@ export function App({
   }
 
   async function createAgent(): Promise<void> {
-    if (!providerId || selectedHostOffline || transitionRef.current) return;
+    if (!providerId || creationUnavailableReason || transitionRef.current) return;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined);
@@ -402,10 +423,11 @@ export function App({
       }
       setProviderName(providerConnectionName(selectedHost.id, providerId));
     } catch (error) {
-      const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found'].includes(error.code ?? '');
+      const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'request_conflict'].includes(error.code ?? '');
       if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
       setFailure(`${message(error, 'Agent could not be created.')}${directory && !invalid ? ' Retry keeps the same session reservation and settings.' : ''}`);
     } finally {
+      if (directory && selectedHost.id !== 'local') retryHosts();
       transitionRef.current = false;
       setTransitioning(false);
     }
@@ -583,6 +605,8 @@ export function App({
       const key = JSON.stringify([sessionKey(source), id, args]);
       let record = forkReservation.current?.key === key ? forkStore.get(forkReservation.current.record.id) : forkStore.all().find((fork) => fork.creationKey === key);
       if (!record) {
+        const quota = remoteHosts.find((host) => host.id === source.hostId)?.sessionQuota;
+        if (quota && quota.used >= quota.limit) throw new Error('Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.');
         const context = await captureForkContext(transport, source);
         const settings = (agent.runtimeInfo.settings ?? []).filter((setting) => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
         let options: CreateSessionOptions;
@@ -596,7 +620,12 @@ export function App({
         record = forkStore.prepare(context, options, settings, key);
         forkReservation.current = { key, record };
       }
-      const result = record.target ? await target.attach(record.target.providerId, record.target.nativeSessionId) : await target.create(source.providerId, record.id, record.options);
+      let result: { agentId: string; nativeSessionId?: string };
+      if (record.target) result = await target.attach(record.target.providerId, record.target.nativeSessionId);
+      else {
+        try { result = await target.create(source.providerId, record.id, record.options); }
+        finally { if (source.hostId && source.hostId !== 'local') retryHosts(); }
+      }
       const session: OpenedSession = { agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? result.agentId, providerId: source.providerId,
         hostId: source.hostId ?? 'local', title: `Fork of ${source.title}`, createdAt: record.capturedAt };
       forkStore.bind(record.id, session);
@@ -713,7 +742,7 @@ export function App({
         <p className="lab-eyebrow">Context</p>
         <span title={baseUrl}>Connected runtime · {new URL(baseUrl, window.location.origin).host}</span>
       </div>
-      {directory ? <HostPairing service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={() => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {directory ? <HostPairing service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={() => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {directory ? <SessionDirectory directory={directory} providerId={providerId} activeAgentId={activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       <ProviderSessionControls
         providers={providerChoices}
@@ -721,7 +750,7 @@ export function App({
         catalogStatus={selectedHost.id !== 'local' || (catalogStatus === 'empty' && providerChoices.length > 0) ? 'ready' : catalogStatus}
         catalogError={catalogError}
         creating={transitioning}
-        unavailableReason={selectedHostOffline ? 'This Host is offline. Reconnect it or select another Provider.' : undefined}
+        unavailableReason={creationUnavailableReason}
         planning={createPlanning}
         configurationLocked={creationLocked}
         onPlanningChange={providerId !== 'dsh' && !creationLocked ? setCreatePlanning : undefined}
@@ -730,7 +759,7 @@ export function App({
         onSelectedProviderChange={selectProvider}
         onCreateSession={() => void createAgent()}
         onResumeSession={activeRemoteSession || activeOpened?.parentAgentId || activeOpened?.parentNativeSessionId ? undefined : () => void resumeAgent()}
-      >{directory ? <SessionConfiguration directory={directory} providerId={providerId} value={sessionOptions} disabled={transitioning || creationLocked || selectedHostOffline} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
+      >{directory ? <SessionConfiguration directory={directory} providerId={providerId} value={sessionOptions} disabled={transitioning || creationLocked || !!creationUnavailableReason} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
       {clientActions.advanceFixture || clientActions.rehydrateFixture || clientActions.stopReader ? <RecordedPlaybackControls
         onAdvance={clientActions.advanceFixture}
         onRehydrate={clientActions.rehydrateFixture}

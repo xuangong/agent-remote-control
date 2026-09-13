@@ -65,6 +65,8 @@ try {
   const state = await page.evaluate(async () => (await fetch('/auth/status')).json());
   const pairing = await page.evaluate(async base => (await fetch(base + 'v1/remote/pairings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json(), state.basePath);
   assert.equal(pairing.serverUrl, relayUrl);
+  let sharedCreations = 0;
+  const sharedBindings = new Map();
   async function connectHost() {
     const host = new WebSocket(relayUrl.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } }); sockets.push(host);
     await once(host, 'open'); const registered = once(host, 'message');
@@ -73,11 +75,22 @@ try {
     host.on('message', raw => {
       const message = JSON.parse(raw.toString());
       if (message.type !== 'rpc_request') return;
-      const body = message.path.startsWith('/remote/catalog/revision') ? { revision: '1' }
+      let creation;
+      if (message.path === '/remote/create') {
+        const input = JSON.parse(message.body);
+        if (input.cwd === '/uncertain') {
+          host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 503, body: JSON.stringify({ code: 'mutation_outcome_unknown', error: 'Uncertain native outcome' }) }));
+          return;
+        }
+        creation = sharedBindings.get(input.requestId);
+        if (!creation) { sharedCreations++; creation = { agentId: `shared-agent-${sharedCreations}`, nativeSessionId: `shared-native-${sharedCreations}` }; sharedBindings.set(input.requestId, creation); }
+      }
+      const body = creation ?? (message.path.startsWith('/remote/catalog/revision') ? { revision: '1' }
+        : message.path.startsWith('/remote/catalog/session') ? { nativeSessionId: new URL(message.path, relayUrl).searchParams.get('nativeSessionId'), providerId: 'codex', title: 'Shared topic', state: 'idle', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
         : message.path.startsWith('/remote/catalog') ? { items: [{ nativeSessionId: 'test-native', providerId: 'codex', title: 'Private test session', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: 'idle' }], revision: '1', hasMore: false }
-        : message.path === '/remote/attach' ? { agentId: 'test-agent', nativeSessionId: 'test-native' }
+        : message.path === '/remote/attach' ? ([...sharedBindings.values()].find(value => value.nativeSessionId === JSON.parse(message.body).nativeSessionId) ?? { agentId: 'test-agent', nativeSessionId: 'test-native' })
         : message.path.startsWith('/v1/sessions/') ? { restored: true }
-        : message.path.startsWith('/remote/workspaces') ? { workspaces: [] } : { models: [] };
+        : message.path.startsWith('/remote/workspaces') ? { workspaces: [] } : { models: [] });
       host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify(body) }));
     });
     return { host, hostId };
@@ -97,6 +110,36 @@ try {
     return { own: await (await fetch(own.basePath + 'v1/remote/hosts')).json(), forbidden: (await fetch(alicePath + 'v1/remote/hosts')).status, basePath: own.basePath };
   }, state.basePath);
   assert.deepEqual(isolation.own, { hosts: [] }); assert.equal(isolation.forbidden, 403); assert.notEqual(isolation.basePath, state.basePath);
+  const shareRequest = (method, body) => fetch(gatewayUrl + `/api/agent-remote/hosts/${hostId}/shares`, { method,
+    headers: { authorization: 'Bearer ses_agent_remote_alice', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await shareRequest('PUT', { email: 'bob@example.com', sessionLimit: 1 })).status, 200);
+  const gatewayHosts = await fetch(gatewayUrl + '/api/agent-remote/hosts', { headers: { authorization: 'Bearer ses_agent_remote_bob' } });
+  assert.equal(gatewayHosts.status, 200);
+  assert.deepEqual((await gatewayHosts.json()).hosts[0].sessionQuota, { limit: 1, used: 0 });
+  await other.goto(gatewayUrl + `/agent-remote?host=${hostId}`);
+  await other.waitForURL(relayUrl + `/?host=${hostId}`);
+  await other.waitForFunction(id => document.querySelector('#remote-host')?.value === id, hostId);
+  const bobRequest = (path, body) => other.evaluate(async ({ path, body }) => {
+    const state = await (await fetch('/auth/status')).json();
+    const response = await fetch(state.basePath + path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  }, { path, body });
+  const createPath = `v1/remote/hosts/${hostId}/create`;
+  const creation = await bobRequest(createPath, { providerId: 'codex', requestId: 'topic-one' });
+  assert.equal(creation.status, 200); assert.equal(sharedCreations, 1);
+  assert.deepEqual(await bobRequest(createPath, { providerId: 'codex', requestId: 'topic-one' }), creation);
+  assert.equal((await bobRequest(createPath, { providerId: 'codex', requestId: 'topic-two' })).body.code, 'session_quota_exceeded');
+  assert.equal((await bobRequest(`v1/remote/hosts/${hostId}/attach`, { providerId: 'codex', nativeSessionId: 'test-native' })).status, 403);
+  const privateCatalog = await bobRequest(`v1/remote/hosts/${hostId}/catalog?providerId=codex`);
+  assert.equal(privateCatalog.status, 200); assert.equal(privateCatalog.body.items.length, 1);
+  assert.equal(privateCatalog.body.items[0].title, 'Shared topic');
+  await other.reload();
+  await other.getByRole('button', { name: 'New session', exact: true }).waitFor();
+  assert.equal(await other.getByRole('button', { name: 'New session', exact: true }).isDisabled(), true);
+  await other.screenshot({ path: join(temporary, 'shared-controller.png'), fullPage: true });
+  assert.equal((await shareRequest('PUT', { email: 'bob@example.com', sessionLimit: 2 })).status, 200);
+  assert.equal((await bobRequest(createPath, { providerId: 'codex', requestId: 'uncertain', cwd: '/uncertain' })).status, 503);
+  assert.equal((await bobRequest(createPath, { providerId: 'codex', requestId: 'uncertain', cwd: '/uncertain' })).body.code, 'creation_outcome_unknown');
   const cookies = await context.cookies(relayUrl); const session = cookies.find(cookie => cookie.name === 'arc_session');
   assert.equal(session?.httpOnly, true); assert.equal(session?.sameSite, 'Strict');
   const storage = await page.evaluate(() => JSON.stringify({ ...localStorage }));
@@ -123,6 +166,17 @@ try {
   await page.getByRole('option', { name: 'Integration Host · Online', exact: true }).waitFor({ state: 'attached' });
   const snapshot = await page.evaluate(async base => (await fetch(base + 'v1/sessions/test-agent/snapshot')).json(), state.basePath);
   assert.deepEqual(snapshot, { restored: true });
+  const sharedAfterRestart = await bobRequest('v1/remote/hosts');
+  assert.deepEqual(sharedAfterRestart.body.hosts[0].sessionQuota, { limit: 2, used: 2 });
+  assert.equal((await bobRequest(createPath, { providerId: 'codex', requestId: 'uncertain', cwd: '/uncertain' })).body.code, 'creation_outcome_unknown');
+  assert.deepEqual(await bobRequest(createPath, { providerId: 'codex', requestId: 'topic-one' }), creation);
+  assert.equal((await bobRequest(createPath, { providerId: 'codex', requestId: 'topic-two' })).body.code, 'session_quota_exceeded');
+  assert.equal(sharedCreations, 1);
+  assert.equal((await shareRequest('DELETE', { email: 'bob@example.com' })).status, 200);
+  assert.deepEqual((await bobRequest('v1/remote/hosts')).body, { hosts: [] });
+  assert.equal(restored.host.readyState, WebSocket.OPEN);
+  assert.equal((await shareRequest('PUT', { email: 'bob@example.com', sessionLimit: 1 })).status, 200);
+  assert.equal((await bobRequest(createPath, { providerId: 'codex', requestId: 'topic-two' })).body.code, 'session_quota_exceeded');
   await page.screenshot({ path: join(temporary, 'controller.png'), fullPage: true });
   await page.locator('#remote-host').selectOption(hostId);
   await page.getByRole('button', { name: 'Revoke Host', exact: true }).click();
@@ -133,7 +187,7 @@ try {
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await page.getByRole('link', { name: 'Sign in through gateway' }).waitFor();
   await bob.close(); await context.close();
-  console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected; renewal, process restart with stable device/binding, device revoke and logout verified. No CLI agents started.');
+  console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected; renewal, process restart with stable device/binding, device revoke and logout verified; shared Host Gateway APIs, selected-Host login, per-user catalog, cumulative quota, retry identity, quota and unresolved-reservation persistence, revoke/regrant verified. No CLI agents started.');
   console.log(`Evidence: ${temporary}`);
 } catch (error) {
   await writeFile(join(temporary, 'failure.log'), logs.join(''));

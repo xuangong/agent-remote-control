@@ -172,3 +172,17 @@ async function settlesWithin(settlement: Promise<void>): Promise<boolean> {
     new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
   ]);
 }
+
+it.each(['create', 'resume'] as const)('applies locally required sandbox and approval settings on %s', async operation => {
+  const appServer = createScriptedAppServer({
+    'thread/start': () => ({ thread: { id: 'restricted' } }),
+    'thread/resume': () => ({ thread: { id: 'restricted' } }),
+    'thread/read': () => ({ thread: { id: 'restricted', turns: [] } }),
+  });
+  const provider = new CodexAppServerProvider({ spawn: () => appServer.child, restrictedNative: true });
+  const session = operation === 'create' ? await provider.createSession({ sessionId: 'local' })
+    : await provider.resumeSession({ providerId: 'codex', sessionId: 'restricted', opaque: '{}' });
+  try { expect(appServer.requests.find(request => request.method === (operation === 'create' ? 'thread/start' : 'thread/resume'))?.params)
+    .toMatchObject({ sandbox: 'workspace-write', approvalPolicy: 'never' }); }
+  finally { await session.dispose(); }
+});

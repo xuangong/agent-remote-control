@@ -18,16 +18,18 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|models|child/attach|attach|create)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|models|child/attach|attach|create|stop)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
   Type.Union([
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity,
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity,
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, credentialRotation: Type.Optional(Type.Literal(true)),
       providers: Type.Array(provider, { minItems: 1, maxItems: 64 }) }, object),
   ]),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_request'), method: Type.Union([Type.Literal('GET'), Type.Literal('POST')]),
     path: requestPath, sessionId: Type.Optional(identity), body: Type.Optional(Type.String()) }, object),
@@ -42,7 +44,7 @@ export const RemoteHostUplinkMessage = Type.Union([
 
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'registered' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+  { type: 'credential_issued' | 'registered' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;

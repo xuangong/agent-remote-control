@@ -44,3 +44,18 @@ it('requires the server and credential together for explicit environment overrid
   expect((await resolveHostConnection(path, {})).remoteKey).toBe('new');
   expect((await resolveHostConnection(path, {})).environment.AGENT_HOST_PROVIDERS).toBe('copilot');
 });
+
+it('persists issued credentials before registration and never overwrites them with the invitation afterward', async () => {
+  const { saveIssuedCredential } = await import('./connection-config.js');
+  const path = await directory();
+  const config = await resolveHostConnection(path, { AGENT_HOST_SERVER: 'https://relay.example', AGENT_HOST_REMOTE_KEY: 'invitation' });
+  let accept!: () => void;
+  const registering = saveRegisteredConnection(path, config, new Promise<void>(resolve => { accept = resolve; }));
+  await saveIssuedCredential(path, config, 'device');
+  expect((await resolveHostConnection(path, {})).remoteKey).toBe('device');
+  expect(config.remoteKey).toBe('device');
+  accept(); await registering;
+  expect((await resolveHostConnection(path, {})).remoteKey).toBe('device');
+  await Promise.all([saveRegisteredConnection(path, config, Promise.resolve()), saveIssuedCredential(path, config, 'rotated')]);
+  expect((await resolveHostConnection(path, {})).remoteKey).toBe('rotated');
+});

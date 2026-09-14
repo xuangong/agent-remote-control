@@ -6,3 +6,4 @@ export * from './claude-directory.js';
 export * from './registrations.js';
 export * from './copilot.js';
 export * from './copilot-directory.js';
+export * from './execution-policy.js';

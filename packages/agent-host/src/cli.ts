@@ -9,7 +9,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAgentHost, type AgentHost } from './host.js';
 import { createHostRegistrations } from './registrations.js';
-import { resolveHostConnection, saveRegisteredConnection, type HostConnection } from './connection-config.js';
+import { createHostExecutionPolicy } from './execution-policy.js';
+import { resolveHostConnection, saveIssuedCredential, saveRegisteredConnection, type HostConnection } from './connection-config.js';
 
 interface DaemonState { pid: number; token: string; socket: string; startedAt: string }
 const args = process.argv.slice(2);
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_WORKSPACE, AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\n`);
+  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
@@ -47,10 +48,14 @@ async function serve(daemon: boolean): Promise<void> {
   await privateDirectory();
   const installationId = await installation();
   const diagnosticSecrets = new Set([remoteKey, process.env.AGENT_HOST_MANAGEMENT_TOKEN ?? '']);
+  const executionPolicy = await createHostExecutionPolicy(environment);
+  if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   const registrations = await createHostRegistrations(environment,
     (line) => process.stderr.write(daemonDiagnosticLine(line, diagnosticSecrets)));
   const host = createAgentHost({ registrations, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
-    uplink: { url: uplinkUrl(serverUrl), remoteKey }, shutdownTimeoutMs: shutdownTimeout() });
+    executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey, onCredential: credential => {
+      diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);
+    } }, shutdownTimeoutMs: shutdownTimeout() });
   if (!daemon) {
     process.stdout.write('Agent Host is running in the foreground.\n');
     await saveRegisteredConnection(stateDir, configuration, host.ready);
@@ -92,8 +97,12 @@ async function handleManagement(input: string, token: string, host: AgentHost, c
     else if (request.action === 'pair') {
       if (!request.server || !request.key) throw new Error('Repair requires a server and key.');
       diagnosticSecrets.add(request.key);
-      const registered = await saveRegisteredConnection(stateDir, { ...configuration, serverUrl: request.server, remoteKey: request.key },
-        host.replaceUplink({ url: uplinkUrl(request.server), remoteKey: request.key }));
+      const replacement = { ...configuration, serverUrl: request.server, remoteKey: request.key };
+      const registered = await saveRegisteredConnection(stateDir, replacement,
+        host.replaceUplink({ url: uplinkUrl(request.server), remoteKey: request.key, onCredential: credential => {
+          diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, replacement, credential);
+        } }));
+      Object.assign(configuration, replacement);
       connection.end(JSON.stringify({ running: true, uplink: host.state, hostId: registered.hostId }));
     } else if (request.action === 'stop') { connection.end(JSON.stringify({ stopping: true })); process.kill(process.pid, 'SIGTERM'); }
     else throw new Error('Unknown local management action.');

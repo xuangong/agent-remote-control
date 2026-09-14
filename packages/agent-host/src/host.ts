@@ -1,7 +1,8 @@
+import { HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@borgee/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
-  RemoteHostCatalog, RemoteHostCatalogError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteSessionSummary } from '@borgee/agent-remote-relay';
+  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteSessionSummary } from '@borgee/agent-remote-relay';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
@@ -15,7 +16,7 @@ export interface AgentHostDirectory {
   close(): Promise<void> | void;
 }
 export interface AgentHostProviderRegistration { adapter: AgentProviderAdapter; directory: AgentHostDirectory }
-export interface AgentHostRuntimeOptions { registrations: readonly AgentHostProviderRegistration[]; shutdownTimeoutMs?: number }
+export interface AgentHostRuntimeOptions { registrations: readonly AgentHostProviderRegistration[]; shutdownTimeoutMs?: number; cancelTimeoutMs?: number; executionPolicy?: HostExecutionPolicy }
 export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
@@ -25,7 +26,7 @@ export interface AgentHostRuntime {
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
   installationId: string;
   name: string;
-  uplink: { url: string; remoteKey: string };
+  uplink: { url: string; remoteKey: string; onCredential?: (credential: string) => Promise<void> };
 }
 export interface AgentHost {
   readonly ready: Promise<{ hostId: string }>;
@@ -41,10 +42,19 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   let closed = false;
   interface Connection { client: RemoteHostUplinkClient; superseded: boolean }
   let connection: Connection;
+  let credentialPersistence: Promise<void> = Promise.resolve();
   const connect = (config: AgentHostOptions['uplink']): Connection => {
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name,
       providers: options.registrations.map(({ adapter }) => adapter.descriptor), url: config.url, remoteKey: config.remoteKey,
+      onCredential: config.onCredential ? credential => {
+        const pending = credentialPersistence.catch(() => undefined).then(async () => {
+          if (generation !== current || closed) throw new Error('Host credential persistence was superseded.');
+          await config.onCredential!(credential);
+        });
+        credentialPersistence = pending;
+        return pending;
+      } : undefined,
       resolveSession: runtime.resolveSession, control: runtime.control,
       onStateChange(next) { if (generation === current && !closed) state = next; } }) };
   };
@@ -78,6 +88,7 @@ interface Creation { fingerprint: string; operation: Promise<AgentRemoteHttpResu
 interface Projection { agentId: string; parentNativeSessionId?: string; operation: Promise<Binding> }
 
 export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentHostRuntime {
+  if (options.executionPolicy) options = { ...options, registrations: options.registrations.map(registration => ({ ...registration, directory: protectHostDirectory(registration.directory, options.executionPolicy!) })) };
   if (!options.registrations.length) throw new Error('Agent Host requires at least one provider registration.');
   const registrations = new Map<string, AgentHostProviderRegistration>();
   const prepared = new Map<string, AgentSession>();
@@ -106,6 +117,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const projections = new Map<string, Projection>();
   const projectionAgents = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
+  const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -218,6 +230,23 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       if (request.method === 'POST') {
         const payload = body(request.body);
+        if (url.pathname === '/remote/stop') {
+          if (Object.keys(payload).length || request.sessionId) throw new HostRequestError(400, 'invalid_request', 'Stop requires an empty body.');
+          const results = await Promise.all([...bindingsByAgent.keys()].map(async agentId => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([relay.requireAgent(agentId).cancel(), new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error('Cancellation deadline exceeded.')), cancelTimeoutMs);
+              })]);
+              return { agentId, status: 'cancelled' as const };
+            } catch (error) {
+              return error instanceof UnsupportedAgentCapabilityError
+                ? { agentId, status: 'unsupported' as const, message: 'The native session does not support cancellation.' }
+                : { agentId, status: 'failed' as const, message: 'Native cancellation did not complete.' };
+            } finally { clearTimeout(timer); }
+          }));
+          return json(200, { results });
+        }
         if (url.pathname === '/remote/create') return await create(request, payload);
         if (url.pathname === '/remote/attach' || url.pathname === '/remote/child/attach') {
           if (!request.sessionId) throw new HostRequestError(400, 'invalid_request', 'A proposed Agent identity is required.');
@@ -229,6 +258,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       throw new HostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
     } catch (error) {
+      if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
       if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });
       if (request.method === 'GET') return json(503, { error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' });

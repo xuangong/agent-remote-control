@@ -302,6 +302,7 @@ async function uplinkBroker(hostId: string, autoRegister = true) {
     url: `ws://127.0.0.1:${address.port}/ws/remote-host`,
     connected,
     advertisedProviders: () => providers,
+    issueCredential(credential: string) { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_issued', credential })); },
     register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId })); },
     rpc(method: 'GET' | 'POST', path: string, sessionId?: string, body?: unknown): Promise<{ status: number; body: string }> {
       const requestId = `rpc-${++sequence}`;
@@ -326,3 +327,77 @@ function summary(providerId: string, nativeSessionId: string) {
   return { providerId, nativeSessionId, title: nativeSessionId, createdAt: '2026-09-11T00:00:00.000Z',
     updatedAt: '2026-09-11T00:00:00.000Z', state: 'idle' as const };
 }
+
+it('stops projected native sessions and reports unsupported and failed cancellation separately', async () => {
+  const registration = fixture('recorded'); let cancelled = 0;
+  const originalOpen = registration.directory.open;
+  registration.directory.open = async id => {
+    const session = await originalOpen(id);
+    if (id === 'ok' || id === 'failed') {
+      Object.assign(session, { capabilities: { ...capabilities, cancel: true }, cancel: async () => {
+        if (id === 'failed') throw new Error('native error contains secret'); cancelled++;
+      } });
+    }
+    return session;
+  };
+  const host = createAgentHostRuntime({ registrations: [registration] });
+  try {
+    for (const id of ['ok', 'unsupported', 'failed']) await host.control({ method: 'POST', path: '/remote/attach', sessionId: id, body: JSON.stringify({ providerId: 'recorded', nativeSessionId: id }) });
+    const response = await host.control({ method: 'POST', path: '/remote/stop', body: '{}' });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ results: [
+      { agentId: 'ok', status: 'cancelled' }, { agentId: 'unsupported', status: 'unsupported', message: 'The native session does not support cancellation.' },
+      { agentId: 'failed', status: 'failed', message: 'Native cancellation did not complete.' },
+    ] });
+    expect(cancelled).toBe(1); expect(response.body).not.toContain('secret');
+    expect((await host.control({ method: 'POST', path: '/remote/stop', body: '{"unexpected":true}' })).status).toBe(400);
+  } finally { await host.close(); }
+});
+
+it('returns a failed cancellation result by the local deadline when a native cancel never settles', async () => {
+  const registration = fixture('recorded'); const open = registration.directory.open;
+  registration.directory.open = async id => Object.assign(await open(id), {
+    capabilities: { ...capabilities, cancel: true }, cancel: () => new Promise<void>(() => undefined),
+  });
+  const host = createAgentHostRuntime({ registrations: [registration], cancelTimeoutMs: 15 });
+  try {
+    await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'hung', body: JSON.stringify({ providerId: 'recorded', nativeSessionId: 'hung' }) });
+    expect(JSON.parse((await host.control({ method: 'POST', path: '/remote/stop', body: '{}' })).body)).toEqual({ results: [
+      { agentId: 'hung', status: 'failed', message: 'Native cancellation did not complete.' },
+    ] });
+  } finally { await host.close(); }
+});
+
+
+it('serializes durable credential writes across uplink replacement so an old save cannot overwrite a new key', async () => {
+  const first = await uplinkBroker('first'); const second = await uplinkBroker('second');
+  const events: string[] = []; let release!: () => void; let saved = '';
+  const host = createAgentHost({ registrations: [fixture('recorded')], installationId: 'i', name: 'Host', uplink: {
+    url: first.url, remoteKey: 'first-key', onCredential: async credential => {
+      events.push('old-start'); await new Promise<void>(resolve => { release = resolve; }); saved = credential; events.push('old-saved');
+    },
+  } });
+  try {
+    await host.ready; first.issueCredential('old-device'); await expect.poll(() => events.length).toBe(1);
+    const replacement = host.replaceUplink({ url: second.url, remoteKey: 'next-key', onCredential: async credential => {
+      saved = credential; events.push('new-saved');
+    } });
+    await second.connected; await expect.poll(() => second.advertisedProviders()).toBeDefined();
+    second.issueCredential('new-device'); await second.rpc('GET', '/remote/workspaces?providerId=recorded');
+    expect(events).toEqual(['old-start']);
+    release(); await replacement; await expect.poll(() => events.length).toBe(3);
+    expect(events).toEqual(['old-start', 'old-saved', 'new-saved']); expect(saved).toBe('new-device');
+  } finally { release?.(); await host.close(); await first.close(); await second.close(); }
+});
+
+it('delivers the owner stop operation over the real Host uplink transport', async () => {
+  const broker = await uplinkBroker('host'); const host = createAgentHost({ registrations: [fixture('recorded')], installationId: 'i', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'key' } });
+  try {
+    await host.ready;
+    await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'recorded', nativeSessionId: 'native' });
+    const result = await broker.rpc('POST', '/remote/stop', undefined, {});
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({ results: [{ agentId: 'agent', status: 'unsupported', message: 'The native session does not support cancellation.' }] });
+  } finally { await host.close(); await broker.close(); }
+});

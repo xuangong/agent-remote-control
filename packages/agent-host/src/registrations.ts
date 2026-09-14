@@ -1,3 +1,4 @@
+import { sanitizeNativeEnvironment } from './execution-policy.js';
 import type { CopilotHostRegistrationOptions } from './copilot.js';
 import type { ClaudeHostRegistrationOptions } from './claude.js';
 import type { CodexHostRegistrationOptions } from './codex.js';
@@ -29,8 +30,8 @@ export function selectedHostProviders(env: NodeJS.ProcessEnv): HostProviderId[] 
 export async function createHostRegistrations(env: NodeJS.ProcessEnv, onDiagnostic?: (line: string) => void,
   factories: HostRegistrationFactories = defaultFactories): Promise<AgentHostProviderRegistration[]> {
   const providers = selectedHostProviders(env);
-  const workspace = env.AGENT_HOST_WORKSPACE ?? env.AGENT_REMOTE_WORKSPACE;
-  const common = { env, onDiagnostic, workspaces: workspace ? [{ id: workspace, name: workspace, path: workspace }] : [] };
+  const workspace = env.AGENT_HOST_WORKSPACE ?? env.AGENT_REMOTE_WORKSPACE ?? process.cwd();
+  const common = { env: sanitizeNativeEnvironment(env), onDiagnostic, restrictedNative: env.AGENT_HOST_TRUSTED_FULL_CONTROL !== '1', workspaces: workspace ? [{ id: workspace, name: workspace, path: workspace }] : [] };
   const registrations: AgentHostProviderRegistration[] = [];
   try {
     for (const provider of providers) {

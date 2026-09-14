@@ -278,6 +278,7 @@ export class CodexAppServerSession implements AgentSession {
     config: AgentSessionConfig,
     collaborationMode?: 'plan',
     codexHome?: string,
+    restrictedNative = false,
   ): Promise<CodexAppServerSession> {
     const stored = toStoredConfig(config, collaborationMode);
     const session = new CodexAppServerSession(transport, stored, codexHome);
@@ -285,6 +286,7 @@ export class CodexAppServerSession implements AgentSession {
     const response = await transport.request('thread/start', {
       historyMode: 'paginated',
       config: { 'features.default_mode_request_user_input': true },
+      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),
@@ -299,6 +301,7 @@ export class CodexAppServerSession implements AgentSession {
     handle: AgentPersistenceHandle,
     collaborationMode?: 'plan',
     codexHome?: string,
+    restrictedNative = false,
   ): Promise<CodexAppServerSession> {
     if (handle.providerId !== PROVIDER_ID) {
       throw new Error(`Cannot resume ${handle.providerId} with the Codex provider`);
@@ -311,6 +314,7 @@ export class CodexAppServerSession implements AgentSession {
     const resumed = await transport.request('thread/resume', {
       threadId: handle.sessionId,
       config: { 'features.default_mode_request_user_input': true },
+      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),

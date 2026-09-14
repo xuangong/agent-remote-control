@@ -16,6 +16,7 @@ import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPa
 
 export interface CodexAppServerProviderOptions {
   executable?: string;
+  restrictedNative?: boolean;
   env?: NodeJS.ProcessEnv;
   requestTimeoutMs?: number;
   collaborationMode?: 'plan';
@@ -49,7 +50,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
     const transport = await this.createTransport(config.cwd);
     try {
-      const session = await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME);
+      const session = await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative);
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
@@ -63,7 +64,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const cwd = readPersistenceCwd(handle.opaque);
     const transport = await this.createTransport(cwd);
     try {
-      const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME);
+      const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative);
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;

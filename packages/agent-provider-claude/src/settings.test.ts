@@ -66,3 +66,12 @@ it('closes an ambiguous timed-out setting change instead of allowing work with s
     expect((await session.runtimeInfo()).model).toBe('old');
   } finally { await session.dispose(); }
 });
+
+it('requires the native sandbox without unsandboxed fallback and resets saved elevated permission mode', async () => {
+  const native = fixture(); let launched: any;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', permissionMode: 'dontAsk' }, {
+    restrictedNative: true, query: input => { launched = input.options; return native.factory(); },
+  });
+  try { expect(launched).toMatchObject({ permissionMode: 'default', sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } }); }
+  finally { await session.dispose(); }
+});

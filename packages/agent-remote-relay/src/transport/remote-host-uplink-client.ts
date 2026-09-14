@@ -14,6 +14,8 @@ export interface RemoteHostUplinkClientOptions {
   readonly name: string;
   readonly providers?: readonly { providerId: string; displayName: string }[];
   readonly remoteKey: string;
+  /** Must durably persist the offered credential before resolving. */
+  readonly onCredential?: (credential: string) => Promise<void>;
   readonly url: string;
   readonly resolveSession: RemoteHostPluginHostOptions['resolveSession'];
   readonly control: RemoteHostPluginHostOptions['control'];
@@ -44,6 +46,8 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   let rejectReady!: (error: Error) => void;
   const ready = new Promise<{ hostId: string }>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   void ready.catch(() => undefined);
+  let remoteKey = options.remoteKey;
+  let credentialWrite: Promise<void> | undefined;
   let closed = false;
   let terminal = false;
   let attempts = 0;
@@ -61,9 +65,10 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
 
   function connect(): void {
     if (closed || terminal) return;
+    if (credentialWrite) { void credentialWrite.then(connect); return; }
     options.onStateChange?.('connecting');
     const socket = new WebSocket(options.url, {
-      headers: { authorization: `Bearer ${options.remoteKey}` },
+      headers: { authorization: `Bearer ${remoteKey}` },
       maxPayload: UPLINK_MAX_FRAME_BYTES,
       handshakeTimeout: registrationTimeout,
       perMessageDeflate: false,
@@ -113,6 +118,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       registrationDeadline = setTimeout(retire, registrationTimeout);
       writer.send(JSON.stringify({
         uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'register', installationId: options.installationId,
+        ...(options.onCredential ? { credentialRotation: true } : {}),
         name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providers }),
       }));
     });
@@ -121,7 +127,23 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       if (isBinary) { retire(); return; }
       const decoded = decodeRemoteHostUplinkMessage(data.toString());
       if (decoded.status !== 'ok') { retire(); return; }
+      if (decoded.value.type === 'credential_issued') {
+        if (!options.onCredential || credentialWrite) { retire(); return; }
+        const credential = decoded.value.credential;
+        credentialWrite = Promise.resolve().then(() => options.onCredential!(credential)).then(() => {
+          // The saved key is authoritative even when this connection disappeared during fsync.
+          remoteKey = credential;
+          if (!closed && !retired) writer.send(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'credential_saved' }));
+        }).catch(() => {
+          terminal = true;
+          if (!closed) options.onStateChange?.('rejected');
+          rejectReady(new Error('Remote Host could not durably save its device credential. Pair again after fixing local storage.'));
+          retire();
+        }).finally(() => { credentialWrite = undefined; });
+        return;
+      }
       if (!registered) {
+        if (credentialWrite) { retire(); return; }
         if (decoded.value.type !== 'registered') { retire(); return; }
         clearTimeout(registrationDeadline);
         registered = true;
@@ -144,7 +166,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       clearTimeout(retry);
       rejectReady(new Error('Remote Host uplink closed before registration.'));
       retireConnection?.();
-      closePromise = connectionClosed;
+      closePromise = Promise.all([connectionClosed, credentialWrite]).then(() => undefined);
       return closePromise;
     },
   };

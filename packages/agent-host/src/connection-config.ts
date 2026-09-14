@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export interface HostConnection { serverUrl: string; remoteKey: string; environment: NodeJS.ProcessEnv }
 const restartSettings = [
   'AGENT_HOST_PROVIDERS', 'AGENT_HOST_CODEX', 'AGENT_HOST_CLAUDE', 'AGENT_HOST_CLAUDE_HOME',
+  'AGENT_HOST_ALLOWED_WORKSPACE_ROOTS', 'AGENT_HOST_TRUSTED_FULL_CONTROL',
   'AGENT_HOST_COPILOT', 'AGENT_HOST_COPILOT_HOME', 'AGENT_HOST_WORKSPACE', 'AGENT_HOST_NAME',
   'AGENT_REMOTE_CODEX_EXECUTABLE', 'AGENT_REMOTE_CODEX_HOME', 'AGENT_REMOTE_WORKSPACE',
 ] as const;
@@ -37,12 +38,35 @@ export async function resolveHostConnection(stateDir: string, env: NodeJS.Proces
 }
 export async function saveRegisteredConnection<T>(stateDir: string, connection: HostConnection, accepted: Promise<T>): Promise<T> {
   const registered = await accepted;
+  await serializedWrite(stateDir, () => writeConnection(stateDir, connection));
+  return registered;
+}
+
+export async function saveIssuedCredential(stateDir: string, connection: HostConnection, credential: string): Promise<void> {
+  await serializedWrite(stateDir, async () => {
+    await writeConnection(stateDir, { ...connection, remoteKey: credential });
+    connection.remoteKey = credential;
+  });
+}
+const pendingWrites = new Map<string, Promise<void>>();
+function serializedWrite(stateDir: string, write: () => Promise<void>): Promise<void> {
+  const pending = (pendingWrites.get(stateDir) ?? Promise.resolve()).catch(() => undefined).then(write);
+  pendingWrites.set(stateDir, pending);
+  void pending.finally(() => { if (pendingWrites.get(stateDir) === pending) pendingWrites.delete(stateDir); }).catch(() => undefined);
+  return pending;
+}
+async function writeConnection(stateDir: string, connection: HostConnection): Promise<void> {
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   await chmod(stateDir, 0o700);
   const temporary = join(stateDir, `.connection-${randomUUID()}.tmp`);
   try {
-    await writeFile(temporary, JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, environment: retainedEnvironment(connection.environment) }), { mode: 0o600, flag: 'wx' });
+    const file = await open(temporary, 'wx', 0o600);
+    try {
+      await file.writeFile(JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, environment: retainedEnvironment(connection.environment) }));
+      await file.sync();
+    } finally { await file.close(); }
     await rename(temporary, join(stateDir, 'connection.json'));
+    const directory = await open(stateDir, 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
   } finally { await rm(temporary, { force: true }); }
-  return registered;
 }

@@ -15,6 +15,7 @@ import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'>;
 export interface ClaudeSessionOptions {
   executable?: string;
+  restrictedNative?: boolean;
   env?: NodeJS.ProcessEnv;
   requestTimeoutMs?: number;
   onDiagnostic?: (line: string) => void;
@@ -59,7 +60,7 @@ export class ClaudeAgentSession implements AgentSession {
     this.timeout = options.requestTimeoutMs ?? 15_000;
     if (!Number.isFinite(this.timeout) || this.timeout <= 0) throw new Error('Claude request timeout must be positive.');
     this.planning = config.planning ?? false;
-    this.resumePermissionMode = ['default', 'acceptEdits', 'dontAsk'].includes(config.permissionMode ?? '') ? config.permissionMode! : 'default';
+    this.resumePermissionMode = !options.restrictedNative && ['default', 'acceptEdits', 'dontAsk'].includes(config.permissionMode ?? '') ? config.permissionMode! : 'default';
     this.permissionMode = this.planning ? 'plan' : this.resumePermissionMode;
     this.images = new ClaudeImageRegistry(config.sessionId);
     this.projector = new ClaudeEventProjector(config.sessionId, 'live', this.images);
@@ -92,6 +93,7 @@ export class ClaudeAgentSession implements AgentSession {
         pathToClaudeCodeExecutable: options.executable ?? 'claude', env: { ...process.env, ...options.env },
         includePartialMessages: true, forwardSubagentText: true, persistSession: true, settingSources: ['user', 'project', 'local'],
         systemPrompt: config.systemPrompt ?? { type: 'preset', preset: 'claude_code' },
+        ...(options.restrictedNative ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } } : {}),
         permissionMode: session.permissionMode, canUseTool: session.interactions.request,
         stderr: options.onDiagnostic,
       } });

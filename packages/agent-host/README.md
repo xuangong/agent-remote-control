@@ -122,3 +122,81 @@ To apply an updated tarball, stop the existing Host, install the new tarball,
 and run `agent-remote-controller start`. Installing a package does not replace already running
 processes. Native session history remains in the native profiles; in-flight
 requests and active work may be interrupted by a restart.
+
+## Local execution policy
+
+The CLI admits workspaces under trusted local roots. Its default root is
+`AGENT_HOST_WORKSPACE` (or `AGENT_REMOTE_WORKSPACE`), falling back to the directory
+where the Host starts. The selected default directory is retained for later
+starts. To admit additional roots, set `AGENT_HOST_ALLOWED_WORKSPACE_ROOTS` to a
+JSON array of absolute directory paths before starting the Host:
+
+```sh
+export AGENT_HOST_WORKSPACE=/Users/me/projects/app
+export AGENT_HOST_ALLOWED_WORKSPACE_ROOTS='["/Users/me/projects/app","/Users/me/projects/docs"]'
+```
+
+The default workspace must be inside an allowed root. Paths must exist; the
+Host checks real paths, including symbolic links, before creating or importing
+sessions and before native input or settings mutations. Catalogs omit sessions
+outside those roots and sessions whose workspace cannot be established. Native
+permission settings are read-only to remote controllers; model controls remain
+available. These rules apply to the CLI. Embedders can provide the same trusted
+`executionPolicy` through `createAgentHostRuntime` or `createAgentHost`.
+
+A workspace admission check is not filesystem isolation. The providers have
+different execution guarantees:
+
+- Codex starts and resumes threads with native `workspace-write` and approval
+  policy `never`. Native sandbox escalation is disabled. Codex may still read
+  outside the workspace and use its native temporary directories; existing
+  native configuration and platform support determine the remaining sandbox
+  details.
+- Claude requests the SDK command sandbox with `enabled: true`,
+  `failIfUnavailable: true`, and `allowUnsandboxedCommands: false`. Unsupported
+  platforms fail closed. Saved elevated permission modes are reset to `default`.
+  The command sandbox does not establish isolation for every native tool,
+  external MCP service, hook, or filesystem read.
+- Copilot has no filesystem sandbox guarantee supplied by this integration.
+  Workspace admission and existing native interactive permissions still apply.
+
+For trusted full remote control, set `AGENT_HOST_TRUSTED_FULL_CONTROL=1` locally
+before starting the Host. This explicitly disables workspace admission, remote
+permission locking, and the Codex/Claude sandbox defaults above. It is retained
+in private connection settings; set it to `0` and restart to restore the default
+policy. Remote APIs cannot alter these local policy settings. Changes require a
+Host restart; re-pairing only replaces the uplink connection.
+
+Relay, Gateway, and local Host management environment variables are masked before
+native subprocesses start, including executable version probes. Provider login
+variables such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GH_TOKEN` remain
+available to the selected native runtime. This filters inherited environment
+variables; it does not hide local credential files from an otherwise authorized
+native tool.
+
+## Device credentials and stopping work
+
+New durable enrollment exchanges the invitation for a device credential. The CLI
+advertises `credentialRotation: true` because it has a durable persistence
+callback. On `credential_issued`, it writes the private connection file using a
+synced temporary file and atomic rename, syncs the containing directory, updates
+the current reconnect key, then sends `credential_saved`. `registered` remains
+the final registration acknowledgment. Later rotation uses the same exchange.
+The saved device credential is authoritative after a disconnected acknowledgment;
+subsequent registration saves cannot restore the invitation or an older key.
+Failed local persistence refuses acknowledgment and requires local storage repair
+and re-pairing. Leave server/key overrides unset on later starts so the saved
+device credential is used.
+
+Embedders must supply an `uplink.onCredential(credential): Promise<void>` callback
+that resolves only after durable persistence to advertise rotation. Existing
+legacy enrolled Hosts remain compatible but cannot rotate until updated. Device
+credentials must never be returned to a browser or logged.
+
+Owner-authorized stop requests call `POST /remote/stop` with `{}` over the Host
+control uplink. The response contains `results`, with one `agentId` and status
+`cancelled`, `unsupported`, or `failed` per attached session. Native cancel calls
+run independently with a local deadline, so an unsupported or unresponsive
+session does not hide other results. `cancelled` means the native cancel call
+completed; it does not prove OS process termination. Revoking browser access or
+rotating a device credential does not cancel already running native work.

@@ -1,3 +1,4 @@
+import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
@@ -18,7 +19,7 @@ export interface CopilotHostRegistrationOptions {
 
 export async function createCopilotHostRegistration(options: CopilotHostRegistrationOptions = {}): Promise<AgentHostProviderRegistration> {
   let executable = options.executable ?? resolveCopilotExecutable();
-  const env: NodeJS.ProcessEnv = { ...process.env, ...options.env, ...(options.copilotHome ? { COPILOT_HOME: options.copilotHome } : {}) };
+  const env: NodeJS.ProcessEnv = { ...sanitizeNativeEnvironment(options.env ?? {}), ...(options.copilotHome ? { COPILOT_HOME: options.copilotHome } : {}) };
   const nodeEntry = /\.(?:m?js|cjs)$/i.test(executable);
   if (nodeEntry && !isAbsolute(executable) && !executable.includes('/') && !executable.includes('\\')) {
     const name = executable;

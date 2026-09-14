@@ -875,10 +875,6 @@ textarea {
   .lab-timeline-scroll { padding-bottom: 8px; }
 }
 
-.gateway-access { max-width: 40rem; margin: 15vh auto; padding: 1.5rem; }
-.gateway-access h1 { font-size: 1.75rem; }
-.gateway-access p { line-height: 1.6; }
-.gateway-access a { display: inline-block; margin-top: 1rem; }
 .gateway-sign-out { position: fixed; z-index: 29; top: calc(3px + env(safe-area-inset-top)); left: max(80px, calc(env(safe-area-inset-left) + 72px)); min-width: 68px; min-height: 32px; padding: 0 8px; border-color: transparent; border-radius: 6px; color: var(--obs-text-secondary); background: var(--obs-surface); font-size: 12px; }
 .gateway-sign-out ~ .gateway-private > .lab-shell .lab-app-bar { padding-left: max(156px, calc(env(safe-area-inset-left) + 148px)); }
 @media (min-width: 1181px) {

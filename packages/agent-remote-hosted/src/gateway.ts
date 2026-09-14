@@ -1,3 +1,4 @@
+import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
@@ -187,7 +188,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const response = json(200, { ok: true });
       response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=; ${cookieFlags}; Max-Age=0`); return response;
     }
-    if (url.pathname === '/auth/callback' && request.method === 'GET') return callback();
+    if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin);
     if (request.method === 'GET' && !url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/u/') && !url.pathname.startsWith('/auth/')) return undefined;
     const grant = await authorize(request); if (grant instanceof Response) return grant;
     if (request.headers.has('origin') && !originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
@@ -269,9 +270,3 @@ export function createHostedRelay(options: HostedRelayOptions) {
   };
 }
 function json(status: number, value: unknown) { return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }); }
-function callback() {
-  const script = `const ticket=new URLSearchParams(location.hash.slice(1)).get('ticket');history.replaceState(null,'','/auth/callback');fetch('/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ticket})}).then(async r=>{if(!r.ok)throw Error();const state=await r.json();location.replace(state.returnPath||(state.hostId?'/?host='+encodeURIComponent(state.hostId):'/'))}).catch(()=>{document.getElementById('status').textContent='Access expired or invalid. Return to the gateway to sign in.'});`;
-  const digest = createHash('sha256').update(script).digest('base64');
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Agent Remote</title><p id="status">Opening your controller…</p><a href="/auth/login">Sign in through gateway</a><script>${script}</script></html>`, { status: 200,
-    headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': `default-src 'none'; script-src 'sha256-${digest}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'` } });
-}

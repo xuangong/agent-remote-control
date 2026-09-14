@@ -1,6 +1,9 @@
 import { controllerPath, readControllerLocation } from '@borgee/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { signInReturnKey } from '@borgee/agent-remote-hosted/access-page';
+import { AccessPage } from './components/AccessPage.js';
+
 import { clearConversationRecovery } from './conversation-recovery.js';
 
 type Access = { basePath: string; expiresAt: number; refreshAfterMs?: number };
@@ -18,6 +21,7 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
   const [access, setAccess] = useState<Access | null>();
   const [failed, setFailed] = useState(false);
   const [suspended, setSuspended] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const stop = useRef<() => void>(() => undefined);
   useEffect(() => {
     const abort = new AbortController();
@@ -75,9 +79,10 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
         } else { setFailed(true); retire(); }
       } finally { inFlight = false; }
     }
-    void request(false);
-    return () => { abort.abort(); clearTimeout(expiry); clearTimeout(refresh); clearTimeout(recovery); };
-  }, []);
+    const deadline = setTimeout(() => { setFailed(true); retire(); }, 12_000);
+    void request(false).finally(() => clearTimeout(deadline));
+    return () => { abort.abort(); clearTimeout(deadline); clearTimeout(expiry); clearTimeout(refresh); clearTimeout(recovery); };
+  }, [attempt]);
   async function logout(): Promise<void> {
     stop.current();
     clearConversationRecovery();
@@ -86,18 +91,23 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
       if (!response.ok && response.status !== 401) setFailed(true);
     } catch { setFailed(true); }
   }
+  let returnPath = '/';
+  let sessionLink = false;
+  try {
+    const target = readControllerLocation(new URLSearchParams(window.location.search));
+    returnPath = controllerPath(target);
+    sessionLink = !!(target.nativeSessionId || target.agentId);
+  } catch { /* Invalid targets do not become redirects. */ }
+  function rememberTarget() {
+    try { sessionStorage.setItem(signInReturnKey, returnPath); } catch { /* Sign-in remains available without browser storage. */ }
+  }
+  const entry = (state: Parameters<typeof AccessPage>[0]['state']) => <AccessPage state={state} sessionLink={sessionLink}
+    loginUrl={'/auth/login' + returnPath.slice(1)} onLogin={rememberTarget}
+    onRetry={() => { setAccess(undefined); setFailed(false); setSuspended(false); setAttempt(value => value + 1); }} />;
   if (access) return <>
-    <button type="button" className="gateway-sign-out" onClick={() => void logout()}>Sign out</button>
+    {!suspended && <button type="button" className="gateway-sign-out" onClick={() => void logout()}>Sign out</button>}
     <div className="gateway-private" key={access.basePath} hidden={suspended} {...(suspended ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, <button type="button" onClick={() => void logout()}>Sign out</button>)}</div>
-    {suspended ? <main className="gateway-access"><h1>Agent Remote</h1><p role="status">Restoring access…</p></main> : null}
+    {suspended ? entry('restoring') : null}
   </>;
-  let loginUrl = '/auth/login';
-  try { loginUrl += controllerPath(readControllerLocation(new URLSearchParams(window.location.search))).slice(1); } catch { /* Invalid targets do not become redirects. */ }
-  return <main className="gateway-access">
-    <h1>Agent Remote</h1>
-    {access === undefined ? <p role="status">Checking access…</p> : <>
-      <p>{failed ? 'The relay is unavailable. Try again shortly.' : 'Sign in through your gateway to open your Agent Hosts and sessions.'}</p>
-      <a href={loginUrl}>Sign in through gateway</a>
-    </>}
-  </main>;
+  return entry(access === undefined ? 'checking' : failed ? 'unavailable' : 'signin');
 }

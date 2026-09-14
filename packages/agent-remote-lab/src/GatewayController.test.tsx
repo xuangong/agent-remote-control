@@ -170,3 +170,30 @@ it('keeps a cross-device session target on the login link', async () => {
     expect(view.querySelector('a')?.getAttribute('href')).toBe('/auth/login?host=desk&agent=live&provider=claude&session=native&parent=root');
   } finally { window.history.replaceState(null, '', '/'); }
 });
+
+it('offers a bounded retry when the initial access check hangs and ignores its late response', async () => {
+  vi.useFakeTimers();
+  let finishFirst!: (response: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finishFirst = resolve; }))
+    .mockResolvedValue(Response.json({}, { status: 401 }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+  expect(view.querySelector('[role="status"]')?.textContent).toBe('Checking access…');
+  await act(async () => { await vi.advanceTimersByTimeAsync(12_001); });
+  expect(view.querySelector('h1')?.textContent).toBe('Connection interrupted');
+  await act(async () => view.querySelector<HTMLButtonElement>('.arc-access-action')!.click());
+  expect(view.querySelector('h1')?.textContent).toBe('Sign in to continue');
+  await act(async () => finishFirst(Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 120000 })));
+  expect(view.textContent).not.toContain('Private controller');
+});
+
+it('preserves only the session return path for a restarted sign-in', async () => {
+  window.history.replaceState(null, '', '/?host=desk&provider=claude&session=native&token=private');
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({}, { status: 401 })));
+  const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+  const link = view.querySelector<HTMLAnchorElement>('.arc-access-action')!;
+  link.addEventListener('click', event => event.preventDefault());
+  await act(async () => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
+  expect(sessionStorage.getItem('agent-remote-sign-in-return')).toBe('/?host=desk&provider=claude&session=native');
+  sessionStorage.removeItem('agent-remote-sign-in-return');
+});

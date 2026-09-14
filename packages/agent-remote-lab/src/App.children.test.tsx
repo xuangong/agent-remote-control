@@ -14,14 +14,15 @@ const snapshots = {
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
 afterEach(() => { vi.restoreAllMocks(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean } = {}) {
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean } = {}) {
+  let connections = 0;
   let releaseChild: (() => void) | undefined;
   const childReady = options.deferChild ? new Promise<void>((resolve) => { releaseChild = resolve; }) : Promise.resolve();
   const sessionSnapshots = { ...snapshots, child: options.restricted ? { ...snapshots.child, capabilities: { ...snapshots.child.capabilities, sendMessage: false, cancel: false }, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'child-plan', plan: 'Review the child plan', allowedActions: ['approve' as const] }] } : snapshots.child };
   const attachments: unknown[] = [];
   const directory = new SessionDirectoryClient('http://localhost/', async (input, init) => {
     const path = new URL(String(input)).pathname;
-    if (path.endsWith('/catalog')) return Response.json({ items: [], hasMore: false, revision: '1' });
+    if (path.endsWith('/catalog')) return Response.json({ items: options.discover ? [{providerId: 'codex', nativeSessionId: 'native-parent', title: 'Discovered parent', state: 'unknown', createdAt: '2026-09-10', updatedAt: '2026-09-10'}] : [], hasMore: false, revision: '1' });
     if (path.endsWith('/workspaces')) return Response.json({ workspaces: [] });
     if (path.endsWith('/attach')) {
       attachments.push({ path, body: JSON.parse(String(init?.body)) });
@@ -41,6 +42,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
       window: { minSeq: 1, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, entries: [], hasOlder: false, hasNewer: false, error: null,
     } }),
     connect: (agentId, listener) => {
+      connections++;
       queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] }));
       return { close() {}, send(message) {
         if (message.type === 'timeline_subscription') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } }));
@@ -62,9 +64,22 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     </>;
   }
   const container = await render(<Harness />);
-  return { container, attachments, sendMessage, respondToInteraction, releaseChild, resumeAgent };
+  return { container, attachments, sendMessage, respondToInteraction, releaseChild, resumeAgent, connections: () => connections };
 
 }
+it('focuses the current discovered session without another attachment or stream connection', async () => {
+  const f = await setup(false, {live: true, discover: true});
+  await draft(f.container, 'Keep current draft');
+  const before = f.connections();
+  for (let index = 0; index < 2; index++) {
+    const row = f.container.querySelector<HTMLButtonElement>('[aria-label="Discover sessions"] .lab-session-row');
+    expect(row).not.toBeNull();
+    await act(async () => row!.click());
+  }
+  expect(f.attachments).toEqual([]);
+  expect(f.connections()).toBe(before);
+  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep current draft');
+});
 async function draft(container: HTMLElement, text: string) {
   const input = container.querySelector<HTMLTextAreaElement>('textarea')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });

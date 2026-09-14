@@ -100,6 +100,7 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
   const discoveredTree = sessionForest([...discovered.values()].filter(matches), known);
   const active = known.find((item) => item.agentId === activeAgentId) ?? opened.find((item) => item.agentId === activeAgentId);
   const activeKey = active ? sessionKey(active) : undefined;
+  const openedByKey = new Map(opened.map(item => [sessionKey(item), item]));
   const openRelated = (item: SessionEntry) => {
     if (onOpenRelated) onOpenRelated(item);
     else { const saved = opened.find((entry) => sessionKey(entry) === sessionKey(item)); if (saved) onSelect(saved); }
@@ -123,9 +124,11 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
       <SessionTree key={search.trim() ? `search:${search}` : 'all'} defaultExpanded={!!search.trim()} nodes={discoveredTree} activeKey={activeKey} renderRow={(item, placeholder) => {
         const summary = page?.items.find((entry) => entry.nativeSessionId === item.nativeSessionId);
         const related = Boolean(item.parentNativeSessionId) || !summary;
-        return <button type="button" className="lab-session-row" aria-current={sessionKey(item) === activeKey ? 'page' : undefined} disabled={busy || (related ? !onOpenRelated : summary?.state === 'unavailable')} onClick={() => { if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>
+        const saved = openedByKey.get(sessionKey(item));
+        const current = sessionKey(item) === activeKey;
+        return <button type="button" className="lab-session-row" aria-current={current ? 'page' : undefined} disabled={busy || (!saved && (related ? !onOpenRelated : summary?.state === 'unavailable'))} onClick={() => { if (saved) onSelect(saved); else if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>
           <strong>{item.title || item.nativeSessionId}</strong>
-          <small>{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
+          <small>{current ? 'Current session · ' : saved ? 'Opened · ' : ''}{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
           <span><i className={`lab-session-indicator lab-session-${item.status ?? summary?.state ?? 'unavailable'}`} aria-hidden="true" />{sessionStatusLabel(item) || (summary ? stateLabel(summary.state) : placeholder ? 'Parent session' : 'Discovered')}{summary ? <time dateTime={summary.updatedAt}>{formatTime(summary.updatedAt)}</time> : null}</span>
         </button>;
       }} />

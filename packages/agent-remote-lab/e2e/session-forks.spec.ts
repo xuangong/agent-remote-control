@@ -1,4 +1,5 @@
 import { showNewSession } from './session-navigation';
+import { toggleViewPanel } from './view-options';
 import { expect, test } from '@playwright/test';
 
 async function start(page: import('@playwright/test').Page) {
@@ -12,6 +13,28 @@ async function start(page: import('@playwright/test').Page) {
   await expect(primary.locator('.agent-message-assistant').last()).toContainText('cobalt orchard');
   return primary;
 }
+
+test('selecting an opened side in discovery focuses its existing window', async ({ page }) => {
+  const primary = await start(page);
+  await primary.getByTestId('prompt-input').fill('/side Keep this branch');
+  await primary.getByTestId('prompt-input').press('Enter');
+  const side = page.getByRole('complementary', {name: 'Side conversation'});
+  await expect(side.getByTestId('prompt-input')).toBeEnabled();
+  await side.getByTestId('prompt-input').fill('Keep the side draft');
+  const discovery = page.getByRole('region', {name: 'Discover sessions'});
+  if (!await discovery.isVisible()) await toggleViewPanel(page, 'Sidebar');
+  await discovery.getByRole('button', {name: 'Refresh', exact: true}).click();
+  const selected = discovery.locator('.lab-session-row[aria-current="page"]');
+  await expect(selected).toHaveCount(1);
+  await expect(selected).toContainText('Current session');
+  const attachmentRequests: string[] = [];
+  page.on('request', request => { if (/\/attach$/.test(new URL(request.url()).pathname)) attachmentRequests.push(request.url()); });
+  await selected.click();
+  await expect(side).toHaveCount(1);
+  await expect(side.getByTestId('prompt-input')).toBeVisible();
+  await expect(side.getByTestId('prompt-input')).toHaveValue('Keep the side draft');
+  expect(attachmentRequests).toEqual([]);
+});
 
 test('fork keeps the source chat, side sends independently, and references survive reload', async ({ page }, testInfo) => {
   const primary = await start(page);

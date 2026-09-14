@@ -406,12 +406,22 @@ export function App({
 
   async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }): Promise<void> {
     if (!directory || transitionRef.current) return;
+    const hostId = item.hostId ?? selectedHost.id;
+    const key = sessionKey({ ...item, hostId });
+    const visible = stackPath.find(entry => sessionKey(entry) === key);
+    // Existing windows keep their connections; remembered views still revalidate their Host binding below.
+    if (visible && (visible.agentId !== activeAgentId || status === 'ready')) {
+      setSideFocus(key);
+      setFailure(undefined);
+      setActiveView('workbench');
+      if (compactLayoutRef.current) { setContextOpen(false); setInspectorOpen(false); }
+      return;
+    }
     const generation = navigationGeneration.current;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined);
     try {
-      const hostId = item.hostId ?? selectedHost.id;
       const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
       const result = item.parentNativeSessionId
         ? await target.attachChild(item.providerId, item.parentNativeSessionId, item.nativeSessionId)
@@ -819,7 +829,7 @@ export function App({
       {directory ? <HostPairing managementVisible={!compactLayout || sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={compactLayout ? undefined : () => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       <div className="lab-directory-panel" hidden={compactLayout && sessionPanel !== 'list'}>
       {compactLayout && providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
-      {directory ? <SessionDirectory searchable={compactLayout} directory={directory} providerId={providerId} activeAgentId={activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
+      {directory ? <SessionDirectory searchable={compactLayout} directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       </div>
       <div hidden={compactLayout && sessionPanel !== 'new'}>
       <ProviderSessionControls

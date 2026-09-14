@@ -26,6 +26,13 @@ runtime state. Closed or initializing handles do not imply idle.
 
 ## Confirmation design
 
+Discovery marks views remembered by this Controller as `Opened`, and the focused
+window as `Current session`. Identity includes Host, provider, and native session
+ID. Selecting an existing window in the current stack focuses it without another
+attach request. Other remembered views revalidate their Host binding before
+reconnecting; repeated attach reuses the native session. These view labels do not
+claim that an external CLI is connected or idle.
+
 The intended takeover flow is shared across the three providers:
 
 1. Establish an actual ownership conflict. Reuse an existing Host binding when

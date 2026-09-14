@@ -8,6 +8,30 @@ const summary = (nativeSessionId: string): SessionSummary => ({ nativeSessionId,
 function button(container: HTMLElement, label: string): HTMLButtonElement { return [...container.querySelectorAll('button')].find((item) => item.textContent === label)!; }
 
 describe('SessionDirectory', () => {
+  it('marks opened and current discovery rows and selects the existing view by full identity', async () => {
+    const directory = new SessionDirectoryClient('http://localhost');
+    vi.spyOn(directory, 'list').mockResolvedValue({items: ['current', 'opened', 'foreign-host', 'foreign-provider'].map(summary), hasMore: false, revision: '1'});
+    const opened = [
+      {agentId: 'current-agent', providerId: 'recorded', nativeSessionId: 'current', title: 'Current'},
+      {agentId: 'opened-agent', providerId: 'recorded', nativeSessionId: 'opened', title: 'Opened'},
+      {agentId: 'foreign-host-agent', hostId: 'another-host', providerId: 'recorded', nativeSessionId: 'foreign-host', title: 'Foreign host'},
+      {agentId: 'foreign-provider-agent', providerId: 'another-provider', nativeSessionId: 'foreign-provider', title: 'Foreign provider'},
+    ];
+    const onSelect = vi.fn(); const onOpen = vi.fn();
+    const container = await render(<SessionDirectory directory={directory} providerId="recorded" activeAgentId="current-agent" opened={opened} busy={false} revision={0} onOpen={onOpen} onSelect={onSelect} onClose={() => {}} />);
+    const rows = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Discover sessions"] .lab-session-row')];
+    expect(rows[0]!.textContent).toContain('Current session');
+    expect(rows[0]!.getAttribute('aria-current')).toBe('page');
+    expect(rows[1]!.textContent).toContain('Opened');
+    expect(rows[2]!.textContent).not.toContain('Opened');
+    expect(rows[3]!.textContent).not.toContain('Opened');
+    await act(async () => rows[1]!.click());
+    expect(onSelect).toHaveBeenCalledWith(opened[1]);
+    expect(onOpen).not.toHaveBeenCalled();
+    await act(async () => rows[2]!.click());
+    expect(onOpen).toHaveBeenCalledWith(summary('foreign-host'));
+  });
+
   it('appends unique pages, keeps expired rows, and refreshes only on request', async () => {
     const directory = new SessionDirectoryClient('http://localhost');
     const list = vi.spyOn(directory, 'list').mockResolvedValueOnce({ items: [summary('first')], hasMore: true, nextCursor: 'next', revision: '1' })
@@ -43,13 +67,14 @@ describe('SessionDirectory', () => {
   });
 });
 
-it('shows unopened native children in discovery and preserves the opened hierarchy when a parent view closes', async () => {
+it('selects an already opened native child from discovery and preserves its closed parent in the hierarchy', async () => {
   const directory = new SessionDirectoryClient('http://localhost');
   vi.spyOn(directory, 'list').mockResolvedValue({ items: [summary('root')], hasMore: false, revision: '1' });
   const child = { ...summary('child'), parentNativeSessionId: 'root', createdAt: '2026-09-10', status: 'running' as const };
   const opened = [{ agentId: 'child-agent', nativeSessionId: 'child', providerId: 'recorded', title: 'child', parentNativeSessionId: 'root' }];
   const onOpenRelated = vi.fn();
-  const container = await render(<SessionDirectory directory={directory} providerId="recorded" opened={opened} known={[summary('root'), child]} activeAgentId="child-agent" busy={false} revision={0} onOpenRelated={onOpenRelated} onOpen={() => {}} onSelect={() => {}} onClose={() => {}} />);
+  const onSelect = vi.fn();
+  const container = await render(<SessionDirectory directory={directory} providerId="recorded" opened={opened} known={[summary('root'), child]} activeAgentId="child-agent" busy={false} revision={0} onOpenRelated={onOpenRelated} onOpen={() => {}} onSelect={onSelect} onClose={() => {}} />);
   const discovery = container.querySelector('[aria-label="Discover sessions"]')!;
   expect(discovery.querySelector('.lab-session-tree .lab-session-tree')).toBeNull();
   expect(discovery.querySelector('[aria-expanded="false"]')).not.toBeNull();
@@ -57,7 +82,8 @@ it('shows unopened native children in discovery and preserves the opened hierarc
   const nested = discovery.querySelector('.lab-session-tree .lab-session-tree .lab-session-row') as HTMLButtonElement;
   expect(nested.textContent).toContain('Working');
   await act(async () => nested.click());
-  expect(onOpenRelated).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'child', parentNativeSessionId: 'root' }));
+  expect(onSelect).toHaveBeenCalledWith(opened[0]);
+  expect(onOpenRelated).not.toHaveBeenCalled();
   expect(container.querySelector('[aria-label="Opened sessions"]')?.textContent).toContain('View closed');
   await act(async () => (discovery.querySelector('[aria-label="Collapse root"]') as HTMLButtonElement).click());
   expect(discovery.querySelector('.lab-session-tree .lab-session-tree')).toBeNull();

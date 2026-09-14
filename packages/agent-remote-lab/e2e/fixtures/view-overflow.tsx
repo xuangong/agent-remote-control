@@ -71,9 +71,24 @@ const failureState: AgentReplicaState = { ...replicaState, timeline: {
     },
   }],
 } };
+const fileChangeState: AgentReplicaState = { ...replicaState, timeline: {
+  ...replicaState.timeline, hasOlder: false, entries: [{
+    ...state.timeline.entries[0]!, resources: [], item: {
+      type: 'tool_call', callId: 'file-change', name: 'file_change', status: 'completed', error: null,
+      detail: { type: 'edit', filePath: `src/${long}/sample.ts` },
+      result: { content: [{ type: 'json', value: { format: 'file_changes', version: 1, files: [
+        { path: `src/${long}/sample.ts`, kind: 'modified', diff: `--- a/sample.ts\n+++ b/sample.ts\n@@ -1,2 +1,2 @@\n-const old = true;\n+const text = "${long}";\n unchanged\n` },
+        { path: 'added.txt', kind: 'added', diff: '@@ -0,0 +1,2 @@\n+first line\n+second line\n' },
+        { path: 'deleted.txt', kind: 'deleted', diff: '@@ -1,1 +0,0 @@\n-old line\n' },
+        { path: 'renamed.txt', previousPath: `src/${long}/old.txt`, kind: 'renamed', diff: '' },
+        { path: 'image.png', kind: 'modified', diff: 'Binary files a/image.png and b/image.png differ' },
+      ] } }] },
+    },
+  }],
+} };
 createRoot(document.getElementById('root')!).render(
   <main style={{ height: '100dvh' }}>
-    {view === 'workbench' || view === 'tool-error' ? <LabWorkbench state={view === 'tool-error' ? failureState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
+    {view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
       : view === 'trace' ? <TraceView state={state} />
       : view === 'inspector' ? <ReplicaInspector state={state} sessionStatus="ready" providerName={long} />
       : view === 'command' ? <AgentCommandDetails command={{ id: long, name: long, description: long, kind: 'skill', documentation: { resourceId: 'documentation', locator: 'SKILL.md', status: 'available' } }} resources={state.resources} onClose={() => {}} />

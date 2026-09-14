@@ -8,8 +8,9 @@ import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@borgee/agent-remote-web';
 import { createProtocolValidationServer } from './server.js';
 
-it.each(['codex', 'dsh'])('preserves %s results over live transport, history, and reconnection without duplicating calls', async (providerId) => {
-  const [running, completed] = observations(providerId);
+it.each(['codex', 'dsh', 'codex-files'])('preserves %s results over live transport, history, and reconnection without duplicating calls', async (scenario) => {
+  const providerId = scenario === 'codex-files' ? 'codex' : scenario;
+  const [running, completed] = observations(scenario);
   const start = deferred();
   const finish = deferred();
   const closed = deferred();
@@ -41,7 +42,10 @@ it.each(['codex', 'dsh'])('preserves %s results over live transport, history, an
     start.resolve();
     await vi.waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'running' }));
     finish.resolve();
-    await vi.waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'completed', result: { content: [expect.objectContaining({ type: 'text', text: 'hello\n' })] } }));
+    const content = scenario === 'codex-files' ? [{ type: 'json', value: { format: 'file_changes', version: 1, files: [
+      { path: '/workspace/a.ts', kind: 'modified', diff: '@@ -1 +1 @@\n-old\n+new\n' },
+    ] } }] : [expect.objectContaining({ type: 'text', text: 'hello\n' })];
+    await vi.waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'completed', result: { content } }));
     expect(first.replica.getState().timeline.entries).toHaveLength(1);
     first.client.stop();
     const reconnected = await connect();
@@ -56,6 +60,14 @@ it.each(['codex', 'dsh'])('preserves %s results over live transport, history, an
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 function observations(providerId: string): ProviderObservation[] {
+  if (providerId === 'codex-files') {
+    const projector = new CodexEventProjector('thread');
+    const item = { id: 'file-call', type: 'fileChange', changes: [{ path: '/workspace/a.ts', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-old\n+new\n' }] };
+    return [
+      projector.projectNotification('item/started', { threadId: 'thread', item: { ...item, status: 'inProgress' } })!,
+      projector.projectNotification('item/completed', { threadId: 'thread', item: { ...item, status: 'completed' } })!,
+    ];
+  }
   if (providerId === 'codex') {
     const projector = new CodexEventProjector('thread');
     const item = { id: 'call', type: 'commandExecution', command: 'echo hello' };

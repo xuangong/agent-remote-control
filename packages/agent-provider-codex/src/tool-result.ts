@@ -1,4 +1,4 @@
-import { boundToolResult, type AgentToolResult, type AgentToolResultContent, type AgentToolResultJson } from '@borgee/agent-provider-sdk';
+import { boundToolResult, fileChangesResult, type AgentFileChange, type AgentToolResult, type AgentToolResultContent, type AgentToolResultJson } from '@borgee/agent-provider-sdk';
 import { isRecord, type JsonObject } from './native.js';
 
 export function codexToolResult(item: JsonObject): AgentToolResult | undefined {
@@ -11,6 +11,8 @@ export function codexToolResult(item: JsonObject): AgentToolResult | undefined {
     return boundToolResult({ content, ...(exitCode === undefined ? {} : { exitCode }), ...(durationMs === undefined ? {} : { durationMs }) });
   }
   if (item.type === 'fileChange' && Array.isArray(item.changes)) {
+    const changes = item.changes.map(normalizeFileChange);
+    if (changes.every((change): change is AgentFileChange => change !== undefined)) return fileChangesResult(changes);
     return boundToolResult({ content: [{ type: 'json', value: item.changes as AgentToolResultJson }] });
   }
   if (item.type === 'mcpToolCall') {
@@ -36,6 +38,16 @@ export function codexToolResult(item: JsonObject): AgentToolResult | undefined {
     return Object.keys(value).length ? boundToolResult({ content: [{ type: 'json', value }] }) : undefined;
   }
   return undefined;
+}
+
+function normalizeFileChange(value: unknown): AgentFileChange | undefined {
+  if (!isRecord(value) || typeof value.path !== 'string' || !value.path || typeof value.diff !== 'string') return undefined;
+  const nativeKind = isRecord(value.kind) ? value.kind.type : value.kind;
+  const destination = isRecord(value.kind) && typeof value.kind.move_path === 'string' && value.kind.move_path
+    ? value.kind.move_path : undefined;
+  if (nativeKind === 'update' && destination) return { path: destination, previousPath: value.path, kind: 'renamed', diff: value.diff };
+  return { path: value.path, diff: value.diff, kind: nativeKind === 'add' ? 'added'
+    : nativeKind === 'delete' ? 'deleted' : nativeKind === 'update' ? 'modified' : 'unknown' };
 }
 
 function contentBlock(value: unknown): AgentToolResultContent {

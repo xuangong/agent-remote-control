@@ -11,6 +11,7 @@ the page is not a substitute for sizing the content correctly.
 | Resources | Locators and errors wrap; status stays readable; actions wrap. | Pending, available, failed and unavailable cards; loaded download links; long locator through the recorded Relay. |
 | Conversation | User/assistant messages, reasoning, tool details/results, tasks, completed questions, errors and compaction fit the conversation. | Every Timeline item type; expanded details for all seven tool types; long links, inline code, text and JSON results. |
 | Failed tools | Errors remain visible when details are collapsed, using 12px monospace text with preserved newlines. Long errors scroll within a 320px-high block. | Multiline lockfile diff, phone/desktop sizing, keyboard access and local scrolling. |
+| File changes | Expandable file cards wrap long paths and show change labels and patch line counts. Unified diffs preserve indentation and scroll inside a 320px-high region using 12px monospace text. | Added, modified, deleted, renamed, binary and empty patches; separate old/new line numbers; keyboard scrolling; 320/390/844/1440px desktop and touch layouts. |
 | Pending interactions | Questions, plans, tool/permission approvals, external actions and forms fit the panel. | All six interaction types with long labels, options, paths and descriptions. |
 | Markdown | Prose wraps. Code blocks and tables can scroll horizontally inside their own bounds. | Narrow and wide layouts; local scrolling remains available. Images render as alternative text; resource links open separately. |
 | Trace | Names and metadata wrap; rows grow to contain their content; the list scrolls vertically. | Long provider/epoch/tool values, row containment and viewport bounds. |
@@ -28,3 +29,31 @@ content-width assertion; visible control bounds are still checked.
 This is deterministic browser coverage without model calls. It does not assert
 physical iOS Safari testing, arbitrary third-party renderer behavior, or support
 below the application's existing 320px minimum width.
+
+## File-change data
+
+The Provider SDK's `fileChangesResult` helper writes a versioned
+`{ format: 'file_changes', version: 1, files }` presentation value into the
+existing JSON tool-result channel. Each file supplies `path`, `kind`, `diff` and
+an optional `previousPath`. The Remote 1.4.0 wire union remains `text | json`;
+older clients can display the JSON without understanding this presentation.
+
+The Codex adapter normalizes native file changes on live completion and history
+replay, including `update.move_path` renames. Existing edit/write results with
+plain path/diff arrays also render, with a neutral File change label: the client
+does not interpret native kind metadata. The Raw result disclosure retains the
+received JSON. Unknown versions or malformed structures use the normal JSON view.
+
+Counts describe added/deleted lines in the received patch, not a comparison with
+the filesystem. Line numbers require unified hunk headers; snippets and binary
+notices remain readable without fabricated numbers. The existing result budget
+still applies: oversized JSON falls back to explicitly truncated text rather than
+claiming to contain a complete structured diff.
+
+This change does not add native patch normalization for Claude, Copilot or DSH.
+Their text/JSON results remain visible, and any adapter can adopt the SDK helper
+when its native result provides the required fields. A Host update is needed for
+new Codex change labels; the client can render existing path/diff history before
+that update. Deterministic rendering coverage lives in `e2e/file-changes.spec.ts`,
+with native adapter tests and real WebSocket/reconnect/history coverage in
+`src/tool-result-transport.test.ts`.

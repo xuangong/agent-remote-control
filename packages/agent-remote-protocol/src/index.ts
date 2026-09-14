@@ -11,5 +11,6 @@ export * from './version.js';
 export * from './uplink.js';
 export * from './remote-host-uplink.js';
 export * from './tool-result.js';
+export * from './file-changes.js';
 export * from './session-settings.js';
 export * from './commands.js';

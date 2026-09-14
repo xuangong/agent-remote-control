@@ -5,10 +5,10 @@ export const BROKER_MAX_BODY_BYTES = 64 * 1024;
 /** Runtime adapters deliver validated frames and own their native socket lifecycle. */
 export interface RelaySocket {
   readonly readyState: number;
-  readonly bufferedAmount: number;
+  readonly bufferedAmount: number | undefined;
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  onMessage(listener: (data: string, binary: boolean) => void): () => void;
+  onMessage(listener: (data: string, binary: boolean) => void | Promise<void>): () => void;
   onClose(listener: () => void): () => void;
   onError(listener: () => void): () => void;
 }

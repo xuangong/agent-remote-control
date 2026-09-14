@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { open, rename, unlink } from 'node:fs/promises';
 
 /** One writer, atomic authenticated snapshots; no transcript or raw device keys. */
 export function openGatewayState<T>(file: string, secret: string, scope: string) {
@@ -44,6 +45,18 @@ export function openGatewayState<T>(file: string, secret: string, scope: string)
         try { writeFileSync(output, JSON.stringify({ payload, signature: sign(payload) })); fsyncSync(output); } finally { closeSync(output); }
         try { renameSync(temporary, file); const directory = openSync(dirname(file), 'r'); try { fsyncSync(directory); } finally { closeSync(directory); } }
         finally { if (existsSync(temporary)) unlinkSync(temporary); }
+      },
+      async commit(value: T) {
+        if (closed) throw new Error('Relay state is closed.');
+        const payload = JSON.stringify(value); const temporary = file + '.' + randomUUID() + '.tmp';
+        const output = await open(temporary, 'wx', 0o600);
+        try {
+          try { await output.writeFile(JSON.stringify({ payload, signature: sign(payload) })); await output.sync(); }
+          finally { await output.close(); }
+          await rename(temporary, file);
+          const directory = await open(dirname(file), 'r');
+          try { await directory.sync(); } finally { await directory.close(); }
+        } finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
       },
       close() { if (closed) return; closed = true; unlock(); },
     };

@@ -31,7 +31,7 @@ export interface HostBrokerOptions {
   onPairing?(key: string, expiresAt: number): void;
   durable?: boolean;
   initialState?: RemoteHostBrokerState;
-  onStateChange?(state: RemoteHostBrokerState): void;
+  onStateChange?(state: RemoteHostBrokerState): void | Promise<void>;
   now?(): number;
   scheduler?: BrokerScheduler;
 }
@@ -68,12 +68,39 @@ export function createHostBroker(options: HostBrokerOptions) {
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
-  const persist = () => options.onStateChange?.(snapshot());
-  const sharing = new HostSharing(options.initialState?.sharing, persist);
+  let sharing = new HostSharing(options.initialState?.sharing, () => {});
+  let unavailable = false;
+  let commits: Promise<unknown> = Promise.resolve();
+  function assertAvailable() { if (unavailable) throw new BrokerError(503, 'state_unavailable', 'Relay state is unavailable.'); }
+  function failClosed() {
+    unavailable = true;
+    for (const client of clients) client.close(1011, 'Relay state is unavailable');
+  }
+  function commit<T>(stage: (draft: RemoteHostBrokerState) => { value: T; publish(): void }): Promise<T> {
+    const operation = commits.then(async () => {
+      assertAvailable();
+      const draft = structuredClone(snapshot());
+      const result = stage(draft);
+      try { await options.onStateChange?.(draft); }
+      catch (error) { failClosed(); throw error; }
+      assertAvailable();
+      result.publish();
+      return result.value;
+    });
+    commits = operation.catch(() => undefined);
+    return operation;
+  }
+  function changeSharing<T>(change: (draft: HostSharing) => T): Promise<T> {
+    return commit(state => {
+      const draft = new HostSharing(state.sharing, () => {});
+      const value = change(draft); state.sharing = draft.snapshot();
+      return { value, publish() { sharing = draft; } };
+    });
+  }
   const sharedCreates = new Map<string, Promise<Binding>>();
   const principal = (context: BrokerRequestContext) => context.principalSubject?.();
   const owner = (subject?: string) => options.ownerSubject === undefined || subject === options.ownerSubject;
-  const hostAllowed = (hostId: string, subject?: string) => hosts.has(hostId) && (owner(subject) || (subject !== undefined && sharing.allowed(hostId, subject)));
+  const hostAllowed = (hostId: string, subject?: string) => !unavailable && hosts.has(hostId) && (owner(subject) || (subject !== undefined && sharing.allowed(hostId, subject)));
   const sessionAllowed = (binding: Binding, subject?: string) => hostAllowed(binding.hostId, subject) && (owner(subject) || binding.creatorSubject === subject);
   function requireOwner(subject?: string) {
     if (!owner(subject)) throw new SharingError(403, 'owner_required', 'Only the Host owner can manage this Host.');
@@ -109,12 +136,14 @@ export function createHostBroker(options: HostBrokerOptions) {
   const requireHost = (id: string) => {
     const host = hosts.get(id);
     if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
+    assertAvailable();
     if (host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
     return host;
   };
   function send(host: Host, message: RemoteHostUplinkMessage) {
+    assertAvailable();
     if (host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
-    if (host.socket.bufferedAmount > BROKER_MAX_FRAME_BYTES) throw new BrokerError(503, 'host_backpressure', 'The Remote Host connection is busy.', true);
+    if (host.socket.bufferedAmount !== undefined && host.socket.bufferedAmount > BROKER_MAX_FRAME_BYTES) throw new BrokerError(503, 'host_backpressure', 'The Remote Host connection is busy.', true);
     host.socket.send(JSON.stringify(message));
   }
   function rpc(host: Host, method: 'GET' | 'POST', path: string, sessionId?: string, body?: string): Promise<RpcResponse> {
@@ -144,8 +173,14 @@ export function createHostBroker(options: HostBrokerOptions) {
     const timer = setTimeout(() => socket.close(1008, 'Registration deadline exceeded'), 10_000);
     socket.onError(() => undefined);
     socket.onClose(() => { clearTimeout(timer); if (host) disconnected(host, socket); });
+    let registration: Promise<void> | undefined;
     socket.onMessage((raw, binary) => {
+      return receive(raw, binary).catch(() => socket.close(1011, 'Host message could not be processed'));
+    });
+    async function receive(raw: string, binary: boolean) {
+      if (registration) await registration;
       try {
+      assertAvailable();
       if (socket.readyState !== RELAY_SOCKET_OPEN || keys.get(credentialHash) !== credential) return socket.close(1008, 'Device credential revoked');
       if (context.connectionExpiresAt && Math.min(credential.expires, context.connectionExpiresAt() ?? credential.expires) <= now()) return socket.close(credential.expires <= now() ? 1008 : (context.connectionExpiryCode?.() ?? 1008), 'Credential expired');
       const decoded = binary ? undefined : decodeRemoteHostUplinkMessage(raw.toString());
@@ -153,25 +188,35 @@ export function createHostBroker(options: HostBrokerOptions) {
       const message = decoded.value;
       if (!host) {
         if (message.type !== 'register' || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return socket.close(1008, 'Registration is not authorized');
-        credential.installationId = message.installationId;
-        if (options.durable) {
-          credential.expires = Number.MAX_SAFE_INTEGER;
-          for (const [hash, key] of keys) if (key !== credential && key.installationId === message.installationId) keys.delete(hash);
-        }
-        host = [...hosts.values()].find((value) => value.installationId === message.installationId);
-        if (!host) {
-          if (hosts.size >= 128) return socket.close(1013, 'Host capacity reached');
+        registration = commit(draft => {
+          if (keys.get(credentialHash) !== credential || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) throw new BrokerError(401, 'device_revoked', 'Registration is not authorized');
+          const savedCredential = draft.keys.find(([hash]) => hash === credentialHash)![1];
+          savedCredential.installationId = message.installationId;
+          if (options.durable) {
+            savedCredential.expires = Number.MAX_SAFE_INTEGER;
+            draft.keys = draft.keys.filter(([hash, key]) => hash === credentialHash || key.installationId !== message.installationId);
+          }
+          const existing = [...hosts.values()].find(value => value.installationId === message.installationId);
+          if (!existing && hosts.size >= 128) throw new BrokerError(429, 'host_capacity', 'Host capacity reached');
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          host = { id: randomUUID(), installationId: message.installationId, name: message.name, providers,
-            legacyDsh: 'providerId' in message, generation: 0, pending: new Map(), streams: new Map() };
-          hosts.set(host.id, host);
-        }
-        if (host.socket) { const previous = host.socket; disconnected(host, previous); previous.close(1012, 'Host connection replaced'); }
-        host.socket = socket; host.name = message.name;
-        host.providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-        host.legacyDsh = 'providerId' in message; host.generation += 1; clearTimeout(timer);
-        try { persist(); } catch { return socket.close(1011, 'Device state could not be saved'); }
-        send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id }); return;
+          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name,
+            providers, legacyDsh: 'providerId' in message };
+          draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
+          return { value: undefined, publish() {
+            Object.assign(credential, savedCredential);
+            for (const hash of keys.keys()) if (!draft.keys.some(([saved]) => saved === hash)) keys.delete(hash);
+            host = existing ?? { ...next, generation: 0, pending: new Map(), streams: new Map() };
+            hosts.set(host.id, host);
+            if (host.socket) { const previous = host.socket; disconnected(host, previous); previous.close(1012, 'Host connection replaced'); }
+            Object.assign(host, next); host.generation += 1; clearTimeout(timer);
+            if (socket.readyState === RELAY_SOCKET_OPEN) {
+              host.socket = socket;
+              send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id });
+            }
+          } };
+        });
+        try { await registration; } finally { registration = undefined; }
+        return;
       }
       if (host.socket !== socket) return;
       if (message.type === 'rpc_response') {
@@ -183,14 +228,17 @@ export function createHostBroker(options: HostBrokerOptions) {
       } else if (message.type === 'stream_message') {
         const stream = host.streams.get(message.streamId);
         if (stream?.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) {
-          if (stream.socket.bufferedAmount > BROKER_MAX_FRAME_BYTES) stream.socket.close(1013, 'Slow browser connection');
+          if (stream.socket.bufferedAmount !== undefined && stream.socket.bufferedAmount > BROKER_MAX_FRAME_BYTES) stream.socket.close(1013, 'Slow browser connection');
           else stream.socket.send(message.message);
         }
       } else if (message.type === 'stream_close') {
         const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); stream?.socket.close(message.code, message.reason);
       } else socket.close(1008, 'Unexpected uplink message');
-      } catch { socket.close(1011, 'Host message could not be processed'); }
-    });
+      } catch (error) {
+        const code = error instanceof BrokerError && error.status === 401 ? 1008 : error instanceof BrokerError && error.status === 429 ? 1013 : 1011;
+        socket.close(code, code === 1011 ? 'Host message could not be processed' : (error as Error).message);
+      }
+    }
   }
   async function recoverBinding(host: Host, binding: Binding): Promise<void> {
     if (binding.generation === host.generation) return;
@@ -263,20 +311,24 @@ export function createHostBroker(options: HostBrokerOptions) {
       const agentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
       if (attaching && actualNativeSessionId !== nativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
       const nativeKey = JSON.stringify([host.id, providerId, actualNativeSessionId]);
-      const byAgent = bindings.get(agentId); const byNative = nativeBindings.get(nativeKey);
-      if ((byAgent && !sameBinding(byAgent, host.id, providerId, actualNativeSessionId)) || (byNative && byNative.agentId !== agentId)) {
-        throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity conflicts with an existing binding.');
-      }
-      const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
-        generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
-      if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
-      if (creatorSubject && binding.creatorSubject !== creatorSubject) throw new BrokerError(409, 'session_binding_conflict', 'The native session belongs to another user.');
-      binding.generation = host.generation;
-      bindings.set(agentId, binding);
-      nativeBindings.set(nativeKey, binding);
-      attached.set(JSON.stringify([host.id, providerId, actualNativeSessionId]), Promise.resolve(binding));
-      persist();
-      return binding;
+      return commit(draft => {
+        if (hosts.get(host.id) !== host || host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
+        const byAgent = bindings.get(agentId); const byNative = nativeBindings.get(nativeKey);
+        if ((byAgent && !sameBinding(byAgent, host.id, providerId, actualNativeSessionId)) || (byNative && byNative.agentId !== agentId)) {
+          throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity conflicts with an existing binding.');
+        }
+        const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
+          generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+        if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
+        if (creatorSubject && binding.creatorSubject !== creatorSubject) throw new BrokerError(409, 'session_binding_conflict', 'The native session belongs to another user.');
+        const { generation: _generation, recovery: _recovery, ...saved } = binding;
+        draft.bindings = draft.bindings.filter(value => value.agentId !== agentId); draft.bindings.push(saved);
+        return { value: binding, publish() {
+          binding.generation = host.generation;
+          bindings.set(agentId, binding); nativeBindings.set(nativeKey, binding);
+          attached.set(nativeKey, Promise.resolve(binding));
+        } };
+      });
     };
     if (attaching) {
       let result = attached.get(key);
@@ -296,7 +348,12 @@ export function createHostBroker(options: HostBrokerOptions) {
       existing = { fingerprint, result: operation() }; creations.set(key, existing);
     }
     const binding = await existing.result;
-    completedCreations.set(key, { fingerprint, agentId: binding.agentId }); persist();
+    await commit(draft => {
+      if (hosts.get(host.id) !== host || bindings.get(binding.agentId) !== binding) throw new BrokerError(404, 'session_unavailable', 'The session binding was revoked.');
+      const value = { fingerprint, agentId: binding.agentId };
+      draft.creations = draft.creations.filter(([id]) => id !== key); draft.creations.push([key, value]);
+      return { value: undefined, publish() { completedCreations.set(key, value); } };
+    });
     await recoverBinding(host, binding); return binding;
   }
   async function userMutation(host: Host, action: string, body: Record<string, unknown>, subject?: string): Promise<Binding> {
@@ -330,25 +387,26 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
     const requestId = required(body.requestId, 'requestId');
     const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) });
-    const reservation = sharing.reserve(host.id, subject!, providerId, requestId, fingerprint);
+    const reservation = await changeSharing(draft => draft.reserve(host.id, subject!, providerId, requestId, fingerprint));
     if (!reservation.fresh) {
       const completedId = reservation.agentId ?? completedCreations.get(JSON.stringify([host.id, providerId, reservation.nativeRequestId]))?.agentId;
       const binding = completedId && bindings.get(completedId);
       if (binding && sessionAllowed(binding, subject)) {
-        if (!reservation.agentId) sharing.complete(reservation.key, binding.agentId);
+        if (!reservation.agentId) await changeSharing(draft => draft.complete(reservation.key, binding.agentId));
         await recoverBinding(host, binding); return binding;
       }
       const pending = sharedCreates.get(reservation.key);
       if (pending) return pending;
       throw new SharingError(409, 'creation_outcome_unknown', 'A previous creation is unresolved. Its quota reservation is retained; ask the Host owner to reconcile it.');
     }
-    const operation = mutate(host, action, { ...body, requestId: reservation.nativeRequestId }, subject).then(binding => {
-      sharing.complete(reservation.key, binding.agentId); return binding;
-    }).catch(error => {
+    requireAccess(host.id, subject);
+    const operation = mutate(host, action, { ...body, requestId: reservation.nativeRequestId }, subject).then(async binding => {
+      await changeSharing(draft => draft.complete(reservation.key, binding.agentId)); return binding;
+    }).catch(async error => {
       // Transport and persistence failures may occur after native creation succeeded.
       if (error instanceof BrokerError && error.creationRejected) {
         creations.delete(JSON.stringify([host.id, providerId, reservation.nativeRequestId]));
-        sharing.release(reservation.key);
+        await changeSharing(draft => draft.release(reservation.key));
       }
       throw error;
     });
@@ -389,6 +447,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
 
   async function handle(request: Request, context: BrokerRequestContext, url: URL) {
+    assertAvailable();
     if (!await permitted(context)) throw new BrokerError(403, 'forbidden', 'This endpoint is available only to the local application.');
     if (request.method === 'POST') {
       const access = context.validateMutation?.();
@@ -399,11 +458,16 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (url.pathname === '/v1/remote/pairings' && request.method === 'POST') {
       requireOwner(subject);
       await readBody(request);
-      for (const [hash, value] of keys) if (value.expires <= now()) keys.delete(hash);
-      if (keys.size >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
       const key = `arc_${randomBytes(32).toString('base64url')}`; const expires = now() + (options.keyLifetimeMs ?? (options.durable ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
-      keys.set(keyHash(key), { expires });
-      options.onPairing?.(key, expires); persist();
+      await commit(draft => {
+        draft.keys = draft.keys.filter(([, value]) => value.expires > now());
+        if (draft.keys.length >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
+        draft.keys.push([keyHash(key), { expires }]);
+        return { value: undefined, publish() {
+          for (const [hash, value] of keys) if (value.expires <= now()) keys.delete(hash);
+          keys.set(keyHash(key), { expires }); options.onPairing?.(key, expires);
+        } };
+      });
       return json(201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
         ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\npnpm agent-host start` } : {}) });
     }
@@ -413,14 +477,22 @@ export function createHostBroker(options: HostBrokerOptions) {
       await readBody(request);
       const host = hosts.get(revoking[1]!);
       if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
-      for (const [key, credential] of keys) if (credential.installationId === host.installationId) keys.delete(key);
-      for (const [id, binding] of bindings) if (binding.hostId === host.id) {
-        bindings.delete(id); const key = JSON.stringify([host.id, binding.providerId, binding.nativeSessionId]);
-        nativeBindings.delete(key); attached.delete(key);
-      }
-      for (const [key, value] of completedCreations) if (!bindings.has(value.agentId)) { completedCreations.delete(key); creations.delete(key); }
-      hosts.delete(host.id); persist();
-      if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(1008, 'Device revoked'); }
+      await commit(draft => {
+        draft.keys = draft.keys.filter(([, credential]) => credential.installationId !== host.installationId);
+        draft.bindings = draft.bindings.filter(binding => binding.hostId !== host.id);
+        draft.creations = draft.creations.filter(([, value]) => draft.bindings.some(binding => binding.agentId === value.agentId));
+        draft.hosts = draft.hosts.filter(value => value.id !== host.id);
+        return { value: undefined, publish() {
+          for (const [key, credential] of keys) if (credential.installationId === host.installationId) keys.delete(key);
+          for (const [id, binding] of bindings) if (binding.hostId === host.id) {
+            bindings.delete(id); const key = JSON.stringify([host.id, binding.providerId, binding.nativeSessionId]);
+            nativeBindings.delete(key); attached.delete(key);
+          }
+          for (const [key, value] of completedCreations) if (!bindings.has(value.agentId)) { completedCreations.delete(key); creations.delete(key); }
+          hosts.delete(host.id);
+          if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(1008, 'Device revoked'); }
+        } };
+      });
       return json(200, { ok: true });
     }
     const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|models|child\/attach|attach|create)$/.exec(url.pathname);
@@ -456,12 +528,14 @@ export function createHostBroker(options: HostBrokerOptions) {
     throw new BrokerError(404, 'route_not_found', 'Unknown Remote Host route.');
   }
   async function upgrade(request: Request, context: BrokerRequestContext, url: URL) {
+    assertAvailable();
     if (url.pathname === '/ws/remote-host') {
       const header = request.headers.get('authorization');
       const hash = header?.startsWith('Bearer ') ? keyHash(header.slice(7)) : undefined;
       const key = hash ? keys.get(hash) : undefined;
       if (!key || key.expires <= now()) return rejectUpgrade(401);
       return { accept(client: RelaySocket) {
+        if (unavailable || keys.get(hash!) !== key || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
         if (context.connectionExpiresAt) expire(client, () => keys.has(hash!) ? Math.min(key.expires, context.connectionExpiresAt?.() ?? key.expires) : 0,
           () => !keys.has(hash!) || key.expires <= now() ? 1008 : (context.connectionExpiryCode?.() ?? 1008));
@@ -475,6 +549,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); } catch { return rejectUpgrade(503); }
     if (host.streams.size >= 128) return rejectUpgrade(429);
     return { accept(client: RelaySocket) {
+      if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
       if (host.streams.size >= 128) { client.close(1013, 'Remote stream capacity reached'); return; }
       track(client);
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
@@ -514,18 +589,20 @@ export function createHostBroker(options: HostBrokerOptions) {
   };
   return {
     snapshot,
+    settled: () => commits.then(() => undefined),
     visibleHosts,
     hasHost: (hostId: string) => hosts.has(hostId),
     canAccessHost: hostAllowed,
     canAccessSession: (agentId: string, subject: string) => { const binding = bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },
-    manageShares(subject: string, hostId: string, action: 'shares' | 'share' | 'revoke-share', targetSubject?: string, targetLabel?: string, sessionLimit?: number) {
+    async manageShares(subject: string, hostId: string, action: 'shares' | 'share' | 'revoke-share', targetSubject?: string, targetLabel?: string, sessionLimit?: number) {
+      assertAvailable();
       requireOwner(subject);
       if (!hosts.has(hostId)) throw new SharingError(404, 'host_not_found', 'Host is unavailable.');
       if (action === 'shares') return { shares: sharing.list(hostId) };
       if (!targetSubject || targetSubject === options.ownerSubject) throw new SharingError(400, 'invalid_recipient', 'Choose another user.');
-      if (action === 'share') sharing.set(hostId, targetSubject, targetLabel ?? targetSubject, sessionLimit!);
+      if (action === 'share') await changeSharing(draft => draft.set(hostId, targetSubject, targetLabel ?? targetSubject, sessionLimit!));
       else {
-        sharing.revoke(hostId, targetSubject);
+        await changeSharing(draft => draft.revoke(hostId, targetSubject));
         const host = hosts.get(hostId)!;
         for (const [streamId, stream] of host.streams) if (stream.subject === targetSubject) {
           host.streams.delete(streamId); stream.buffered = []; clearTimeout(stream.timer);
@@ -558,6 +635,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       catch { return rejectUpgrade(503); }
     },
     close() {
+      unavailable = true;
       for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket);
       for (const client of clients) client.close(1001, 'Broker closed');
       clients.clear();

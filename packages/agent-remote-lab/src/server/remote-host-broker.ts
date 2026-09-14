@@ -65,6 +65,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     async close() {
       broker.close();
       for (const client of websockets.clients) client.terminate();
+      await broker.settled();
       await new Promise<void>(resolve => websockets.close(() => resolve()));
     },
   };
@@ -73,10 +74,10 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
 function local(request: IncomingMessage, origin: string): boolean {
   return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress ?? '') && (!request.headers.origin || request.headers.origin === origin);
 }
-class InvalidHttpRequest extends Error {
+export class InvalidHttpRequest extends Error {
   constructor() { super('The HTTP request is unsupported.'); }
 }
-function webRequest(request: IncomingMessage, url: URL, body = true): Request {
+export function webRequest(request: IncomingMessage, url: URL, body = true): Request {
   try {
     const headers = new Headers();
     for (const [key, value] of Object.entries(request.headers)) {
@@ -92,12 +93,15 @@ function webRequest(request: IncomingMessage, url: URL, body = true): Request {
     return new Request(url, init);
   } catch { throw new InvalidHttpRequest(); }
 }
-async function writeResponse(response: ServerResponse, result: Response) {
+export async function writeResponse(response: ServerResponse, result: Response) {
   const body = await result.text();
   if (response.destroyed || response.writableEnded) return;
-  response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(body);
+  const headers: Record<string, string | string[]> = {};
+  result.headers.forEach((value, key) => { if (key !== 'set-cookie') headers[key] = value; });
+  const cookies = result.headers.getSetCookie(); if (cookies.length) headers['set-cookie'] = cookies;
+  response.writeHead(result.status, headers); response.end(body);
 }
-function relaySocket(socket: WebSocket): RelaySocket {
+export function relaySocket(socket: WebSocket): RelaySocket {
   socket.on('error', () => undefined);
   return {
     get readyState() { return socket.readyState; },
@@ -105,11 +109,14 @@ function relaySocket(socket: WebSocket): RelaySocket {
     send: data => socket.send(data),
     close: (code, reason) => socket.close(code, reason),
     onMessage(listener) {
-      const receive = (data: import('ws').RawData, binary: boolean) => listener(data.toString(), binary);
+      const receive = (data: import('ws').RawData, binary: boolean) => {
+        try { void Promise.resolve(listener(data.toString(), binary)).catch(() => socket.close(1011, 'Socket message failed')); }
+        catch { socket.close(1011, 'Socket message failed'); }
+      };
       socket.on('message', receive); return () => { socket.off('message', receive); };
     },
     onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
     onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
   };
 }
-function rejectUpgrade(socket: Duplex, status: number) { socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); }
+export function rejectUpgrade(socket: Duplex, status: number) { socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); }

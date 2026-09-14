@@ -276,3 +276,39 @@ This evidence does not constitute an actual Cloudflare or SSH deployment. Public
 DNS/TLS, the production login account, deployment replacement, and realistic
 streaming load remain deployment acceptance checks. The worktrees do not modify
 or replace existing local service stacks when running the isolated contracts.
+
+## Production deployment: 2026-09-14
+
+The independent `agent-remote-control` Worker is deployed on the Custom Domain
+`agents.xianliao.de5.net`, version `f96ce501-084b-4828-a7f9-2bb993d019b2`.
+It owns its `RELAY` SQLite Durable Object namespace and Controller assets.
+The paired `copilot-gateway-vnext` Worker is enabled at `token.xianliao.de5.net`,
+version `31469215-d142-4a33-802e-219fe9937fe8` (Gateway commit `3dd3661c`).
+Existing Gateway D1, KV, R2 and OAuth bindings were retained; no D1 migrations
+were pending and no production test users were created.
+
+Both versions received the same generated signing secret using Wrangler's
+`--secrets-file` deployment option. A private recovery copy is retained at
+`.runtime/production-agents/secret.json` in the primary Agents checkout, mode
+0600, outside version control. Back it up securely; do not regenerate it when
+rebuilding, redeploying or removing a development worktree. Existing durable
+state is bound to this secret and the configured origins.
+
+Public smoke checks passed for HTTPS, both health endpoints, Controller assets,
+the Gateway authentication marker, the browser-bound login redirect and Secure
+HttpOnly challenge cookie. Gateway reports `enabled: true`. Unauthenticated Host
+access returns 401 and missing assets return 404. Both services accept their
+correct service proof type and reject invalid proofs; Relay also rejects replay
+of a consumed control proof. Gateway continues rejecting invalid inference API
+keys. These checks do not claim a completed production user login, paired Host,
+native provider invocation, replacement/reconnect test or load acceptance.
+
+Gateway's Relay fetch was additionally adapted to Workers' supported manual
+redirect mode. Its complete CI passed 3594 tests with one existing skip. A real
+local Gateway workerd instance with D1 sessions verified successful control
+requests and refusal of all five redirect statuses without forwarding credentials.
+
+For first use, open `https://agents.xianliao.de5.net`, sign in through the existing
+Gateway account, and create a Host pairing invitation in Controller. Use that
+invitation's connection details with Agent Host. No separate Agents account,
+Google OAuth application or manually created Durable Object is required.

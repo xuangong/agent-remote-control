@@ -624,10 +624,12 @@ textarea {
 .lab-session-configuration label { margin-top: 3px; }
 .lab-session-reconnect { min-height: 30px; padding: 3px 8px; font-size: .8rem; }
 @media (max-width: 1180px) { .lab-session-list { max-height: 260px; } }
-.lab-host-pairing { display: grid; gap: 9px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--obs-border); }
+.lab-host-pairing { display: grid; grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; gap: 9px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--obs-border); }
+.lab-host-pairing > *, .lab-pairing-details > * { min-width: 0; }
+.lab-host-pairing select, .lab-host-pairing textarea { min-width: 0; max-width: 100%; }
 .lab-host-pairing > label { font-size: .85rem; color: var(--obs-text-secondary); }
 .lab-pair-host { width: 100%; }
-.lab-pairing-details { display: grid; gap: 8px; }
+.lab-pairing-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .lab-pairing-details textarea { font-family: var(--obs-mono); font-size: .78rem; overflow-wrap: anywhere; }
 .lab-pairing-details label { font-size: .85rem; }
 .lab-context-rail > .lab-session-directory, .lab-context-rail > .lab-directory-panel > .lab-session-directory { margin: 16px 16px 24px; }
@@ -914,6 +916,12 @@ textarea {
   .lab-context-rail > .lab-rail-heading { display: none; }
   .lab-session-panel-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
   .lab-session-panel-actions button { min-height: 44px; }
+  .lab-mobile-settings { min-width: 0; overflow-wrap: anywhere; }
+  .lab-display-settings { margin-block: 20px; }
+  .lab-display-settings h2 { margin: 0 0 12px; font-size: 1rem; }
+  .lab-display-settings button, .lab-display-settings summary { min-height: 44px; }
+  .lab-display-settings summary { display: list-item; padding-block: 12px; cursor: pointer; color: var(--obs-action); }
+  .lab-display-settings [role="alert"] { color: var(--obs-danger); }
   .lab-mobile-settings p { line-height: 1.6; color: var(--obs-text-secondary); }
   .lab-session-panel-footer { position: sticky; bottom: 0; padding: 12px 0 max(12px, env(safe-area-inset-bottom)); margin-top: auto; background: var(--obs-surface); border-top: 1px solid var(--obs-border); }
   .lab-session-panel-footer button { width: 100%; min-height: 48px; background: var(--obs-action); color: white; border-color: var(--obs-action); }

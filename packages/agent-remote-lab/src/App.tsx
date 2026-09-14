@@ -1,4 +1,5 @@
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@borgee/agent-remote-hosted/controller-location';
+import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
 import { SessionLink } from './components/SessionLink.js';
 import type { AgentChildSession, AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
 import {
@@ -812,7 +813,7 @@ export function App({
       </div> : null}
       {compactLayout && sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         {accountAction}
-        <p>For a full-screen experience, add Agent Remote to your Home Screen from your browser menu.</p>
+        <MobileDisplaySettings />
         <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
       </section> : null}
       {directory ? <HostPairing managementVisible={!compactLayout || sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={compactLayout ? undefined : () => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}

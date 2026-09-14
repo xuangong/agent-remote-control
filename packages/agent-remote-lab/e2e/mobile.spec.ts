@@ -184,3 +184,90 @@ test('restores the reading anchor after reload instead of jumping to latest', as
     return entry ? entry.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
   }, before.key)).toBeCloseTo(before.offset, 0);
 });
+
+for (const width of [320, 390]) {
+  test(`keeps Settings and pairing controls within a ${width}px phone`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 740 });
+    await openSession(page);
+    await page.route('**/v1/remote/hosts', route => route.fulfill({ json: { hosts: [{
+      id: 'phone-host', name: 'DevelopmentWorkstationWithAnUnbrokenName0123456789abcdef0123456789',
+      online: true, managed: true, access: 'owner', credentialRotation: true,
+      providers: [{ providerId: 'codex', displayName: 'Codex' }],
+    }] } }));
+    await page.getByRole('button', { name: 'Open sessions', exact: true }).tap();
+    const drawer = page.getByRole('dialog', { name: 'Context', exact: true });
+    await drawer.getByRole('button', { name: 'Settings', exact: true }).tap();
+    await drawer.getByRole('button', { name: 'Retry Hosts', exact: true }).tap();
+    await expect(drawer.locator('#remote-host option')).toContainText(['Select a Host', 'DevelopmentWorkstation']);
+    await drawer.getByRole('combobox', { name: 'Connected Host' }).selectOption('phone-host');
+    await drawer.getByRole('button', { name: 'Rotate credential', exact: true }).tap();
+    await page.route('**/v1/remote/pairings', route => route.fulfill({ json: {
+      key: 'arc_test_' + 'x'.repeat(64), expiresAt: new Date(Date.now() + 60000).toISOString(),
+      serverUrl: 'https://agents.example.test', command: 'AGENT_HOST_REMOTE_KEY=arc_test_' + 'x'.repeat(64) + ' agent-remote-controller start',
+    } }));
+    await drawer.getByRole('button', { name: 'Pair Agent Host', exact: true }).tap();
+    await drawer.getByRole('button', { name: 'Generate pairing key', exact: true }).tap();
+    await expect(drawer.getByRole('textbox', { name: 'Agent Host configuration' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('settings-pairing.png') });
+    expect(await drawer.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    const controls = await drawer.locator('button:visible, select:visible, textarea:visible').evaluateAll(elements => elements.map(element => {
+      const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right };
+    }));
+    for (const bounds of controls) { expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(width); }
+  });
+}
+
+async function openSettings(page: Page) {
+  await page.getByRole('button', { name: 'Open sessions', exact: true }).tap();
+  await page.getByRole('button', { name: 'Settings', exact: true }).tap();
+  return page.getByRole('region', { name: 'Controller settings', exact: true });
+}
+
+test('enters and exits browser fullscreen while preserving the current conversation', async ({ page }, testInfo) => {
+  await openSession(page);
+  await page.getByTestId('prompt-input').fill('Keep this fullscreen draft');
+  const settings = await openSettings(page);
+  await page.screenshot({ path: testInfo.outputPath('mobile-display-settings.png') });
+  await settings.getByRole('button', { name: 'Enter full screen', exact: true }).tap();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.documentElement)).toBe(true);
+  await expect(settings.getByRole('button', { name: 'Exit full screen', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close Context', exact: true }).tap();
+  await expect(page.getByTestId('prompt-input')).toHaveValue('Keep this fullscreen draft');
+  await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBe(await page.evaluate(() => visualViewport!.height));
+  await openSettings(page);
+  await settings.getByRole('button', { name: 'Exit full screen', exact: true }).tap();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(settings.getByRole('button', { name: 'Enter full screen', exact: true })).toBeVisible();
+});
+
+test('explains unsupported fullscreen and keeps Settings usable', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(document, 'fullscreenEnabled', { value: false, configurable: true }); });
+  await openSession(page);
+  const settings = await openSettings(page);
+  await expect(settings.getByRole('button', { name: 'Enter full screen' })).toHaveCount(0);
+  await expect(settings).toContainText('This browser does not support page full screen.');
+  await settings.getByText('Open without the address bar', { exact: true }).tap();
+  await expect(settings.getByText(/On iPhone/)).toBeVisible();
+  await expect(settings).toContainText('Add to Home Screen');
+});
+
+test('reports fullscreen rejection without claiming success or losing the draft', async ({ page }) => {
+  await page.addInitScript(() => {
+    Element.prototype.requestFullscreen = async () => { throw new Error('Denied'); };
+  });
+  await openSession(page);
+  const settings = await openSettings(page);
+  await settings.getByRole('button', { name: 'Enter full screen', exact: true }).tap();
+  await expect(settings.getByRole('alert')).toContainText('Full screen could not be changed');
+  await expect(settings.getByRole('button', { name: 'Enter full screen', exact: true })).toBeEnabled();
+});
+
+
+test('recognizes a Home Screen launch without offering redundant fullscreen controls', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(navigator, 'standalone', { value: true }); });
+  await openSession(page);
+  const settings = await openSettings(page);
+  await expect(settings).toContainText('Opened from your Home Screen');
+  await expect(settings.getByRole('button', { name: 'Enter full screen' })).toHaveCount(0);
+  await expect(settings.getByText('Open without the address bar')).toHaveCount(0);
+});

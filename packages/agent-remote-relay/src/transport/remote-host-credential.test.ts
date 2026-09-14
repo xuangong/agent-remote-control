@@ -109,3 +109,34 @@ it('rotates an already registered host and reconnects with the rotated credentia
     expect(authorizations).toEqual(['Bearer invitation', 'Bearer next-device']); expect(saved).toBe('next-device'); }
   finally { await client.close(); await relay.close(); }
 });
+it('accepts the matching registered rotation acknowledgment without disconnecting or interrupting control delivery', async () => {
+  let connections = 0; let response: unknown; const states: string[] = [];
+  const relay = await server(socket => {
+    connections++;
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'register') { send(socket, { type: 'registered', hostId: 'host' }); send(socket, { type: 'credential_issued', credential: 'new-device' }); }
+      if (message.type === 'credential_saved') {
+        send(socket, { type: 'registered', hostId: 'host' });
+        send(socket, { type: 'rpc_request', requestId: 'after-rotation', method: 'POST', path: '/remote/stop', body: '{}' });
+      }
+      if (message.type === 'rpc_response') response = message;
+    });
+  });
+  const client = createRemoteHostUplinkClient({ ...base, url: relay.url, onCredential: async () => {}, onStateChange: state => states.push(state) });
+  try {
+    await client.ready; await expect.poll(() => response).toMatchObject({ requestId: 'after-rotation', status: 200 });
+    expect(connections).toBe(1); expect(states).toEqual(['connecting', 'registered']);
+  } finally { await client.close(); await relay.close(); }
+});
+it('rejects a rotation acknowledgment that changes the registered Host identity', async () => {
+  const states: string[] = [];
+  const relay = await server(socket => socket.on('message', data => {
+    if (JSON.parse(data.toString()).type === 'register') {
+      send(socket, { type: 'registered', hostId: 'host' }); send(socket, { type: 'registered', hostId: 'different-host' });
+    }
+  }));
+  const client = createRemoteHostUplinkClient({ ...base, url: relay.url, onStateChange: state => states.push(state) });
+  try { await client.ready; await expect.poll(() => states.includes('disconnected')).toBe(true); }
+  finally { await client.close(); await relay.close(); }
+});

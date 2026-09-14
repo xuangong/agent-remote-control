@@ -75,6 +75,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       followRedirects: false,
     });
     let registered = false;
+    let registeredHostId: string | undefined;
     let retired = false;
     let registrationDeadline: ReturnType<typeof setTimeout> | undefined;
     const writer = createUplinkWriter(socket, {
@@ -142,11 +143,16 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         }).finally(() => { credentialWrite = undefined; });
         return;
       }
+      if (registered && decoded.value.type === 'registered') {
+        if (decoded.value.hostId !== registeredHostId) retire();
+        return;
+      }
       if (!registered) {
         if (credentialWrite) { retire(); return; }
         if (decoded.value.type !== 'registered') { retire(); return; }
         clearTimeout(registrationDeadline);
         registered = true;
+        registeredHostId = decoded.value.hostId;
         options.onStateChange?.('registered');
         attempts = 0;
         resolveReady({ hostId: decoded.value.hostId });

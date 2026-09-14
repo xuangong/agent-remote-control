@@ -1,5 +1,5 @@
 import type { AgentChildSession, AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
-import { useRef, useState, type ReactNode } from 'react';
+import { useContext, useMemo, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -7,6 +7,7 @@ import type {
 import type { AgentReplicaState, RemoteSessionStatus } from '@borgee/agent-remote-web';
 import { AgentCommandDetails, AgentTimeline, type QuestionDraft } from '@borgee/agent-remote-web/react';
 
+import { RecoveryScope } from '../conversation-recovery.js';
 import { LiveControlPanel } from './LiveControlPanel.js';
 import { PlanningControl } from './PlanningControl.js';
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
@@ -25,10 +26,12 @@ export interface LabWorkbenchActions {
 }
 
 export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
-  const readingPositions = useRef(new Map());
+  const recoveryPositions = useContext(RecoveryScope);
+  const localPositions = useMemo(() => new Map(), []);
+  const readingPositions = recoveryPositions ?? localPositions;
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
-  const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions.current, undefined,
+  const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
     actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;

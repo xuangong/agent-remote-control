@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -12,7 +13,9 @@ test('delivers immediate input within the native turn, queues a new turn, and in
   const evidenceOffset = (await readRecords()).length;
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'DeepSeek Harness' });
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('connection-summary')).toContainText('Ready', { timeout: 30_000 });
   const input = page.getByTestId('prompt-input');

@@ -1,7 +1,9 @@
+import { showNewSession } from './session-navigation';
 import { expect, test } from '@playwright/test';
 
 async function start(page: import('@playwright/test').Page) {
   await page.goto('/');
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   const primary = page.locator('.lab-primary-conversation');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
@@ -135,12 +137,14 @@ test('keeps a tree of side routes with stacked ancestors and independent drafts'
   const d = await branch(b, 'Branch D');
   await expect(primary).toBeHidden();
   await d.getByTestId('prompt-input').fill('Draft on D');
-  await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 0 });
+  else await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
   await expect(primary).toBeVisible();
   const c = await branch(primary, 'Branch C');
   const e = await branch(c, 'Branch E');
   await e.getByTestId('prompt-input').fill('Draft on E');
-  await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 0 });
+  else await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
   await primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button', { name: 'Side 1 · Branch B', exact: true }).click();
   await expect(b).toBeVisible();
   await expect(d).toBeHidden();
@@ -148,10 +152,12 @@ test('keeps a tree of side routes with stacked ancestors and independent drafts'
   await expect(e).toBeHidden();
   if (testInfo.project.name === 'chromium-desktop') await expect(primary).toBeVisible();
   await expect(b.getByTestId('prompt-input')).toBeFocused();
-  await page.getByRole('navigation', { name: 'Later windows' }).getByRole('button', { name: 'Expand window 3:', exact: false }).click();
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 2 });
+  else await page.getByRole('navigation', { name: 'Later windows' }).getByRole('button', { name: 'Expand window 3:', exact: false }).click();
   await expect(d).toBeVisible();
   await expect(d.getByTestId('prompt-input')).toHaveValue('Draft on D');
-  await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 0 });
+  else await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
   await expect(primary.getByRole('button', { name: 'Side 1 · Branch B', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await primary.getByRole('button', { name: 'Side 2 · Branch C', exact: true }).click();
   await expect(c).toBeVisible();

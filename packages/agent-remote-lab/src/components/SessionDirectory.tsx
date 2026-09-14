@@ -4,6 +4,7 @@ import { SessionTree } from './SessionTree.js';
 import { DirectoryError, type CreateSessionOptions, type OpenedSession, type SessionCatalogPage, type SessionDirectoryClient, type SessionSummary, type SessionWorkspace } from '../directory-client.js';
 
 interface Props {
+  searchable?: boolean;
   directory: SessionDirectoryClient;
   providerId: string;
   activeAgentId?: string;
@@ -18,7 +19,9 @@ interface Props {
   onClose(agentId: string): void;
 }
 
-export function SessionDirectory({ directory, providerId, activeAgentId, opened, known = [], hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
+export function SessionDirectory({ searchable = false, directory, providerId, activeAgentId, opened, known = [], hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
+  const [search, setSearch] = useState('');
+  const matches = (item: SessionEntry) => !search.trim() || [item.title, item.nativeSessionId, item.providerId, ('workspace' in item && typeof item.workspace === 'string' ? item.workspace : '')].some((value) => value?.toLowerCase().includes(search.trim().toLowerCase()));
   const [page, setPage] = useState<SessionCatalogPage | undefined>(directory.cachedPages.get(providerId));
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -88,13 +91,13 @@ export function SessionDirectory({ directory, providerId, activeAgentId, opened,
     return () => { retired = true; window.clearInterval(timer); };
   }, [providerId, directory]);
 
-  const openedTree = sessionForest(opened.map((item) => openedEntry(item, known)), known);
+  const openedTree = sessionForest(opened.map((item) => openedEntry(item, known)).filter(matches), known);
   const discovered = new Map<string, SessionEntry>((page?.items ?? []).map((item) => [sessionKey({ ...item, hostId }), { ...item, hostId }]));
   for (const item of known) {
     if ((item.hostId ?? 'local') !== hostId || item.providerId !== providerId) continue;
     if (item.parentNativeSessionId || discovered.has(sessionKey(item))) discovered.set(sessionKey(item), { ...discovered.get(sessionKey(item)), ...item });
   }
-  const discoveredTree = sessionForest([...discovered.values()], known);
+  const discoveredTree = sessionForest([...discovered.values()].filter(matches), known);
   const active = known.find((item) => item.agentId === activeAgentId) ?? opened.find((item) => item.agentId === activeAgentId);
   const activeKey = active ? sessionKey(active) : undefined;
   const openRelated = (item: SessionEntry) => {
@@ -102,9 +105,10 @@ export function SessionDirectory({ directory, providerId, activeAgentId, opened,
     else { const saved = opened.find((entry) => sessionKey(entry) === sessionKey(item)); if (saved) onSelect(saved); }
   };
   return <>
+    {searchable ? <label className="lab-session-search">Search loaded sessions<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Title, workspace, or ID" /></label> : null}
     {opened.length > 0 ? <section className="lab-session-directory" aria-label="Opened sessions">
       <div className="lab-directory-heading"><h2>Opened sessions</h2><span>{opened.length}</span></div>
-      <SessionTree nodes={openedTree} activeKey={activeKey} renderRow={(item, placeholder) => <>
+      <SessionTree key={search.trim() ? `search:${search}` : 'all'} defaultExpanded={!!search.trim()} nodes={openedTree} activeKey={activeKey} renderRow={(item, placeholder) => <>
         <button type="button" className="lab-session-row" aria-current={item.agentId === activeAgentId ? 'page' : undefined} disabled={busy || (placeholder && !onOpenRelated)} onClick={() => { const saved = opened.find((entry) => entry.agentId === item.agentId); if (saved && !placeholder) onSelect(saved); else openRelated(item); }}><strong>{item.title}</strong><small>{placeholder ? 'Parent · View closed' : item.role ?? item.providerId}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small></button>
         {!placeholder && item.agentId ? <button type="button" className="lab-session-close" aria-label={`Close ${item.title}`} title="Remove from opened sessions" onClick={() => onClose(item.agentId!)}>×</button> : null}
       </>} />
@@ -115,8 +119,8 @@ export function SessionDirectory({ directory, providerId, activeAgentId, opened,
       {updates && !expired ? <button type="button" className="lab-directory-updates" onClick={() => void load()} disabled={loading}>Updates available · Refresh</button> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       {loading ? <p className="lab-control-note" role="status">Loading sessions…</p> : null}
-      {!loading && !failure && discoveredTree.length === 0 ? <p className="lab-control-note">No sessions yet. Open a new session below.</p> : null}
-      <SessionTree nodes={discoveredTree} activeKey={activeKey} renderRow={(item, placeholder) => {
+      {!loading && !failure && discoveredTree.length === 0 ? <p className="lab-control-note">{search.trim() ? 'No matching loaded sessions.' : 'No sessions yet. Create a new session to get started.'}</p> : null}
+      <SessionTree key={search.trim() ? `search:${search}` : 'all'} defaultExpanded={!!search.trim()} nodes={discoveredTree} activeKey={activeKey} renderRow={(item, placeholder) => {
         const summary = page?.items.find((entry) => entry.nativeSessionId === item.nativeSessionId);
         const related = Boolean(item.parentNativeSessionId) || !summary;
         return <button type="button" className="lab-session-row" aria-current={sessionKey(item) === activeKey ? 'page' : undefined} disabled={busy || (related ? !onOpenRelated : summary?.state === 'unavailable')} onClick={() => { if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>

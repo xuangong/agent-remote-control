@@ -7,6 +7,7 @@ test.beforeEach(async ({}, testInfo) => {
 
 async function openSession(page: Page) {
   await page.goto('/');
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
 }
@@ -35,12 +36,20 @@ test('keeps status readable and composer actions in one row on a small phone', a
 test('uses one chat viewport in landscape and returns to the retained source draft', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 844, height: 390 });
   await openSession(page);
+  const historyLength = await page.evaluate(() => history.length);
   const primary = page.locator('.lab-primary-conversation');
   await primary.getByTestId('prompt-input').fill('/side');
   await primary.getByTestId('prompt-input').press('Enter');
   const side = page.getByRole('complementary', { name: 'Side conversation' });
   await expect(side.getByTestId('prompt-input')).toBeEnabled();
   await expect(primary).toBeHidden();
+  expect((await side.boundingBox())!.width).toBe(844);
+  await expect(page.getByRole('combobox', { name: 'Side path' })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 0 });
+  await expect(primary).toBeVisible();
+  await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 1 });
+  await expect(side).toBeVisible();
+  expect(await page.evaluate(() => history.length)).toBe(historyLength);
   const input = side.getByTestId('prompt-input');
   await input.fill('Side draft on phone');
   const send = (await side.getByTestId('prompt-submit').boundingBox())!;
@@ -91,10 +100,18 @@ test('keeps drawer dismissal reachable after scrolling and preserves the chat dr
   await page.setViewportSize({ width: 390, height: 844 });
   await openSession(page);
   await page.getByTestId('prompt-input').fill('Retain my phone draft');
-  await page.getByRole('button', { name: 'View options', exact: true }).tap();
-  await page.getByRole('checkbox', { name: 'Sidebar', exact: true }).tap();
+  await page.getByRole('button', { name: 'Open sessions', exact: true }).tap();
   const drawer = page.getByRole('dialog', { name: 'Context', exact: true });
   await expect(drawer).toBeVisible();
+  expect((await drawer.boundingBox())!.width).toBe(390);
+  await expect(drawer.getByTestId('session-create')).toBeHidden();
+  await expect(drawer.getByRole('button', { name: 'Pair Agent Host', exact: true })).toBeHidden();
+  await expect(drawer.getByRole('searchbox')).toBeVisible();
+  await drawer.getByRole('searchbox').fill('no-matching-session-xyz');
+  await expect(drawer.locator('.lab-session-row')).toHaveCount(0);
+  await expect(drawer.getByText('No matching loaded sessions.')).toBeVisible();
+  await drawer.getByRole('searchbox').fill('');
+  await expect(drawer.locator('.lab-session-row').first()).toBeVisible();
   await drawer.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   const close = drawer.getByRole('button', { name: 'Close Context', exact: true });
   const bounds = (await close.boundingBox())!;
@@ -105,4 +122,65 @@ test('keeps drawer dismissal reachable after scrolling and preserves the chat dr
   await close.tap();
   await expect(drawer).toHaveCount(0);
   await expect(page.getByTestId('prompt-input')).toHaveValue('Retain my phone draft');
+});
+
+
+test('recovers a draft after reload without adding session history', async ({ page }) => {
+  await openSession(page);
+  const historyLength = await page.evaluate(() => history.length);
+  const sessionUrl = page.url();
+  await page.getByTestId('prompt-input').fill('Recover after an accidental leave');
+  await page.reload();
+  await expect(page.getByTestId('prompt-input')).toHaveValue('Recover after an accidental leave');
+  await page.getByRole('button', { name: 'Open sessions' }).tap();
+  await page.getByRole('button', { name: 'New session', exact: true }).tap();
+  await page.getByTestId('session-create').click();
+  await expect(page.getByTestId('prompt-input')).toBeEnabled();
+  await expect(page.getByTestId('prompt-input')).toHaveValue('');
+  expect(page.url()).not.toBe(sessionUrl);
+  expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  await page.getByRole('button', { name: 'Open sessions' }).tap();
+  await page.getByRole('region', { name: 'Opened sessions', exact: true }).locator('.lab-session-row:not([aria-current])').first().click();
+  await expect(page.getByTestId('prompt-input')).toHaveValue('Recover after an accidental leave');
+});
+
+test('serves a standalone manifest and touch icons', async ({ page, request }) => {
+  await page.goto('/');
+  const manifest = await request.get('/app/manifest.webmanifest');
+  expect(manifest.ok()).toBe(true);
+  const value = await manifest.json();
+  expect(value.display).toBe('standalone');
+  expect(value.start_url).toBe('/');
+  for (const icon of value.icons) {
+    const response = await request.get(icon.src);
+    expect(response.headers()['content-type']).toContain('image/png');
+    expect(response.ok()).toBe(true);
+  }
+});
+
+
+test('restores the reading anchor after reload instead of jumping to latest', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 640 });
+  await openSession(page);
+  const timeline = page.getByTestId('timeline');
+  await timeline.focus();
+  await timeline.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
+    element.scrollTop = 120;
+    element.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
+  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBe(120);
+  const before = await timeline.evaluate((element) => {
+    const top = element.getBoundingClientRect().top;
+    const entry = [...element.querySelectorAll<HTMLElement>('[data-entry-key]')].find((item) => item.getBoundingClientRect().bottom > top)!;
+    return { key: entry.dataset.entryKey, offset: entry.getBoundingClientRect().top - top };
+  });
+  await page.reload();
+  await expect(page.getByTestId('prompt-input')).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
+  await expect.poll(() => timeline.evaluate((element, key) => {
+    const entry = [...element.querySelectorAll<HTMLElement>('[data-entry-key]')].find((item) => item.dataset.entryKey === key);
+    return entry ? entry.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
+  }, before.key)).toBeCloseTo(before.offset, 0);
 });

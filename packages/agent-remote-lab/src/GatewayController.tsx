@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { clearConversationRecovery } from './conversation-recovery.js';
+
 type Access = { basePath: string; expiresAt: number; refreshAfterMs?: number };
 function parseAccess(value: unknown): Access {
   if (!value || typeof value !== 'object' || !('basePath' in value) || !('expiresAt' in value) ||
@@ -11,7 +13,7 @@ function parseAccess(value: unknown): Access {
   return value as Access;
 }
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
-export function GatewayController({ children }: { children(baseUrl: string): ReactNode }) {
+export function GatewayController({ children }: { children(baseUrl: string, accountAction: ReactNode): ReactNode }) {
   const [access, setAccess] = useState<Access | null>();
   const [failed, setFailed] = useState(false);
   const [suspended, setSuspended] = useState(false);
@@ -77,6 +79,7 @@ export function GatewayController({ children }: { children(baseUrl: string): Rea
   }, []);
   async function logout(): Promise<void> {
     stop.current();
+    clearConversationRecovery();
     try {
       const response = await fetch('/auth/logout', { ...jsonPost, credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok && response.status !== 401) setFailed(true);
@@ -84,7 +87,7 @@ export function GatewayController({ children }: { children(baseUrl: string): Rea
   }
   if (access) return <>
     <button type="button" className="gateway-sign-out" onClick={() => void logout()}>Sign out</button>
-    <div className="gateway-private" key={access.basePath} hidden={suspended} {...(suspended ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href)}</div>
+    <div className="gateway-private" key={access.basePath} hidden={suspended} {...(suspended ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, <button type="button" onClick={() => void logout()}>Sign out</button>)}</div>
     {suspended ? <main className="gateway-access"><h1>Agent Remote</h1><p role="status">Restoring access…</p></main> : null}
   </>;
   return <main className="gateway-access">

@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { expect, test, type Page } from '@playwright/test';
 
 const prompt = 'Ask me to confirm the shared Agent Remote path, then continue after my answer.';
@@ -10,6 +11,7 @@ test('discovers native commands and continues model and permission menus through
   const errors = collectBrowserErrors(page);
   await page.goto('/');
   await selectCodexHost(page);
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
   const input = page.getByTestId('prompt-input');
@@ -51,6 +53,7 @@ test('selects native models and permissions from the toolbar and restores confir
   const errors = collectBrowserErrors(page);
   await page.goto('/');
   await selectCodexHost(page);
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
   const input = page.getByTestId('prompt-input');
@@ -98,6 +101,7 @@ test('sends immediate input to a working native turn, restores elapsed time and 
   const errors = collectBrowserErrors(page);
   await page.goto('/');
   await selectCodexHost(page);
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
   await sendMessage(page, 'Hold this native turn for an interrupt.');
@@ -135,6 +139,7 @@ for (const planning of [false, true]) test(`answers a Codex question in ${planni
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
   await selectCodexHost(page);
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
 
@@ -185,6 +190,7 @@ for (const planning of [false, true]) test(`answers a Codex question in ${planni
 test('cancels a Default question after reconnect and accepts a follow-up message', async ({ page }) => {
   await page.goto('/');
   await selectCodexHost(page);
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
   await sendMessage(page, prompt);

@@ -13,7 +13,8 @@ export interface HostPairingService {
   revoke?(hostId: string): Promise<void>;
 }
 
-export function HostPairing({ service, selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession }: {
+export function HostPairing({ service, selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession, managementVisible = true }: {
+  managementVisible?: boolean;
   service: HostPairingService; selectedHostId: string; selectionLocked?: boolean; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
 }) {
   const [revokeTarget, setRevokeTarget] = useState<RemoteHost>();
@@ -62,6 +63,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     </select>
     {selectedHost?.access ? <p className="lab-control-note">{selectedHost.access === 'shared' ? 'Shared with you' : 'You own this Host'}</p> : null}
     {quota ? <p className="lab-control-note" role="status">Session creation allowance used: {quota.used} / {quota.limit}. This total does not reset when sessions finish.{quotaExhausted ? ' Creation limit reached. Existing sessions remain available.' : ''}</p> : null}
+    <div hidden={!managementVisible}>
     {selectedHost?.managed && selectedHost.access !== 'shared' && service.revoke ? <button type="button" onClick={() => setRevokeTarget(selectedHost)}>Revoke Host</button> : null}
     {revokeTarget ? <div role="group" aria-label="Confirm Host revocation">
       <p>Revoke {revokeTarget.name}? Its connection and sessions will close. Pair it again to restore access.</p>
@@ -70,9 +72,10 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     </div> : null}
     {onNewSession ? <button type="button" disabled={quotaExhausted} onClick={onNewSession}>New session</button> : null}
     <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>
+    </div>
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
-    {showPairing ? <div className="lab-pairing-details">
+    {managementVisible && showPairing ? <div className="lab-pairing-details">
       <p className="lab-control-note">Generate a pairing key, then run <code>agent-remote-controller start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>agent-remote-controller pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>
       {invitation?.command ? <p className="lab-control-note">Copy and run the setup command below. After pairing, the managed Host saves its connection privately for restart and stays paired until revoked.</p> : null}
       {invitation ? <>

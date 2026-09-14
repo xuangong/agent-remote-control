@@ -17,7 +17,7 @@ export default {
           'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
         } });
       }
-      if (url.pathname.startsWith('/assets/')) {
+      if (url.pathname.startsWith('/assets/') || ['/favicon.svg', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'].includes(url.pathname)) {
         const asset = await env.ASSETS.fetch(request);
         // Static asset fallback must never expose the ordinary unauthenticated workbench index.
         if (asset.headers.get('content-type')?.includes('text/html')) return new Response(null, { status: 404 });

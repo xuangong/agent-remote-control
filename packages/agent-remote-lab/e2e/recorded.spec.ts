@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -5,7 +6,9 @@ import { readFile } from 'node:fs/promises';
 test('sends a multiline conversation through the Relay and returns focus to an empty composer', async ({ page }) => {
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   const input = page.getByTestId('prompt-input');
   const timeline = page.getByTestId('timeline');
@@ -41,11 +44,14 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
   await expect(page.locator('.lab-app-bar')).toBeHidden();
+  await showNewSession(page);
   const context = contextRail(page, testInfo);
   await expect(context.getByText('Session intake')).toBeVisible();
   await expect(context.getByTestId('provider-select')).toBeVisible();
   await expect(context.getByRole('button', { name: 'Open session' })).toBeVisible();
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   if (isCompact(testInfo)) await expect(context).toHaveCount(0);
   await toggleViewPanel(page, 'Header');
@@ -150,6 +156,7 @@ function contextRail(page: Page, testInfo: TestInfo): Locator {
 async function openContextForFixture(page: Page, testInfo: TestInfo): Promise<Locator> {
   if (isCompact(testInfo)) {
     await toggleViewPanel(page, 'Sidebar');
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
   }
   return contextRail(page, testInfo);
 }

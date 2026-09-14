@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
@@ -21,6 +22,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   const originalAgent = new URL(page.url()).searchParams.get('agent');
   await page.getByTestId('prompt-input').fill('A draft to retain while switching sessions.');
   await showContext();
+  await showNewSession(page);
   await context().getByTestId('session-create').click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
   await expect.poll(() => new URL(page.url()).searchParams.get('agent')).not.toBe(originalAgent);
@@ -60,6 +62,7 @@ test('creates a temporary pairing key through the workbench', async ({ page }, t
   await page.goto('/');
   const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
   await expect(context.getByRole('region', { name: 'Remote Hosts' })).toBeVisible();
+  if (testInfo.project.name === 'chromium-mobile') await context.getByRole('button', { name: 'Settings', exact: true }).click();
   await context.getByRole('button', { name: 'Pair Agent Host' }).click();
   const responsePromise = page.waitForResponse((response) => response.url().endsWith('/v1/remote/pairings') && response.request().method() === 'POST');
   await context.getByRole('button', { name: 'Generate pairing key' }).click();
@@ -68,5 +71,5 @@ test('creates a temporary pairing key through the workbench', async ({ page }, t
   const invitation = await response.json();
   await expect(context.getByLabel('Agent Host configuration')).toHaveValue(new RegExp(invitation.key));
   await expect(context.getByRole('button', { name: 'Copy configuration' })).toBeEnabled();
-  await expect(context.getByText(/Key expires/)).toBeVisible();
+  await expect(context.getByText(/Pair before/)).toBeVisible();
 });

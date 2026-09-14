@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
@@ -111,6 +112,7 @@ test('keeps one View entry fixed while toggling panels and preserving the chat',
     await options.getByRole('checkbox', { name: 'Header', exact: true }).check();
   }
   await assertFixed();
+  if (await options.isVisible()) await options.press('Escape');
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
 });
@@ -122,12 +124,14 @@ test('keeps Context and Replica Inspector keyboard-contained on compact layouts'
 
   await page.getByRole('button', { name: 'Close Context' }).press('Escape');
   const contextTrigger = page.getByRole('button', { name: 'View options', exact: true });
-  await expect(contextTrigger).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Open sessions', exact: true })).toBeFocused();
   await toggleViewPanel(page, 'Sidebar');
   await assertKeyboardContained(page, 'Context', contextTrigger);
 
   await toggleViewPanel(page, 'Sidebar');
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
 
@@ -142,6 +146,7 @@ test('keeps command feedback visible in compact layout', async ({ page }, testIn
   const browserErrors = collectBrowserErrors(page);
   await openRecordedSession(page);
   await toggleViewPanel(page, 'Sidebar');
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByTestId('playback-advance').click();
 
   const feedback = page.getByText('Recorded observation advanced.');
@@ -155,6 +160,7 @@ test('keeps command feedback visible in compact layout', async ({ page }, testIn
 test('meets AA contrast for operational text and primary actions', async ({ page }) => {
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
   const primaryAction = page.getByTestId('session-create');
   await expect(primaryAction).toBeEnabled();
@@ -182,6 +188,7 @@ test('meets AA contrast for operational text and primary actions', async ({ page
 test('renders a visible focus indicator with three-to-one contrast', async ({ page }) => {
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
+  await showNewSession(page);
   const provider = page.getByTestId('provider-select');
   await provider.focus();
 
@@ -224,6 +231,7 @@ test('renders default control boundaries with three-to-one contrast', async ({ p
   test.skip(testInfo.project.name !== 'chromium-desktop');
   const browserErrors = collectBrowserErrors(page);
   await openRecordedSession(page);
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByTestId('playback-advance').click();
 
   const controls = {
@@ -243,9 +251,12 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
   await assertMinimumSize(page.getByRole('button', { name: 'View options', exact: true, includeHidden: true }), 44);
+  await showNewSession(page);
   await assertMinimumSize(page.locator('.lab-provider-controls button'), 44);
 
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
   await page.getByRole('button', { name: 'Load resource' }).click();
@@ -255,6 +266,7 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
   await expect(resourceLinks.first()).toBeVisible();
   await assertMinimumSize(resourceLinks, 44);
   await toggleViewPanel(page, 'Sidebar');
+  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByTestId('playback-advance').click();
   await page.getByRole('button', { name: 'Close Context' }).click();
 
@@ -266,7 +278,9 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
 
 async function openRecordedSession(page: Page): Promise<void> {
   await page.goto('/');
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'Recorded semantic Provider' });
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
   await expect(page.locator('.lab-app-bar')).toBeHidden();

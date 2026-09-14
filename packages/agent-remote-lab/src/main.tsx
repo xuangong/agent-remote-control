@@ -20,5 +20,5 @@ const fixtureAction = fixtureEndpoint ? async (
 
 const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
 createRoot(root).render(<StrictMode>{gatewayMode
-  ? <GatewayController>{baseUrl => <App baseUrl={baseUrl} />}</GatewayController>
+  ? <GatewayController>{(baseUrl, accountAction) => <App baseUrl={baseUrl} accountAction={accountAction} />}</GatewayController>
   : <App fixtureAction={fixtureAction} />}</StrictMode>);

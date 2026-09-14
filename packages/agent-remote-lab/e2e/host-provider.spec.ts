@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test } from '@playwright/test';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@borgee/agent-remote-relay';
@@ -48,6 +49,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     const { hostId } = await uplink.ready;
     const { hostId: alternateHostId } = await alternateUplink.ready;
     await page.goto('/');
+    await showNewSession(page);
     const compact = testInfo.project.name === 'chromium-mobile';
     const context = () => compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
     const provider = () => context().getByTestId('provider-select');
@@ -61,6 +63,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     await expect(provider()).toHaveValue(JSON.stringify([hostId, selected.id]));
     await context().getByLabel('Workspace', { exact: true }).selectOption('native-project');
     const creation = page.waitForResponse((response) => response.url().endsWith(`/hosts/${hostId}/create`));
+    await showNewSession(page);
     await context().getByTestId('session-create').click();
     const response = await creation;
     expect(response.ok()).toBe(true);
@@ -84,6 +87,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     if (compact) await toggleViewPanel(page, 'Sidebar');
     await expect(context().getByRole('region', { name: 'Lab scenario controls' })).toHaveCount(0);
     await expect(context().getByTestId('session-resume')).toBeDisabled();
+    await showNewSession(page);
     await context().getByRole('button', { name: 'Retry Hosts', exact: true }).click();
     await expect(provider().getByRole('option', { name: `${selected.name} · Browser DSH ${testInfo.project.name} · Offline`, exact: true })).toHaveCount(1);
     await expect(context().getByTestId('session-create')).toBeDisabled();

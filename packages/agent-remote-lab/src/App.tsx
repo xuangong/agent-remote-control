@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
 } from 'react';
 import type {
   AgentInteractionResponse,
@@ -24,6 +25,7 @@ import {
   type RemoteAgentTransport,
   type RemoteSessionStatus,
 } from '@borgee/agent-remote-web';
+import { ReadingPositions, RecoveryScope, readDrafts, saveDrafts } from './conversation-recovery.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
@@ -71,6 +73,7 @@ export interface AppActions {
 
 export interface AppProps {
   baseUrl?: string;
+  accountAction?: ReactNode;
   transport?: LabTransport;
   directory?: SessionDirectoryClient;
   hostService?: HostPairingService;
@@ -91,8 +94,10 @@ export function App({
   initialProviderName,
   actions,
   fixtureAction,
+  accountAction,
 }: AppProps) {
   const shellRef = useVisualViewport();
+  const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
   const [requestedHostId] = useState(() => new URL(window.location.href).searchParams.get('host') || undefined);
@@ -122,7 +127,7 @@ export function App({
   const [creationLocked, setCreationLocked] = useState(false);
   const replicas = useRef(new Map<string, AgentReplica>());
   const [uncertainMutation, setUncertainMutation] = useState(false);
-  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
+  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>(() => readDrafts(baseUrl));
   const clientRef = useRef<RemoteSessionClient>();
   const replicaRef = useRef<AgentReplica>();
   const unsubscribeReplicaRef = useRef<() => void>();
@@ -131,6 +136,9 @@ export function App({
   const providerRequestGenerationRef = useRef(0);
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const traceTabRef = useRef<HTMLButtonElement>(null);
+  const sessionsTriggerRef = useRef<HTMLButtonElement>(null);
+  const [contextFromSessions, setContextFromSessions] = useState(true);
+  const [sessionPanel, setSessionPanel] = useState<'list' | 'new' | 'settings'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
@@ -155,6 +163,15 @@ export function App({
   const [headerHidden, setHeaderHidden] = useState(true);
   const [desktopContextVisible, setDesktopContextVisible] = useState(true);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
+
+  useEffect(() => { saveDrafts(baseUrl, messageDrafts); }, [baseUrl, messageDrafts]);
+  useEffect(() => {
+    if (!compactLayout || !contextOpen) return;
+    const panel = shellRef.current?.querySelector<HTMLElement>('#lab-context');
+    if (!panel) return;
+    panel.scrollTop = 0;
+    panel.querySelector<HTMLElement>(sessionPanel === 'new' ? '#provider-select' : '.lab-rail-close')?.focus({ preventScroll: true });
+  }, [compactLayout, contextOpen, sessionPanel]);
 
   useEffect(() => {
     if (restoredHostSelection.current || remoteHosts.length === 0) return;
@@ -476,7 +493,9 @@ export function App({
     (next === 'workbench' ? workbenchTabRef : traceTabRef).current?.focus();
   }
 
-  function openContext(): void {
+  function openContext(fromSessions = false): void {
+    setContextFromSessions(fromSessions);
+    setSessionPanel('list');
     setDesktopContextVisible(true);
     setInspectorOpen(false);
     setContextOpen(true);
@@ -673,7 +692,13 @@ export function App({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
-  return <main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <RecoveryScope.Provider value={readingPositions}><main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+    {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
+      <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
+      {stackPath.length > 1 ? <select aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
+        {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
+      </select> : <span className="lab-mobile-session-title">{activeOpened?.title || 'Agent Remote'}</span>}
+    </nav> : null}
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -735,15 +760,28 @@ export function App({
       compact={compactLayout}
       collapsible
       open={contextVisible}
-      triggerRef={viewTriggerRef}
+      triggerRef={compactLayout && contextFromSessions ? sessionsTriggerRef : viewTriggerRef}
       onClose={() => setContextOpen(false)}
     >
       <div className="lab-rail-heading">
         <p className="lab-eyebrow">Context</p>
         <span title={baseUrl}>Connected runtime · {new URL(baseUrl, window.location.origin).host}</span>
       </div>
-      {directory ? <HostPairing service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={() => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
-      {directory ? <SessionDirectory directory={directory} providerId={providerId} activeAgentId={activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
+      {compactLayout ? <div className="lab-session-panel-actions">
+        {sessionPanel !== 'list' ? <button type="button" onClick={() => setSessionPanel('list')}>All sessions</button> : <strong>Your sessions</strong>}
+        <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel((value) => value === 'settings' ? 'list' : 'settings')}>Settings</button>
+      </div> : null}
+      {compactLayout && sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
+        {accountAction}
+        <p>For a full-screen experience, add Agent Remote to your Home Screen from your browser menu.</p>
+        <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
+      </section> : null}
+      {directory ? <HostPairing managementVisible={!compactLayout || sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={compactLayout ? undefined : () => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      <div className="lab-directory-panel" hidden={compactLayout && sessionPanel !== 'list'}>
+      {compactLayout && providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
+      {directory ? <SessionDirectory searchable={compactLayout} directory={directory} providerId={providerId} activeAgentId={activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
+      </div>
+      <div hidden={compactLayout && sessionPanel !== 'new'}>
       <ProviderSessionControls
         providers={providerChoices}
         selectedProviderId={selectedProviderChoice?.selectionId ?? ''}
@@ -760,12 +798,16 @@ export function App({
         onCreateSession={() => void createAgent()}
         onResumeSession={activeRemoteSession || activeOpened?.parentAgentId || activeOpened?.parentNativeSessionId ? undefined : () => void resumeAgent()}
       >{directory ? <SessionConfiguration directory={directory} providerId={providerId} value={sessionOptions} disabled={transitioning || creationLocked || !!creationUnavailableReason} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
+      </div>
+      <div hidden={compactLayout && sessionPanel !== 'settings'}>
       {clientActions.advanceFixture || clientActions.rehydrateFixture || clientActions.stopReader ? <RecordedPlaybackControls
         onAdvance={clientActions.advanceFixture}
         onRehydrate={clientActions.rehydrateFixture}
         onStopReader={clientActions.stopReader}
       /> : null}
+      </div>
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
+      {compactLayout && sessionPanel === 'list' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}>New session</button></footer> : null}
     </SupportingRail>
     <section className="lab-main-stage" {...backgroundInert}>
       <section
@@ -843,7 +885,7 @@ export function App({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main>;
+  </main></RecoveryScope.Provider>;
 }
 
 function createAgentId(): string {

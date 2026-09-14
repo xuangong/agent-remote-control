@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -101,7 +102,9 @@ async function openDshAgent(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Agent conversations' })).toBeVisible();
   await expect(page.getByTestId('provider-select').locator('option')).toHaveText(['DeepSeek Harness', 'Codex (fixture)']);
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption({ label: 'DeepSeek Harness' });
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('connection-status')).toHaveText('ready', { timeout: 30_000 });
   await expect(page.getByTestId('prompt-input')).toBeEnabled();

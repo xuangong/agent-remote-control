@@ -9,6 +9,11 @@ it('serves hosted assets and health, authenticates browser login, and transports
   expect(index.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   expect((await f.request('/index.html')).headers.get('content-security-policy')).toContain("connect-src 'self'");
   expect((await f.request('/assets/main.js')).status).toBe(200);
+  for (const path of ['/favicon.svg', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png']) {
+    const asset = await f.request(path);
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toBe('asset');
+  }
   expect((await f.request('/ws/remote-host', { headers: { upgrade: 'websocket' } })).status).toBe(401);
   const alice = await f.login('alice');
   expect((await f.json('/auth/session', '', { ticket: alice.ticket })).status).toBe(401);

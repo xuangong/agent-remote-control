@@ -1,3 +1,4 @@
+import { showNewSession } from './session-navigation';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -17,7 +18,9 @@ test('reviews typed interactions and recovers redacted history through the real 
   await mkdir(screenshotDirectory, { recursive: true });
   await page.goto('/');
   await page.waitForLoadState('networkidle');
+  await showNewSession(page);
   await page.getByTestId('provider-select').selectOption('interaction-fixture');
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   const form = page.locator('.agent-form');
   await expect(form.getByRole('heading', { name: 'Connect a project' })).toBeVisible();

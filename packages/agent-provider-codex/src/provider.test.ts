@@ -7,6 +7,43 @@ import { CodexAppServerProvider } from './provider.js';
 import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 
 describe('CodexAppServerProvider contract', () => {
+  it.each(['create', 'resume'] as const)('enables native Default questions on %s without overriding permissions or mode', async (operation) => {
+    const appServer = createScriptedAppServer({
+      'collaborationMode/list': () => ({ data: [{ mode: 'plan' }, { mode: 'default' }] }),
+      'thread/start': () => ({ thread: { id: 'thread-question' }, model: 'gpt-5.4' }),
+      'thread/resume': () => ({ thread: { id: 'thread-question' }, model: 'gpt-5.4' }),
+      'thread/read': () => ({ thread: { id: 'thread-question', turns: [] } }),
+      'turn/start': () => ({ turn: { id: 'turn-question' } }),
+    });
+    const provider = new CodexAppServerProvider({ spawn: () => appServer.child });
+    const session = operation === 'create'
+      ? await provider.createSession({ sessionId: 'local', planning: false })
+      : await provider.resumeSession({ providerId: 'codex', sessionId: 'thread-question', opaque: '{}' });
+    try {
+      const opening = appServer.requests.find(request => request.method === (operation === 'create' ? 'thread/start' : 'thread/resume'))!;
+      expect(opening.params).toEqual({
+        ...(operation === 'create' ? { historyMode: 'paginated' } : { threadId: 'thread-question' }),
+        config: { 'features.default_mode_request_user_input': true },
+      });
+      await session.sendMessage('Ask a question');
+      expect(appServer.requests.find(request => request.method === 'turn/start')?.params).toMatchObject({
+        collaborationMode: { mode: 'default' },
+      });
+    } finally { await session.dispose(); }
+  });
+
+  it.each(['thread/start', 'thread/resume'])('surfaces native question configuration rejection from %s without retrying silently', async method => {
+    const appServer = createScriptedAppServer({
+      [method]: () => { throw new Error('Default question feature is unavailable'); },
+    });
+    const provider = new CodexAppServerProvider({ spawn: () => appServer.child });
+    const opening = method === 'thread/start' ? provider.createSession({ sessionId: 'local' })
+      : provider.resumeSession({ providerId: 'codex', sessionId: 'thread', opaque: '{}' });
+    await expect(opening).rejects.toThrow('Default question feature is unavailable');
+    expect(appServer.requests.filter(request => request.method === method)).toHaveLength(1);
+    expect(appServer.child.killed).toBe(true);
+  });
+
   it('creates a usable session and exposes a resumable runtime handle', async () => {
     const appServer = createScriptedAppServer({
       'thread/start': () => ({ thread: { id: 'thread-1' }, model: 'gpt-5.4', cwd: '/workspace' }),

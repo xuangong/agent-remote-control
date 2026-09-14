@@ -44,3 +44,28 @@ The command directory refreshes enabled skills through `skills/list` with `force
 Custom prompts are top-level Markdown files in `CODEX_HOME/prompts`, using the Provider environment override before the process environment or `~/.codex` default. Discovery ignores symlinks and files above 256 KiB, validates names, and limits directory scans to 1,024 entries. Prompt frontmatter supplies `description` and `argument-hint`. Expansion preserves raw `$ARGUMENTS`; named, positional, escaped-dollar, and braced placeholders fail explicitly. Arguments for a prompt without `$ARGUMENTS` are rejected. The input hint names this grammar limit. This directory is adapter-owned native discovery, not terminal menu scraping; additional TUI commands and goal controls are not exposed.
 
 See the [Provider support baseline](../../docs/current/agent-remote/provider-support.md) for per-endpoint support, conditional child controls and explicit degradation boundaries.
+
+## Questions in ordinary sessions
+
+The adapter enables `features.default_mode_request_user_input` through the native
+`config` argument on `thread/start` and `thread/resume`. Ordinary Default sessions
+can ask structured questions without entering Plan. Claude and Copilot use their
+native question callbacks for the same ordinary-session experience; supported
+question shapes remain provider-specific.
+
+This is a session runtime policy: it also applies when the user opens a discovered
+CLI thread or resumes an old handle after a Host restart. The directory has no
+reliable historical ownership marker, so it does not guess ownership from `cwd`,
+model, or the presence of a persistence handle. The override takes precedence over
+an explicit `false` in the selected profile for this runtime. No profile file is
+written. Listing threads, reading history, and opening an existing same-runtime
+child do not issue a separate feature override. Approval policy, sandbox and
+collaboration mode remain independent.
+
+Native Default questions have `isBlocking: false`; they still need an explicit
+answer or cancellation. Request identity, response validation, cancellation and
+late-answer rejection use the existing Question lifecycle. A feature being
+available does not force the model to ask. The verified native target is Codex
+0.148.0; a native configuration error is surfaced rather than retried without the
+feature. This adapter does not add a feature-negotiation API for arbitrary Codex
+versions or recover pending callbacks across process restarts.

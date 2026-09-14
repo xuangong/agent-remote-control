@@ -30,7 +30,7 @@ test('discovers native commands and continues model and permission menus through
   await page.getByRole('button', { name: 'Submit response' }).click();
   await expect(page.getByRole('heading', { name: 'Agent questions' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Status', exact: true }).click();
-  await expect(page.getByRole('switch', { name: 'Planning mode' })).toBeChecked();
+  await expect(page.getByRole('switch', { name: 'Planning mode' })).not.toBeChecked();
   await page.getByRole('button', { name: 'Close session controls' }).click();
   await input.fill('/permissions');
   await expect(page.getByRole('option').filter({ hasText: /^\/permissions/ })).toBeVisible();
@@ -67,7 +67,7 @@ test('selects native models and permissions from the toolbar and restores confir
   await expect(model).toHaveValue(selectedModel, { timeout: 20_000 });
   await expect(model).toBeEnabled();
   await page.getByRole('button', { name: 'Status', exact: true }).click();
-  await expect(page.getByRole('switch', { name: 'Planning mode' })).toBeChecked();
+  await expect(page.getByRole('switch', { name: 'Planning mode' })).not.toBeChecked();
   await page.getByRole('button', { name: 'Close session controls' }).click();
   await page.getByTestId('session-permissions-button').click();
   const approval = page.getByTestId('session-setting-approval');
@@ -131,18 +131,27 @@ test('sends immediate input to a working native turn, restores elapsed time and 
   expect(errors.page).toEqual([]);
 });
 
-test('answers a Codex question and renders consecutive turns through the visible UI', async ({ page }, testInfo) => {
+for (const planning of [false, true]) test(`answers a Codex question in ${planning ? 'Plan' : 'Default'} and renders consecutive turns`, async ({ page }, testInfo) => {
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Agent conversations' })).toBeVisible();
   await selectCodexHost(page);
   await page.getByTestId('session-create').click();
   await expectReady(page);
+
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  const planningSwitch = page.getByRole('switch', { name: 'Planning mode' });
+  await expect(planningSwitch).not.toBeChecked();
+  if (planning) {
+    await planningSwitch.click();
+    await expect(planningSwitch).toBeChecked();
+  }
+  await page.getByRole('button', { name: 'Close session controls' }).click();
 
   await page.getByTestId('prompt-input').fill(prompt);
   await page.getByTestId('prompt-submit').click();
   await expect(page.getByRole('article', { name: 'User message' }).filter({ hasText: prompt })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Agent questions' })).toBeVisible({ timeout: 60_000 });
+  await page.screenshot({ path: testInfo.outputPath('codex-question.png'), fullPage: true });
   await page.getByLabel('Yes (Recommended)').check();
   await page.getByRole('button', { name: 'Submit response' }).click();
   await expectAssistantTranscript(page, completion);
@@ -167,7 +176,31 @@ test('answers a Codex question and renders consecutive turns through the visible
   await expectIdle(page);
   expect(browserErrors.console).toEqual([]);
   expect(browserErrors.page).toEqual([]);
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  await expect(planningSwitch).toBeChecked({ checked: planning });
+  await page.getByRole('button', { name: 'Close session controls' }).click();
   await page.screenshot({ path: testInfo.outputPath('codex-visible.png'), fullPage: true });
+});
+
+test('cancels a Default question after reconnect and accepts a follow-up message', async ({ page }) => {
+  await page.goto('/');
+  await selectCodexHost(page);
+  await page.getByTestId('session-create').click();
+  await expectReady(page);
+  await sendMessage(page, prompt);
+  await expect(page.getByRole('heading', { name: 'Agent questions' })).toBeVisible();
+  await page.reload();
+  await expectReady(page);
+  await expect(page.getByRole('heading', { name: 'Agent questions' })).toBeVisible();
+  await page.getByRole('button', { name: 'Interrupt', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Agent questions' })).toHaveCount(0);
+  await expectIdle(page);
+  await sendMessage(page, 'Hold this native turn for an interrupt.');
+  await expect(page.getByTestId('agent-activity-label')).toHaveText('Working');
+  await page.getByRole('button', { name: 'Interrupt', exact: true }).click();
+  await expectIdle(page);
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  await expect(page.getByRole('switch', { name: 'Planning mode' })).not.toBeChecked();
 });
 
 async function expectReady(page: Page): Promise<void> {

@@ -284,6 +284,7 @@ export class CodexAppServerSession implements AgentSession {
     await session.initialize();
     const response = await transport.request('thread/start', {
       historyMode: 'paginated',
+      config: { 'features.default_mode_request_user_input': true },
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),
@@ -309,6 +310,7 @@ export class CodexAppServerSession implements AgentSession {
     await session.initialize();
     const resumed = await transport.request('thread/resume', {
       threadId: handle.sessionId,
+      config: { 'features.default_mode_request_user_input': true },
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),

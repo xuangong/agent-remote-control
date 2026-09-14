@@ -52,7 +52,6 @@ export async function createCodexProviderFixture(options: CodexValidationServerO
     executable: options.executable,
     env: { CODEX_HOME: codexHome, OPENAI_API_KEY: 'borgee-local-fixture' },
     requestTimeoutMs: 15_000,
-    collaborationMode: 'plan',
   });
   const provider = withCodexDefaults(directoryProvider, workspace);
   return {

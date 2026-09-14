@@ -267,7 +267,7 @@ describe('CodexAppServerSession', () => {
     await session.dispose();
   });
 
-  it('closes a pending interaction when Codex reports that its server request was resolved', async () => {
+  it.each([true, false])('closes a pending interaction when Codex resolves a request with isBlocking=%s', async isBlocking => {
     const harness = createSessionHarness();
     const starting = CodexAppServerSession.create(harness.transport, { sessionId: 'local', cwd: '/workspace' });
     respond(harness, (await waitForRequest(harness, 'initialize')).id, {});
@@ -280,7 +280,7 @@ describe('CodexAppServerSession', () => {
 
     harness.child.stdout.write(`${JSON.stringify({
       id: 7, method: 'item/tool/requestUserInput', params: {
-        threadId: 'thread-1', turnId: 'turn-1', itemId: 'question-tool-1', isBlocking: true,
+        threadId: 'thread-1', turnId: 'turn-1', itemId: 'question-tool-1', isBlocking,
         questions: [{
           id: 'confirm', header: 'Confirm', question: 'Continue?', isOther: false, isSecret: false,
           options: [{ label: 'Yes', description: 'Continue' }],

@@ -2,29 +2,16 @@ import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { open, rename, unlink } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 
 /** One writer, atomic authenticated snapshots; no transcript or raw device keys. */
 export function openGatewayState<T>(file: string, secret: string, scope: string) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const lock = file + '.lock';
-  // Serialize stale-lock recovery too: a second contender must never unlink a new owner's lock.
-  const guard = lock + '.recovery';
-  const guardFd = openSync(guard, 'wx', 0o600);
-  const owner = JSON.stringify({ pid: process.pid, id: randomUUID() });
-  try {
-    if (existsSync(lock)) {
-      const previous: unknown = JSON.parse(readFileSync(lock, 'utf8'));
-      const pid = typeof previous === 'number' ? previous : previous && typeof previous === 'object' && 'pid' in previous ? previous.pid : undefined;
-      if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) throw new Error('Relay state lock is invalid.');
-      let alive = true;
-      try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') alive = false; }
-      if (alive) throw new Error('Another Relay process owns this state file.');
-      unlinkSync(lock);
-    }
-    const fd = openSync(lock, 'wx', 0o600);
-    try { writeFileSync(fd, owner); } finally { closeSync(fd); }
-  } finally { closeSync(guardFd); unlinkSync(guard); }
-  const unlock = () => { if (existsSync(lock) && readFileSync(lock, 'utf8') === owner) unlinkSync(lock); };
+  const lockFd = openSync(file + '.lock', 'a+', 0o600);
+  try { acquireStateLock(lockFd); } catch (error) { closeSync(lockFd); throw error; }
+  // Keep this inode and open file description for the entire writer lifetime.
+  // The kernel releases its advisory lock even after SIGKILL or PID namespace reuse.
+  const unlock = () => closeSync(lockFd);
   const sign = (payload: string) => createHmac('sha256', secret).update('arc-state-v1\0' + scope + '\0' + payload).digest('hex');
   try {
     let initial: T | undefined;
@@ -61,4 +48,16 @@ export function openGatewayState<T>(file: string, secret: string, scope: string)
       close() { if (closed) return; closed = true; unlock(); },
     };
   } catch (error) { unlock(); throw error; }
+}
+
+function acquireStateLock(fd: number) {
+  const conflict = 73;
+  const python = 'import fcntl, sys\ntry: fcntl.flock(3, fcntl.LOCK_EX | fcntl.LOCK_NB)\nexcept BlockingIOError: sys.exit(73)';
+  const executable = process.platform === 'linux' ? '/usr/bin/flock' : process.platform === 'darwin' ? '/usr/bin/python3' : undefined;
+  if (!executable) throw new Error('Durable Relay state locking requires Linux flock or macOS system Python.');
+  const args = process.platform === 'linux' ? ['-n', '-E', String(conflict), '3'] : ['-c', python];
+  // Child fd 3 duplicates our open file description; its flock survives child exit.
+  const result = spawnSync(executable, args, { stdio: ['ignore', 'pipe', 'pipe', fd], timeout: 3000, maxBuffer: 16384 });
+  if (result.status === conflict) throw new Error('Another Relay process owns this state file.');
+  if (result.error || result.status !== 0) throw new Error(`Relay advisory locking is unavailable; ${executable} must be installed and usable.`);
 }

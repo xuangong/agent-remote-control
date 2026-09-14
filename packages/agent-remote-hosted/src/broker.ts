@@ -46,6 +46,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   const keys = new Map<string, { expires: number; installationId?: string }>();
   const hosts = new Map<string, Host>();
   const bindings = new Map<string, Binding>();
+  const pendingBindingSlots = new Set<symbol>();
   const nativeBindings = new Map<string, Binding>();
   const attached = new Map<string, Promise<Binding>>();
   const creations = new Map<string, { fingerprint: string; result: Promise<Binding> }>();
@@ -278,57 +279,61 @@ export function createHostBroker(options: HostBrokerOptions) {
       throw new BrokerError(400, 'unsupported_configuration', 'This Host uses native model settings and a registered workspace.');
     }
     if (host.legacyDsh && action === 'child/attach') throw new BrokerError(400, 'unsupported_operation', 'This Host does not support native child attachment.');
-    if (bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.', true);
     const attaching = action !== 'create';
     const nativeSessionId = attaching ? required(body.nativeSessionId, 'nativeSessionId') : randomUUID();
     const parentNativeSessionId = action === 'child/attach' ? required(body.parentNativeSessionId, 'parentNativeSessionId') : undefined;
     if (parentNativeSessionId) creatorSubject ??= nativeBindings.get(JSON.stringify([host.id, providerId, parentNativeSessionId]))?.creatorSubject;
     const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.requestId, 'requestId') : nativeSessionId]);
-    const operation = async () => {
-      const proposedAgentId = randomUUID();
-      const generation = host.generation;
-      const request = host.legacyDsh
-        ? { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) }
-        : action === 'create'
-          ? { providerId, requestId: required(body.requestId, 'requestId'),
-              ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) }
-          : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
-      const result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
-      if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
-      if (result.status >= 300) {
-        let detail: Record<string, unknown> = {};
-        try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
-        throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.', result.status < 500 && ['invalid_request', 'invalid_provider', 'unsupported_configuration'].includes(String(detail.code)));
-      }
-      let returned: Record<string, unknown> = {};
-      try { returned = JSON.parse(result.body); } catch {
-        if (!host.legacyDsh) throw new BrokerError(502, 'invalid_host_response', 'The Remote Host returned invalid session identity.');
-      }
-      if (host.legacyDsh && returned.nativeSessionId !== undefined && returned.nativeSessionId !== nativeSessionId) {
-        throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
-      }
-      const actualNativeSessionId = host.legacyDsh ? nativeSessionId : requiredHostIdentity(returned.nativeSessionId, 'nativeSessionId');
-      const agentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
-      if (attaching && actualNativeSessionId !== nativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
-      const nativeKey = JSON.stringify([host.id, providerId, actualNativeSessionId]);
-      return commit(draft => {
-        if (hosts.get(host.id) !== host || host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
-        const byAgent = bindings.get(agentId); const byNative = nativeBindings.get(nativeKey);
-        if ((byAgent && !sameBinding(byAgent, host.id, providerId, actualNativeSessionId)) || (byNative && byNative.agentId !== agentId)) {
-          throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity conflicts with an existing binding.');
+    const operation = () => {
+      if (bindings.size + pendingBindingSlots.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.', true);
+      const slot = Symbol(); pendingBindingSlots.add(slot);
+      return (async () => {
+        const proposedAgentId = randomUUID();
+        const generation = host.generation;
+        const request = host.legacyDsh
+          ? { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) }
+          : action === 'create'
+            ? { providerId, requestId: required(body.requestId, 'requestId'),
+                ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) }
+            : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+        const result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
+        if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
+        if (result.status >= 300) {
+          let detail: Record<string, unknown> = {};
+          try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
+          throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.', result.status < 500 && ['invalid_request', 'invalid_provider', 'unsupported_configuration'].includes(String(detail.code)));
         }
-        const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
-          generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
-        if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
-        if (creatorSubject && binding.creatorSubject !== creatorSubject) throw new BrokerError(409, 'session_binding_conflict', 'The native session belongs to another user.');
-        const { generation: _generation, recovery: _recovery, ...saved } = binding;
-        draft.bindings = draft.bindings.filter(value => value.agentId !== agentId); draft.bindings.push(saved);
-        return { value: binding, publish() {
-          binding.generation = host.generation;
-          bindings.set(agentId, binding); nativeBindings.set(nativeKey, binding);
-          attached.set(nativeKey, Promise.resolve(binding));
-        } };
-      });
+        let returned: Record<string, unknown> = {};
+        try { returned = JSON.parse(result.body); } catch {
+          if (!host.legacyDsh) throw new BrokerError(502, 'invalid_host_response', 'The Remote Host returned invalid session identity.');
+        }
+        if (host.legacyDsh && returned.nativeSessionId !== undefined && returned.nativeSessionId !== nativeSessionId) {
+          throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
+        }
+        const actualNativeSessionId = host.legacyDsh ? nativeSessionId : requiredHostIdentity(returned.nativeSessionId, 'nativeSessionId');
+        const agentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
+        if (attaching && actualNativeSessionId !== nativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
+        const nativeKey = JSON.stringify([host.id, providerId, actualNativeSessionId]);
+        return commit(draft => {
+          if (hosts.get(host.id) !== host || host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
+          const byAgent = bindings.get(agentId); const byNative = nativeBindings.get(nativeKey);
+          if ((byAgent && !sameBinding(byAgent, host.id, providerId, actualNativeSessionId)) || (byNative && byNative.agentId !== agentId)) {
+            throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity conflicts with an existing binding.');
+          }
+          if (!byAgent && !byNative && bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.');
+          const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
+            generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+          if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
+          if (creatorSubject && binding.creatorSubject !== creatorSubject) throw new BrokerError(409, 'session_binding_conflict', 'The native session belongs to another user.');
+          const { generation: _generation, recovery: _recovery, ...saved } = binding;
+          draft.bindings = draft.bindings.filter(value => value.agentId !== agentId); draft.bindings.push(saved);
+          return { value: binding, publish() {
+            binding.generation = host.generation;
+            bindings.set(agentId, binding); nativeBindings.set(nativeKey, binding); pendingBindingSlots.delete(slot);
+            attached.set(nativeKey, Promise.resolve(binding));
+          } };
+        });
+      })().finally(() => pendingBindingSlots.delete(slot));
     };
     if (attaching) {
       let result = attached.get(key);

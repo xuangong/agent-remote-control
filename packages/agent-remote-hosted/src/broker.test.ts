@@ -358,3 +358,54 @@ it('binds a temporary credential to only one installation during concurrent regi
   expect(b.native.closeCode).toBe(1008);
   expect(broker.snapshot().hosts.map(host => host.installationId)).toEqual(['installation-a']);
 }, 10000);
+
+it.each(['create', 'attach'])('reserves the last binding slot before concurrent native %s and persists a restorable snapshot', async action => {
+  const initialState: RemoteHostBrokerState = { ...restoredState, bindings: Array.from({ length: 4095 }, (_, index) => ({
+    hostId: 'host', providerId: 'codex', agentId: `saved-agent-${index}`, nativeSessionId: `saved-native-${index}`,
+  })) };
+  let saved: RemoteHostBrokerState | undefined;
+  const { broker, native } = await restoredFixture({ initialState, ownerSubject: 'alice', onStateChange(state) { saved = structuredClone(state); } });
+  const calls: Array<{ requestId: string }> = []; const entered = deferred<void>();
+  native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'rpc_request') { calls.push(message); entered.resolve(); } });
+  const request = (id: string) => broker.handleRequest(new Request(`https://relay.example/v1/remote/hosts/host/${action}`, {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', requestId: id, nativeSessionId: `native-${id}` }),
+  }), { principalSubject: () => 'alice' });
+  const first = request('first'); await entered.promise;
+  const second = request('second');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const admitted = calls.length;
+  for (const [index, call] of calls.entries()) native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: call.requestId,
+    status: 200, body: JSON.stringify({ agentId: `new-agent-${index}`, nativeSessionId: index === 0 ? 'native-first' : 'native-second' }) }));
+  const responses = await Promise.all([first, second]);
+  expect(responses.map(response => response?.status)).toEqual([200, 429]); expect(admitted).toBe(1);
+  expect(saved?.bindings).toHaveLength(4096);
+  const { createHostedRelay, emptyRelayState } = await import('./index.js');
+  const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 'capacity-restore-secret-01234567890123456789' };
+  const restored = emptyRelayState(auth);
+  restored.tenants.push({ subject: 'alice', namespace: '7c1c385902e0ae7f484f5274fbad49131a97fc0771fac9b71f56d093232f49cd', broker: saved! });
+  const runtime = createHostedRelay({ ...auth, storage: { initial: restored, async commit() {} }, scheduler: { schedule() {}, cancel() {} } });
+  close.push(() => runtime.close());
+  expect((await runtime.fetch(new Request(auth.origin + '/health')))?.status).toBe(200);
+}, 10000);
+
+it('releases an in-flight binding slot after a native rejection so the denied request can retry', async () => {
+  const initialState: RemoteHostBrokerState = { ...restoredState, bindings: Array.from({ length: 4095 }, (_, index) => ({
+    hostId: 'host', providerId: 'codex', agentId: `saved-agent-${index}`, nativeSessionId: `saved-native-${index}`,
+  })) };
+  const { broker, native } = await restoredFixture({ initialState });
+  const entered = deferred<void>(); const calls: Array<{ requestId: string }> = [];
+  native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'rpc_request') { calls.push(message); entered.resolve(); } });
+  const request = (id: string) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', requestId: id }),
+  }));
+  const first = request('first'); await entered.promise;
+  const rejected = await request('second'); expect(rejected?.status).toBe(429);
+  native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: calls[0]!.requestId, status: 400, body: '{"code":"invalid_request"}' }));
+  expect((await first)?.status).toBe(400);
+  const retry = request('second');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(calls).toHaveLength(2);
+  native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: calls[1]!.requestId, status: 200,
+    body: '{"agentId":"retried-agent","nativeSessionId":"retried-native"}' }));
+  expect((await retry)?.status).toBe(200); expect(broker.snapshot().bindings).toHaveLength(4096);
+}, 10000);

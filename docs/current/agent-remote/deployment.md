@@ -102,6 +102,12 @@ Workers uses pinned Wrangler with local workerd and local Durable Object storage
 it does not use a remote Cloudflare binding. Providers/CLI agents are not installed
 in either Relay image.
 
+The local Workers image installs its pinned toolchain through the Tencent npm
+proxy by default. Set `AGENT_REMOTE_NPM_REGISTRY` to select another public package
+registry for the Compose build. This only affects dependency installation in the
+image; it does not change global npm settings or the Gateway/Relay runtime origins.
+For direct Docker builds, pass `--build-arg NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/`.
+
 The launcher chooses free loopback ports and saves each runtime's origins and
 random shared secret in private `.runtime/relay-<runtime>/` files. Subsequent runs
 reuse those ports and the saved Compose project identity. New project names include

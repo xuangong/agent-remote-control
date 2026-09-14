@@ -14,7 +14,8 @@ CMD ["node", "gateway.mjs"]
 # Local Workers parity image. Production Workers deploy through Wrangler.
 FROM node:22-bookworm-slim AS workers
 ARG WRANGLER_VERSION=4.97.0
-RUN npm install --global wrangler@${WRANGLER_VERSION}
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN npm install --global --registry="${NPM_REGISTRY}" wrangler@${WRANGLER_VERSION}
 WORKDIR /app
 ENV NODE_ENV=development WRANGLER_SEND_METRICS=false CI=true
 COPY --chown=node:node dist/cloudflare ./worker

@@ -49,6 +49,8 @@ services:
     build:
       context: .
       target: workers
+      args:
+        NPM_REGISTRY: ${AGENT_REMOTE_NPM_REGISTRY:-https://mirrors.cloud.tencent.com/npm/}
     network_mode: service:network
     environment: *relay-environment
     volumes:

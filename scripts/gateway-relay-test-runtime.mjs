@@ -45,9 +45,10 @@ export async function gatewayRelayTestRuntime({ root, gateway, temporary, env, r
     }
   };
   if (docker) {
-    const config = localRelayConfiguration({ runtime, gatewayPort, relayPort, gatewayImage: process.env.AGENT_REMOTE_GATEWAY_IMAGE, secret: env.AGENT_REMOTE_SIGNING_SECRET });
+    const config = localRelayConfiguration({ runtime, gatewayPort, relayPort, gatewayImage: process.env.AGENT_REMOTE_GATEWAY_IMAGE, secret: env.AGENT_REMOTE_SIGNING_SECRET,
+      projectName: `arc-test-${runtime}-${process.pid}` });
     const envFile = join(temporary, '.env'); await writeFile(envFile, composeEnvironment(config), { mode: 0o600 });
-    compose = ['compose', '--project-name', `arc-test-${runtime}-${process.pid}`, '--file', join(root, 'compose.yaml'), '--file', join(root, 'deploy/compose.test.yaml'),
+    compose = ['compose', '--project-name', config.projectName, '--file', join(root, 'compose.yaml'), '--file', join(root, 'deploy/compose.test.yaml'),
       '--env-file', envFile, '--profile', runtime];
   } else if (runtime === 'workers') {
     await mkdir(workerDirectory);

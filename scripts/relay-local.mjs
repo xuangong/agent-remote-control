@@ -27,6 +27,7 @@ async function freePort() {
 }
 if (action !== 'up' && !previous) throw new Error('This runtime has no saved local deployment. Start it with up first.');
 const config = localRelayConfiguration({ runtime: values.runtime,
+  instancePath: root, projectName: previous?.projectName,
   gatewayPort: values['gateway-port'] ?? previous?.gatewayPort ?? await freePort(),
   relayPort: values['relay-port'] ?? previous?.relayPort ?? await freePort(),
   gatewayImage: values['gateway-image'] ?? process.env.AGENT_REMOTE_GATEWAY_IMAGE ?? previous?.gatewayImage,

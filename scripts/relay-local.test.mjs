@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { localRelayConfiguration, composeEnvironment } from './relay-local-config.mjs';
 
-const input = { runtime: 'node', gatewayPort: 49121, relayPort: 49122, gatewayImage: 'local/agent-gateway:test', secret: 'local-test-secret-01234567890123456789' };
+const input = { runtime: 'node', instancePath: '/workspace/checkout-one', gatewayPort: 49121, relayPort: 49122, gatewayImage: 'local/agent-gateway:test', secret: 'local-test-secret-01234567890123456789' };
 test('requires an explicit runtime and distinct valid local ports', { timeout: 1000 }, () => {
   for (const runtime of [undefined, 'auto', 'node,workers']) assert.throws(() => localRelayConfiguration({ ...input, runtime }), /runtime/i);
   for (const relayPort of [0, 65536, '49122extra', input.gatewayPort]) assert.throws(() => localRelayConfiguration({ ...input, relayPort }), /port/i);
@@ -13,12 +13,20 @@ test('uses matching canonical origins for browser and services in either runtime
     const config = localRelayConfiguration({ ...input, runtime });
     assert.equal(config.gatewayUrl, 'http://127.0.0.1:49121');
     assert.equal(config.relayUrl, 'http://127.0.0.1:49122');
-    assert.equal(config.projectName, `arc-relay-${runtime}`);
+    assert.match(config.projectName, new RegExp(`^arc-relay-${runtime}-[a-f0-9]{12}$`));
     const env = composeEnvironment(config);
     assert.match(env, /AGENT_REMOTE_ISSUER=http:\/\/127.0.0.1:49121\n/);
     assert.match(env, /AGENT_REMOTE_RELAY_URL=http:\/\/127.0.0.1:49122\n/);
     assert.match(env, /AGENT_REMOTE_GATEWAY_IMAGE=local\/agent-gateway:test\n/);
   }
+});
+test('isolates checkout stacks and preserves a saved deployment identity', { timeout: 1000 }, () => {
+  const first = localRelayConfiguration(input);
+  assert.equal(localRelayConfiguration(input).projectName, first.projectName);
+  assert.notEqual(localRelayConfiguration({ ...input, instancePath: '/workspace/checkout-two' }).projectName, first.projectName);
+  assert.notEqual(localRelayConfiguration({ ...input, runtime: 'workers' }).projectName, first.projectName);
+  assert.equal(localRelayConfiguration({ ...input, projectName: 'arc-relay-node' }).projectName, 'arc-relay-node');
+  assert.throws(() => localRelayConfiguration({ ...input, projectName: '../another-stack' }), /project/i);
 });
 test('rejects unsafe configuration text and weak signing secrets', { timeout: 1000 }, () => {
   assert.throws(() => localRelayConfiguration({ ...input, secret: 'short' }), /secret/i);

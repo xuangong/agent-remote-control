@@ -104,7 +104,10 @@ in either Relay image.
 
 The launcher chooses free loopback ports and saves each runtime's origins and
 random shared secret in private `.runtime/relay-<runtime>/` files. Subsequent runs
-reuse those ports. Optional `--gateway-port` and `--relay-port` select the ports
+reuse those ports and the saved Compose project identity. New project names include
+a checkout-specific suffix so another worktree cannot replace or stop this stack.
+Do not copy a running stack's private settings into another checkout. Existing
+saved project names are preserved for continuity. Optional `--gateway-port` and `--relay-port` select the ports
 on first launch. Changing saved origins requires an explicit state migration or
 reset; the launcher rejects an implicit change.
 

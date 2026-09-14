@@ -9,7 +9,8 @@ export async function queryGatewayAuthority(auth: GatewayAuthOptions, operation:
     .map(part => Buffer.from(JSON.stringify(part)).toString('base64url')).join('.');
   const proof = input + '.' + createHmac('sha256', auth.secret).update(input).digest('base64url');
   try {
-    const response = await fetch(`${auth.issuer}/api/agent-remote/${operation}`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+    // Workers supports manual redirects; every non-success response fails closed below.
+    const response = await fetch(`${auth.issuer}/api/agent-remote/${operation}`, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(5000),
       headers: { authorization: `Bearer ${proof}`, 'content-type': 'application/json' }, body });
     if (response.status === 401 || response.status === 403) return { status: 'denied' };
     if (!response.ok) return { status: 'unavailable' };

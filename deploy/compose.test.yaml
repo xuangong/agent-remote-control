@@ -1,0 +1,9 @@
+# Explicit test override. Only use with isolated loopback ports and test volumes.
+# The Gateway image must contain its agent-remote integration fixture.
+services:
+  gateway:
+    working_dir: /app
+    command: ["bun", "packages/gateway/tests/fixtures/agent-remote-gateway.ts"]
+    environment:
+      AGENT_REMOTE_READY_FILE: /tmp/agent-remote-fixture.json
+      AGENT_REMOTE_FIXTURE_DOCKER: "1"

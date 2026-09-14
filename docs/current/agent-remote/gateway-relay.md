@@ -1,8 +1,9 @@
 # Gateway-authenticated Relay
 
 The optional hosted mode reuses Copilot API Gateway user login and the existing
-Agent Host uplink protocol. The gateway is the identity authority; Node runs the
-Relay and serves the built controller. Agent traffic travels directly between
+Agent Host uplink protocol. The gateway is the identity authority. The hosted Relay serves the built
+Controller through Node/Docker or Cloudflare Workers. See [deployment](deployment.md)
+for runtime setup and the independent `agents.xianliao.de5.net` service. Agent traffic travels directly between
 browser, Relay and Hosts. Trojan and the gateway's other outbound dial protocols
 are not involved.
 

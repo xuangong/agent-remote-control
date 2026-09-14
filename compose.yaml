@@ -1,0 +1,59 @@
+name: agent-remote-local
+
+x-relay-environment: &relay-environment
+  AGENT_REMOTE_RELAY_URL: ${AGENT_REMOTE_RELAY_URL:?Set the public Relay origin}
+  AGENT_REMOTE_ISSUER: ${AGENT_REMOTE_ISSUER:?Set the public Gateway origin}
+  AGENT_REMOTE_SIGNING_SECRET: ${AGENT_REMOTE_SIGNING_SECRET:?Set the shared signing secret}
+  AGENT_REMOTE_PORT: ${AGENT_REMOTE_PORT:-5910}
+
+services:
+  network:
+    image: alpine:3.22
+    command: ["sleep", "infinity"]
+    ports:
+      - "127.0.0.1:${AGENT_REMOTE_GATEWAY_PORT:-5911}:${AGENT_REMOTE_GATEWAY_PORT:-5911}"
+      - "127.0.0.1:${AGENT_REMOTE_PORT:-5910}:${AGENT_REMOTE_PORT:-5910}"
+
+  gateway:
+    image: ${AGENT_REMOTE_GATEWAY_IMAGE:?Build and select the Gateway worktree image}
+    network_mode: service:network
+    environment:
+      <<: *relay-environment
+      PORT: ${AGENT_REMOTE_GATEWAY_PORT:-5911}
+      VNEXT_DB_PATH: /data/vnext.sqlite
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    volumes:
+      - gateway-state:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+
+  relay-node:
+    profiles: [node]
+    build:
+      context: .
+      target: node
+    network_mode: service:network
+    environment: *relay-environment
+    volumes:
+      - relay-node-state:/data
+    restart: unless-stopped
+
+  relay-workers:
+    profiles: [workers]
+    build:
+      context: .
+      target: workers
+    network_mode: service:network
+    environment: *relay-environment
+    volumes:
+      - relay-workers-state:/data
+    restart: unless-stopped
+
+volumes:
+  gateway-state:
+  relay-node-state:
+  relay-workers-state:

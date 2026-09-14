@@ -7,10 +7,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { gatewayRelayTestRuntime } from './gateway-relay-test-runtime.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const gateway = process.env.AGENT_REMOTE_GATEWAY_CHECKOUT;
-if (!gateway) throw new Error('Set AGENT_REMOTE_GATEWAY_CHECKOUT to the gateway worktree.');
+if (!gateway && process.env.AGENT_REMOTE_TEST_DOCKER !== '1') throw new Error('Set AGENT_REMOTE_GATEWAY_CHECKOUT to the gateway worktree.');
+const fetch = (input, init = {}) => globalThis.fetch(input, { ...init, signal: init.signal ?? AbortSignal.timeout(10_000) });
+const nextEvent = (emitter, name) => once(emitter, name, { signal: AbortSignal.timeout(10_000) });
 const require = createRequire(join(root, 'packages/agent-remote-lab/package.json'));
 const { chromium } = require('@playwright/test');
 const { WebSocket } = require('ws');
@@ -18,6 +21,7 @@ const temporary = await mkdtemp(join(tmpdir(), 'agent-remote-gateway-'));
 const processes = [];
 const sockets = [];
 let browser;
+let runtime;
 const logs = [];
 function launch(command, args, cwd, env) {
   const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -27,8 +31,17 @@ function launch(command, args, cwd, env) {
   child.stderr.on('data', value => logs.push(value.toString()));
   return child;
 }
-function stop(signal = 'SIGTERM') { for (const child of processes) { try { process.kill(-child.pid, signal); } catch { /* Process already exited. */ } } }
-const deadline = setTimeout(() => { stop('SIGKILL'); process.stderr.write('Gateway Relay test exceeded 90 seconds.\n'); process.exit(124); }, 90_000);
+function stop(signal = 'SIGTERM') {
+  for (const child of processes) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    try { process.kill(-child.pid, signal); } catch { /* Process already exited. */ }
+  }
+}
+const timeoutMs = process.env.AGENT_REMOTE_TEST_DOCKER === '1' ? 360_000 : 120_000;
+const deadline = setTimeout(() => {
+  stop('SIGKILL'); process.stderr.write('Gateway Relay test exceeded its process deadline.\n');
+  Promise.resolve(runtime?.close()).finally(() => process.exit(124));
+}, timeoutMs);
 async function port() {
   const server = createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const value = server.address().port; await new Promise(resolve => server.close(resolve)); return value;
@@ -46,12 +59,8 @@ try {
   const relayPort = await port(); const gatewayPort = await port();
   const relayUrl = `http://127.0.0.1:${relayPort}`; const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
   const env = { AGENT_REMOTE_RELAY_URL: relayUrl, AGENT_REMOTE_ISSUER: gatewayUrl, AGENT_REMOTE_SIGNING_SECRET: randomBytes(32).toString('base64url') };
-  const gatewayReady = join(temporary, 'gateway.json');
-  const issuer = launch('bun', ['packages/gateway/tests/fixtures/agent-remote-gateway.ts'], join(gateway, 'vnext'), { ...env, PORT: String(gatewayPort), AGENT_REMOTE_READY_FILE: gatewayReady });
-  await ready(gatewayReady, issuer);
-  const relayReady = join(temporary, 'relay.json');
-  let relay = launch(process.execPath, ['--import', 'tsx/esm', 'src/server/gateway.ts'], join(root, 'packages/agent-remote-lab'), { ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_READY_FILE: relayReady, AGENT_REMOTE_STATE_DIR: join(temporary, 'state') });
-  await ready(relayReady, relay);
+  runtime = await gatewayRelayTestRuntime({ root, gateway, temporary, env, relayPort, gatewayPort, launch, ready });
+  await runtime.start();
   browser = await chromium.launch({ headless: true, ...(process.env.AGENT_REMOTE_TEST_BROWSER ? { executablePath: process.env.AGENT_REMOTE_TEST_BROWSER } : {}) });
   const context = await browser.newContext(); const page = await context.newPage();
   page.setDefaultTimeout(10_000); page.setDefaultNavigationTimeout(15_000);
@@ -69,7 +78,7 @@ try {
   const sharedBindings = new Map();
   async function connectHost() {
     const host = new WebSocket(relayUrl.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } }); sockets.push(host);
-    await once(host, 'open'); const registered = once(host, 'message');
+    await nextEvent(host, 'open'); const registered = nextEvent(host, 'message');
     host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'integration-host', name: 'Integration Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
     const hostId = JSON.parse((await registered)[0].toString()).hostId;
     host.on('message', raw => {
@@ -157,10 +166,7 @@ try {
   assert.equal(refreshed.status, 200); assert.equal(refreshed.value.basePath, state.basePath);
   const attached = await page.evaluate(async ({ base, hostId }) => (await fetch(base + `v1/remote/hosts/${hostId}/attach`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'test-native' }) })).json(), { base: state.basePath, hostId });
   assert.equal(attached.agentId, 'test-agent');
-  const exited = once(relay, 'exit'); process.kill(-relay.pid, 'SIGTERM'); await exited;
-  await rm(relayReady, { force: true });
-  relay = launch(process.execPath, ['--import', 'tsx/esm', 'src/server/gateway.ts'], join(root, 'packages/agent-remote-lab'), { ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_READY_FILE: relayReady, AGENT_REMOTE_STATE_DIR: join(temporary, 'state') });
-  await ready(relayReady, relay);
+  await runtime.restart({ crash: true });
   const restored = await connectHost(); assert.equal(restored.hostId, hostId);
   await page.reload();
   await page.getByRole('option', { name: 'Integration Host · Online', exact: true }).waitFor({ state: 'attached' });
@@ -180,7 +186,7 @@ try {
   await page.screenshot({ path: join(temporary, 'controller.png'), fullPage: true });
   await page.locator('#remote-host').selectOption(hostId);
   await page.getByRole('button', { name: 'Revoke Host', exact: true }).click();
-  const hostClosed = once(restored.host, 'close');
+  const hostClosed = nextEvent(restored.host, 'close');
   await page.getByRole('button', { name: 'Confirm revoke', exact: true }).click(); await hostClosed;
   const revoked = await page.evaluate(async base => (await fetch(base + 'v1/remote/hosts')).json(), state.basePath);
   assert.deepEqual(revoked, { hosts: [] });
@@ -188,7 +194,7 @@ try {
   await page.getByRole('link', { name: 'Sign in through gateway' }).waitFor();
   await bob.close(); await context.close();
   console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected; renewal, process restart with stable device/binding, device revoke and logout verified; shared Host Gateway APIs, selected-Host login, per-user catalog, cumulative quota, retry identity, quota and unresolved-reservation persistence, revoke/regrant verified. No CLI agents started.');
-  console.log(`Evidence: ${temporary}`);
+  console.log(`Runtime: ${runtime.runtime}${runtime.docker ? " (Docker)" : ""}; Evidence: ${temporary}`);
 } catch (error) {
   await writeFile(join(temporary, 'failure.log'), logs.join(''));
   if (browser) { try { await browser.contexts()[0]?.pages()[0]?.screenshot({ path: join(temporary, 'failure.png'), fullPage: true }); } catch { /* Browser may already be closed. */ } }
@@ -196,6 +202,7 @@ try {
 } finally {
   for (const socket of sockets) socket.terminate();
   stop(); await browser?.close();
-  await Promise.all(processes.map(child => child.exitCode !== null ? undefined : Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 2000))])));
-  stop('SIGKILL'); clearTimeout(deadline);
+  await Promise.all(processes.map(child => child.exitCode !== null || child.signalCode !== null ? undefined : Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 2000))])));
+  stop('SIGKILL');
+  try { await runtime?.close(); } finally { clearTimeout(deadline); }
 }

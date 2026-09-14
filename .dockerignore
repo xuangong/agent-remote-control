@@ -1,0 +1,11 @@
+**
+!dist/
+!dist/relay/
+!dist/relay/gateway.mjs
+!dist/relay/web/
+!dist/relay/web/**
+!dist/cloudflare/
+!dist/cloudflare/**
+!scripts/
+!scripts/relay-workers-local.mjs
+!Dockerfile

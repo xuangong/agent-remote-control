@@ -1,3 +1,4 @@
+import { validControllerPath } from './controller-location.js';
 import { createHash } from 'node:crypto';
 import type { GatewayAuthOptions, GatewayGrant } from './auth.js';
 import type { RemoteHostBrokerState } from './broker.js';
@@ -8,7 +9,7 @@ export interface HostedRelayState {
   config: { origin: string; issuer: string };
   sessions: SavedGatewaySession[];
   tenants: Array<{ subject: string; namespace: string; broker: RemoteHostBrokerState }>;
-  loginChallenges: Array<[string, { expiresAt: number; hostId?: string }]>;
+  loginChallenges: Array<[string, { expiresAt: number; hostId?: string; returnPath?: string }]>;
   consumedProofs: Array<[string, number]>;
 }
 export interface RelayStateStore {
@@ -48,7 +49,7 @@ export function validateRelayState(value: unknown, auth: GatewayAuthOptions): Ho
   if (!Array.isArray(value.sessions) || value.sessions.length > 1024 || !Array.isArray(value.tenants) || !Array.isArray(value.loginChallenges) || value.loginChallenges.length > 4096 || !Array.isArray(value.consumedProofs) || value.consumedProofs.length > 10000) return invalid();
   if (!value.sessions.every((session: unknown) => record(session) && /^[a-f0-9]{64}$/.test(session.hash) && time(session.sessionExpiresAt) && record(session.grant) && string(session.grant.subject) && session.grant.namespace === namespace(auth.issuer, session.grant.subject) && time(session.grant.expiresAt) && typeof session.grant.ticket === 'string' && string(session.grant.nonce) && string(session.grant.continuation, 6000) && time(session.grant.sessionExpiresAt)) ||
     !value.tenants.every((tenant: unknown) => record(tenant) && string(tenant.subject) && tenant.namespace === namespace(auth.issuer, tenant.subject) && validBroker(tenant.broker)) ||
-    !value.loginChallenges.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[A-Za-z0-9_-]{43}$/.test(item[0]) && record(item[1]) && time(item[1].expiresAt) && (item[1].hostId === undefined || /^[A-Za-z0-9_-]{1,256}$/.test(item[1].hostId))) ||
+    !value.loginChallenges.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[A-Za-z0-9_-]{43}$/.test(item[0]) && record(item[1]) && time(item[1].expiresAt) && (item[1].returnPath === undefined || validControllerPath(item[1].returnPath)) && (item[1].hostId === undefined || /^[A-Za-z0-9_-]{1,256}$/.test(item[1].hostId))) ||
     !value.consumedProofs.every((item: unknown) => Array.isArray(item) && item.length === 2 && string(item[0], 128) && item[0].length >= 16 && time(item[1])) ||
     !unique(value.sessions, item => item.hash) || !unique(value.tenants, item => item.namespace) || !unique(value.loginChallenges, item => item[0]) || !unique(value.consumedProofs, item => item[0])) return invalid();
   return structuredClone(value) as HostedRelayState;

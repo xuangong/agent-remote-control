@@ -62,7 +62,7 @@ it('does not accept a consumed Gateway control proof after the Relay restarts', 
 
 it('preserves an unconsumed browser challenge through restart and consumes it exactly once', async () => {
   const f = await fixture();
-  const begin = await fetch(f.url + '/auth/login?host=selected-host', { redirect: 'manual', signal: AbortSignal.timeout(5000) });
+  const begin = await fetch(f.url + '/auth/login?host=selected-host&provider=claude&session=native-child&parent=native-root', { redirect: 'manual', signal: AbortSignal.timeout(5000) });
   const location = begin.headers.get('location');
   const cookie = begin.headers.get('set-cookie')?.split(';')[0];
   if (!location || !cookie) throw new Error('Login did not issue a browser challenge');
@@ -80,7 +80,7 @@ it('preserves an unconsumed browser challenge through restart and consumes it ex
   expect(accepted.headers.getSetCookie()).toHaveLength(2);
   expect(accepted.headers.getSetCookie()[0]).toContain('arc_session=');
   expect(accepted.headers.getSetCookie()[1]).toContain('arc_login=;');
-  expect(await accepted.json()).toMatchObject({ hostId: 'selected-host' });
+  expect(await accepted.json()).toMatchObject({ hostId: 'selected-host', returnPath: '/?host=selected-host&provider=claude&session=native-child&parent=native-root' });
   await f.restart();
   expect((await exchange()).status).toBe(401);
 }, 10000);

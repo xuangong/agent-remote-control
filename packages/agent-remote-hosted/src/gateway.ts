@@ -1,3 +1,4 @@
+import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
 import { createGatewayControlVerifier } from './control.js';
@@ -133,14 +134,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return json(200, await target.broker.manageShares(control.subject, control.hostId!, control.operation, control.targetSubject, control.targetLabel, control.sessionLimit));
     }
     if (url.pathname === '/auth/login' && request.method === 'GET') {
+      let returnPath: string;
+      try { returnPath = controllerPath(readControllerLocation(url.searchParams)); }
+      catch { return json(400, { error: 'Invalid session link.' }); }
       const hostId = url.searchParams.get('host') ?? undefined;
-      if (hostId !== undefined && !/^[A-Za-z0-9_-]{1,256}$/.test(hostId)) return json(400, { error: 'Invalid Host.' });
       const verifier = randomBytes(32).toString('base64url');
       const challenge = createHash('sha256').update(verifier).digest('base64url');
       const added = await state.mutate(draft => {
         draft.loginChallenges = draft.loginChallenges.filter(([, value]) => value.expiresAt > Date.now());
         if (draft.loginChallenges.length >= 4096) return false;
-        draft.loginChallenges.push([challenge, { expiresAt: Date.now() + 300_000, ...(hostId ? { hostId } : {}) }]); return true;
+        draft.loginChallenges.push([challenge, { expiresAt: Date.now() + 300_000, returnPath, ...(hostId ? { hostId } : {}) }]); return true;
       });
       if (!added) return json(429, { error: 'Too many pending sign-ins.' });
       return new Response(null, { status: 303, headers: {
@@ -166,7 +169,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const exchange = await sessions.exchange(grant);
       if (exchange.status !== 'active') return json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Gateway access could not be renewed.' });
       if (grant.continuation) { owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false; }
-      const response = json(200, { ...browserState(exchange.grant), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
+      const response = json(200, { ...browserState(exchange.grant), ...(pending.returnPath ? { returnPath: pending.returnPath } : {}), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
       response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
       response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login')}=; ${cookieFlags}; Max-Age=0`);
       return response;
@@ -267,7 +270,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
 }
 function json(status: number, value: unknown) { return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }); }
 function callback() {
-  const script = `const ticket=new URLSearchParams(location.hash.slice(1)).get('ticket');history.replaceState(null,'','/auth/callback');fetch('/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ticket})}).then(async r=>{if(!r.ok)throw Error();const state=await r.json();location.replace(state.hostId?'/?host='+encodeURIComponent(state.hostId):'/')}).catch(()=>{document.getElementById('status').textContent='Access expired or invalid. Return to the gateway to sign in.'});`;
+  const script = `const ticket=new URLSearchParams(location.hash.slice(1)).get('ticket');history.replaceState(null,'','/auth/callback');fetch('/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ticket})}).then(async r=>{if(!r.ok)throw Error();const state=await r.json();location.replace(state.returnPath||(state.hostId?'/?host='+encodeURIComponent(state.hostId):'/'))}).catch(()=>{document.getElementById('status').textContent='Access expired or invalid. Return to the gateway to sign in.'});`;
   const digest = createHash('sha256').update(script).digest('base64');
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Agent Remote</title><p id="status">Opening your controller…</p><a href="/auth/login">Sign in through gateway</a><script>${script}</script></html>`, { status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': `default-src 'none'; script-src 'sha256-${digest}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'` } });

@@ -17,6 +17,7 @@ afterEach(async () => {
     await act(async () => entry.root.unmount());
     entry.container.remove();
   }
+  if (typeof window !== 'undefined') window.history.replaceState(null, '', '/');
 });
 
 export async function render(node: ReactNode): Promise<HTMLDivElement> {

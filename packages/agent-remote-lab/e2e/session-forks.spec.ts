@@ -56,6 +56,12 @@ test('fork keeps the source chat, side sends independently, and references survi
   await expect(side.getByTestId('prompt-input')).toHaveValue('Retained side draft');
   await page.reload();
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+  await expect(primary.getByTestId('prompt-input')).toHaveValue('Retained side draft');
+  await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
+  await expect(primary.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');
+  await primary.locator('.lab-fork-reference summary').click();
+  await primary.getByRole('button', { name: 'Open source session' }).click();
+  await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button')).toBeVisible();
   await primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button').click();
   await expect(side.locator('.lab-fork-reference summary')).toBeVisible();
   await expect(side.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');

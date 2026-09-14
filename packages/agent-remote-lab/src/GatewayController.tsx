@@ -1,3 +1,4 @@
+import { controllerPath, readControllerLocation } from '@borgee/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { clearConversationRecovery } from './conversation-recovery.js';
@@ -90,11 +91,13 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
     <div className="gateway-private" key={access.basePath} hidden={suspended} {...(suspended ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, <button type="button" onClick={() => void logout()}>Sign out</button>)}</div>
     {suspended ? <main className="gateway-access"><h1>Agent Remote</h1><p role="status">Restoring access…</p></main> : null}
   </>;
+  let loginUrl = '/auth/login';
+  try { loginUrl += controllerPath(readControllerLocation(new URLSearchParams(window.location.search))).slice(1); } catch { /* Invalid targets do not become redirects. */ }
   return <main className="gateway-access">
     <h1>Agent Remote</h1>
     {access === undefined ? <p role="status">Checking access…</p> : <>
       <p>{failed ? 'The relay is unavailable. Try again shortly.' : 'Sign in through your gateway to open your Agent Hosts and sessions.'}</p>
-      <a href="/auth/login">Sign in through gateway</a>
+      <a href={loginUrl}>Sign in through gateway</a>
     </>}
   </main>;
 }

@@ -1,3 +1,5 @@
+import { controllerPath, readControllerLocation, type ControllerLocation } from '@borgee/agent-remote-hosted/controller-location';
+import { SessionLink } from './components/SessionLink.js';
 import type { AgentChildSession, AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
 import {
   useCallback,
@@ -100,7 +102,11 @@ export function App({
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
-  const [requestedHostId] = useState(() => new URL(window.location.href).searchParams.get('host') || undefined);
+  const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
+    try { return { target: readControllerLocation(new URLSearchParams(window.location.search)) }; }
+    catch { return { error: 'Invalid session link.' }; }
+  });
+  const requestedHostId = requested.target?.hostId;
   const [selectedHost, setSelectedHost] = useState<RemoteHost>(() => requestedHostId
     ? { id: requestedHostId, name: 'Requested Host', online: false, providers: [], providerId: '' }
     : { id: 'local', name: 'Recorded fixture', online: true });
@@ -156,7 +162,7 @@ export function App({
   const [status, setStatus] = useState<RemoteSessionStatus>(initialSessionStatus);
   const [attachingAgentId, setAttachingAgentId] = useState<string>();
   const [transitioning, setTransitioning] = useState(false);
-  const [failure, setFailure] = useState<string>();
+  const [failure, setFailure] = useState<string | undefined>(requested.error);
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !initialState);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -179,8 +185,8 @@ export function App({
       const host = remoteHosts.find((item) => item.id === requestedHostId);
       if (!host) return;
       restoredHostSelection.current = true;
-      const descriptor = host.providers?.[0];
-      const selectedProviderId = descriptor?.providerId ?? host.providerId ?? 'dsh';
+      const descriptor = host.providers?.find((provider) => provider.providerId === requested.target?.providerId) ?? host.providers?.[0];
+      const selectedProviderId = requested.target?.providerId ?? descriptor?.providerId ?? host.providerId ?? 'dsh';
       setSelectedHost({ ...host, providerId: selectedProviderId });
       setProviderName(descriptor ? `${descriptor.displayName} · ${host.name}` : selectedProviderId);
       return;
@@ -237,7 +243,7 @@ export function App({
   const selectedHostOffline = selectedHost.id !== 'local' && remoteHosts.find((host) => host.id === selectedHost.id)?.online !== true;
   const selectedQuota = remoteHosts.find((host) => host.id === selectedHost.id)?.sessionQuota;
   const creationQuotaExhausted = selectedQuota !== undefined && selectedQuota.used >= selectedQuota.limit && !creationReservation.current;
-  const requestedHostUnavailable = requestedHostId && !restoredHostSelection.current && !remoteHosts.some((host) => host.id === requestedHostId)
+  const requestedHostUnavailable = requestedHostId && requestedHostId !== 'local' && !restoredHostSelection.current && !remoteHosts.some((host) => host.id === requestedHostId)
     ? 'Requested Host is unavailable or is not shared with you. Retry Hosts or select another Host.' : undefined;
   const creationUnavailableReason = requestedHostUnavailable ?? (selectedHostOffline ? 'This Host is offline. Reconnect it or select another Provider.'
     : creationQuotaExhausted ? 'Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.' : undefined);
@@ -313,6 +319,33 @@ export function App({
 
   useEffect(() => {
     if (initialState) return;
+    if (requested.error) return;
+    const location = requested.target;
+    if (location?.hostId && location.providerId && location.nativeSessionId) {
+      let retired = false;
+      const generation = navigationGeneration.current;
+      const target = new SessionDirectoryClient(baseUrl, undefined, location.hostId);
+      setAttachingAgentId(location.agentId ?? location.nativeSessionId);
+      setStatus('connecting');
+      const request = location.parentNativeSessionId
+        ? target.attachChild(location.providerId, location.parentNativeSessionId, location.nativeSessionId)
+        : target.attach(location.providerId, location.nativeSessionId);
+      void request.then((result) => {
+        if (retired || navigationGeneration.current !== generation) return;
+        rememberSession({ hostId: location.hostId, providerId: location.providerId!, nativeSessionId: location.nativeSessionId!,
+          agentId: result.agentId, parentNativeSessionId: location.parentNativeSessionId,
+          title: openedSessionsRef.current.find((session) => session.hostId === location.hostId && session.providerId === location.providerId && session.nativeSessionId === location.nativeSessionId)?.title ?? 'Session' });
+        if (location.hostId === 'local') setLocalProviderId(location.providerId!);
+        setProviderName(providerConnectionName(location.hostId!, location.providerId!));
+        attach(result.agentId);
+      }).catch((error) => {
+        if (retired || navigationGeneration.current !== generation) return;
+        setAttachingAgentId(undefined); setStatus('idle');
+        setFailure(message(error, 'This session is unavailable or your account does not have access.'));
+        if (compactLayoutRef.current) setContextOpen(true);
+      });
+      return () => { retired = true; clientRef.current?.stop(); };
+    }
     if (requestedHostId) return () => clientRef.current?.stop();
     const remembered = rememberedAgent();
     if (remembered) {
@@ -566,6 +599,12 @@ export function App({
   const expandedKeys = new Set(stackPath.slice(stackRange.start, stackRange.end + 1).map(sessionKey));
   const focusedWindow = stackPath[stackRange.end];
   const primaryExpanded = stackRange.start === 0;
+  const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
+  useEffect(() => {
+    if (!addressSession) return;
+    const path = controllerPath({ ...addressSession, hostId: addressSession.hostId ?? 'local' });
+    window.history.replaceState(null, '', path);
+  }, [addressSession?.hostId, addressSession?.providerId, addressSession?.nativeSessionId, addressSession?.agentId, addressSession?.parentNativeSessionId]);
 
   function nextSideRequest(source: OpenedSession): number {
     const key = sessionKey(source);
@@ -822,14 +861,14 @@ export function App({
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
         <CollapsedConversations sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
-        <div className="lab-primary-conversation" hidden={!primaryExpanded}>
+        <div className="lab-primary-conversation" hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
         <LabWorkbench
           state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : {}} visible={activeView === 'workbench' && primaryExpanded}
           consoleCommands={directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
           onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
-          sessionManager={directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : undefined}
+          sessionManager={<>{directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}{stackRoot ? <SessionLink session={stackRoot} /> : null}</>}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
               <button type="button" disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
@@ -855,7 +894,7 @@ export function App({
           initialInput={forkInputStatus?.agentId === session.agentId ? forkInputStatus : undefined}
           visible={activeView === 'workbench'} draft={messageDrafts[session.agentId] ?? ''}
           onDraftChange={(text) => setMessageDrafts((current) => ({ ...current, [session.agentId]: text }))}
-          onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
+          onFocus={() => { if (sideFocus !== sessionKey(session)) setSideFocus(sessionKey(session)); }} onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
         <CollapsedConversations sessions={stackPath.slice(stackRange.end + 1)} offset={stackRange.end + 1} onExpand={revealSession} />
         </div>
       </section>

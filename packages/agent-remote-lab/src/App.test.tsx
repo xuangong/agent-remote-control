@@ -12,6 +12,32 @@ import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 describe('App', () => {
+  it('opens a native child link without cached sessions and ignores a stale runtime Agent ID', async () => {
+    window.history.replaceState(null, '', '/?host=desk&agent=stale&provider=codex&session=child&parent=parent');
+    const request = vi.fn(async () => Response.json({ agentId: 'current-child', nativeSessionId: 'child' }));
+    vi.stubGlobal('fetch', request);
+    const connect = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
+    try {
+      await render(<App baseUrl="http://localhost/tenant/" transport={labTransport({ connect })} />);
+      expect(request).toHaveBeenCalledOnce();
+      const [url, options] = request.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(url.pathname).toBe('/tenant/v1/remote/hosts/desk/child/attach');
+      expect(JSON.parse(options.body as string)).toEqual({ providerId: 'codex', nativeSessionId: 'child', parentNativeSessionId: 'parent' });
+      expect(connect).toHaveBeenCalledWith('current-child', expect.any(Object));
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('does not fall back to the runtime Agent when a native session link is denied', async () => {
+    window.history.replaceState(null, '', '/?host=desk&agent=stale&provider=codex&session=private');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'Session access denied.' }, { status: 403 })));
+    const connect = vi.fn();
+    try {
+      const container = await render(<App transport={labTransport({ connect })} />);
+      expect(container.textContent).toContain('Session access denied.');
+      expect(connect).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('requests planning explicitly at creation and shows an unsupported error without attaching an ordinary session', async () => {
     const createAgent = vi.fn().mockRejectedValue(new Error('Planning is not supported by this Provider.'));
     const connect = vi.fn();

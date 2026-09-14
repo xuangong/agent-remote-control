@@ -160,3 +160,13 @@ it('clears the paused private controller if authoritative recovery is denied', a
   expect(view.querySelector('input')).toBeNull();
   expect(view.querySelector('a')?.getAttribute('href')).toBe('/auth/login');
 });
+
+
+it('keeps a cross-device session target on the login link', async () => {
+  window.history.replaceState(null, '', '/?host=desk&agent=live&provider=claude&session=native&parent=root');
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({}, { status: 401 })));
+  try {
+    const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+    expect(view.querySelector('a')?.getAttribute('href')).toBe('/auth/login?host=desk&agent=live&provider=claude&session=native&parent=root');
+  } finally { window.history.replaceState(null, '', '/'); }
+});

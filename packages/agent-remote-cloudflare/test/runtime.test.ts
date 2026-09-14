@@ -191,3 +191,21 @@ it('enforces the native registration deadline without incoming frames', async ()
   });
   expect((await closed).code).toBe(1008);
 });
+
+it('retains a session login destination across Worker replacement', async () => {
+  const f = await fixture();
+  const target = '/?host=desk&provider=claude&session=native-child&parent=native-root';
+  const begin = await f.request('/auth/login' + target.slice(1));
+  expect(begin.status).toBe(303);
+  const cookie = begin.headers.get('set-cookie')!.split(';')[0]!;
+  const challenge = new URL(begin.headers.get('location')!).searchParams.get('challenge');
+  const { sign, issuer } = await import('./fixture.js');
+  const iat = Math.floor(Date.now() / 1000);
+  const ticket = sign('arc-relay+jwt', { iss: issuer, aud: origin, sub: 'alice', nonce: challenge,
+    iat, exp: iat + 900, jti: 'session-link', continuation: 'alice', sessionExpiresAt: Date.now() + 3_600_000 });
+  await f.restart();
+  const accepted = await f.json('/auth/session', cookie, { ticket });
+  expect(accepted.status).toBe(200);
+  expect(await accepted.json()).toMatchObject({ returnPath: target });
+  expect((await f.json('/auth/session', cookie, { ticket })).status).toBe(401);
+});

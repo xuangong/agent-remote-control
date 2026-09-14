@@ -56,9 +56,24 @@ const state: AgentReplicaState = {
   diagnostics: [{ code: 'protocol_violation', message: long, recoverable: true }],
 };
 const view = new URLSearchParams(location.search).get('view') ?? 'workbench';
+const diffError = [
+  'diff --git a/workspace/source/pnpm-lock.yaml b/workspace/build-source/pnpm-lock.yaml',
+  'index fd9ab2bd..74261497 100644',
+  '--- a/workspace/source/pnpm-lock.yaml',
+  '+++ b/workspace/build-source/pnpm-lock.yaml',
+  ...Array.from({ length: 20 }, (_, index) => `@@ -${361 + index},10 +${361 + index},6 @@ importers:\n     version: 5.9.3\n   packages/plugins/dsh:\n-    dependencies:\n-      '@deepseek-ai/dsh-session-projection':\n-        specifier: 0.1.2-rc.1`),
+].join('\n');
+const failureState: AgentReplicaState = { ...replicaState, timeline: {
+  ...replicaState.timeline, hasOlder: false, entries: [{
+    ...state.timeline.entries[0]!, resources: [], item: {
+      type: 'tool_call', callId: 'failed-diff', name: 'command', status: 'failed', error: diffError,
+      detail: { type: 'shell', command: "/bin/zsh -lc 'git diff --no-index /workspace/source/pnpm-lock.yaml /workspace/build-source/pnpm-lock.yaml'" },
+    },
+  }],
+} };
 createRoot(document.getElementById('root')!).render(
   <main style={{ height: '100dvh' }}>
-    {view === 'workbench' ? <LabWorkbench state={state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
+    {view === 'workbench' || view === 'tool-error' ? <LabWorkbench state={view === 'tool-error' ? failureState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
       : view === 'trace' ? <TraceView state={state} />
       : view === 'inspector' ? <ReplicaInspector state={state} sessionStatus="ready" providerName={long} />
       : view === 'command' ? <AgentCommandDetails command={{ id: long, name: long, description: long, kind: 'skill', documentation: { resourceId: 'documentation', locator: 'SKILL.md', status: 'available' } }} resources={state.resources} onClose={() => {}} />

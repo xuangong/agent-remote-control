@@ -28,7 +28,7 @@ export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineIte
       <ToolCallDetails detail={item.detail} />
       {item.result ? <ToolResultView result={item.result} /> : null}
     </div>
-    {item.error ? <p className="agent-tool-error" role="alert">{item.error}</p> : null}
+    {item.error ? <pre className="agent-tool-error" role="alert" tabIndex={0}>{item.error}</pre> : null}
   </article>;
 }
 

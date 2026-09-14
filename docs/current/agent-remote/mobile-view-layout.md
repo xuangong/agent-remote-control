@@ -10,6 +10,7 @@ the page is not a substitute for sizing the content correctly.
 | --- | --- | --- |
 | Resources | Locators and errors wrap; status stays readable; actions wrap. | Pending, available, failed and unavailable cards; loaded download links; long locator through the recorded Relay. |
 | Conversation | User/assistant messages, reasoning, tool details/results, tasks, completed questions, errors and compaction fit the conversation. | Every Timeline item type; expanded details for all seven tool types; long links, inline code, text and JSON results. |
+| Failed tools | Errors remain visible when details are collapsed, using 12px monospace text with preserved newlines. Long errors scroll within a 320px-high block. | Multiline lockfile diff, phone/desktop sizing, keyboard access and local scrolling. |
 | Pending interactions | Questions, plans, tool/permission approvals, external actions and forms fit the panel. | All six interaction types with long labels, options, paths and descriptions. |
 | Markdown | Prose wraps. Code blocks and tables can scroll horizontally inside their own bounds. | Narrow and wide layouts; local scrolling remains available. Images render as alternative text; resource links open separately. |
 | Trace | Names and metadata wrap; rows grow to contain their content; the list scrolls vertically. | Long provider/epoch/tool values, row containment and viewport bounds. |

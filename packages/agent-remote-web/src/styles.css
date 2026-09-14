@@ -159,6 +159,8 @@
 .agent-tool-detail span { color: var(--agent-muted); }
 .agent-tool-error,
 .agent-form-error { margin: 0; color: var(--agent-danger); }
+.agent-tool-error { min-width: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-radius: var(--agent-radius); background: var(--agent-surface-danger); font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; font-size: 12px; line-height: 1.5; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.agent-tool-error:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 .agent-state-running .agent-state-label,
 .agent-state-in_progress .agent-state-label { color: var(--agent-running); }
 .agent-state-completed .agent-state-label,

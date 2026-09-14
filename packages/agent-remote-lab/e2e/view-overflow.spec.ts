@@ -12,6 +12,30 @@ async function expectContained(container: Locator) {
 }
 
 for (const width of [320, 390, 844, 1440]) {
+  test(`keeps failed command output compact and readable at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 740 });
+    await page.goto('/e2e/fixtures/view-overflow.html?view=tool-error');
+    const error = page.getByRole('alert');
+    await expect(error).toContainText('diff --git');
+    await expect(page.locator('.agent-tool-toggle')).toHaveAttribute('aria-expanded', 'false');
+    const typography = await error.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { size: parseFloat(style.fontSize), whitespace: style.whiteSpace, font: style.fontFamily, height: element.clientHeight, scrollHeight: element.scrollHeight };
+    });
+    expect(typography.size).toBe(12);
+    expect(typography.whitespace).toBe('pre-wrap');
+    expect(typography.font).toContain('monospace');
+    expect(typography.height).toBeLessThanOrEqual(320);
+    expect(typography.scrollHeight).toBeGreaterThan(typography.height);
+    await expectContained(error);
+    await expectContained(page.getByTestId('timeline'));
+    await error.focus();
+    await expect(error).toBeFocused();
+    await error.press('ArrowDown');
+    await expect.poll(() => error.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    await page.screenshot({ path: testInfo.outputPath(`failed-command-${width}.png`) });
+  });
+
   for (const view of ['workbench', 'timeline', 'trace', 'inspector', 'command']) {
     test(`contains every rendered content type in ${view} at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 740 });

@@ -31,7 +31,7 @@ export async function createCopilotHostRegistration(options: CopilotHostRegistra
     executable = found;
   }
   const { stdout } = await promisify(execFile)(nodeEntry ? process.execPath : executable,
-    [...(nodeEntry ? [executable] : []), '--version'], { timeout: 5000, env });
+    [...(nodeEntry ? [executable] : []), '--version'], { timeout: 30000, env });
   const match = /^GitHub Copilot CLI (\d+)\.(\d+)\.(\d+)\.?(?:\s|$)/.exec(stdout.trim());
   const supported = match && (Number(match[1]) > 1 || Number(match[1]) === 1 &&
     (Number(match[2]) > 0 || Number(match[2]) === 0 && Number(match[3]) >= 83));

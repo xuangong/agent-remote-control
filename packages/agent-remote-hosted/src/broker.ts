@@ -474,7 +474,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         } };
       });
       return json(201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
-        ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\npnpm agent-host start` } : {}) });
+        ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\nagent-remote-controller start` } : {}) });
     }
     const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);
     if (options.durable && revoking && request.method === 'POST') {

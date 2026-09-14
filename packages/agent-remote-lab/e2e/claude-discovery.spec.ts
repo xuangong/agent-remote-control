@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createAgentHost, createClaudeSessionDirectory } from '@borgee/agent-host';
+import { createAgentHost, createClaudeSessionDirectory } from '@agent-remote-control/agent-remote-controller';
 import { ClaudeAgentProvider } from '../../agent-provider-claude/dist/index.js';
 
 test('uses Claude settings, plan review, skills and a read-only native child through the Host', async ({ page, request }, testInfo) => {

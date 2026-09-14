@@ -32,7 +32,7 @@ describe('HostPairing', () => {
     const container = await render(<HostPairing service={{ hosts: async () => ({ hosts: [] }), pair: async () => ({ key: 'key', expiresAt: '2099-01-01T00:00:00Z', serverUrl: 'http://127.0.0.1:5910' }) }} selectedHostId="local" onSelect={() => undefined} hosts={[]} onRetryHosts={() => undefined} />);
     const toggle = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Pair Agent Host')!;
     await act(async () => toggle.click());
-    expect(container.textContent).toContain('pnpm agent-host start');
+    expect(container.textContent).toContain('agent-remote-controller start');
     expect(container.textContent).toContain('already-running Host daemon');
     expect(container.textContent).toContain('DSH Host plugin');
     expect(container.textContent).toContain('reachable broker address');

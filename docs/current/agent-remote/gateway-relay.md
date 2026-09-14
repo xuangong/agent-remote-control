@@ -80,13 +80,13 @@ export AGENT_HOST_SERVER=https://agents.example.com
 export AGENT_HOST_REMOTE_KEY=<pairing-key-from-controller>
 export AGENT_HOST_PROVIDERS=codex,claude,copilot
 export AGENT_HOST_WORKSPACE=/path/to/workspace
-pnpm agent-host start
+pnpm agent-remote-controller start
 ```
 
 Use the existing DSH Host plugin configuration with the same `serverUrl` and
-`remoteKey` for DSH. A running Host can update its uplink with `pnpm agent-host pair`. Successful
+`remoteKey` for DSH. A running Host can update its uplink with `pnpm agent-remote-controller pair`. Successful
 managed Host registration saves private connection/provider settings in its state
-directory. Subsequent `pnpm agent-host start` can reuse them without exporting the
+directory. Subsequent `pnpm agent-remote-controller start` can reuse them without exporting the
 key again. Server/key overrides must be supplied together. Explicit re-pairing of
 the same installation rotates its credential and rejects the previous key.
 After the Host appears, choose a provider and attach or create a session.

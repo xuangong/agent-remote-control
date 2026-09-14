@@ -29,6 +29,15 @@ Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` owns
 
 The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.148.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-remote-lab/compatibility.json). The [Provider support baseline](docs/current/agent-remote/provider-support.md) compares DSH, Codex, Claude and Copilot, including endpoint gaps, verification and workarounds; use its [onboarding checklist](docs/current/agent-remote/provider-onboarding.md) for a new Provider.
 
+## Install Agent Host as a standalone command
+
+Run `pnpm build:agent-remote-controller` to create `dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz`.
+Install it with `npm install -g ./dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz --registry=https://mirrors.cloud.tencent.com/npm/`.
+The installed `agent-remote-controller` command runs without a repository checkout or pnpm.
+See the [Agent Host CLI guide](packages/agent-host/README.md) for native CLI requirements,
+pairing, background operation and upgrades. Run `pnpm test:agent-remote-controller-package` after
+building to verify installation and daemon lifecycle in an isolated prefix.
+
 ## Connect a real Codex CLI
 
 Start the workbench, open **Pair Agent Host**, and generate a temporary key. In another terminal, start Codex through the Host:
@@ -38,7 +47,7 @@ export AGENT_HOST_SERVER=http://127.0.0.1:5910
 export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
 export AGENT_HOST_CODEX=/absolute/path/to/codex
 export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
-pnpm agent-host start
+pnpm agent-remote-controller start
 ```
 
 Select **Codex · <Host name> · Online** in Session intake. The verified CLI version is `0.148.0`; older versions are rejected with an actionable message. `AGENT_REMOTE_CODEX_HOME`, `AGENT_REMOTE_CODEX_EXECUTABLE`, and `AGENT_REMOTE_WORKSPACE` remain supported aliases. See [Codex installation and debugging](docs/runbooks/codex-debug.md) for an isolated Tencent-registry install and the process/session boundaries.
@@ -53,7 +62,7 @@ export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
 export AGENT_HOST_PROVIDERS=claude
 export AGENT_HOST_CLAUDE=/absolute/path/to/claude
 export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
-pnpm agent-host start
+pnpm agent-remote-controller start
 ```
 
 Select **Claude Code · <Host name> · Online**. Claude Code must be version `2.1.247` or newer; the adapter pins `@anthropic-ai/claude-agent-sdk` to `0.3.247`. Set `AGENT_HOST_PROVIDERS=codex,claude` and `AGENT_HOST_CODEX` to advertise both providers under one Host. The default remains `codex`. All selected executables must be available; empty, duplicate, or unknown selections fail startup.
@@ -62,7 +71,7 @@ Select **Claude Code · <Host name> · Online**. Claude Code must be version `2.
 
 ## Connect GitHub Copilot through its official SDK
 
-Copilot is opt-in: `pnpm start --providers copilot` uses the pinned installed CLI; pass `--copilot /absolute/path/to/copilot` to override. For a manually paired Host, set `AGENT_HOST_PROVIDERS=copilot`, `AGENT_HOST_SERVER`, `AGENT_HOST_REMOTE_KEY` and `AGENT_HOST_WORKSPACE`, then run `pnpm agent-host start`. `AGENT_HOST_COPILOT` overrides the executable and `AGENT_HOST_COPILOT_HOME` selects the native profile. Comma-separated Host selections may include `codex,claude,copilot`.
+Copilot is opt-in: `pnpm start --providers copilot` uses the pinned installed CLI; pass `--copilot /absolute/path/to/copilot` to override. For a manually paired Host, set `AGENT_HOST_PROVIDERS=copilot`, `AGENT_HOST_SERVER`, `AGENT_HOST_REMOTE_KEY` and `AGENT_HOST_WORKSPACE`, then run `pnpm agent-remote-controller start`. `AGENT_HOST_COPILOT` overrides the executable and `AGENT_HOST_COPILOT_HOME` selects the native profile. Comma-separated Host selections may include `codex,claude,copilot`.
 
 The adapter uses official `@github/copilot-sdk` **1.0.11** and Copilot CLI **1.0.83**, through SDK stdio. It does not use ACP. Authentication remains in the native CLI profile/environment. Real SDK/CLI tests use an isolated local model endpoint, without cloud prompts. See the [Copilot audit](docs/current/agent-remote/copilot-support-audit.md) for supported input, history, parent-owned children, experimental APIs and remaining gaps. Run `pnpm test:copilot` for the bounded adapter and native loopback suite.
 
@@ -101,7 +110,7 @@ dsh --profile web --host 127.0.0.1 --port 3081
 
 The plugin also accepts Cordis configuration fields `serverUrl`, `remoteKey`, and `instanceName`. Each advertised Provider appears in the workbench selector as `<Provider name> · <Host name> · Online/Offline`, alongside the labeled Recorded fixture. Selecting it switches session discovery and workspace selection to that installation. Choose a workspace and click **Open session**, or select an existing session from the directory. Offline Hosts remain visible, with creation disabled; another Provider can still be selected. The native DSH installation continues to own model selection, credentials, persistence, and approval services.
 
-Keys are valid for new connections for 24 hours and bind to one installation. Established connections remain active after key expiry until they disconnect. Restarting the backend clears temporary keys and host bindings. A background Host can keep native sessions alive: generate a new key, set `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY`, then run `pnpm agent-host pair` to replace only its uplink. Host reconnection within the same backend process restores session bindings on demand without replaying message submissions or uncertain creation requests.
+Keys are valid for new connections for 24 hours and bind to one installation. Established connections remain active after key expiry until they disconnect. Restarting the backend clears temporary keys and host bindings. A background Host can keep native sessions alive: generate a new key, set `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY`, then run `pnpm agent-remote-controller pair` to replace only its uplink. Host reconnection within the same backend process restores session bindings on demand without replaying message submissions or uncertain creation requests.
 
 ## Development and verification
 
@@ -115,7 +124,7 @@ pnpm lint:docs
 
 Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing. Run `pnpm compatibility:update` after source changes, then `pnpm compatibility:check` to verify the declared implementation digest.
 
-`pnpm dev` runs the Recorded-backed workbench and pairing broker. `pnpm agent-host start` starts the selected native providers in the managed Host daemon so a later `pnpm agent-host pair` can replace its uplink without stopping native sessions. `pnpm agent-host foreground` is an attached debugging mode without daemon pairing control. `pnpm dev codex-fixture` remains a clearly labeled direct fixture composition for adapter validation; `pnpm dev recorded` runs the Recorded fixture and broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
+`pnpm dev` runs the Recorded-backed workbench and pairing broker. `pnpm agent-remote-controller start` starts the selected native providers in the managed Host daemon so a later `pnpm agent-remote-controller pair` can replace its uplink without stopping native sessions. `pnpm agent-remote-controller foreground` is an attached debugging mode without daemon pairing control. `pnpm dev codex-fixture` remains a clearly labeled direct fixture composition for adapter validation; `pnpm dev recorded` runs the Recorded fixture and broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
 
 ## Package boundaries
 

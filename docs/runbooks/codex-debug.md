@@ -22,7 +22,7 @@ export AGENT_HOST_SERVER=http://127.0.0.1:5910
 export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
 export AGENT_HOST_CODEX="$PWD/.runtime/codex/node_modules/.bin/codex"
 export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
-OPENAI_API_KEY=test pnpm agent-host start
+OPENAI_API_KEY=test pnpm agent-remote-controller start
 ```
 
 The Codex child inherits this key and the native profile's configured base URL. The broker never stores it. This does not modify the profile or store credentials in the workbench.
@@ -37,14 +37,14 @@ CODEX_HOME="$PWD/.runtime/codex-home" .runtime/codex/node_modules/.bin/codex log
 AGENT_REMOTE_CODEX_HOME="$PWD/.runtime/codex-home" \
 AGENT_HOST_CODEX="$PWD/.runtime/codex/node_modules/.bin/codex" \
 AGENT_HOST_WORKSPACE=/absolute/path/to/workspace \
-pnpm agent-host start
+pnpm agent-remote-controller start
 ```
 
 ## Discover and resume
 
 **Discover sessions** lists up to 500 recent unarchived native threads, ordered by activity, from the selected Codex home. Root discovery reads metadata via `thread/list`; subagent threads are excluded from that root catalog. The console groups runtime-discovered children below their parents and keeps the known relationships while navigating between chats. Selecting a row explicitly resumes that original thread via `thread/resume` and reads its history via `thread/read`. Native files are not moved or deleted. New threads stay alive before their first turn because Codex may not persist an empty thread yet.
 
-This is control of processes owned by Agent Host. It does not attach stdio to an already-running terminal or Codex desktop process. Avoid simultaneously continuing the same native thread in another application. A browser reconnect reuses the Host-owned native session. Stopping the Host closes its app-server children. `pnpm agent-host start` creates the managed daemon and management socket. `pnpm agent-host foreground` is only for attached debugging and cannot accept a later daemon `pair` command. Restarting only the backend invalidates its process-local pairing key but does not stop a managed Host: generate another key and run `pnpm agent-host pair` with the new `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY`. The Host replaces its uplink without recreating native sessions. Submitted commands and unknown creation outcomes are never automatically replayed.
+This is control of processes owned by Agent Host. It does not attach stdio to an already-running terminal or Codex desktop process. Avoid simultaneously continuing the same native thread in another application. A browser reconnect reuses the Host-owned native session. Stopping the Host closes its app-server children. `pnpm agent-remote-controller start` creates the managed daemon and management socket. `pnpm agent-remote-controller foreground` is only for attached debugging and cannot accept a later daemon `pair` command. Restarting only the backend invalidates its process-local pairing key but does not stop a managed Host: generate another key and run `pnpm agent-remote-controller pair` with the new `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY`. The Host replaces its uplink without recreating native sessions. Submitted commands and unknown creation outcomes are never automatically replayed.
 
 The managed daemon appends startup, runtime, and native Codex diagnostics to `~/.agent-remote-control/agent-host/agent-host.log`, or `agent-host.log` under `AGENT_HOST_STATE_DIR` when that override is set. The state directory and log are private to the local user. Pairing and local management credentials are redacted from native diagnostic lines.
 

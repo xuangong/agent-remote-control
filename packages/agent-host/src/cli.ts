@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createConnection, createServer } from 'node:net';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -18,7 +19,7 @@ const stateFile = join(stateDir, 'daemon.json');
 const installationFile = join(stateDir, 'installation-id');
 const daemonLogFile = join(stateDir, 'agent-host.log');
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   try { await main(); } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
@@ -33,11 +34,11 @@ async function main(): Promise<void> {
   else if (command === 'status') await status();
   else if (command === 'stop') await manage({ action: 'stop' });
   else if (command === 'pair') await pair();
-  else throw new Error(`Unknown command: ${command}. Run agent-host --help.`);
+  else throw new Error(`Unknown command: ${command}. Run agent-remote-controller --help.`);
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-host <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_WORKSPACE, AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\n`);
+  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  foreground  Run in the foreground\n  start       Start the background daemon\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the background daemon\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_WORKSPACE, AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
@@ -111,11 +112,12 @@ async function start(): Promise<void> {
     const token = randomBytes(32).toString('hex');
     const log = await open(daemonLogFile, 'a', 0o600);
     await log.chmod(0o600);
-    const child = spawn(process.execPath, [new URL(import.meta.url).pathname, '_serve'], { detached: true, stdio: ['ignore', log.fd, log.fd],
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_serve'], { detached: true, stdio: ['ignore', log.fd, log.fd],
       env: { ...process.env, AGENT_HOST_MANAGEMENT_TOKEN: token } });
     await log.close();
     child.unref();
-    const deadline = Date.now() + 10_000;
+    // Allow all selected native version probes to finish, including a cold Copilot launch.
+    const deadline = Date.now() + 45_000;
     while (Date.now() < deadline) {
       const state = await readState();
       if (state && state.pid === child.pid) { process.stdout.write(`Agent Host daemon started (pid ${state.pid}); log: ${daemonLogFile}.\n`); return; }

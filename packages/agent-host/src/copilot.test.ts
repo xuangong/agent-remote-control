@@ -14,6 +14,12 @@ async function entry(source: string) {
 }
 
 describe('Copilot registration executable preflight', () => {
+  it('allows the native CLI to finish a cold version probe before advertising', async () => {
+    const executable = await entry("setTimeout(() => console.log('GitHub Copilot CLI 1.0.83.'), 6000);");
+    const registration = await createCopilotHostRegistration({ executable });
+    try { expect(registration.adapter.descriptor.providerId).toBe('copilot'); }
+    finally { await registration.directory.close(); }
+  }, 15000);
   it('runs a JavaScript CLI entry with the selected profile and environment before advertising', async () => {
     const previous = process.env.COPILOT_HOME;
     const executable = await entry("if (process.argv[2] !== '--version' || process.env.COPILOT_HOME !== '/selected-profile' || process.env.COPILOT_HOST_TEST !== 'yes') process.exit(1); console.log('GitHub Copilot CLI 1.0.83');");

@@ -28,7 +28,7 @@
     "@borgee/agent-remote-hosted": "workspace:*"
   },
   "devDependencies": {
-    "@borgee/agent-host": "workspace:*",
+    "@agent-remote-control/agent-remote-controller": "workspace:*",
     "@playwright/test": "^1.50.0",
     "@types/node": "^24.3.0",
     "@types/react": "^18.3.0",

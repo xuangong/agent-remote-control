@@ -73,7 +73,7 @@ import subprocess
 result = subprocess.run([
     'pnpm', '-r', '--filter', '@borgee/agent-provider-dsh',
     '--filter', '@borgee/agent-provider-codex', '--filter', '@borgee/agent-provider-claude',
-    '--filter', '@agent-remote-control/dsh', '--filter', '@borgee/agent-host',
+    '--filter', '@agent-remote-control/dsh', '--filter', '@agent-remote-control/agent-remote-controller',
     'run', 'test', '--hookTimeout=30000',
 ], timeout=180)
 raise SystemExit(result.returncode)

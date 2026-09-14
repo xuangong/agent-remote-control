@@ -73,7 +73,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
     {showPairing ? <div className="lab-pairing-details">
-      <p className="lab-control-note">Generate a pairing key, then run <code>pnpm agent-host start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>pnpm agent-host pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>
+      <p className="lab-control-note">Generate a pairing key, then run <code>agent-remote-controller start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>agent-remote-controller pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>
       {invitation?.command ? <p className="lab-control-note">Copy and run the setup command below. After pairing, the managed Host saves its connection privately for restart and stays paired until revoked.</p> : null}
       {invitation ? <>
         <label htmlFor="pairing-configuration">Agent Host configuration</label>

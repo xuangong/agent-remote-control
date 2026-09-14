@@ -1,5 +1,5 @@
 import type { CodexAppServerProvider } from '@borgee/agent-provider-codex';
-import { createCodexSessionDirectory } from '@borgee/agent-host';
+import { createCodexSessionDirectory } from '@agent-remote-control/agent-remote-controller';
 import type { SessionDirectorySource } from './session-directory.js';
 
 /** Test-only compatibility adapter for direct native Provider fixtures. */

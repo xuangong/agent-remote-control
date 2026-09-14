@@ -24,7 +24,7 @@ export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
 export AGENT_HOST_PROVIDERS=claude
 export AGENT_HOST_CLAUDE="$PWD/.runtime/claude/node_modules/.bin/claude"
 export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
-pnpm agent-host start
+pnpm agent-remote-controller start
 ```
 
 Select **Claude Code · <Host name> · Online**, choose the workspace, and open a session. Creation initializes the native session without sending a model prompt. Send a message to begin the first turn.
@@ -42,7 +42,7 @@ For a separate profile, create the directory and configure Claude using the same
 ```bash
 mkdir -p .runtime/claude-home
 CLAUDE_CONFIG_DIR="$PWD/.runtime/claude-home" .runtime/claude/node_modules/.bin/claude
-AGENT_HOST_CLAUDE_HOME="$PWD/.runtime/claude-home" pnpm agent-host start
+AGENT_HOST_CLAUDE_HOME="$PWD/.runtime/claude-home" pnpm agent-remote-controller start
 ```
 
 The other Host variables from the launch example must still be set. Native settings and authentication belong in that selected profile. Codex keeps its existing `AGENT_REMOTE_CODEX_HOME`, `AGENT_REMOTE_CODEX_EXECUTABLE`, and `AGENT_REMOTE_WORKSPACE` aliases.
@@ -56,10 +56,10 @@ A browser disconnect leaves the native Query alive. After a backend restart, gen
 ```bash
 export AGENT_HOST_SERVER=http://127.0.0.1:5910
 export AGENT_HOST_REMOTE_KEY='paste-the-new-key'
-pnpm agent-host pair
+pnpm agent-remote-controller pair
 ```
 
-Codex and Claude remain isolated even when their native session identifiers collide. Pairing does not recreate their native sessions or resubmit messages. `pnpm agent-host stop` closes the Host-owned sessions. `pnpm agent-host foreground` is useful for attached diagnostics, but does not expose daemon management commands.
+Codex and Claude remain isolated even when their native session identifiers collide. Pairing does not recreate their native sessions or resubmit messages. `pnpm agent-remote-controller stop` closes the Host-owned sessions. `pnpm agent-remote-controller foreground` is useful for attached diagnostics, but does not expose daemon management commands.
 
 ## Supported controls and diagnosis
 

@@ -18,13 +18,15 @@
     "compatibility:check": "node scripts/compatibility.mjs --check",
     "lint:docs": "bash scripts/lint-mermaid.sh docs",
     "bdb": "node packages/agent-remote-debugger/dist/cli.js",
-    "agent-host": "node packages/agent-host/dist/cli.js",
+    "agent-remote-controller": "node packages/agent-host/dist/cli.js",
     "test:copilot": "node scripts/run-tests.mjs copilot",
     "start:gateway-relay": "pnpm --filter agent-remote-lab exec tsx src/server/gateway.ts",
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",
     "test:cloudflare": "node scripts/run-tests.mjs cloudflare",
     "build:relay": "node scripts/build-relay.mjs",
-    "relay:local": "node scripts/relay-local.mjs"
+    "relay:local": "node scripts/relay-local.mjs",
+    "build:agent-remote-controller": "node scripts/build-agent-host.mjs",
+    "test:agent-remote-controller-package": "node scripts/run-tests.mjs host-package"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

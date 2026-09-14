@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 
 const mode = process.argv[2] ?? 'unit';
 const commands = {
+  'host-package': ['exec', 'node', '--test', '--test-timeout=180000', 'scripts/agent-host-cli.test.mjs', 'scripts/agent-host-package.test.mjs'],
   cloudflare: ['--filter', '@borgee/agent-remote-cloudflare', 'run', 'test', '--hookTimeout=30000'],
   copilot: ['--filter', '@borgee/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
   setup: ['exec', 'node', '--test', '--test-timeout=15000', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs'],

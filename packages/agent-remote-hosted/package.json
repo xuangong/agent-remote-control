@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --testTimeout=10000 --hookTimeout=10000"
+    "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
     "@borgee/agent-remote-protocol": "workspace:*"

@@ -50,7 +50,7 @@ its own checkout. Agents does not import sibling source or workspace packages.
 Build from the Agents worktree with Node 22+ and pnpm 10:
 
 ```sh
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
 pnpm build:relay
 pnpm --filter @borgee/agent-remote-cloudflare run build
 pnpm --filter @borgee/agent-remote-cloudflare exec wrangler deploy --dry-run
@@ -215,6 +215,11 @@ cannot certify Workers behavior, and neither can certify provider-native SDKs.
 - Gateway authority renews every 60 seconds with a maximum 120-second lease.
   Request/frame checks enforce expiry even if an alarm is delayed. A failed
   authority check cannot prolong access.
+- Browser authorization is checked when an HTTP request is admitted. An already
+  pending Host catalog/snapshot RPC does not recheck the browser lease before
+  returning its result. This existing behavior means logout/expiry is not a
+  cancellation guarantee for admitted HTTP requests; active stream revocation
+  and checks on subsequent requests remain enforced.
 - Node snapshots remain signed and bound to the configured secret and origins.
   DO records also validate the configuration binding. Secret rotation or origin
   changes require an explicit migration/reset; neither silently starts empty.
@@ -236,3 +241,38 @@ the same cutoff for its internal outgoing queue. It reports the measurement as
 unavailable, not as an empty queue. Slow-peer memory behavior remains part of
 production load acceptance; no additional acknowledgement wire protocol is added.
 Incoming frames are assembled by workerd before application size validation.
+
+## Verified local acceptance
+
+The 2026-09-14 implementation was exercised with real Gateway SQLite identities,
+scripted Host WebSockets, and Chromium against Node, Node Docker, Workers/workerd,
+and Workers Docker. The contracts verify login, selected/shared Hosts, per-user
+catalogs, cumulative creation allowance, idempotent retry, unknown reservations,
+revocation, logout and SIGKILL recovery using the same retained state.
+
+Focused regression includes 31 portable-core tests, 43 Node HTTP/WS and state
+adapter tests, and 7 real workerd scenarios. Workers scenarios additionally cover
+atomic SQL rollback, persisted configuration fingerprints, alarm renewal and
+storage-failure recovery, frame limits and registration deadlines. Gateway's local
+CI passed 3593 tests with one existing skip, plus type checks, lint, UI build and
+Cloudflare dry-run. No provider CLI or production identity was used for these
+runtime contracts.
+
+The final ARC workspace build and type checks passed. The workspace regression
+passed 1479 tests with six skips while excluding native CLI test entrypoints:
+
+```sh
+pnpm -r run test --hookTimeout=30000 \
+  --exclude '**/*.local.test.ts' --exclude '**/codex-host-process.test.ts'
+```
+
+Run that command with an outer process deadline (540 seconds for this acceptance).
+Compatibility metadata was regenerated and verified after the final test-script
+change. The complete runtime diff and the final packaging adjustments passed
+independent review; the admitted-HTTP authorization boundary above predates this
+runtime extraction and is retained explicitly.
+
+This evidence does not constitute an actual Cloudflare or SSH deployment. Public
+DNS/TLS, the production login account, deployment replacement, and realistic
+streaming load remain deployment acceptance checks. The worktrees do not modify
+or replace existing local service stacks when running the isolated contracts.

@@ -40,6 +40,15 @@
         "packages/agent-provider-sdk/package.json",
         "packages/agent-provider-sdk/src",
         "packages/agent-provider-sdk/tsconfig.json",
+        "packages/agent-remote-cloudflare/.dev.vars.example",
+        "packages/agent-remote-cloudflare/README.md",
+        "packages/agent-remote-cloudflare/package.json",
+        "packages/agent-remote-cloudflare/scripts",
+        "packages/agent-remote-cloudflare/src",
+        "packages/agent-remote-cloudflare/test",
+        "packages/agent-remote-cloudflare/tsconfig.json",
+        "packages/agent-remote-cloudflare/vitest.config.ts",
+        "packages/agent-remote-cloudflare/wrangler.jsonc",
         "packages/agent-remote-debugger/README.md",
         "packages/agent-remote-debugger/package.json",
         "packages/agent-remote-debugger/src",
@@ -48,6 +57,9 @@
         "packages/agent-remote-dsh/scripts",
         "packages/agent-remote-dsh/src",
         "packages/agent-remote-dsh/tsconfig.json",
+        "packages/agent-remote-hosted/package.json",
+        "packages/agent-remote-hosted/src",
+        "packages/agent-remote-hosted/tsconfig.json",
         "packages/agent-remote-lab/README.md",
         "packages/agent-remote-lab/e2e",
         "packages/agent-remote-lab/index.html",
@@ -77,7 +89,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:6cc7845ad67774de168bf666b2c8dc1c19ec1fa23e9f9177708f22becacbf6a0"
+      "digest": "sha256:a6bc7c09b85914f99420844f85dda7bb4d0b0f51de7f38a77e34df75770c14d1"
     }
   },
   "providers": [

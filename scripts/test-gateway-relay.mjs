@@ -143,7 +143,7 @@ try {
   assert.equal(privateCatalog.status, 200); assert.equal(privateCatalog.body.items.length, 1);
   assert.equal(privateCatalog.body.items[0].title, 'Shared topic');
   await other.reload();
-  await other.getByRole('button', { name: 'New session', exact: true }).waitFor();
+  await other.getByRole('status').filter({ hasText: 'Session creation allowance used: 1 / 1.' }).waitFor();
   assert.equal(await other.getByRole('button', { name: 'New session', exact: true }).isDisabled(), true);
   await other.screenshot({ path: join(temporary, 'shared-controller.png'), fullPage: true });
   assert.equal((await shareRequest('PUT', { email: 'bob@example.com', sessionLimit: 2 })).status, 200);

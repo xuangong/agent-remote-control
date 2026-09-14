@@ -1,4 +1,4 @@
-import type { HostPairingService, PairingInvitation, RemoteHost } from './components/HostPairing.js';
+import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult } from './components/HostPairing.js';
 export interface SessionSummary {
   nativeSessionId: string;
   providerId: string;
@@ -45,12 +45,22 @@ export class RemoteHostClient implements HostPairingService {
   private async request<T>(path: string, method = 'GET'): Promise<T> {
     const response = await fetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: '{}' } : {}) });
     const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? 'Remote Host service is unavailable.');
+    if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', response.status === 403 ? body.code : undefined);
     return body as T;
   }
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
   pair(): Promise<PairingInvitation> { return this.request('pairings', 'POST'); }
+  async rotate(hostId: string): Promise<{ ok: true; status: 'pending' | 'rotated' }> {
+    const value = await this.request<{ ok?: boolean; status?: string }>(`hosts/${encodeURIComponent(hostId)}/rotate`, 'POST');
+    if (value.ok !== true || !['pending', 'rotated'].includes(value.status ?? '')) throw new Error('The rotation result could not be confirmed. Refresh before trying again.');
+    return value as { ok: true; status: 'pending' | 'rotated' };
+  }
+  async stop(hostId: string): Promise<{ results: HostStopResult[] }> {
+    const value = await this.request<{ results?: HostStopResult[] }>(`hosts/${encodeURIComponent(hostId)}/stop`, 'POST');
+    if (!Array.isArray(value.results) || !value.results.every(result => result && typeof result.agentId === 'string' && ['cancelled', 'unsupported', 'failed'].includes(result.status) && (result.message === undefined || typeof result.message === 'string'))) throw new Error('The stop results could not be confirmed. Work may still be running.');
+    return { results: value.results };
+  }
   async revoke(hostId: string): Promise<void> { await this.request(`hosts/${encodeURIComponent(hostId)}/revoke`, 'POST'); }
 }

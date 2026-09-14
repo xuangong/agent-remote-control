@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react';
+import { HostSecurityActions } from './HostSecurityActions.js';
+import { ReauthenticationNotice } from './ReauthenticationNotice.js';
+import { needsReauthentication } from '../security-client.js';
 
 export interface HostProvider { providerId: string; displayName: string }
 export interface RemoteHost {
   id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
+  credentialRotation?: boolean;
   access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
 }
 export interface PairingInvitation { id?: string; key: string; expiresAt: string; serverUrl: string; command?: string }
+export interface HostStopResult { agentId: string; status: 'cancelled' | 'unsupported' | 'failed'; message?: string }
 export interface HostPairingService {
   invitation?: PairingInvitation;
   hosts(): Promise<{ hosts: RemoteHost[] }>;
   pair(): Promise<PairingInvitation>;
   revoke?(hostId: string): Promise<void>;
+  rotate?(hostId: string): Promise<{ ok: true; status: 'pending' | 'rotated' }>;
+  stop?(hostId: string): Promise<{ results: HostStopResult[] }>;
 }
 
 export function HostPairing({ service, selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession, managementVisible = true }: {
@@ -22,6 +29,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
   const selectedHost = hosts.find(host => host.id === selectedHostId);
   const quota = selectedHost?.sessionQuota;
   const quotaExhausted = quota !== undefined && quota.used >= quota.limit;
+  const [reauthenticate, setReauthenticate] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [invitation, setInvitation] = useState<PairingInvitation | undefined>(service.invitation);
   const [pairing, setPairing] = useState(false);
@@ -38,9 +46,10 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
   async function pair(): Promise<void> {
     if (pairing) return;
     setPairing(true);
+    setReauthenticate(false);
     setFailure(undefined);
     try { const next = await service.pair(); service.invitation = next; setInvitation(next); setCopied(false); setShowPairing(true); }
-    catch (error) { setFailure(error instanceof Error ? error.message : 'Could not create a pairing key.'); }
+    catch (error) { if (needsReauthentication(error)) { setReauthenticate(true); setInvitation(undefined); service.invitation = undefined; } else setFailure(error instanceof Error ? error.message : 'Could not create a pairing key.'); }
     finally { setPairing(false); }
   }
 
@@ -66,14 +75,16 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     <div hidden={!managementVisible}>
     {selectedHost?.managed && selectedHost.access !== 'shared' && service.revoke ? <button type="button" onClick={() => setRevokeTarget(selectedHost)}>Revoke Host</button> : null}
     {revokeTarget ? <div role="group" aria-label="Confirm Host revocation">
-      <p>Revoke {revokeTarget.name}? Its connection and sessions will close. Pair it again to restore access.</p>
+      <p>Revoke {revokeTarget.name}? Its remote connections will close. Running work may continue. Use Stop work first to request cancellation. Pair it again to restore access.</p>
       <button type="button" disabled={revoking} onClick={() => void revoke()}>{revoking ? 'Revoking…' : 'Confirm revoke'}</button>
       <button type="button" disabled={revoking} onClick={() => setRevokeTarget(undefined)}>Cancel</button>
     </div> : null}
+    {selectedHost ? <HostSecurityActions key={selectedHost.id} host={selectedHost} service={service} /> : null}
     {onNewSession ? <button type="button" disabled={quotaExhausted} onClick={onNewSession}>New session</button> : null}
     <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>
     </div>
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
+    {managementVisible && reauthenticate ? <ReauthenticationNotice /> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
     {managementVisible && showPairing ? <div className="lab-pairing-details">
       <p className="lab-control-note">Generate a pairing key, then run <code>agent-remote-controller start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>agent-remote-controller pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>

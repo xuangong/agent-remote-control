@@ -197,3 +197,33 @@ it('preserves only the session return path for a restarted sign-in', async () =>
   expect(sessionStorage.getItem('agent-remote-sign-in-return')).toBe('/?host=desk&provider=claude&session=native');
   sessionStorage.removeItem('agent-remote-sign-in-return');
 });
+
+it('manages browser sessions without unmounting drafts and clears private state after revoking this browser', async () => {
+  const requests: Array<{ url: string; body?: BodyInit | null }> = [];
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    requests.push({ url, body: init?.body });
+    if (url === '/auth/status') return Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 120000 });
+    if (url === '/auth/sessions') return Response.json({ sessions: [{ id: 'this-browser', label: 'Chrome on Mac', createdAt: 1000, lastSeenAt: 2000, expiresAt: Date.now() + 3600000, current: true }], authenticatedAt: 1000, recentAuthentication: false });
+    if (url === '/auth/audit') return Response.json({ events: [] });
+    return Response.json({ ok: true, current: true });
+  });
+  const view = await render(<GatewayController>{() => <input aria-label="Draft" defaultValue="unsent" />}</GatewayController>);
+  const draft = view.querySelector('input')!;
+  sessionStorage.setItem('agent-remote:recovery:test:drafts', 'private draft');
+  const button = (label: string) => [...view.querySelectorAll('button')].find(value => value.textContent === label)!;
+  expect(button('Security')).toBeDefined();
+  await act(async () => button('Security').click());
+  expect(draft.closest('[hidden][inert]')).not.toBeNull();
+  expect(view.textContent).toContain('Chrome on Mac');
+  await act(async () => button('Back to conversation').click());
+  expect(view.querySelector('input')).toBe(draft);
+  expect(draft.closest('[hidden]')).toBeNull();
+  await act(async () => button('Security').click());
+  await act(async () => button('Sign out this browser').click());
+  expect(requests.some(value => value.url === '/auth/sessions/revoke')).toBe(false);
+  await act(async () => button('Confirm sign out').click());
+  expect(requests).toContainEqual({ url: '/auth/sessions/revoke', body: JSON.stringify({ id: 'this-browser' }) });
+  expect(requests.some(value => value.url === '/auth/logout')).toBe(false);
+  expect(sessionStorage.getItem('agent-remote:recovery:test:drafts')).toBeNull();
+  expect(view.querySelector('input')).toBeNull();
+});

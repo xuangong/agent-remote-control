@@ -20,3 +20,22 @@ it('revokes the selected Host over the user-scoped HTTP endpoint', async () => {
     expect(requests).toEqual([{ method: 'POST', path: '/u/tenant/v1/remote/hosts/host%2Fone/revoke', body: '{}', contentType: 'application/json' }]);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });
+
+it('sends owner stop and rotation requests without credentials and retains fresh-auth error codes', async () => {
+  const paths: string[] = [];
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const part of request) body += String(part);
+    paths.push(request.url!);
+    expect(request.method).toBe('POST'); expect(body).toBe('{}'); expect(request.headers.authorization).toBeUndefined();
+    response.setHeader('content-type', 'application/json');
+    if (request.url!.endsWith('/rotate')) { response.statusCode = 403; response.end(JSON.stringify({ code: 'reauthentication_required', loginUrl: 'https://untrusted.example' })); }
+    else response.end(JSON.stringify({ results: [{ agentId: 'one', status: 'unsupported' }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new RemoteHostClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/tenant/`);
+    await expect(client.rotate('host/one')).rejects.toMatchObject({ code: 'reauthentication_required' });
+    expect(await client.stop('host/one')).toEqual({ results: [{ agentId: 'one', status: 'unsupported' }] });
+    expect(paths).toEqual(['/u/tenant/v1/remote/hosts/host%2Fone/rotate', '/u/tenant/v1/remote/hosts/host%2Fone/stop']);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

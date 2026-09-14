@@ -2,6 +2,7 @@ import { controllerPath, readControllerLocation } from '@borgee/agent-remote-hos
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { signInReturnKey } from '@borgee/agent-remote-hosted/access-page';
+import { SecurityPanel } from './components/SecurityPanel.js';
 import { AccessPage } from './components/AccessPage.js';
 
 import { clearConversationRecovery } from './conversation-recovery.js';
@@ -21,6 +22,8 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
   const [access, setAccess] = useState<Access | null>();
   const [failed, setFailed] = useState(false);
   const [suspended, setSuspended] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const securityTrigger = useRef<HTMLElement>();
   const [attempt, setAttempt] = useState(0);
   const stop = useRef<() => void>(() => undefined);
   useEffect(() => {
@@ -83,9 +86,12 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
     void request(false).finally(() => clearTimeout(deadline));
     return () => { abort.abort(); clearTimeout(deadline); clearTimeout(expiry); clearTimeout(refresh); clearTimeout(recovery); };
   }, [attempt]);
-  async function logout(): Promise<void> {
-    stop.current();
+  function signedOut(): void {
+    stop.current(); setSecurityOpen(false);
     clearConversationRecovery();
+  }
+  async function logout(): Promise<void> {
+    signedOut();
     try {
       const response = await fetch('/auth/logout', { ...jsonPost, credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok && response.status !== 401) setFailed(true);
@@ -104,9 +110,18 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
   const entry = (state: Parameters<typeof AccessPage>[0]['state']) => <AccessPage state={state} sessionLink={sessionLink}
     loginUrl={'/auth/login' + returnPath.slice(1)} onLogin={rememberTarget}
     onRetry={() => { setAccess(undefined); setFailed(false); setSuspended(false); setAttempt(value => value + 1); }} />;
+  function closeSecurity() {
+    setSecurityOpen(false);
+    requestAnimationFrame(() => securityTrigger.current?.focus());
+  }
+  const accountAction = <>
+    <button type="button" onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
+    <button type="button" onClick={() => void logout()}>Sign out</button>
+  </>;
   if (access) return <>
-    {!suspended && <button type="button" className="gateway-sign-out" onClick={() => void logout()}>Sign out</button>}
-    <div className="gateway-private" key={access.basePath} hidden={suspended} {...(suspended ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, <button type="button" onClick={() => void logout()}>Sign out</button>)}</div>
+    <div className="gateway-sign-out gateway-account-actions" hidden={suspended || securityOpen}>{accountAction}</div>
+    <div className="gateway-private" key={access.basePath} hidden={suspended || securityOpen} {...(suspended || securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, accountAction)}</div>
+    {securityOpen && !suspended ? <SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /> : null}
     {suspended ? entry('restoring') : null}
   </>;
   return entry(access === undefined ? 'checking' : failed ? 'unavailable' : 'signin');

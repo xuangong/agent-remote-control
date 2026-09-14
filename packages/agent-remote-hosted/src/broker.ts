@@ -475,6 +475,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); } catch { return rejectUpgrade(503); }
     if (host.streams.size >= 128) return rejectUpgrade(429);
     return { accept(client: RelaySocket) {
+      if (host.streams.size >= 128) { client.close(1013, 'Remote stream capacity reached'); return; }
       track(client);
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);

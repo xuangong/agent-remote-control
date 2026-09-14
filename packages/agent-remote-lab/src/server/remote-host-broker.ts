@@ -42,12 +42,13 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
         if (!broker.handlesRequest(url)) {
           for (const handler of requests) handler.call(server, request, response); return;
         }
-        void broker.handleRequest(webRequest(request, url), context(request)).then(result => {
+        void Promise.resolve().then(() => broker.handleRequest(webRequest(request, url), context(request))).then(result => {
           if (result) return writeResponse(response, result);
         }).catch(error => {
           if (response.destroyed || response.writableEnded) return;
-          response.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-          response.end(JSON.stringify({ code: 'host_operation_failed', error: error instanceof Error ? error.message : 'Remote Host operation failed.' }));
+          const invalidRequest = error instanceof InvalidHttpRequest;
+          response.writeHead(invalidRequest ? 400 : 503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+          response.end(JSON.stringify({ code: invalidRequest ? 'invalid_request' : 'host_operation_failed', error: error instanceof Error ? error.message : 'Remote Host operation failed.' }));
         });
       });
       server.on('upgrade', (request, socket, head) => {
@@ -55,10 +56,10 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
         if (!broker.handlesUpgrade(url)) {
           for (const handler of upgrades) handler.call(server, request, socket, head); return;
         }
-        void broker.prepareUpgrade(webRequest(request, url, false), context(request)).then(prepared => {
+        void Promise.resolve().then(() => broker.prepareUpgrade(webRequest(request, url, false), context(request))).then(prepared => {
           if (!prepared || prepared instanceof Response) return rejectUpgrade(socket, prepared?.status ?? 404);
           websockets.handleUpgrade(request, socket, head, client => prepared.accept(relaySocket(client)));
-        }).catch(() => rejectUpgrade(socket, 503));
+        }).catch(error => rejectUpgrade(socket, error instanceof InvalidHttpRequest ? 400 : 503));
       });
     },
     async close() {
@@ -72,19 +73,24 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
 function local(request: IncomingMessage, origin: string): boolean {
   return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress ?? '') && (!request.headers.origin || request.headers.origin === origin);
 }
+class InvalidHttpRequest extends Error {
+  constructor() { super('The HTTP request is unsupported.'); }
+}
 function webRequest(request: IncomingMessage, url: URL, body = true): Request {
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(request.headers)) {
-    if (Array.isArray(value)) for (const item of value) headers.append(key, item);
-    else if (value !== undefined) headers.set(key, value);
-  }
-  const method = request.method ?? 'GET';
-  const init: RequestInit & { duplex?: 'half' } = { method, headers };
-  if (body && method !== 'GET' && method !== 'HEAD') {
-    init.body = Readable.toWeb(request) as ReadableStream<Uint8Array>;
-    init.duplex = 'half';
-  }
-  return new Request(url, init);
+  try {
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(request.headers)) {
+      if (Array.isArray(value)) for (const item of value) headers.append(key, item);
+      else if (value !== undefined) headers.set(key, value);
+    }
+    const method = request.method ?? 'GET';
+    const init: RequestInit & { duplex?: 'half' } = { method, headers };
+    if (body && method !== 'GET' && method !== 'HEAD') {
+      init.body = Readable.toWeb(request) as ReadableStream<Uint8Array>;
+      init.duplex = 'half';
+    }
+    return new Request(url, init);
+  } catch { throw new InvalidHttpRequest(); }
 }
 async function writeResponse(response: ServerResponse, result: Response) {
   const body = await result.text();

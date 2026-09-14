@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -36,6 +36,24 @@ async function providerHost(url: string, key: string, installationId = 'provider
   return { socket, id: JSON.parse(message.toString()).hostId as string, providers };
 }
 describe('Remote Host broker', () => {
+  it.each([
+    { path: '/v1/remote/hosts', headers: {} },
+    { path: '/ws/remote-host', headers: { connection: 'Upgrade', upgrade: 'websocket' } },
+  ])('rejects unsupported TRACE conversion at $path and keeps serving requests', async ({ path, headers }) => {
+    const f = await setup();
+    const status = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest(f.url + path, { method: 'TRACE', headers }, response => {
+        response.resume(); response.on('end', () => resolve(response.statusCode!));
+      });
+      request.setTimeout(1000, () => request.destroy(new Error('TRACE request exceeded its deadline')));
+      request.on('error', reject); request.end();
+    });
+    expect(status).toBe(400);
+    const response = await fetch(f.url + '/v1/remote/hosts', { signal: AbortSignal.timeout(1000) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ hosts: [] });
+  }, 10_000);
+
   it('issues temporary keys, binds one installation, and keeps disconnected hosts visible', async () => {
     const f = await setup();
     const pair = await (await f.post('/v1/remote/pairings')).json();

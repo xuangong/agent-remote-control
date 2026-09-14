@@ -8,6 +8,7 @@ function transportPair() {
   class Socket implements RelaySocket {
     readyState = 1;
     bufferedAmount = 0;
+    closeCode?: number;
     peer!: Socket;
     messages = new Set<(data: string, binary: boolean) => void>();
     closes = new Set<() => void>();
@@ -15,11 +16,12 @@ function transportPair() {
       if (this.readyState !== 1) throw new Error('Socket is closed');
       queueMicrotask(() => { if (this.peer.readyState === 1) for (const listener of this.peer.messages) listener(data, false); });
     }
-    close() {
+    close(code?: number) {
       if (this.readyState !== 1) return;
       this.readyState = 3;
+      this.closeCode = code;
       for (const listener of this.closes) listener();
-      this.peer.close();
+      this.peer.close(code);
     }
     onMessage(listener: (data: string, binary: boolean) => void) { this.messages.add(listener); return () => { this.messages.delete(listener); }; }
     onClose(listener: () => void) { this.closes.add(listener); return () => { this.closes.delete(listener); }; }
@@ -166,4 +168,36 @@ it('keeps the persisted shared native request identity byte compatible', () => {
   expect(sharing.reserve('host', 'bob', 'codex', 'request-1', 'fingerprint').nativeRequestId).toBe(
     'shared:8346efd12290a4f47c75c7ca87fe63103fd34bc003df16e1f3fd685393cabfe8',
   );
+}, 10_000);
+
+it('limits concurrently prepared streams at acceptance without reserving abandoned preparations', async () => {
+  const { broker, native } = await restoredFixture();
+  let opened = 0;
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type === 'rpc_request') native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: '{"agentId":"agent","nativeSessionId":"native-session"}' }));
+    if (message.type === 'stream_open') {
+      opened += 1;
+      native.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId }));
+    }
+  });
+  const prepare = () => broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/agent/events', { headers: { origin: 'https://relay.example' } }));
+  await Promise.all(Array.from({ length: 129 }, prepare));
+  const preparations = await Promise.all(Array.from({ length: 129 }, prepare));
+  const browsers = preparations.map(preparation => {
+    if (!preparation || preparation instanceof Response) throw new Error('Unaccepted preparations consumed stream capacity');
+    const pair = transportPair(); preparation.accept(pair.server); return pair;
+  });
+  await Promise.resolve();
+  expect(opened).toBe(128);
+  expect(browsers.filter(pair => pair.native.readyState === 1)).toHaveLength(128);
+  expect(browsers[128]!.native.closeCode).toBe(1013);
+  browsers[0]!.native.close();
+  const next = await prepare();
+  if (!next || next instanceof Response) throw new Error('Closed stream capacity was not released');
+  const replacement = transportPair(); next.accept(replacement.server);
+  await Promise.resolve();
+  expect(opened).toBe(129);
+  expect(replacement.native.readyState).toBe(1);
 }, 10_000);

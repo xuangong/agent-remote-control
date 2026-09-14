@@ -24,7 +24,8 @@
     "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "@agent-remote-control/dsh": "workspace:*"
+    "@agent-remote-control/dsh": "workspace:*",
+    "@borgee/agent-remote-hosted": "workspace:*"
   },
   "devDependencies": {
     "@borgee/agent-host": "workspace:*",

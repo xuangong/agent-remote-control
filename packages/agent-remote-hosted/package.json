@@ -1,0 +1,34 @@
+{
+  "name": "@borgee/agent-remote-hosted",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared hosted Host broker with explicit runtime transport ports.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000 --hookTimeout=10000"
+  },
+  "dependencies": {
+    "@borgee/agent-remote-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5"
+  }
+}

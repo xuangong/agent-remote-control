@@ -9,7 +9,7 @@ describe('Claude provider catalog', () => {
       async info() { return undefined; }, async messages() { return []; },
     } });
     expect(await provider.listSessions()).toEqual([{ nativeSessionId: 'native', providerId: 'claude', title: 'Project notes', workspace: '/work',
-      createdAt: '1970-01-01T00:00:01.000Z', updatedAt: '1970-01-01T00:00:02.000Z', state: 'idle' }]);
+      createdAt: '1970-01-01T00:00:01.000Z', updatedAt: '1970-01-01T00:00:02.000Z', state: 'unknown' }]);
   });
 
   it('refuses foreign, malformed and nonexistent native persistence handles before spawning', async () => {

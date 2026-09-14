@@ -303,3 +303,14 @@ it('rejects busy model changes and does not claim deferred writes are confirmed'
   await vi.waitFor(async () => expect((await session.runtimeInfo()).model).toBe('model-b'), {timeout: 1000});
  } finally { await provider.dispose(); }
 }, 10000);
+
+
+it('does not infer idle activity from persisted Copilot metadata', async () => {
+  mock.client.listSessions.mockResolvedValue([{sessionId: 'external', summary: 'Original session', startTime: new Date(1000), modifiedTime: new Date(2000), isRemote: false}]);
+  const provider = new CopilotAgentProvider({executable: '/test/copilot'});
+  try {
+    expect(await provider.listSessions()).toEqual([expect.objectContaining({nativeSessionId: 'external', state: 'unknown'})]);
+    expect(mock.client.resumeSession).not.toHaveBeenCalled();
+    expect(mock.native.rpc.metadata.isProcessing).not.toHaveBeenCalled();
+  } finally { await provider.dispose(); }
+});

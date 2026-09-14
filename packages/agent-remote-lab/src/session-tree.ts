@@ -56,5 +56,5 @@ export function openedEntry(item: OpenedSession, known: readonly SessionEntry[])
 }
 export function sessionStatusLabel(item: SessionEntry): string {
   if (item.observation === 'saved_history') return 'Saved history';
-  return item.status === 'running' ? 'Working' : item.status === 'waiting' ? 'Waiting' : item.status === 'closed' ? 'Closed' : item.status === 'failed' ? 'Failed' : item.status === 'starting' ? 'Starting' : item.status === 'idle' ? 'Ready' : '';
+  return item.status === 'running' ? 'Working' : item.status === 'waiting' ? 'Waiting' : item.status === 'closed' ? 'Closed' : item.status === 'failed' ? 'Failed' : item.status === 'starting' ? 'Starting' : item.status === 'idle' ? 'Idle' : '';
 }

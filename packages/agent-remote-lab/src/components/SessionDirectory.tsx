@@ -134,7 +134,7 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
   </>;
 }
 
-function stateLabel(state: SessionSummary['state']): string { return state === 'running' ? 'Working' : state === 'waiting' ? 'Waiting' : state === 'unavailable' ? 'Unavailable' : 'Ready'; }
+function stateLabel(state: SessionSummary['state']): string { return state === 'running' ? 'Working' : state === 'waiting' ? 'Waiting' : state === 'unavailable' ? 'Unavailable' : state === 'idle' ? 'Idle' : 'Unknown'; }
 function formatTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
 
 export function SessionConfiguration({ directory, providerId, disabled, value, onChange }: {

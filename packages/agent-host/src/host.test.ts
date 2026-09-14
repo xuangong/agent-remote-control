@@ -38,6 +38,25 @@ function fixture(providerId: string) {
 }
 
 describe('Agent Host runtime', () => {
+  it('preserves unknown and observed activity over the real uplink for all native providers', async () => {
+    const broker = await uplinkBroker('host');
+    const registrations = ['codex', 'claude', 'copilot'].map(fixture);
+    let state: 'unknown' | 'idle' | 'running' | 'waiting' = 'unknown';
+    for (const registration of registrations) registration.directory.list = async () => [{...summary(registration.directory.providerId, 'native'), state}];
+    const host = createAgentHost({registrations, installationId: 'installation', name: 'Host', uplink: {url: broker.url, remoteKey: 'key'}});
+    try {
+      await host.ready;
+      for (const activity of ['unknown', 'running', 'waiting', 'idle'] as const) {
+        state = activity;
+        for (const providerId of ['codex', 'claude', 'copilot']) {
+          const result = await broker.rpc('GET', `/remote/catalog?providerId=${providerId}`);
+          expect(result.status).toBe(200);
+          expect(JSON.parse(result.body).items).toEqual([expect.objectContaining({providerId, state: activity})]);
+        }
+      }
+    } finally { await host.close(); await broker.close(); }
+  });
+
   it.each([
     { code: -32603, message: 'thread native already has an active writer' },
     { code: -32600, message: 'thread other already has an active writer' },

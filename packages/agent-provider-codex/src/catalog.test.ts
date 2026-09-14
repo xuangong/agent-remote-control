@@ -13,7 +13,7 @@ it('lists native thread metadata with a cursor and disposes the discovery proces
   const page = await provider.listSessions({ limit: 30, cursor: 'before' });
   expect(page).toEqual({ sessions: [{
     nativeSessionId: 'saved', providerId: 'codex', title: 'Saved task', workspace: '/project',
-    createdAt: '1970-01-01T00:01:40.000Z', updatedAt: '1970-01-01T00:03:20.000Z', state: 'idle',
+    createdAt: '1970-01-01T00:01:40.000Z', updatedAt: '1970-01-01T00:03:20.000Z', state: 'unknown',
   }], nextCursor: 'next' });
   expect(app.requests.find((r) => r.method === 'thread/list')?.params).toMatchObject({ cursor: 'before', limit: 30, sortKey: 'updated_at' });
   expect(app.child.killed).toBe(true);

@@ -7,7 +7,7 @@ export interface CodexSessionSummary {
   workspace?: string;
   createdAt: string;
   updatedAt: string;
-  state: 'idle' | 'running' | 'waiting' | 'unavailable';
+  state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable';
 }
 
 export interface CodexSessionPage { sessions: CodexSessionSummary[]; nextCursor?: string }
@@ -21,13 +21,14 @@ export function readCodexSessionPage(value: unknown): CodexSessionPage {
     if (row.parentThreadId || (isRecord(row.source) && 'subAgent' in row.source)) continue;
     const status = isRecord(row.status) ? row.status : {};
     const flags = Array.isArray(status.activeFlags) ? status.activeFlags : [];
+    // notLoaded is local to this app-server; an external owner may still be working.
     sessions.push({
       nativeSessionId: row.id, providerId: 'codex',
       title: readString(row.name)?.trim() || readString(row.preview)?.trim().slice(0, 160) || row.id,
       ...(readString(row.cwd) ? { workspace: readString(row.cwd) } : {}),
       createdAt: timestamp(row.createdAt), updatedAt: timestamp(row.updatedAt ?? row.createdAt),
       state: status.type === 'active' ? flags.some((flag) => flag === 'waitingOnApproval' || flag === 'waitingOnUserInput') ? 'waiting' : 'running'
-        : status.type === 'systemError' ? 'unavailable' : 'idle',
+        : status.type === 'systemError' ? 'unavailable' : status.type === 'idle' ? 'idle' : 'unknown',
     });
   }
   if (value.nextCursor != null && typeof value.nextCursor !== 'string') throw new Error('Codex thread/list returned an invalid cursor.');

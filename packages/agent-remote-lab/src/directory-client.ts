@@ -7,7 +7,7 @@ export interface SessionSummary {
   model?: string;
   createdAt: string;
   updatedAt: string;
-  state: 'idle' | 'running' | 'waiting' | 'unavailable';
+  state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable';
 }
 export interface SessionCatalogPage { items: SessionSummary[]; hasMore: boolean; nextCursor?: string; revision: string }
 export interface SessionWorkspace { id: string; name: string; path: string }

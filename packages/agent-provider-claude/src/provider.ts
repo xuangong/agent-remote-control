@@ -12,7 +12,7 @@ export interface ClaudeSessionSummary {
   workspace?: string;
   createdAt: string;
   updatedAt: string;
-  state: 'idle' | 'running' | 'waiting' | 'unavailable';
+  state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable';
 }
 export interface ClaudeAgentProviderOptions extends ClaudeSessionOptions { catalog?: ClaudeCatalog }
 
@@ -26,9 +26,10 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
   }
 
   async listSessions(): Promise<ClaudeSessionSummary[]> {
+    // Persisted SDK metadata does not describe an external query's current activity.
     return (await this.catalog.list()).map((entry) => ({ nativeSessionId: entry.sessionId, providerId: 'claude',
       title: entry.customTitle || entry.summary || entry.firstPrompt || 'Claude session', ...(entry.cwd ? { workspace: entry.cwd } : {}),
-      createdAt: new Date(entry.createdAt ?? entry.lastModified).toISOString(), updatedAt: new Date(entry.lastModified).toISOString(), state: 'idle' }));
+      createdAt: new Date(entry.createdAt ?? entry.lastModified).toISOString(), updatedAt: new Date(entry.lastModified).toISOString(), state: 'unknown' }));
   }
 
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {

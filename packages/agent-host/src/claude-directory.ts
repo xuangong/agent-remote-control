@@ -19,7 +19,7 @@ export function createClaudeSessionDirectory(
       summaries.set(nativeSessionId, { nativeSessionId, providerId: 'claude', title: previous?.title ?? 'New Claude session',
         ...(info.cwd ?? previous?.workspace ? { workspace: info.cwd ?? previous?.workspace } : {}),
         createdAt: previous?.createdAt ?? entry.createdAt, updatedAt: previous?.updatedAt ?? entry.createdAt,
-        state: info.status === 'running' ? 'running' : info.status === 'waiting' ? 'waiting' : info.status === 'failed' ? 'unavailable' : 'idle' });
+        state: info.status === 'running' ? 'running' : info.status === 'waiting' ? 'waiting' : info.status === 'failed' ? 'unavailable' : info.status === 'idle' ? 'idle' : 'unknown' });
     }
     return [...summaries.values()];
   }

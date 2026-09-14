@@ -8,7 +8,7 @@ export interface RemoteSessionSummary {
   model?: string;
   createdAt: string;
   updatedAt: string;
-  state: 'idle' | 'running' | 'waiting' | 'unavailable';
+  state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable';
 }
 
 export interface RemoteCatalogPage {

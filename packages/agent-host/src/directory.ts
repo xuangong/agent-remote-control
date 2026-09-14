@@ -30,7 +30,7 @@ export function createCodexSessionDirectory(
         ...(info.cwd ?? previous?.workspace ? { workspace: info.cwd ?? previous?.workspace } : {}),
         ...(info.model ? { model: info.model } : {}), createdAt: previous?.createdAt ?? entry.createdAt,
         updatedAt: previous?.updatedAt ?? entry.createdAt, state: info.status === 'running' ? 'running' : info.status === 'waiting' ? 'waiting'
-          : info.status === 'failed' ? 'unavailable' : 'idle' });
+          : info.status === 'failed' ? 'unavailable' : info.status === 'idle' ? 'idle' : 'unknown' });
     }
     return [...summaries.values()];
   }

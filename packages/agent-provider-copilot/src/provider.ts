@@ -8,7 +8,7 @@ import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig }
 import { CopilotAgentSession } from './session.js';
 import { deadline } from './channel.js';
 export interface CopilotAgentProviderOptions { executable?: string; env?: Record<string, string | undefined>; requestTimeoutMs?: number; onDiagnostic?: (message: string) => void; nativeSessionConfig?: Pick<SessionConfig, 'provider' | 'skillDirectories'>; useLoggedInUser?: boolean; }
-export interface CopilotSessionSummary { nativeSessionId: string; providerId: string; title: string; workspace?: string; createdAt: string; updatedAt: string; state: 'idle' | 'running' | 'waiting' | 'unavailable'; }
+export interface CopilotSessionSummary { nativeSessionId: string; providerId: string; title: string; workspace?: string; createdAt: string; updatedAt: string; state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable'; }
 export function resolveCopilotExecutable(): string {
   const packagePath = createRequire(import.meta.url).resolve('@github/copilot/package.json');
   const manifest = JSON.parse(readFileSync(packagePath, 'utf8')) as {bin: {copilot: string}};
@@ -33,7 +33,8 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
   }
   async listSessions(): Promise<CopilotSessionSummary[]> {
     await this.ready();
-    return (await deadline(this.client.listSessions(), this.options.requestTimeoutMs ?? 15000, 'Copilot session discovery')).map(s => ({ nativeSessionId: s.sessionId, providerId: 'copilot', title: s.summary || 'Copilot session', workspace: s.context?.workingDirectory, createdAt: s.startTime.toISOString(), updatedAt: s.modifiedTime.toISOString(), state: 'idle' }));
+    // Persisted metadata does not establish activity in another CLI server.
+    return (await deadline(this.client.listSessions(), this.options.requestTimeoutMs ?? 15000, 'Copilot session discovery')).map(s => ({ nativeSessionId: s.sessionId, providerId: 'copilot', title: s.summary || 'Copilot session', workspace: s.context?.workingDirectory, createdAt: s.startTime.toISOString(), updatedAt: s.modifiedTime.toISOString(), state: 'unknown' }));
   }
   async createSession(config: AgentSessionConfig): Promise<CopilotAgentSession> {
     if (config.planning) throw new Error('Copilot planning controls are not supported.');

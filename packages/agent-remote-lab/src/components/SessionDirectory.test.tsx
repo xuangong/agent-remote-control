@@ -62,3 +62,19 @@ it('shows unopened native children in discovery and preserves the opened hierarc
   await act(async () => (discovery.querySelector('[aria-label="Collapse root"]') as HTMLButtonElement).click());
   expect(discovery.querySelector('.lab-session-tree .lab-session-tree')).toBeNull();
 });
+
+
+it('distinguishes unknown activity from idle and keeps unknown sessions openable', async () => {
+  const directory = new SessionDirectoryClient('http://localhost');
+  const states = ['unknown', 'idle', 'running', 'waiting', 'unavailable'] as const;
+  vi.spyOn(directory, 'list').mockResolvedValue({items: states.map(state => ({...summary(state), state})), hasMore: false, revision: '1'});
+  const onOpen = vi.fn();
+  const container = await render(<SessionDirectory directory={directory} providerId="recorded" opened={[]} busy={false} revision={0} onOpen={onOpen} onSelect={() => {}} onClose={() => {}} />);
+  const rows = [...container.querySelectorAll<HTMLButtonElement>('.lab-session-row')];
+  expect(rows.map(row => row.querySelector('span')?.textContent)).toEqual([
+    expect.stringContaining('Unknown'), expect.stringContaining('Idle'), expect.stringContaining('Working'), expect.stringContaining('Waiting'), expect.stringContaining('Unavailable'),
+  ]);
+  expect(rows.map(row => row.disabled)).toEqual([false, false, false, false, true]);
+  await act(async () => rows[0]!.click());
+  expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({nativeSessionId: 'unknown'}));
+});

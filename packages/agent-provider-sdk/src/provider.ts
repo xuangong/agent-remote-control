@@ -32,6 +32,14 @@ export interface AgentPersistenceHandle {
   opaque: string;
 }
 
+/** An adapter-confirmed ownership conflict, with a message safe for remote clients. */
+export class AgentSessionInUseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentSessionInUseError';
+  }
+}
+
 export interface AgentSessionConfig {
   sessionId: string;
   cwd?: string;

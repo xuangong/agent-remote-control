@@ -137,6 +137,15 @@ export AGENT_HOST_ALLOWED_WORKSPACE_ROOTS='["/Users/me/projects/app","/Users/me/
 ```
 
 The default workspace must be inside an allowed root. Paths must exist; the
+Codex session discovery lists saved threads, including threads owned by another
+Codex client. Opening a thread requires the native writer lock. If another client
+owns it, the Host returns HTTP 409 with `session_in_use`. Release the session in
+the original client, or exit that client, before retrying. Finishing a turn alone
+does not release the session. The Host does not take over the lock or silently
+fork the conversation. A CLI older than the client that wrote the history may
+also be unable to read its stored format; configure a compatible
+`AGENT_HOST_CODEX` executable and restart the Host after validating it.
+
 Host checks real paths, including symbolic links, before creating or importing
 sessions and before native input or settings mutations. Catalogs omit sessions
 outside those roots and sessions whose workspace cannot be established. Native

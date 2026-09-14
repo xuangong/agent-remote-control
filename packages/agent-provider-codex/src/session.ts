@@ -22,7 +22,7 @@ import type {
   ProviderStreamItem,
 } from '@borgee/agent-provider-sdk';
 
-import { CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@borgee/agent-provider-sdk';
+import { AgentSessionInUseError, CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@borgee/agent-provider-sdk';
 import { mapCodexQuestion, mapCodexQuestionResponse } from './questions.js';
 import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.js';
 import { mapCodexPermissions } from './permissions.js';
@@ -319,6 +319,12 @@ export class CodexAppServerSession implements AgentSession {
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),
+    }).catch((error: unknown) => {
+      if (error instanceof CodexAppServerRpcError && error.code === -32600
+        && error.message === `thread ${handle.sessionId} already has an active writer`) {
+        throw new AgentSessionInUseError('This session is in use by another Codex client. Close the original Codex client, then try opening this session again.');
+      }
+      throw error;
     });
     session.setThreadFromResponse(resumed, 'thread/resume');
     const history = await transport.request('thread/read', {

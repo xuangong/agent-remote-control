@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createCodexSessionDirectory } from './directory.js';
 import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory } from './host.js';
+import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
+import { createScriptedAppServer } from '../../agent-provider-codex/src/test-utils/scripted-app-server.js';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
   interactions: { question: false, planApproval: false, toolApproval: false } };
@@ -36,6 +38,53 @@ function fixture(providerId: string) {
 }
 
 describe('Agent Host runtime', () => {
+  it.each([
+    { code: -32603, message: 'thread native already has an active writer' },
+    { code: -32600, message: 'thread other already has an active writer' },
+    { code: -32600, message: 'private native failure: test-secret-value' },
+  ])('keeps unrelated native resume errors private ($code, $message)', async failure => {
+    const app = createScriptedAppServer({ 'thread/resume': () => { throw Object.assign(new Error(failure.message), { code: failure.code }); } });
+    const adapter = new CodexAppServerProvider({ spawn: () => app.child });
+    const host = createAgentHostRuntime({ registrations: [{ adapter, directory: createCodexSessionDirectory(adapter, []) }] });
+    try {
+      const result = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'relay',
+        body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native' }) });
+      expect(result.status).toBe(503);
+      expect(JSON.parse(result.body)).toEqual({ code: 'mutation_outcome_unknown', error: 'Remote Host operation outcome is unknown.' });
+      expect(app.child.killed).toBe(true);
+    } finally { await host.close(); }
+  });
+
+  it('reports a native writer conflict over the uplink and allows attachment after the owner releases it', async () => {
+    const broker = await uplinkBroker('host');
+    let occupied = true;
+    const apps: ReturnType<typeof createScriptedAppServer>[] = [];
+    const adapter = new CodexAppServerProvider({ spawn: () => {
+      const app = createScriptedAppServer({
+        'thread/resume': () => {
+          if (occupied) throw Object.assign(new Error('thread native already has an active writer'), { code: -32600 });
+          return { thread: { id: 'native' }, cwd: '/workspace' };
+        },
+        'thread/read': () => ({ thread: { id: 'native', turns: [] } }),
+      });
+      apps.push(app); return app.child;
+    } });
+    const host = createAgentHost({ registrations: [{ adapter, directory: createCodexSessionDirectory(adapter, []) }],
+      installationId: 'installation', name: 'Host', uplink: { url: broker.url, remoteKey: 'key' } });
+    try {
+      await host.ready;
+      const failed = await broker.rpc('POST', '/remote/attach', 'relay', { providerId: 'codex', nativeSessionId: 'native' });
+      expect(failed.status).toBe(409);
+      expect(JSON.parse(failed.body)).toMatchObject({ code: 'session_in_use', error: expect.stringMatching(/another Codex client/i) });
+      expect(apps[0]!.child.killed).toBe(true);
+      occupied = false;
+      const opened = await broker.rpc('POST', '/remote/attach', 'relay', { providerId: 'codex', nativeSessionId: 'native' });
+      expect(opened.status).toBe(200);
+      expect(JSON.parse(opened.body)).toEqual({ agentId: 'relay', nativeSessionId: 'native' });
+      expect(apps.flatMap(app => app.requests).some(request => request.method === 'turn/start')).toBe(false);
+    } finally { await host.close(); await broker.close(); }
+  });
+
   it('advertises Codex, Claude and Copilot over real WebSockets and preserves provider-scoped identities across re-pair', async () => {
     const first = await uplinkBroker('first'); const second = await uplinkBroker('second');
     const copilot = fixture('copilot');

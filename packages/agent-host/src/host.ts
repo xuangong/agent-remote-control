@@ -1,5 +1,6 @@
 import { HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@borgee/agent-provider-sdk';
+import { AgentSessionInUseError } from '@borgee/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteSessionSummary } from '@borgee/agent-remote-relay';
@@ -258,6 +259,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       throw new HostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
     } catch (error) {
+      if (error instanceof AgentSessionInUseError) return json(409, { error: error.message, code: 'session_in_use' });
       if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
       if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });

@@ -23,7 +23,8 @@ export function createScriptedAppServer(
     } catch (error) {
       child.stdout.write(`${JSON.stringify({
         id: message.id,
-        error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
+        error: { code: error instanceof Error && 'code' in error && typeof error.code === 'number' ? error.code : -32603,
+          message: error instanceof Error ? error.message : String(error) },
       })}\n`);
     }
   });

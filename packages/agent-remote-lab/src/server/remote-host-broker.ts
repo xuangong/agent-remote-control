@@ -98,6 +98,7 @@ async function writeResponse(response: ServerResponse, result: Response) {
   response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(body);
 }
 function relaySocket(socket: WebSocket): RelaySocket {
+  socket.on('error', () => undefined);
   return {
     get readyState() { return socket.readyState; },
     get bufferedAmount() { return socket.bufferedAmount; },

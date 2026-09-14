@@ -16,7 +16,7 @@ async function setup(options = {}) {
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   cleanup.push(async () => { await broker.close(); await new Promise<void>((resolve) => server.close(() => resolve())); });
   const post = (path: string, body = {}) => fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  return { url, post };
+  return { url, post, server };
 }
 async function host(url: string, key: string, installationId = 'native-installation') {
   const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
@@ -52,6 +52,55 @@ describe('Remote Host broker', () => {
     const response = await fetch(f.url + '/v1/remote/hosts', { signal: AbortSignal.timeout(1000) });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ hosts: [] });
+  }, 10_000);
+
+  it('handles invalid frames from a stream rejected during the closing handshake', async () => {
+    const f = await setup({ now: () => 10_000, initialState: {
+      keys: [['7a8ce1c8927a74e75f9bc855677bd2cb361d6b19a58f85296a8777022d022a14', { expires: 20_000, installationId: 'provider-installation' }]],
+      hosts: [{ id: 'capacity-host', installationId: 'provider-installation', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
+      bindings: [{ hostId: 'capacity-host', providerId: 'codex', nativeSessionId: 'native-capacity', agentId: 'capacity-agent' }],
+      creations: [],
+    } });
+    const native = await providerHost(f.url, 'arc_fixture');
+    let upgrades = 0;
+    let releaseUpgrades!: () => void;
+    const allUpgrades = new Promise<void>(resolve => { releaseUpgrades = resolve; });
+    f.server.on('upgrade', request => {
+      if (request.url === '/v1/sessions/capacity-agent/events' && ++upgrades === 129) releaseUpgrades();
+    });
+    const recovery = once(native.socket, 'message');
+    let nativeOpens = 0;
+    native.socket.on('message', raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === 'stream_open') nativeOpens += 1;
+    });
+    const browsers = Array.from({ length: 129 }, () => {
+      const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/v1/sessions/capacity-agent/events', {
+        headers: { origin: 'http://127.0.0.1:6175' }, handshakeTimeout: 2000,
+      });
+      socket.on('error', () => undefined);
+      const closed = new Promise<number>(resolve => socket.once('close', code => resolve(code)));
+      socket.once('open', () => {
+        // An unmasked client frame is invalid even while the server is closing the connection.
+        const transport = (socket as unknown as { _socket: import('node:net').Socket })._socket;
+        transport.write(Buffer.from([0x81, 0x01, 0x78]));
+      });
+      return { socket, closed };
+    });
+    cleanup.push(async () => { for (const { socket } of browsers) socket.terminate(); });
+    const [raw] = await recovery;
+    await allUpgrades;
+    const request = JSON.parse(raw.toString());
+    expect(request.path).toBe('/remote/attach');
+    native.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId, status: 200,
+      body: '{"agentId":"capacity-agent","nativeSessionId":"native-capacity"}' }));
+    const codes = await Promise.all(browsers.map(value => value.closed));
+    expect(nativeOpens).toBe(128);
+    expect(codes.filter(code => code === 1013)).toHaveLength(1);
+    expect(codes.filter(code => code === 1002)).toHaveLength(128);
+    const response = await fetch(f.url + '/v1/remote/hosts', { signal: AbortSignal.timeout(1000) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ hosts: [{ id: 'capacity-host', online: true }] });
   }, 10_000);
 
   it('issues temporary keys, binds one installation, and keeps disconnected hosts visible', async () => {

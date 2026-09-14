@@ -1,3 +1,4 @@
+import { createSecurityPolicy } from './security.js';
 import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -16,6 +17,7 @@ export interface HostedRelayOptions extends GatewayAuthOptions {
   storage?: RelayStateStore;
   scheduler?: RelayScheduler;
   maxTenants?: number;
+  clientAddress?(request: Request): string;
   keyLifetimeMs?: number;
 }
 type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityDenied: boolean;
@@ -33,6 +35,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let renewalAt = Date.now() + 60_000;
   const state = createRelayState(auth, options.storage, failClosed, published);
   const sessions = createGatewaySessions(auth, state, durable);
+  const security = createSecurityPolicy(state);
   const verifyControl = createGatewayControlVerifier(auth, state);
   function failClosed() {
     failed = true;
@@ -84,6 +87,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (tenants.size >= (options.maxTenants ?? 64)) return undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
         ownerSubject: grant.subject, durable, initialState,
+        userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
         onStateChange: async broker => { await state.mutate(draft => {
           const previous = draft.tenants.find(value => value.namespace === grant.namespace);
           if (previous) previous.broker = broker;
@@ -110,7 +114,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   const originAllowed = (request: Request) => request.headers.get('origin') === auth.origin;
   function context(request: Request, grant: GatewayGrant): BrokerRequestContext {
-    return { principalSubject: () => grant.subject, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now(),
+    return { principalSubject: () => grant.subject, authorizeMessage: raw => {
+      try { const message = JSON.parse(raw); return message.type !== 'set_session_setting' || !['approval', 'sandbox', 'permissions'].includes(message.payload?.settingId) || security.recent(grant.authenticatedAt); } catch { return true; }
+    }, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now(),
       validateMutation: () => ({ status: 'allowed' }), connectionExpiresAt: () => failed || closing ? 0 : sessions.expiresAt(request, grant) };
   }
   function relativeRequest(request: Request, prefix: string): Request {
@@ -132,9 +138,14 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (control.operation === 'hosts') return json(200, { hosts: [...tenants.values()].flatMap(value => value.broker.visibleHosts(control.subject)) });
       const target = [...tenants.values()].find(value => value.broker.hasHost(control.hostId!));
       if (!target) return json(404, { error: 'Host is unavailable.' });
-      return json(200, await target.broker.manageShares(control.subject, control.hostId!, control.operation, control.targetSubject, control.targetLabel, control.sessionLimit));
+      const result = await target.broker.manageShares(control.subject, control.hostId!, control.operation, control.targetSubject, control.targetLabel, control.sessionLimit);
+      if (control.operation !== 'shares') await security.record(control.subject, control.operation === 'share' ? 'host_shared' : 'share_revoked', 'allowed', control.hostId);
+      return json(200, result);
     }
     if (url.pathname === '/auth/login' && request.method === 'GET') {
+      if (!security.allow('login:' + (options.clientAddress?.(request) ?? 'unknown'), 30, 60_000) || !security.allow('login:global', 300, 60_000)) return json(429, {error:'Too many sign-in attempts. Try again shortly.'});
+      const reauthenticate = url.searchParams.get('reauthenticate');
+      if (reauthenticate !== null && reauthenticate !== '1') return json(400, {error:'Invalid authentication request.'});
       let returnPath: string;
       try { returnPath = controllerPath(readControllerLocation(url.searchParams)); }
       catch { return json(400, { error: 'Invalid session link.' }); }
@@ -149,7 +160,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (!added) return json(429, { error: 'Too many pending sign-ins.' });
       return new Response(null, { status: 303, headers: {
         'set-cookie': `${gatewayCookieName(auth.origin, 'login')}=${verifier}; ${cookieFlags}; Max-Age=300`,
-        location: `${auth.issuer}/agent-remote?challenge=${challenge}${hostId ? '&host=' + encodeURIComponent(hostId) : ''}`,
+        location: `${auth.issuer}/agent-remote?challenge=${challenge}${hostId ? '&host=' + encodeURIComponent(hostId) : ''}${reauthenticate ? '&reauthenticate=1' : ''}`,
       } });
     }
     if (url.pathname === '/auth/session' && request.method === 'POST') {
@@ -167,9 +178,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
         draft.loginChallenges = draft.loginChallenges.filter(([key]) => key !== challenge); return entry[1];
       });
       if (!pending) return json(401, { error: 'Start sign-in from this browser before opening the gateway.' });
-      const exchange = await sessions.exchange(grant);
+      const exchange = await sessions.exchange(grant, request);
       if (exchange.status !== 'active') return json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Gateway access could not be renewed.' });
       if (grant.continuation) { owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false; }
+      await security.record(grant.subject, 'signed_in', 'allowed');
       const response = json(200, { ...browserState(exchange.grant), ...(pending.returnPath ? { returnPath: pending.returnPath } : {}), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
       response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
       response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login')}=; ${cookieFlags}; Max-Age=0`);
@@ -178,15 +190,50 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (url.pathname === '/auth/status' && request.method === 'GET') {
       const grant = await authorize(request); return grant instanceof Response ? grant : json(200, browserState(grant));
     }
+    if (['/auth/refresh', '/auth/logout'].includes(url.pathname) && request.method === 'POST') {
+      if (!originAllowed(request)) return json(403, {error:'Origin is not allowed.'});
+      if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, {error:'JSON is required.'});
+      const body = await readJson(request);
+      if (!body || Object.keys(body).length) return json(400, {error:'No parameters are accepted.'});
+      const credential = readGatewayCookie(request, gatewayCookieName(auth.origin, 'session')) ?? '';
+      if (!security.allow(url.pathname + ':' + hash(credential), 30, 60_000) || !security.allow(url.pathname + ':global', 600, 60_000)) return json(429, {error:'Too many authentication requests.'});
+    }
     if (url.pathname === '/auth/refresh' && request.method === 'POST') {
       if (!originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
       const grant = await authorize(request, true); return grant instanceof Response ? grant : json(200, browserState(grant));
     }
     if (url.pathname === '/auth/logout' && request.method === 'POST') {
       if (!originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
+      const current = await sessions.authenticate(request);
       await sessions.logout(request);
+      if (current.grant) await security.record(current.grant.subject, 'signed_out', 'allowed');
       const response = json(200, { ok: true });
       response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=; ${cookieFlags}; Max-Age=0`); return response;
+    }
+    if (['/auth/sessions', '/auth/sessions/revoke', '/auth/sessions/revoke-all', '/auth/audit'].includes(url.pathname)) {
+      const grant = await authorize(request); if (grant instanceof Response) return grant;
+      if (request.headers.has('origin') && !originAllowed(request)) return json(403, {error:'Origin is not allowed.'});
+      if (request.method === 'GET' && url.pathname === '/auth/sessions') return json(200, {sessions:sessions.list(grant.subject, request), authenticatedAt:grant.authenticatedAt ?? null, recentAuthentication:security.recent(grant.authenticatedAt)});
+      if (request.method === 'GET' && url.pathname === '/auth/audit') return json(200, {events:security.events(grant.subject)});
+      if (request.method !== 'POST' || !originAllowed(request)) return json(403, {error:'Same-origin POST is required.'});
+      if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, {error:'JSON is required.'});
+      if (!security.allow('security:' + grant.subject, 30, 60_000)) return json(429, {error:'Too many security requests.'});
+      const body = await readJson(request);
+      let current = false;
+      if (url.pathname === '/auth/sessions/revoke') {
+        if (!body || Object.keys(body).length !== 1 || typeof body.id !== 'string' || body.id.length > 128) return json(400, {error:'A browser session ID is required.'});
+        const result = await sessions.revoke(grant.subject, body.id, request);
+        if (!result.found) return json(404, {error:'Browser session is unavailable.'});
+        current = result.current;
+        await security.record(grant.subject, 'session_revoked', 'allowed');
+      } else if (url.pathname === '/auth/sessions/revoke-all') {
+        if (!body || Object.keys(body).length) return json(400, {error:'No parameters are accepted.'});
+        await sessions.revokeAll(grant.subject); current = true;
+        await security.record(grant.subject, 'all_sessions_revoked', 'allowed');
+      } else return json(405, {error:'Method is not allowed.'});
+      const response = json(200, {ok:true,current});
+      if (current) response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=; ${cookieFlags}; Max-Age=0`);
+      return response;
     }
     if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin);
     if (request.method === 'GET' && !url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/u/') && !url.pathname.startsWith('/auth/')) return undefined;
@@ -201,8 +248,22 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const owned = tenant(grant); if (!owned) return json(429, { error: 'Relay tenant capacity reached.' });
     const relative = relativeRequest(request, prefix); const path = new URL(relative.url).pathname;
     if (path === '/v1/remote/hosts' && request.method === 'GET') return json(200, { hosts: [...tenants.values()].flatMap(value => value.broker.visibleHosts(grant.subject)) });
+    if (request.method !== 'GET') {
+      if (!security.allow('mutation:' + grant.subject, 60, 60_000)) return json(429, {error:'Too many control requests.'});
+      const sensitive = path === '/v1/remote/pairings' || /\/rotate$/.test(path);
+      if (sensitive && durable && !security.recent(grant.authenticatedAt)) {
+        await security.record(grant.subject, 'recent_authentication_required', 'denied');
+        return json(403, {code:'reauthentication_required',error:'Sign in again before managing device credentials.',loginUrl:'/auth/login?reauthenticate=1'});
+      }
+      if (path === '/v1/remote/pairings' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
+    }
     const destination = routeTenant(path, grant.subject) ?? owned;
-    return await destination.broker.handleRequest(relative, context(request, grant)) ?? (path === '/v1/providers' && request.method === 'GET'
+    const result = await destination.broker.handleRequest(relative, context(request, grant));
+    if (request.method !== 'GET' && result) {
+      const action = path === '/v1/remote/pairings' ? 'pairing_created' : /\/revoke$/.test(path) ? 'host_revoked' : /\/rotate$/.test(path) ? 'credential_rotation_requested' : /\/stop$/.test(path) ? 'host_stop_requested' : undefined;
+      if (action) await security.record(grant.subject, action, result.ok ? 'allowed' : 'denied', /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)?.[1]);
+    }
+    return result ?? (path === '/v1/providers' && request.method === 'GET'
       ? json(200, { protocolVersion: '1.4.0', type: 'provider_list', payload: { providers: [] } })
       : json(404, { error: 'Route or session is unavailable.' }));
   }

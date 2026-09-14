@@ -12,7 +12,7 @@ const secret = 'lifecycle-test-secret-01234567890123456789';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.reverse()) await close(); cleanups.length = 0; });
 async function fixture() {
-  let disabled = false; let unavailable = false;
+  let disabled = false; let unavailable = false; const authenticatedAt = Date.now();
   const authority = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
     const proof = (req.headers.authorization ?? '').slice(7).split('.');
@@ -20,7 +20,7 @@ async function fixture() {
     expect(proof[2]).toBe(createHmac('sha256', secret).update(proof.slice(0, 2).join('.')).digest('base64url'));
     expect(claims.bodyHash).toBe(createHash('sha256').update(body).digest('base64url'));
     res.writeHead(unavailable ? 503 : disabled ? 401 : 200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ active: !disabled, subject: 'alice', expiresAt: Date.now() + 3600_000, validUntil: Date.now() + 1500 }));
+    res.end(JSON.stringify({ active: !disabled, subject: 'alice', authenticatedAt, expiresAt: Date.now() + 3600_000, validUntil: Date.now() + 1500 }));
   }); authority.listen(0, '127.0.0.1'); await once(authority, 'listening');
   cleanups.push(async () => { authority.closeAllConnections(); await new Promise<void>(resolve => authority.close(() => resolve())); });
   const addr = authority.address(); if (!addr || typeof addr === 'string') throw Error();
@@ -68,8 +68,12 @@ it('restores enrolled Hosts with the same credentials and enforces device revoca
   async function connect() {
     const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
     await once(host, 'open'); const result = once(host, 'message');
-    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'persistent', name: 'Saved Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-    return { host, id: JSON.parse((await result)[0].toString()).hostId };
+    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: 'persistent', name: 'Saved Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+    const issued = JSON.parse((await result)[0].toString());
+    if (issued.type === 'registered') return { host, id: issued.hostId };
+    expect(issued.type).toBe('credential_issued'); pair.key = issued.credential;
+    const saved = once(host, 'message'); host.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
+    return { host, id: JSON.parse((await saved)[0].toString()).hostId };
   }
   const first = await connect(); await f.stop(); await f.start(); const second = await connect(); expect(second.id).toBe(first.id);
   const closed = once(second.host, 'close');
@@ -92,7 +96,7 @@ it('lets the production Host uplink reconnect after an authority outage without 
   const states: string[] = [];
   const uplink = createRemoteHostUplinkClient({ relay: native, installationId: 'automatic-reconnect', name: 'Recoverable Host',
     providers: [{ providerId: 'test', displayName: 'Test' }], remoteKey: pair.key, url: f.url.replace('http:', 'ws:') + '/ws/remote-host',
-    resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
+    onCredential: async () => {}, resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
     reconnectBaseDelayMs: 50, reconnectMaxDelayMs: 100, onStateChange: value => states.push(value) });
   cleanups.push(() => uplink.close()); await uplink.ready;
   f.outage();
@@ -108,7 +112,9 @@ it('enforces authority leases on Host upgrades that include a query string', asy
   const f = await fixture(); const pair = await (await f.request(f.state.basePath + 'v1/remote/pairings', {})).json();
   const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?client=desktop', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(host, 'open'); const registered = once(host, 'message');
-  host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'query-peer', name: 'Query peer', providers: [{ providerId: 'test', displayName: 'Test' }] }));
-  await registered; f.outage();
+  host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: 'query-peer', name: 'Query peer', providers: [{ providerId: 'test', displayName: 'Test' }] }));
+  expect(JSON.parse((await registered)[0].toString()).type).toBe('credential_issued');
+  const saved = once(host, 'message'); host.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
+  await saved; f.outage();
   expect((await once(host, 'close'))[0]).toBe(1013);
 }, 5000);

@@ -76,7 +76,7 @@ it('keeps shared Host catalogs private and commits concurrent quota and unknown 
   expect((await proof()).status).toBe(401);
   const offline = await (await f.json(alice.basePath + 'v1/remote/hosts', alice.cookie)).json() as any;
   expect(offline.hosts[0]).toMatchObject({ id: hostId, online: false });
-  host = await f.host(pairing.key); expect(host.hostId).toBe(hostId); attachHandler();
+  host = await f.host(host.key); expect(host.hostId).toBe(hostId); attachHandler();
   expect((await create(firstId)).status).toBe(200); expect(creations).toBe(2);
   expect((await (await create('unknown', '/uncertain')).json() as any).code).toBe('creation_outcome_unknown');
   expect((await (await create('third')).json() as any).code).toBe('session_quota_exceeded');
@@ -147,7 +147,7 @@ it('expires HTTP and socket access during a Gateway outage even without alarm de
   const f = await fixture(); f.setAuthority(200, 400);
   const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
-  const { socket } = await f.host(pairing.key);
+  const { socket, key } = await f.host(pairing.key);
   const closed = event(socket, 'close'); f.setAuthority(503);
   await new Promise(resolve => setTimeout(resolve, 500));
   socket.send(JSON.stringify({ uplinkVersion: 2, type: 'ping' }));
@@ -161,7 +161,7 @@ it('expires HTTP and socket access during a Gateway outage even without alarm de
   expect(unavailable.alarm).toBeGreaterThan(Date.now());
   f.setAuthority(200); await f.inspect('alarm');
   expect((await f.json('/auth/status', alice.cookie)).status).toBe(200);
-  expect((await f.host(pairing.key)).hostId).toBeTruthy();
+  expect((await f.host(key)).hostId).toBeTruthy();
 });
 
 it('rejects oversized native frames and closes registration when its asynchronous durable commit fails', async () => {
@@ -174,7 +174,7 @@ it('rejects oversized native frames and closes registration when its asynchronou
   const frames: unknown[] = []; registering.addEventListener('message', message => frames.push(message.data));
   await f.inspect('fail-commit?kind=host');
   const rejected = event(registering, 'close');
-  send(registering, { type: 'register', installationId: 'rejected-host', name: 'Rejected Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
+  send(registering, { type: 'register', credentialRotation: true, installationId: 'rejected-host', name: 'Rejected Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
   expect([1001, 1011]).toContain((await rejected).code); expect(frames).toEqual([]);
   await f.inspect('restore-commit'); await f.inspect('alarm').catch(() => undefined); await f.inspect('alarm');
   expect(await (await f.json(alice.basePath + 'v1/remote/hosts', alice.cookie)).json()).toEqual({ hosts: [] });

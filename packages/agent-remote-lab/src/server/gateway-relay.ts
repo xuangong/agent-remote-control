@@ -17,10 +17,13 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   const websockets = new WebSocketServer({ noServer: true, maxPayload: BROKER_MAX_FRAME_BYTES });
   let runtime: ReturnType<typeof createHostedRelay> | undefined;
   let storage: ReturnType<typeof openGatewayState> | undefined;
+  const clientAddresses = new WeakMap<Request, string>();
   const server = createServer((request, response) => {
     void (async () => {
       if (!runtime) throw new Error('Relay is starting.');
-      const result = await runtime.fetch(webRequest(request, new URL(request.url ?? '/', auth.origin)));
+      const forwarded = webRequest(request, new URL(request.url ?? '/', auth.origin));
+      clientAddresses.set(forwarded, request.socket.remoteAddress ?? 'unknown');
+      const result = await runtime.fetch(forwarded);
       if (result) return writeResponse(response, result);
       response.setHeader('cache-control', 'no-store'); response.setHeader('referrer-policy', 'no-referrer'); response.setHeader('x-content-type-options', 'nosniff');
       if (await options.servePage?.(request, response)) return;
@@ -48,7 +51,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       try {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, JSON.stringify([auth.origin, auth.issuer]));
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
-        runtime = createHostedRelay({ ...auth, maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs,
+        runtime = createHostedRelay({ ...auth, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs,
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
       } catch (error) { storage?.close(); server.close(); throw error; }
       return { port: address.port, url: auth.origin };

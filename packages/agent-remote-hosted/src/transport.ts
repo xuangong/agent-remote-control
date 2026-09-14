@@ -15,6 +15,7 @@ export interface RelaySocket {
 
 export interface BrokerRequestContext {
   principalSubject?(): string | undefined;
+  authorizeMessage?(raw: string): boolean;
   authorize?(): boolean | Promise<boolean>;
   validateMutation?(): { status: 'allowed' } | { status: 'rejected'; httpStatus: number; code: string; message: string };
   connectionExpiresAt?(): number | undefined;

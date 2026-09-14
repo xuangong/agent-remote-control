@@ -79,10 +79,18 @@ try {
   async function connectHost() {
     const host = new WebSocket(relayUrl.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } }); sockets.push(host);
     await nextEvent(host, 'open'); const registered = nextEvent(host, 'message');
-    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'integration-host', name: 'Integration Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-    const hostId = JSON.parse((await registered)[0].toString()).hostId;
+    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: 'integration-host', name: 'Integration Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+    let reply = JSON.parse((await registered)[0].toString());
+    if (reply.type === 'credential_issued') {
+      pairing.key = reply.credential; const saved = nextEvent(host, 'message');
+      host.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
+      reply = JSON.parse((await saved)[0].toString());
+    }
+    assert.equal(reply.type, 'registered');
+    const hostId = reply.hostId;
     host.on('message', raw => {
       const message = JSON.parse(raw.toString());
+      if (message.type === 'credential_issued') { pairing.key = message.credential; host.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' })); return; }
       if (message.type !== 'rpc_request') return;
       let creation;
       if (message.path === '/remote/create') {
@@ -94,7 +102,7 @@ try {
         creation = sharedBindings.get(input.requestId);
         if (!creation) { sharedCreations++; creation = { agentId: `shared-agent-${sharedCreations}`, nativeSessionId: `shared-native-${sharedCreations}` }; sharedBindings.set(input.requestId, creation); }
       }
-      const body = creation ?? (message.path.startsWith('/remote/catalog/revision') ? { revision: '1' }
+      const body = creation ?? (message.path === '/remote/stop' ? { results: [{ agentId: 'test-agent', status: 'cancelled' }, { agentId: 'unsupported-agent', status: 'unsupported' }] } : message.path.startsWith('/remote/catalog/revision') ? { revision: '1' }
         : message.path.startsWith('/remote/catalog/session') ? { nativeSessionId: new URL(message.path, relayUrl).searchParams.get('nativeSessionId'), providerId: 'codex', title: 'Shared topic', state: 'idle', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
         : message.path.startsWith('/remote/catalog') ? { items: [{ nativeSessionId: 'test-native', providerId: 'codex', title: 'Private test session', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: 'idle' }], revision: '1', hasMore: false }
         : message.path === '/remote/attach' ? ([...sharedBindings.values()].find(value => value.nativeSessionId === JSON.parse(message.body).nativeSessionId) ?? { agentId: 'test-agent', nativeSessionId: 'test-native' })
@@ -157,7 +165,7 @@ try {
   assert.equal(forwarded.status, 200);
   const { launchUrl } = await forwarded.json();
   await page.goto(launchUrl);
-  await page.getByText('Access expired or invalid. Return to the gateway to sign in.', { exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Let’s try signing in again', exact: true }).waitFor();
   const retained = await page.evaluate(async () => (await fetch('/auth/status')).json());
   assert.equal(retained.basePath, state.basePath, 'A forwarded grant must not switch the victim account');
   await page.goto(relayUrl);
@@ -183,6 +191,35 @@ try {
   assert.equal(restored.host.readyState, WebSocket.OPEN);
   assert.equal((await shareRequest('PUT', { email: 'bob@example.com', sessionLimit: 1 })).status, 200);
   assert.equal((await bobRequest(createPath, { providerId: 'codex', requestId: 'topic-two' })).body.code, 'session_quota_exceeded');
+  await page.locator('#remote-host').selectOption(hostId);
+  await page.getByRole('button', { name: 'Rotate credential', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm rotation', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: 'Rotation pending.' }).waitFor();
+  assert.equal(restored.host.readyState, WebSocket.OPEN);
+  await page.getByRole('button', { name: 'Stop work', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm stop', exact: true }).click();
+  await page.getByText('Cancellation unsupported', { exact: false }).waitFor();
+  assert.equal(restored.host.readyState, WebSocket.OPEN);
+  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+    userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36' });
+  const phone = await mobile.newPage(); phone.setDefaultTimeout(10000);
+  await mobile.addCookies([{ name: 'session_token', value: 'ses_agent_remote_alice', url: gatewayUrl }]);
+  await phone.goto(gatewayUrl + `/agent-remote?host=${hostId}`); await phone.waitForURL(relayUrl + `/?host=${hostId}`);
+  await phone.getByRole('button', { name: 'Settings', exact: true }).click();
+  await phone.getByRole('region', { name: 'Controller settings' }).getByRole('button', { name: 'Security', exact: true }).click();
+  const phoneSecurity = phone.getByRole('main', { name: 'Security', exact: true });
+  await phoneSecurity.getByText('Android · Chrome', { exact: true }).waitFor();
+  assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await phone.screenshot({ path: join(temporary, 'security-mobile.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Security', exact: true }).click();
+  const securityPanel = page.getByRole('main', { name: 'Security', exact: true });
+  await securityPanel.getByRole('button', { name: 'Sign out Android · Chrome', exact: true }).click();
+  await securityPanel.getByRole('button', { name: 'Confirm sign out', exact: true }).click();
+  await securityPanel.getByRole('status').filter({ hasText: 'Android · Chrome signed out.' }).waitFor();
+  assert.equal(await phone.evaluate(async () => (await fetch('/auth/status')).status), 401);
+  await page.screenshot({ path: join(temporary, 'security-desktop.png'), fullPage: true });
+  await securityPanel.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await mobile.close();
   await page.screenshot({ path: join(temporary, 'controller.png'), fullPage: true });
   await page.locator('#remote-host').selectOption(hostId);
   await page.getByRole('button', { name: 'Revoke Host', exact: true }).click();
@@ -193,7 +230,7 @@ try {
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await page.getByRole('link', { name: 'Sign in through gateway' }).waitFor();
   await bob.close(); await context.close();
-  console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected; renewal, process restart with stable device/binding, device revoke and logout verified; shared Host Gateway APIs, selected-Host login, per-user catalog, cumulative quota, retry identity, quota and unresolved-reservation persistence, revoke/regrant verified. No CLI agents started.');
+  console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected; renewal, process restart with stable device/binding, device rotation without disconnect, explicit partial stop outcomes, mobile security management and other-browser revocation, device revoke and logout verified; shared Host Gateway APIs, selected-Host login, per-user catalog, cumulative quota, retry identity, quota and unresolved-reservation persistence, revoke/regrant verified. No CLI agents started.');
   console.log(`Runtime: ${runtime.runtime}${runtime.docker ? " (Docker)" : ""}; Evidence: ${temporary}`);
 } catch (error) {
   await writeFile(join(temporary, 'failure.log'), logs.join(''));

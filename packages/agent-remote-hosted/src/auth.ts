@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
-export interface GatewayGrant { subject: string; namespace: string; expiresAt: number; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number }
+export interface GatewayGrant { subject: string; namespace: string; expiresAt: number; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number; authenticatedAt?: number }
 export interface GatewayAuthOptions { origin: string; issuer: string; secret: string }
 export function validateGatewayOrigin(value: string): string {
   const url = new URL(value);
@@ -32,7 +32,8 @@ export function verifyGatewayGrant(ticket: unknown, options: GatewayAuthOptions)
     if ((value.continuation !== undefined || value.sessionExpiresAt !== undefined) &&
       (typeof value.continuation !== 'string' || !value.continuation || value.continuation.length > 6000 ||
         !Number.isSafeInteger(value.sessionExpiresAt) || value.sessionExpiresAt <= Date.now())) return undefined;
-    return { continuation: value.continuation, sessionExpiresAt: value.sessionExpiresAt, subject: value.sub, namespace: createHash('sha256').update(JSON.stringify([value.iss, value.sub])).digest('hex'), expiresAt: value.exp * 1000, ticket, nonce: value.nonce };
+    if (value.authenticatedAt !== undefined && (!Number.isSafeInteger(value.authenticatedAt) || value.authenticatedAt < 0 || value.authenticatedAt > Date.now())) return undefined;
+    return { authenticatedAt: value.authenticatedAt, continuation: value.continuation, sessionExpiresAt: value.sessionExpiresAt, subject: value.sub, namespace: createHash('sha256').update(JSON.stringify([value.iss, value.sub])).digest('hex'), expiresAt: value.exp * 1000, ticket, nonce: value.nonce };
   } catch { return undefined; }
 }
 export function authenticateGatewayRequest(request: Request, options: GatewayAuthOptions): GatewayGrant | undefined {

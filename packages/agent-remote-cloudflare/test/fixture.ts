@@ -46,7 +46,7 @@ export async function fixture() {
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'neutral',
       conditions: ['workerd', 'worker', 'import'], external: ['node:*', 'cloudflare:*'], alias: { '@borgee/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
   const script = result.outputFiles[0]!.text;
-  let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
+  let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   const sockets: WebSocket[] = [];
   let mf: Miniflare;
   let envSecret = secret;
@@ -66,7 +66,7 @@ export async function fixture() {
         if (!valid) return new Response('Invalid proof', { status: 401 });
         if (authorityStatus !== 200) return new Response('Unavailable', { status: authorityStatus });
         const value = JSON.parse(body); const subject = value.subject ?? value.continuation;
-        return Response.json({ active: true, subject, expiresAt: Date.now() + 3_600_000, validUntil: Date.now() + leaseMs });
+        return Response.json({ active: true, subject, authenticatedAt, expiresAt: Date.now() + 3_600_000, validUntil: Date.now() + leaseMs });
       },
     });
     await mf.ready;
@@ -96,9 +96,14 @@ export async function fixture() {
   }
   async function host(key: string) {
     const socket = await upgrade('/ws/remote-host', { authorization: `Bearer ${key}` });
-    const registered = event(socket, 'message'); send(socket, { type: 'register', installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
-    const { hostId } = await registered;
-    return { socket, hostId: hostId as string };
+    const registered = event(socket, 'message'); send(socket, { type: 'register', credentialRotation: true, installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
+    let message = await registered;
+    if (message.type === 'credential_issued') {
+      key = message.credential; const saved = event(socket, 'message');
+      send(socket, { type: 'credential_saved' }); message = await saved;
+    }
+    expect(message.type).toBe('registered');
+    return { socket, hostId: message.hostId as string, key };
   }
   function control(body: Record<string, unknown>) {
     const serialized = JSON.stringify(body); const iat = Math.floor(Date.now() / 1000);
@@ -107,6 +112,7 @@ export async function fixture() {
   }
   return { request, json, beginLogin, login, upgrade, host, control, directory,
     setAuthority(status: number, duration = 120_000) { authorityStatus = status; leaseMs = duration; },
+    setAuthenticatedAt(value: number) { authenticatedAt = value; },
     get authorityCalls() { return authorityCalls; },
     async inspect(path: string) { const namespace = await mf.getDurableObjectNamespace('RELAY'); return namespace.getByName('primary').fetch(origin + '/_fixture/' + path); },
     async restart(replacementSecret = secret) { await mf.dispose(); envSecret = replacementSecret; await start(); },

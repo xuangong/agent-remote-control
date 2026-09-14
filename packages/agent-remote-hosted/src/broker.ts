@@ -5,7 +5,9 @@ import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, 
 
 type RpcResponse = { status: number; body: string };
 type ProviderDescriptor = { providerId: string; displayName: string };
+type DeviceCredential = { expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
+  ready?: boolean; credentialRotation?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
   pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown }>;
   streams: Map<string, { socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
@@ -17,13 +19,14 @@ class BrokerError extends Error {
 }
 export interface RemoteHostBrokerState {
   sharing?: HostSharingState;
-  keys: Array<[string, { expires: number; installationId?: string }]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh'>>;
+  keys: Array<[string, DeviceCredential]>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
 export interface HostBrokerOptions {
   ownerSubject?: string;
+  userStreamCount?(subject: string): number;
   origin: string;
   rpcTimeoutMs?: number;
   keyLifetimeMs?: number;
@@ -43,9 +46,10 @@ export function createHostBroker(options: HostBrokerOptions) {
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
   const clients = new Set<RelaySocket>();
   function track(client: RelaySocket) { clients.add(client); client.onClose(() => clients.delete(client)); }
-  const keys = new Map<string, { expires: number; installationId?: string }>();
+  const keys = new Map<string, DeviceCredential>();
   const hosts = new Map<string, Host>();
   const bindings = new Map<string, Binding>();
+  const activeStreamCount = (subject: string) => [...hosts.values()].reduce((sum, host) => sum + [...host.streams.values()].filter(stream => stream.subject === subject).length, 0);
   const pendingBindingSlots = new Set<symbol>();
   const nativeBindings = new Map<string, Binding>();
   const attached = new Map<string, Promise<Binding>>();
@@ -65,7 +69,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   function snapshot(): RemoteHostBrokerState {
     return { ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh }) => ({ id, installationId, name, providers, legacyDsh })),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation }) => ({ id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -111,8 +115,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
   }
   function visibleHosts(subject?: string) {
-    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket }) => ({
-      id, name, online: socket?.readyState === RELAY_SOCKET_OPEN, providers,
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation }) => ({
+      ...(credentialRotation ? {credentialRotation:true} : {}), id, name, online: ready === true && socket?.readyState === RELAY_SOCKET_OPEN, providers,
       ...(options.durable && owner(subject) ? { managed: true } : {}),
       ...(options.ownerSubject ? { access: owner(subject) ? 'owner' as const : 'shared' as const } : {}),
       ...(!owner(subject) && subject ? { sessionQuota: sharing.quota(id, subject) } : {}),
@@ -138,7 +142,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const host = hosts.get(id);
     if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
     assertAvailable();
-    if (host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
+    if (!host.ready || host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
     return host;
   };
   function send(host: Host, message: RemoteHostUplinkMessage) {
@@ -163,14 +167,17 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   function disconnected(host: Host, socket: RelaySocket) {
     if (host.socket !== socket) return;
-    host.socket = undefined;
+    host.socket = undefined; host.ready = false;
     for (const pending of host.pending.values()) { clearTimeout(pending.timer); pending.reject(new BrokerError(503, 'host_offline', 'The Remote Host disconnected; the operation outcome may be unknown.')); }
     host.pending.clear();
     for (const stream of host.streams.values()) stream.socket.close(1012, 'Remote Host disconnected');
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: { expires: number; installationId?: string }, context: BrokerRequestContext, credentialHash: string) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string) {
     let host: Host | undefined;
+    let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
+    let issuing: Promise<void> | undefined;
+    expire(socket, () => keys.get(credentialHash) === credential ? Math.min(credential.expires, context.connectionExpiresAt?.() ?? credential.expires) : 0, () => keys.get(credentialHash) !== credential ? 1008 : context.connectionExpiryCode?.() ?? 1008);
     const timer = setTimeout(() => socket.close(1008, 'Registration deadline exceeded'), 10_000);
     socket.onError(() => undefined);
     socket.onClose(() => { clearTimeout(timer); if (host) disconnected(host, socket); });
@@ -189,19 +196,21 @@ export function createHostBroker(options: HostBrokerOptions) {
       const message = decoded.value;
       if (!host) {
         if (message.type !== 'register' || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return socket.close(1008, 'Registration is not authorized');
+        const invitation = credential.requiresRotation === true || credential.installationId === undefined;
+        if (credential.requiresRotation && !message.credentialRotation) return socket.close(1008, 'Update Agent Host to enroll this device');
         registration = commit(draft => {
           if (keys.get(credentialHash) !== credential || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) throw new BrokerError(401, 'device_revoked', 'Registration is not authorized');
           const savedCredential = draft.keys.find(([hash]) => hash === credentialHash)![1];
           savedCredential.installationId = message.installationId;
           if (options.durable) {
-            savedCredential.expires = Number.MAX_SAFE_INTEGER;
+            if (!savedCredential.requiresRotation) savedCredential.expires = Number.MAX_SAFE_INTEGER;
             draft.keys = draft.keys.filter(([hash, key]) => hash === credentialHash || key.installationId !== message.installationId);
           }
           const existing = [...hosts.values()].find(value => value.installationId === message.installationId);
           if (!existing && hosts.size >= 128) throw new BrokerError(429, 'host_capacity', 'Host capacity reached');
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
           const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name,
-            providers, legacyDsh: 'providerId' in message };
+            providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
           return { value: undefined, publish() {
             Object.assign(credential, savedCredential);
@@ -212,15 +221,31 @@ export function createHostBroker(options: HostBrokerOptions) {
             Object.assign(host, next); host.generation += 1; clearTimeout(timer);
             if (socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
-              send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id });
+              host.issueCredential = message.credentialRotation ? () => issueCredential(false) : undefined;
+              if (!options.durable || !message.credentialRotation || credential.kind === 'device') {
+                send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id }); host.ready = true;
+              }
             }
           } };
         });
         try { await registration; } finally { registration = undefined; }
+        if (options.durable && message.credentialRotation && credential.kind !== 'device') await issueCredential(invitation);
         return;
       }
       if (host.socket !== socket) return;
-      if (message.type === 'rpc_response') {
+      if (message.type === 'credential_saved') {
+        if (!pendingCredential) return socket.close(1008, 'No pending device credential');
+        const pending = pendingCredential;
+        await commit(draft => {
+          if (!host || host.socket !== socket || !draft.keys.some(([hash]) => hash === pending.hash)) throw new BrokerError(401, 'device_revoked', 'Device credential is unavailable.');
+          draft.keys = draft.keys.filter(([hash, value]) => value.installationId !== host!.installationId || hash === pending.hash);
+          return {value:undefined,publish() {
+            for (const [hash,value] of keys) if (value.installationId === host!.installationId && hash !== pending.hash) keys.delete(hash);
+            credentialHash = pending.hash; credential = keys.get(pending.hash)!; pendingCredential = undefined;
+          }};
+        });
+        send(host, {uplinkVersion:2,type:'registered',hostId:host.id}); host.ready = true;
+      } else if (message.type === 'rpc_response') {
         const pending = host.pending.get(message.requestId);
         if (pending) { clearTimeout(pending.timer); host.pending.delete(message.requestId); pending.resolve(message); }
       } else if (message.type === 'stream_opened') {
@@ -239,6 +264,25 @@ export function createHostBroker(options: HostBrokerOptions) {
         const code = error instanceof BrokerError && error.status === 401 ? 1008 : error instanceof BrokerError && error.status === 429 ? 1013 : 1011;
         socket.close(code, code === 1011 ? 'Host message could not be processed' : (error as Error).message);
       }
+    }
+    async function issueCredential(consumeInvitation: boolean): Promise<void> {
+      if (issuing) return issuing;
+      if (pendingCredential) throw new BrokerError(409, 'rotation_pending', 'A device credential is awaiting confirmation.');
+      const value = `arc_device_${randomBytes(32).toString('base64url')}`;
+      const nextHash = keyHash(value);
+      const operation = commit(draft => {
+        if (!host || host.socket !== socket || keys.get(credentialHash) !== credential) throw new BrokerError(401, 'device_revoked', 'Device is no longer connected.');
+        if (draft.keys.length >= 128 && !consumeInvitation) throw new BrokerError(429, 'capacity_exceeded', 'Too many device credentials.');
+        const next: DeviceCredential = {expires:Number.MAX_SAFE_INTEGER,installationId:host.installationId,kind:'device'};
+        if (consumeInvitation) draft.keys = draft.keys.filter(([hash]) => hash !== credentialHash);
+        draft.keys.push([nextHash,next]);
+        return {value:undefined,publish() {
+          keys.set(nextHash,next); pendingCredential = {hash:nextHash,value:next};
+          if (consumeInvitation) {keys.delete(credentialHash);credentialHash=nextHash;credential=next;}
+        }};
+      }).then(() => { if (host?.socket === socket) send(host, {uplinkVersion:2,type:'credential_issued',credential:value}); });
+      issuing=operation;
+      try {await operation;} finally {issuing=undefined;}
     }
   }
   async function recoverBinding(host: Host, binding: Binding): Promise<void> {
@@ -467,14 +511,28 @@ export function createHostBroker(options: HostBrokerOptions) {
       await commit(draft => {
         draft.keys = draft.keys.filter(([, value]) => value.expires > now());
         if (draft.keys.length >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
-        draft.keys.push([keyHash(key), { expires }]);
+        draft.keys.push([keyHash(key), { expires, ...(options.durable ? {requiresRotation:true} : {}) }]);
         return { value: undefined, publish() {
           for (const [hash, value] of keys) if (value.expires <= now()) keys.delete(hash);
-          keys.set(keyHash(key), { expires }); options.onPairing?.(key, expires);
+          keys.set(keyHash(key), { expires, ...(options.durable ? {requiresRotation:true} : {}) }); options.onPairing?.(key, expires);
         } };
       });
       return json(201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
         ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\nagent-remote-controller start` } : {}) });
+    }
+    const management = /^\/v1\/remote\/hosts\/([^/]+)\/(rotate|stop)$/.exec(url.pathname);
+    if (management && request.method === 'POST') {
+      requireOwner(subject);
+      const body = await readBody(request);
+      if (Object.keys(body).length) throw new BrokerError(400, 'invalid_request', 'No parameters are accepted.');
+      const host = requireHost(management[1]!);
+      if (management[2] === 'rotate') {
+        if (!options.durable || !host.issueCredential) throw new BrokerError(409, 'host_upgrade_required', 'Update and reconnect Agent Host before rotating its credential.');
+        await host.issueCredential();
+        return json(200, {ok:true,status:'pending'});
+      }
+      const result = await rpc(host, 'POST', '/remote/stop', undefined, '{}');
+      return rawJson(result);
     }
     const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);
     if (options.durable && revoking && request.method === 'POST') {
@@ -542,8 +600,6 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        if (context.connectionExpiresAt) expire(client, () => keys.has(hash!) ? Math.min(key.expires, context.connectionExpiresAt?.() ?? key.expires) : 0,
-          () => !keys.has(hash!) || key.expires <= now() ? 1008 : (context.connectionExpiryCode?.() ?? 1008));
         register(client, key, context, hash!);
       } };
     }
@@ -552,10 +608,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!binding || !sessionAllowed(binding, principal(context)) || !await permitted(context) || request.headers.get('origin') !== origin) return rejectUpgrade(403);
     let host: Host;
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); } catch { return rejectUpgrade(503); }
-    if (host.streams.size >= 128) return rejectUpgrade(429);
+    const subject = principal(context);
+    const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
+    if (host.streams.size >= 128 || userStreams() >= 32) return rejectUpgrade(429);
     return { accept(client: RelaySocket) {
       if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
-      if (host.streams.size >= 128) { client.close(1013, 'Remote stream capacity reached'); return; }
+      if (host.streams.size >= 128 || userStreams() >= 32) { client.close(1013, 'Remote stream capacity reached'); return; }
       track(client);
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);
@@ -564,7 +622,11 @@ export function createHostBroker(options: HostBrokerOptions) {
       const opening = setTimeout(() => client.close(1013, 'Remote stream opening timed out'), options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
       client.onError(() => undefined);
+      let messageWindow = now(); let messageCount = 0;
       client.onMessage((raw, binary) => {
+        if (now()-messageWindow >= 60_000) {messageWindow=now();messageCount=0;}
+        if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');
+        if (context.authorizeMessage?.(raw.toString()) === false) return client.close(1008, 'Recent authentication is required');
         const expiresAt = expiry();
         if (expiresAt !== undefined && expiresAt <= now()) return client.close(1008, 'Credential expired');
         if (binary) return client.close(1003, 'Text protocol required');
@@ -594,6 +656,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   };
   return {
     snapshot,
+    activeStreamCount,
     settled: () => commits.then(() => undefined),
     visibleHosts,
     hasHost: (hostId: string) => hosts.has(hostId),

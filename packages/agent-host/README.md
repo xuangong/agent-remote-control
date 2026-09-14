@@ -142,13 +142,17 @@ sessions and before native input or settings mutations. Catalogs omit sessions
 outside those roots and sessions whose workspace cannot be established. Native
 permission settings are read-only to remote controllers; model controls remain
 available. These rules apply to the CLI. Embedders can provide the same trusted
-`executionPolicy` through `createAgentHostRuntime` or `createAgentHost`.
+`executionPolicy` through `createAgentHostRuntime` or `createAgentHost`, and
+should also configure Codex/Claude providers with `restrictedNative: true` to
+enforce their native permission and sandbox boundaries.
 
 A workspace admission check is not filesystem isolation. The providers have
 different execution guarantees:
 
 - Codex starts and resumes threads with native `workspace-write` and approval
-  policy `never`. Native sandbox escalation is disabled. Codex may still read
+  policy `never`. Native sandbox escalation and additional permission grants are
+  disabled. The adapter hides and rejects the permissions command and locks
+  permission mutations even when a command interaction invokes them internally. Codex may still read
   outside the workspace and use its native temporary directories; existing
   native configuration and platform support determine the remaining sandbox
   details.
@@ -168,7 +172,10 @@ policy. Remote APIs cannot alter these local policy settings. Changes require a
 Host restart; re-pairing only replaces the uplink connection.
 
 Relay, Gateway, and local Host management environment variables are masked before
-native subprocesses start, including executable version probes. Provider login
+native subprocesses start, including executable version probes. The entire
+`AGENT_HOST_` and `AGENT_REMOTE_` namespaces are masked, including
+`AGENT_REMOTE_SIGNING_SECRET`; selected native profile paths are passed through
+the provider configuration before sanitizing the child environment. Provider login
 variables such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GH_TOKEN` remain
 available to the selected native runtime. This filters inherited environment
 variables; it does not hide local credential files from an otherwise authorized

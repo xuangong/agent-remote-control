@@ -6,7 +6,7 @@ import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 
 const sessions: CodexAppServerSession[] = [];
 afterEach(async () => { await Promise.all(sessions.splice(0).map((session) => session.dispose())); });
-async function harness() {
+async function harness(restrictedNative = false) {
   const server = createScriptedAppServer({ 'thread/start': () => ({ thread: { id: 'thread' } }) });
   const replies: Array<{ id: string; result?: unknown; error?: unknown }> = [];
   server.child.stdin.on('data', (chunk) => {
@@ -15,7 +15,7 @@ async function harness() {
       if (!message.method && message.id !== undefined) replies.push(message);
     }
   });
-  const session = await CodexAppServerSession.create(new CodexAppServerTransport(server.child), { sessionId: 'local' });
+  const session = await CodexAppServerSession.create(new CodexAppServerTransport(server.child), { sessionId: 'local' }, undefined, undefined, restrictedNative);
   sessions.push(session);
   const iterator = session.observe()[Symbol.asyncIterator]();
   await iterator.next();
@@ -236,4 +236,15 @@ describe('Codex terminal interaction lifecycle', () => {
     await expect(h.session.respondToInteraction(request.requestId, { kind: 'permission_approval', decision: 'allow', scope: 'session' })).rejects.toThrow('No pending');
     expect(h.replies).toEqual([]);
   });
+});
+
+
+it('denies additional native permission grants in restricted mode while retaining ordinary tool approval', async () => {
+  const h = await harness(true);
+  h.send('item/permissions/requestApproval', { threadId: 'thread', permissions: { network: { enabled: true }, fileSystem: null } }, 'extra-permissions');
+  await expect.poll(() => h.replies).toContainEqual({ id: 'extra-permissions', result: { permissions: {}, scope: 'turn' } });
+  const request = await h.request('item/fileChange/requestApproval', { itemId: 'edit', reason: 'Edit the current workspace' }, 'ordinary-tool');
+  expect(request.kind).toBe('tool_approval');
+  await h.session.respondToInteraction(request.requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' });
+  await expect.poll(() => h.replies).toContainEqual({ id: 'ordinary-tool', result: { decision: 'accept' } });
 });

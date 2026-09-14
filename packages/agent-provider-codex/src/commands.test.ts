@@ -8,7 +8,7 @@ import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-async function harness() {
+async function harness(restrictedNative = false) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'codex-commands-'));
   cleanup.push(() => rm(home, { recursive: true, force: true }));
   await mkdir(path.join(home, 'prompts'));
@@ -37,7 +37,7 @@ async function harness() {
     'turn/start': () => ({ turn: { id: 'turn' } }),
     'thread/compact/start': () => ({}),
   });
-  const session = await new CodexAppServerProvider({ spawn: () => server.child, env: { CODEX_HOME: home } }).createSession({ sessionId: 'local', cwd: '/work', planning: true });
+  const session = await new CodexAppServerProvider({ restrictedNative, spawn: () => server.child, env: { CODEX_HOME: home } }).createSession({ sessionId: 'local', cwd: '/work', planning: true });
   cleanup.push(() => session.dispose());
   const items: ProviderStreamItem[] = [];
   void (async () => { for await (const item of session.observe()) items.push(item); })();
@@ -185,4 +185,17 @@ describe('Codex provider commands', () => {
     await h.session.respondToInteraction(sandbox.requestId, { kind: 'question', answers: [{ questionId: sandbox.questions[0]!.questionId, selectedValues: ['readOnly'] }] });
     expect((await h.session.runtimeInfo()).settings?.find(({ id }) => id === 'sandbox')?.value).toBe('readOnly');
   });
+});
+
+
+it('prevents permission command escalation under the local native policy while preserving model menus', async () => {
+  const h = await harness(true);
+  expect((await h.session.listCommands!()).some(command => command.id === 'permissions')).toBe(false);
+  await expect(h.session.executeCommand!('permissions', '')).rejects.toThrow(/locked/i);
+  await expect(h.session.setSessionSetting!('approval', 'on-request')).rejects.toThrow(/locked/i);
+  expect(h.server.requests.some(request => request.method === 'thread/settings/update')).toBe(false);
+  await h.session.executeCommand!('model', ''); const question = await h.question();
+  expect(question.questions[0]!.questionId).toBe('model');
+  await h.session.respondToInteraction(question.requestId, {kind:'question', answers:[{questionId:'model', selectedValues:['b']}]});
+  expect(h.server.requests.find(request => request.method === 'thread/settings/update')?.params).toMatchObject({model:'b'});
 });

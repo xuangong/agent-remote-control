@@ -47,7 +47,7 @@ async function allowedWorkspace(policy: HostExecutionPolicy, cwd: string | undef
 export function sanitizeNativeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const native = { ...process.env, ...env };
   for (const key of Object.keys(native)) {
-    if (/^(?:AGENT_HOST_|AGENT_REMOTE_(?:GATEWAY|RELAY|HOST|SERVER|REMOTE_KEY|ACCESS_KEY|AUTH|MANAGEMENT)|GATEWAY_|RELAY_)/i.test(key)) native[key] = undefined;
+    if (/^(?:AGENT_HOST_|AGENT_REMOTE_|GATEWAY_|RELAY_)/i.test(key)) native[key] = undefined;
   }
   return native;
 }

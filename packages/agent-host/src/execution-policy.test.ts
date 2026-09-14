@@ -66,3 +66,17 @@ it('enforces the trusted policy at the Host control boundary', async () => {
     expect(response.status).toBe(403); expect(JSON.parse(response.body).code).toBe('local_execution_policy'); expect(f.calls).toEqual([]);
   } finally { await host.close(); }
 });
+
+
+it('masks the actual Relay configuration namespace while preserving native provider authentication', () => {
+  const management = ['AGENT_HOST_REMOTE_KEY', 'AGENT_HOST_MANAGEMENT_TOKEN', 'AGENT_HOST_STATE_DIR', 'AGENT_REMOTE_SIGNING_SECRET',
+    'AGENT_REMOTE_ISSUER', 'AGENT_REMOTE_RELAY_URL', 'AGENT_REMOTE_STATE_DIR', 'AGENT_REMOTE_READY_FILE', 'AGENT_REMOTE_BIND',
+    'AGENT_REMOTE_PORT', 'AGENT_REMOTE_WEB_DIST', 'AGENT_REMOTE_GATEWAY_IMAGE', 'AGENT_REMOTE_GATEWAY_PORT'];
+  const sanitized = sanitizeNativeEnvironment(Object.fromEntries(management.map(name => [name, 'private-relay-value']).concat([
+    ['OPENAI_API_KEY', 'openai'], ['ANTHROPIC_API_KEY', 'anthropic'], ['ANTHROPIC_AUTH_TOKEN', 'anthropic-token'],
+    ['GH_TOKEN', 'github'], ['GITHUB_TOKEN', 'github-token'], ['COPILOT_GITHUB_TOKEN', 'copilot'], ['CODEX_HOME', '/native-profile'],
+  ])));
+  for (const name of management) expect(sanitized[name], name).toBeUndefined();
+  expect(sanitized).toMatchObject({ OPENAI_API_KEY: 'openai', ANTHROPIC_API_KEY: 'anthropic', ANTHROPIC_AUTH_TOKEN: 'anthropic-token',
+    GH_TOKEN: 'github', GITHUB_TOKEN: 'github-token', COPILOT_GITHUB_TOKEN: 'copilot', CODEX_HOME: '/native-profile' });
+});

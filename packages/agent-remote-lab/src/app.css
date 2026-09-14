@@ -203,7 +203,9 @@ textarea {
   background: var(--obs-surface);
 }
 
-.lab-context-rail { border-right: 1px solid var(--obs-border); }
+.lab-context-rail { border-right: 1px solid var(--obs-border); overflow-x: hidden; overflow-wrap: anywhere; }
+.lab-context-rail input, .lab-context-rail select, .lab-context-rail textarea { min-width: 0; max-width: 100%; }
+.lab-context-rail .lab-session-list { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
 .lab-inspector-rail { display: grid; align-content: start; border-left: 1px solid var(--obs-border); }
 
 .lab-rail-mobile-heading {
@@ -242,6 +244,7 @@ textarea {
 
 .lab-panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
   padding: 16px;
@@ -619,7 +622,7 @@ textarea {
 .lab-opened-session .lab-session-row { flex: 1; }
 .lab-session-close { flex-shrink: 0; min-height: 32px; width: 28px; padding: 0; border-color: transparent; background: transparent; color: var(--obs-text-secondary); }
 .lab-directory-more, .lab-directory-updates { width: 100%; font-size: .85rem; }
-.lab-session-configuration { display: grid; gap: 7px; }
+.lab-session-configuration { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 7px; }
 .lab-session-configuration input { width: 100%; min-height: 38px; padding: 9px 11px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); color: var(--obs-text); background: var(--obs-surface); }
 .lab-session-configuration label { margin-top: 3px; }
 .lab-session-reconnect { min-height: 30px; padding: 3px 8px; font-size: .8rem; }
@@ -894,7 +897,7 @@ textarea {
 .gateway-private[hidden] { display: none; }
 
 .lab-mobile-navigation { display: none; }
-.lab-session-search, .lab-browse-provider { display: grid; gap: 6px; margin: 12px 0; color: var(--obs-text-secondary); }
+.lab-session-search, .lab-browse-provider { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; margin: 12px 0; color: var(--obs-text-secondary); }
 .lab-session-search input { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); color: var(--obs-text); background: var(--obs-surface); }
 @media (max-width: 1180px) {
   html, body, #root { overscroll-behavior: none; }

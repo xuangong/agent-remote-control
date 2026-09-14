@@ -5,6 +5,9 @@ service and Node/Docker for an SSH server. Local Docker can run either the Node
 entry or the actual Workers/workerd entry. Both use the same hosted Relay core
 and the existing Agent Host protocol.
 
+Read [Personal access security](security.md) before upgrading an existing service;
+its rollout order and re-login boundary preserve existing device and sharing state.
+
 ## Production ownership
 
 | Service | Public origin | Owns |

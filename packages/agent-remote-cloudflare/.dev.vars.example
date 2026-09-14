@@ -1,0 +1,4 @@
+# Set the same independently generated secret in Gateway and Relay platform bindings.
+AGENT_REMOTE_SIGNING_SECRET=replace-with-at-least-32-random-bytes
+AGENT_REMOTE_RELAY_URL=https://agents.xianliao.de5.net
+AGENT_REMOTE_ISSUER=https://token.xianliao.de5.net

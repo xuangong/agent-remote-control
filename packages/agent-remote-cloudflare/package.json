@@ -1,0 +1,25 @@
+{
+  "name": "@borgee/agent-remote-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Native Cloudflare Worker and SQLite Durable Object for authenticated Agent Remote Relay.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=30000 --maxWorkers=1",
+    "deploy:dry-run": "wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "@borgee/agent-remote-hosted": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260601.1",
+    "@types/node": "^24.3.0",
+    "esbuild": "^0.28.1",
+    "miniflare": "4.20260601.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5",
+    "wrangler": "4.97.0"
+  }
+}

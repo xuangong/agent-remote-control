@@ -37,6 +37,8 @@ import { SessionConfiguration, SessionDirectory } from './components/SessionDire
 import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { sessionKey } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
+import { TimelineDisplay } from '@borgee/agent-remote-web/react';
+import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
@@ -147,6 +149,7 @@ export function App({
   const [contextFromSessions, setContextFromSessions] = useState(true);
   const [sessionPanel, setSessionPanel] = useState<'list' | 'new' | 'settings'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
+  const [timelineDisplay, setTimelineDisplay] = useTimelineDisplayMode();
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
   const compactLayoutRef = useRef(isCompactLayout());
@@ -742,7 +745,7 @@ export function App({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
-  return <RecoveryScope.Provider value={readingPositions}><main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       {stackPath.length > 1 ? <select aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
@@ -751,6 +754,7 @@ export function App({
     </nav> : null}
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
+      simpleConversation={timelineDisplay === 'simple'} onToggleSimpleConversation={() => setTimelineDisplay(value => value === 'simple' ? 'preview' : 'simple')}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
       onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
     <header className="lab-app-bar" hidden={headerHidden}>
@@ -935,7 +939,7 @@ export function App({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider>;
+  </main></RecoveryScope.Provider></TimelineDisplay.Provider>;
 }
 
 function createAgentId(): string {

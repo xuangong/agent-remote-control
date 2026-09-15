@@ -385,6 +385,23 @@
 .agent-tool-result-note { font-size: 12px; }
 
 .agent-file-changes { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; }
+.agent-tool-preview, .agent-tool-result-preview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.agent-content-preview { margin: 0; min-width: 0; max-width: 100%; color: var(--agent-muted); }
+.agent-reasoning-details { min-width: 0; max-width: 100%; }
+.agent-text-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
+.agent-code-preview { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: auto; overflow-y: hidden; white-space: pre; font: 12px/1.6 "SFMono-Regular", Consolas, monospace; padding: 6px 8px; background: var(--agent-panel); border-radius: var(--agent-radius); }
+.agent-code-preview .agent-preview-line { display: block; height: 1.6em; }
+.agent-preview-expand { justify-self: start; min-height: 36px; border: 0; padding: 4px 2px; color: var(--agent-action-text); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.agent-file-preview { min-width: 0; border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); }
+.agent-file-preview > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px; }
+.agent-file-preview .agent-file-identity > code, .agent-file-preview .agent-file-identity > small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.agent-diff-scroll.agent-diff-preview { max-height: none; overflow-y: hidden; }
+.agent-preview-expand:focus-visible, .agent-code-preview:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .agent-text-preview { -webkit-line-clamp: 3; }
+  .agent-code-preview .agent-preview-line:nth-child(n+5), .agent-diff-preview .agent-preview-line:nth-child(n+5) { display: none; }
+  .agent-preview-expand { min-height: 44px; }
+}
 .agent-file-change { min-width: 0; border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); }
 .agent-file-change > summary { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 10px; min-height: 44px; cursor: pointer; list-style: none; }
 .agent-file-change > summary::-webkit-details-marker { display: none; }

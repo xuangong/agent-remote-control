@@ -12,6 +12,28 @@ import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 describe('App', () => {
+  it('switches conversation previews from View and restores the browser preference', async () => {
+    const key = 'agent-remote:timeline-display';
+    window.localStorage.removeItem(key);
+    const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
+      providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-15T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'reasoning' as const, text: 'Review the failing test first.' },
+    }] } };
+    try {
+      const container = await render(<App initialState={initialState} transport={labTransport()} />);
+      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Review the failing test');
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      const simple = container.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]');
+      expect(simple).not.toBeNull();
+      await act(async () => simple!.click());
+      expect(container.querySelector('.agent-content-preview')).toBeNull();
+      expect(window.localStorage.getItem(key)).toBe('simple');
+      const restored = await render(<App initialState={initialState} transport={labTransport()} />);
+      expect(restored.querySelector('.agent-content-preview')).toBeNull();
+      await act(async () => simple!.click());
+      expect(container.querySelector('.agent-content-preview')).not.toBeNull();
+    } finally { window.localStorage.removeItem(key); }
+  });
+
   it('opens a native child link without cached sessions and ignores a stale runtime Agent ID', async () => {
     window.history.replaceState(null, '', '/?host=desk&agent=stale&provider=codex&session=child&parent=parent');
     const request = vi.fn(async () => Response.json({ agentId: 'current-child', nativeSessionId: 'child' }));

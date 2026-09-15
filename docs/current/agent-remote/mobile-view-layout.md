@@ -30,6 +30,34 @@ This is deterministic browser coverage without model calls. It does not assert
 physical iOS Safari testing, arbitrary third-party renderer behavior, or support
 below the application's existing 320px minimum width.
 
+## Conversation previews
+
+The default conversation shows bounded previews before full disclosure. View's
+**Simple conversation view** checkbox restores the title-oriented display for
+untouched items. This preference is stored in the current browser and applies to
+the main conversation and Side conversations. Individual expand/collapse choices
+survive content updates and changes to the default mode while the item is mounted.
+
+| Element | Default preview | Full disclosure |
+| --- | --- | --- |
+| Tool calls | Shell command and up to two received result blocks; no invented result when none was reported. | Complete bounded result, command details and existing raw JSON disclosure. |
+| File changes | First three files, change labels and received patch counts; each diff starts at its first unified hunk when present. Paths wrap to two preview lines. | All received file paths and diffs. |
+| Reasoning and runtime notices | Up to four lines of supplied text, three below 641px; no generated summary. | Original Markdown reasoning or complete diagnostic text. |
+| Completed questions | Brief question prompt beside the existing answer. | Complete prompt and description. Sensitive answers remain redacted. |
+
+Code/diff previews show up to six lines, four below 641px. Text extraction is
+bounded to 2,400 characters per preview; the complete result remains available
+through disclosure. Preview code scrolls horizontally within its own width and
+does not create a vertical scroll region. Expanded results retain their existing
+local scroll limits. Counts always refer to the received patch, not just preview
+lines. Full details are rendered lazily when opened.
+
+Messages, pending interactions, plans, resources and subagent links keep their
+existing presentation. Failed tool diagnostics stay visible in both modes.
+No provider, Relay or wire contract changes are required. Browser coverage is in
+`e2e/conversation-previews.spec.ts`, including narrow layouts, mode persistence,
+local scrolling and full-result access.
+
 ## File-change data
 
 The Provider SDK's `fileChangesResult` helper writes a versioned

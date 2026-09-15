@@ -1,5 +1,8 @@
 import { ToolResultView } from './ToolResultView.js';
-import { useId, useState } from 'react';
+import { useId } from 'react';
+import { useItemDisclosure } from '../TimelineDisplay.js';
+import { ToolResultPreview } from './ToolResultPreview.js';
+import { ContentPreview } from './ContentPreview.js';
 import type { AgentTimelineItem, AgentToolDetail } from '@borgee/agent-remote-protocol';
 
 const statusLabels = {
@@ -7,7 +10,7 @@ const statusLabels = {
 } as const;
 
 export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineItem, { type: 'tool_call' }> }) {
-  const [expanded, setExpanded] = useState(false);
+  const { expanded, preview, toggle } = useItemDisclosure();
   const detailsId = useId();
   return <article className={`agent-timeline-item agent-tool agent-state-${item.status}`}>
     <header className="agent-item-header">
@@ -16,7 +19,7 @@ export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineIte
         type="button"
         aria-expanded={expanded}
         aria-controls={detailsId}
-        onClick={() => setExpanded((current) => !current)}
+        onClick={toggle}
       >
         <span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <strong>{item.name}</strong>
@@ -24,9 +27,16 @@ export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineIte
         <span className="agent-state-label">{statusLabels[item.status]}</span>
       </button>
     </header>
+    {preview ? <div className="agent-tool-preview">
+      {item.detail.type === 'shell' ? <ContentPreview code text={item.detail.command} /> : null}
+      {item.result ? <ToolResultPreview result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} search={item.detail.type === 'search'} /> : null}
+      <button className="agent-preview-expand" type="button" aria-controls={detailsId} aria-expanded={false} onClick={toggle}>
+        {item.result ? 'Show full result' : 'Show details'}
+      </button>
+    </div> : null}
     <div id={detailsId} className="agent-tool-details" hidden={!expanded}>
-      <ToolCallDetails detail={item.detail} />
-      {item.result ? <ToolResultView result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} /> : null}
+      {expanded ? <><ToolCallDetails detail={item.detail} />
+      {item.result ? <ToolResultView result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} /> : null}</> : null}
     </div>
     {item.error ? <pre className="agent-tool-error" role="alert" tabIndex={0}>{item.error}</pre> : null}
   </article>;

@@ -43,3 +43,26 @@ export function FileChangesView({ files }: { files: readonly AgentFileChange[] }
     })}
   </section>;
 }
+
+export function FileChangesPreview({ files }: { files: readonly AgentFileChange[] }) {
+  return <section className="agent-file-changes agent-file-previews" aria-label="File changes preview">
+    {files.length === 0 ? <p>No file changes reported.</p> : files.slice(0, 3).map((file, index) => {
+      const lines = diffLines(file.diff);
+      const added = lines.filter(line => line.kind === 'added').length;
+      const deleted = lines.filter(line => line.kind === 'deleted').length;
+      const firstHunk = Math.max(0, lines.findIndex(line => line.kind === 'hunk'));
+      return <div className="agent-file-preview" key={`${index}:${file.path}`}>
+        <header><span className="agent-file-identity"><span>{labels[file.kind]}</span><code>{file.path}</code>
+          {file.previousPath ? <small>from <code>{file.previousPath}</code></small> : null}</span>
+          <span className="agent-diff-stats" aria-label={`${added} added lines, ${deleted} deleted lines`}><span>+{added}</span><span>−{deleted}</span></span>
+        </header>
+        {lines.length ? <div className="agent-diff-scroll agent-diff-preview" role="region" aria-label={`Diff preview for ${file.path}`} tabIndex={0}>
+          <div className="agent-diff-lines">{lines.slice(firstHunk, firstHunk + 6).map((line, lineIndex) => <div className="agent-diff-line agent-preview-line" data-line-kind={line.kind} key={lineIndex}>
+            <span className="agent-diff-line-number">{line.oldLine ?? ''}</span><span className="agent-diff-line-number">{line.newLine ?? ''}</span><code>{line.text || '\u00a0'}</code>
+          </div>)}</div>
+        </div> : <p className="agent-diff-empty">No diff content provided.</p>}
+      </div>;
+    })}
+    {files.length > 3 ? <small>{files.length - 3} more files</small> : null}
+  </section>;
+}

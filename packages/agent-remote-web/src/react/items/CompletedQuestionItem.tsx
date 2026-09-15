@@ -1,4 +1,6 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
+import { useItemDisclosure } from '../TimelineDisplay.js';
+import { ContentPreview } from './ContentPreview.js';
 import type { AgentInteractionRequest, AgentInteractionResponse } from '@borgee/agent-remote-protocol';
 
 import { MarkdownContent } from '../MarkdownContent.js';
@@ -9,7 +11,7 @@ interface CompletedQuestionItemProps {
 }
 
 export function CompletedQuestionItem({ request, response }: CompletedQuestionItemProps) {
-  const [showQuestions, setShowQuestions] = useState(false);
+  const { expanded: showQuestions, preview, toggle } = useItemDisclosure();
   const answersId = useId();
   const rows = request.questions.map((question) => {
     const answer = response.answers.find(({ questionId }) => questionId === question.questionId);
@@ -31,7 +33,7 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
         <span className="agent-question-receipt-status">{status}</span>
         <span className="agent-question-receipt-count">{count}</span>
       </div>
-      <button className="agent-question-context-toggle" type="button" aria-expanded={showQuestions} aria-controls={answersId} onClick={() => setShowQuestions((value) => !value)}>
+      <button className="agent-question-context-toggle" type="button" aria-expanded={showQuestions} aria-controls={answersId} onClick={toggle}>
         {showQuestions ? 'Hide questions' : 'Show questions'}
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d={showQuestions ? 'M3 7.5L6 4.5L9 7.5' : 'M3 4.5L6 7.5L9 4.5'} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
@@ -40,6 +42,7 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
       {rows.map(({ question, answer, answered }) => <div className="agent-completed-answer" key={question.questionId}>
         <dt>{question.header}</dt>
         <dd>
+          {preview ? <ContentPreview text={question.prompt} /> : null}
           {answered && (question.sensitive || answer?.redacted) ? <span className="agent-answer-hidden">Hidden answer</span> : null}
           {!question.sensitive && !answer?.redacted && answer?.selectedValues.length ? <ul>{answer.selectedValues.map((value) => <li key={value}>{question.options.find((option) => option.value === value)?.label ?? value}</li>)}</ul> : null}
           {!question.sensitive && !answer?.redacted && answer?.customText ? <p className="agent-answer-custom">{answer.customText}</p> : null}

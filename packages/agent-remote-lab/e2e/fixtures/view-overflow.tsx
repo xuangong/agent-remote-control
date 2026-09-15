@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import type { AgentInteractionRequest, AgentTimelineItem, AgentToolDetail } from '@borgee/agent-remote-protocol';
 import type { AgentReplicaState } from '@borgee/agent-remote-web';
 import { AgentCommandDetails, AgentTimeline } from '@borgee/agent-remote-web/react';
+import { App } from '../../src/App.js';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
 import { TraceView } from '../../src/components/TraceView.js';
@@ -86,9 +87,27 @@ const fileChangeState: AgentReplicaState = { ...replicaState, timeline: {
     },
   }],
 } };
+const previewItems: AgentTimelineItem[] = [
+  { type: 'assistant_message', text: 'I found the failing assertion and updated the renderer.' },
+  { type: 'reasoning', text: 'Check the existing event and preserve the original result.\nShow a short preview before opening the complete details.' },
+  { type: 'tool_call', callId: 'preview-shell', name: 'command', status: 'completed', error: null,
+    detail: { type: 'shell', command: 'pnpm test --filter renderer', cwd: '/workspace/project' },
+    result: { content: [{ type: 'text', text: Array.from({ length: 30 }, (_, index) => index === 0 ? `PASS ${long}` : `Test result ${index}`).join('\n') }], exitCode: 0 } },
+  { ...fileChangeState.timeline.entries[0]!.item, detail: { type: 'edit', filePath: 'src/renderer.tsx' },
+    result: { content: [{ type: 'json', value: [{ path: 'src/renderer.tsx', diff: '@@ -1,2 +1,2 @@\n-old renderer\n+preview renderer\n unchanged' },
+      { path: `src/${long}/mobile.tsx`, diff: '@@ -1 +1 @@\n-old\n+new' }] }] } } as AgentTimelineItem,
+  { type: 'error', message: 'Optional catalog lookup timed out.\nThe session remains connected.\nRetry the catalog request to load available items.' },
+  { type: 'interaction', request: { kind: 'question', requestId: 'preview-question', questions: [{ questionId: 'directory', header: 'Workspace',
+    prompt: 'Which directory should be used for validation?', selection: 'single', required: true,
+    options: [{ value: 'project', label: 'Current project' }], allowCustomText: true, allowDismiss: false }] },
+    response: { kind: 'question', answers: [{ questionId: 'directory', selectedValues: ['project'] }] } },
+];
+const previewState: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false, entries: previewItems.map((item, index) => ({
+  providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-09-15T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item,
+})) } };
 createRoot(document.getElementById('root')!).render(
   <main style={{ height: '100dvh' }}>
-    {view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
+    {view === 'previews' ? <App initialState={previewState} initialSessionStatus="ready" /> : view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
       : view === 'trace' ? <TraceView state={state} />
       : view === 'inspector' ? <ReplicaInspector state={state} sessionStatus="ready" providerName={long} />
       : view === 'command' ? <AgentCommandDetails command={{ id: long, name: long, description: long, kind: 'skill', documentation: { resourceId: 'documentation', locator: 'SKILL.md', status: 'available' } }} resources={state.resources} onClose={() => {}} />

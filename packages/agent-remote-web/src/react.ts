@@ -1,4 +1,6 @@
 export { AgentTimeline } from './react/AgentTimeline.js';
+export { TimelineDisplay } from './react/TimelineDisplay.js';
+export type { TimelineDisplayMode } from './react/TimelineDisplay.js';
 export type { AgentTimelineProps, AgentTimelineState } from './react/AgentTimeline.js';
 export { InteractionPanel } from './react/InteractionPanel.js';
 export type { InteractionPanelProps } from './react/InteractionPanel.js';

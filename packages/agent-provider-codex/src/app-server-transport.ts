@@ -1,6 +1,8 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import readline from 'node:readline';
+import { connect } from 'node:net';
+import { WebSocket } from 'ws';
 
 import { isRecord, type JsonObject } from './native.js';
 
@@ -35,7 +37,7 @@ export class CodexAppServerRpcError extends Error {
 }
 
 export class CodexAppServerTransport {
-  private readonly lines: readline.Interface;
+  private readonly lines: readline.Interface | undefined;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly requestHandlers = new Map<string, RequestHandler>();
   private readonly requestTimeoutMs: number;
@@ -50,12 +52,23 @@ export class CodexAppServerTransport {
   private stderr = '';
 
   constructor(
-    readonly child: ChildProcessWithoutNullStreams,
+    readonly child: ChildProcessWithoutNullStreams | undefined,
     options: CodexAppServerTransportOptions = {},
+    private readonly socket?: WebSocket,
   ) {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 90_000;
     this.gracefulShutdownMs = options.gracefulShutdownMs ?? 2_000;
     this.onDiagnostic = options.onDiagnostic ?? (() => undefined);
+    if (socket) {
+      socket.on('message', (data, binary) => {
+        if (binary) { this.handleTermination(new Error('Codex shared app-server sent a binary JSON-RPC frame')); socket.terminate(); return; }
+        void this.handleLine(data.toString());
+      });
+      socket.once('error', error => this.handleTermination(error));
+      socket.once('close', () => this.handleTermination(new Error('Codex shared app-server connection closed. Restore the daemon and restart the Host connection.')));
+      return;
+    }
+    if (!child) throw new Error('Codex transport requires a process or a shared socket.');
     this.lines = readline.createInterface({ input: child.stdout });
     this.lines.on('line', (line) => void this.handleLine(line));
     child.stderr.on('data', (chunk) => {
@@ -68,6 +81,20 @@ export class CodexAppServerTransport {
         `Codex app-server exited with code ${code ?? 'null'} and signal ${signal ?? 'null'}${suffix}`,
       ));
     });
+  }
+
+  static async connectShared(socketPath: string, options: CodexAppServerTransportOptions = {}): Promise<CodexAppServerTransport> {
+    const socket = new WebSocket('ws://localhost/', {
+      createConnection: () => connect(socketPath),
+      handshakeTimeout: options.requestTimeoutMs ?? 5000,
+      maxPayload: 64 * 1024 * 1024, perMessageDeflate: false, followRedirects: false,
+    });
+    const transport = new CodexAppServerTransport(undefined, options, socket);
+    try { await once(socket, 'open'); return transport; }
+    catch (error) {
+      socket.terminate();
+      throw new Error('Could not connect to the shared Codex app-server. Start the native daemon or check its local socket path.', { cause: error });
+    }
   }
 
   setNotificationHandler(handler: NotificationHandler): void {
@@ -99,7 +126,7 @@ export class CodexAppServerTransport {
       this.pending.set(id, { resolve, reject, timer });
     });
     try {
-      this.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+      this.write({ id, method, params });
     } catch (error) {
       const pending = this.pending.get(id);
       if (pending) {
@@ -113,7 +140,7 @@ export class CodexAppServerTransport {
 
   notify(method: string, params?: unknown): void {
     if (this.closed) return;
-    this.child.stdin.write(`${JSON.stringify({ method, params })}\n`);
+    this.write({ method, params });
   }
 
   dispose(): Promise<void> {
@@ -128,7 +155,16 @@ export class CodexAppServerTransport {
     this.notificationHandler = undefined;
     this.terminationHandler = undefined;
     this.rejectPending(new Error('Codex app-server transport is closed'));
-    this.lines.close();
+    this.lines?.close();
+    if (this.socket) {
+      if (this.socket.readyState === WebSocket.CLOSED) return;
+      const exited = once(this.socket, 'close');
+      this.socket.close();
+      const timer = setTimeout(() => this.socket?.terminate(), this.gracefulShutdownMs);
+      try { await exited; } finally { clearTimeout(timer); }
+      return;
+    }
+    if (!this.child) return;
     this.child.stdin.end();
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
 
@@ -148,7 +184,8 @@ export class CodexAppServerTransport {
   private handleTermination(error: Error): void {
     if (this.closed) return;
     this.closed = true;
-    this.lines.close();
+    this.lines?.close();
+    this.socket?.terminate();
     this.notificationHandler = undefined;
     this.rejectPending(error);
     const handler = this.terminationHandler;
@@ -227,8 +264,10 @@ export class CodexAppServerTransport {
   }
 
   private write(message: JsonObject): void {
-    if (this.closed || !this.child.stdin.writable) return;
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    if (this.closed) return;
+    if (this.socket) {
+      this.socket.send(JSON.stringify(message), error => { if (error) this.handleTermination(error); });
+    } else if (this.child?.stdin.writable) this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 }
 

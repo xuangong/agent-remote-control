@@ -1,4 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { homedir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
 
 import type {
   AgentPersistenceHandle,
@@ -16,6 +18,9 @@ import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPa
 
 export interface CodexAppServerProviderOptions {
   executable?: string;
+  /** Shared mode attaches to a native local WebSocket; disposing it never stops the daemon. */
+  connectionMode?: 'private' | 'shared';
+  socketPath?: string;
   restrictedNative?: boolean;
   env?: NodeJS.ProcessEnv;
   requestTimeoutMs?: number;
@@ -32,7 +37,16 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
 
   private readonly sessions = new Set<CodexAppServerSession>();
 
-  constructor(private readonly options: CodexAppServerProviderOptions = {}) {}
+  constructor(private readonly options: CodexAppServerProviderOptions = {}) {
+    if (options.connectionMode !== undefined && !['private', 'shared'].includes(options.connectionMode)) throw new Error('Codex connection mode must be private or shared.');
+    if (options.socketPath !== undefined && (options.connectionMode !== 'shared' || !isAbsolute(options.socketPath))) {
+      throw new Error('Codex socket path requires shared mode and an absolute local path.');
+    }
+    if (options.connectionMode === 'shared' && options.restrictedNative) {
+      throw new Error('Shared Codex uses the native daemon permissions. Explicit local trusted control is required; per-client sandbox restrictions cannot be enforced.');
+    }
+    if (options.connectionMode === 'shared' && options.spawn) throw new Error('Shared Codex cannot also spawn a private runtime.');
+  }
 
   async listSessions(options: CodexSessionListOptions = {}): Promise<CodexSessionPage> {
     const limit = options.limit ?? 100;
@@ -83,6 +97,12 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   }
 
   private async createTransport(cwd?: string): Promise<CodexAppServerTransport> {
+    if (this.options.connectionMode === 'shared') {
+      const home = this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+      return CodexAppServerTransport.connectShared(this.options.socketPath ?? join(home, 'app-server-control', 'app-server-control.sock'), {
+        requestTimeoutMs: this.options.requestTimeoutMs, onDiagnostic: this.options.onDiagnostic,
+      });
+    }
     const child = this.options.spawn
       ? await this.options.spawn({ cwd })
       : spawnCodexAppServer({

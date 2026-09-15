@@ -26,7 +26,8 @@
     "build:relay": "node scripts/build-relay.mjs",
     "relay:local": "node scripts/relay-local.mjs",
     "build:agent-remote-controller": "node scripts/build-agent-host.mjs",
-    "test:agent-remote-controller-package": "node scripts/run-tests.mjs host-package"
+    "test:agent-remote-controller-package": "node scripts/run-tests.mjs host-package",
+    "test:codex-shared": "node scripts/run-tests.mjs codex-shared"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

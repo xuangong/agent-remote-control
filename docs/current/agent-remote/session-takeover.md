@@ -81,6 +81,10 @@ policy and a reliable identity/impact implementation before it can be enabled.
 
 ## Delivery state
 
+Implemented for Codex: opt-in [shared native runtime connections](codex-shared-runtime.md)
+allow multiple clients to edit the same daemon-owned session without releasing
+the original client. This does not take over an external private writer.
+
 Implemented: accurate catalog activity labels and unknown-state propagation
 through providers, Host, Relay, and the session directory UI.
 

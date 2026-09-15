@@ -216,3 +216,17 @@ run independently with a local deadline, so an unsupported or unresponsive
 session does not hide other results. `cancelled` means the native cancel call
 completed; it does not prove OS process termination. Revoking browser access or
 rotating a device credential does not cancel already running native work.
+## Shared Codex runtime
+
+To use the same native session from a desktop CLI and the Remote Controller,
+start `codex app-server daemon start` and connect the CLI with
+`codex --remote unix://`. Configure this Host with
+`AGENT_HOST_CODEX_CONNECTION=shared` and `AGENT_HOST_CODEX_TRUST_SHARED=1` before
+starting it. `AGENT_HOST_CODEX_SOCKET` optionally selects an absolute local socket
+path; otherwise the native socket under the configured Codex home is used.
+
+Shared mode accepts the daemon's native permissions for Codex only. It never
+starts a replacement writer or stops the daemon when a Remote connection closes.
+The default remains `private`. Existing private CLI or desktop sessions must be
+released once before they can be opened in the shared daemon. An already-running
+Host must be restarted to apply provider configuration changes.

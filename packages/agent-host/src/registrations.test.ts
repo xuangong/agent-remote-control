@@ -59,3 +59,24 @@ it('selects native restrictions by default, supports the explicit local opt-out,
     expect(options.env.OPENAI_API_KEY).toBe('native-auth');
   }
 });
+
+it('passes the locally configured shared Codex connection to its provider', async () => {
+  let seen: unknown;
+  const factory = async (options: unknown) => { seen = options; return registration(); };
+  await createHostRegistrations({ AGENT_HOST_CODEX_CONNECTION: 'shared', AGENT_HOST_CODEX_SOCKET: '/tmp/codex.sock', AGENT_HOST_TRUSTED_FULL_CONTROL: '1' },
+    undefined, { codex: factory, claude: factory, copilot: factory });
+  expect(seen).toMatchObject({ connectionMode: 'shared', socketPath: '/tmp/codex.sock', restrictedNative: false });
+});
+
+it('rejects an invalid Codex connection mode before starting providers', async () => {
+  const factory = async () => { throw new Error('unexpected startup'); };
+  await expect(createHostRegistrations({ AGENT_HOST_CODEX_CONNECTION: 'typo' }, undefined,
+    { codex: factory, claude: factory, copilot: factory })).rejects.toThrow('Codex connection mode');
+});
+
+it('trusts shared Codex permissions only for Codex, retaining restrictions for the other providers', async () => {
+  const seen: any[] = []; const factory = async (options: unknown) => { seen.push(options); return registration(); };
+  await createHostRegistrations({ AGENT_HOST_PROVIDERS: 'codex,claude,copilot', AGENT_HOST_CODEX_CONNECTION: 'shared', AGENT_HOST_CODEX_TRUST_SHARED: '1' },
+    undefined, { codex: factory, claude: factory, copilot: factory });
+  expect(seen.map(options => options.restrictedNative)).toEqual([false, true, true]);
+});

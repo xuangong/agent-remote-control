@@ -38,6 +38,9 @@ See the [Agent Host CLI guide](packages/agent-host/README.md) for native CLI req
 pairing, background operation and upgrades. Run `pnpm test:agent-remote-controller-package` after
 building to verify installation and daemon lifecycle in an isolated prefix.
 
+For simultaneous desktop CLI and phone control of one Codex session, use the
+[shared native runtime setup](docs/current/agent-remote/codex-shared-runtime.md).
+
 ## Connect a real Codex CLI
 
 Start the workbench, open **Pair Agent Host**, and generate a temporary key. In another terminal, start Codex through the Host:

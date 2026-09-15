@@ -27,11 +27,13 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@borgee/agent-provider-sdk": "workspace:*"
+    "@borgee/agent-provider-sdk": "workspace:*",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
     "typescript": "5.9.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "@types/ws": "^8.18.1"
   }
 }

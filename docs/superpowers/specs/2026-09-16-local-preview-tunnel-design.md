@@ -8,14 +8,14 @@ Follow-up: [stack research and local experiment results](2026-09-16-local-previe
 
 Open a workstation's local web application from a phone through the existing authenticated Relay. Implement the tunnel inside Agent Remote Control; do not depend on Cloudflare Tunnel, Quick Tunnels, or another public forwarding service. Support both HTTP and WebSocket as required capabilities, including streaming responses and development-server hot reload. A static HTML fetch or a rewritten link alone does not satisfy this design.
 
-Keep the control site at `https://agents.xianliao.de5.net`. Use one fixed preview origin, `https://preview.xianliao.de5.net`, with paths identifying registrations. Provision DNS, HTTPS for that exact hostname, and routing to the Relay deployment separately. No wildcard certificate or dynamically created hostname is required. This document does not claim that the preview hostname is configured.
+Use `https://agents.xianliao.de5.net` for both the control site and previews, with `/p/<id>/` identifying registrations and `/_arc/enter` reserved for preview entry. Reuse the existing DNS, HTTPS certificate, and Relay deployment. A separately configured preview origin remains optional. No wildcard certificate or additional hostname is required by the default deployment.
 
 ```text
 Original URL:
 http://127.0.0.1:15811/me?agent=balabala
 
 Preview URL:
-https://preview.xianliao.de5.net/p/7f3a/me?agent=balabala
+https://agents.xianliao.de5.net/p/7f3a/me?agent=balabala
 
 Mapping:
 7f3a -> authenticated principal + Host + http://127.0.0.1:15811
@@ -139,7 +139,7 @@ Accept only explicit HTTP(S) loopback targets supported by the Controller. Norma
 
 Treat a port registration as access to that local service, not just the one path mentioned in the timeline. Use Host-level preview permission; session visibility alone must not silently grant arbitrary local port access. Begin with owner-only registration/access unless an explicit Host sharing capability is defined. Do not inherit broad preview rights from an unrelated session share.
 
-The fixed preview hostname separates local application scripts from the control site's origin, but all previews on that hostname share an origin. Cookie paths are not a security boundary. A script in one preview can interact with another preview accessible to the same browser principal. This design is therefore for trusted local project previews and does not promise isolation between hostile applications. Preserve strict Origin/CSRF checks and restrictive credentialed CORS at the control site, and do not send parent-domain auth cookies to previews. A hostile-preview isolation requirement would require revisiting the origin design.
+The default preview origin is the control site's origin. Browser scripts in a preview can access the control site's authenticated APIs, storage, and other previews as the signed-in principal. Cookie paths are not a security boundary; stripping credentials from upstream HTTP forwarding does not remove these browser privileges. This mode is only for trusted local applications. Every preview request still requires valid Relay-backed preview authorization, so knowing its URL does not grant access. Preserve Origin/CSRF checks and restrictive credentialed CORS. A separately configured preview origin isolates local scripts from the control site, but previews on that origin still share browser privileges; hostile application isolation requires different origins per application.
 
 ## Runtime integration and evidence
 

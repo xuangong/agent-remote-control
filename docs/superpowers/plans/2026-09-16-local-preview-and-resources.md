@@ -14,7 +14,7 @@
 
 - Work only in this dedicated worktree. Do not modify production services, deploy, or push as part of implementation.
 - Browser requests must retain existing Relay authorization; preview management is owner-only.
-- The preview origin is explicitly configured and separate from the control origin. Route by `/p/<id>/`, never infer a current preview from a cookie or Referer.
+- Previews use the control origin by default; a separate origin remains configurable. Same-origin preview scripts are trusted with the control site privileges. Route by `/p/<id>/`, never infer a current preview from a cookie or Referer.
 - Use binary streaming and bounded queues; preserve separate WS text/binary messages. Cancel interrupted operations instead of replaying them.
 - Use Controller-owned fixed expiry, initially one hour with a configurable duration; retain bounded tombstones and reconcile after reconnect.
 - Local files are session-scoped and canonicalized under authorized workspace roots. Do not expose arbitrary filesystem access to a shared session.

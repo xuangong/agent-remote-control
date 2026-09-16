@@ -30,11 +30,12 @@ class LocalSession implements AgentSession {
   async runtimeInfo() { return { providerId: this.providerId, sessionId: this.nativeSessionId, status: 'idle' as const, cwd: this.cwd, persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } }; }
   async sendMessage() {} async respondToInteraction() {} async dispose() { this.release(); }
 }
-export async function previewFixture(options: { target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
+export async function previewFixture(options: { separateOrigin?: boolean; target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-preview-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
-  const observed = { cancelledEvents: 0 };
+  const observed = { cancelledEvents: 0, cookies: [] as string[] };
   const local = createServer((request, response) => {
+    observed.cookies.push(request.headers.cookie ?? '');
     if (request.url === '/static') { response.setHeader('content-type', 'text/html'); response.end('<!doctype html><html><head><link rel="stylesheet" href="/style.css"></head><body><img src="/bytes"></body></html>'); return; }
     if (request.url === '/style.css') { response.setHeader('content-type', 'text/css'); response.end('body{background:url(/bytes)}'); return; }
     if (request.url === '/redirect') { response.writeHead(302, { location: '/next?q=1', 'set-cookie': ['one=a; Path=/', 'two=b; Path=/; HttpOnly'] }); response.end(); return; }
@@ -54,9 +55,9 @@ export async function previewFixture(options: { target?: string; pathMode?: 'str
   await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve));
   cleanups.push(async () => { for (const socket of appWs.clients) socket.terminate(); await new Promise<void>(resolve => appWs.close(() => resolve())); local.closeAllConnections(); await new Promise<void>(resolve => local.close(() => resolve())); });
   const target = options.target ?? `http://127.0.0.1:${(local.address() as import('node:net').AddressInfo).port}`;
-  const relay = createGatewayRelay({ origin: 'http://127.0.0.1:0', previewOrigin: 'http://localhost:0', issuer, secret, servePage: options.servePage });
+  const relay = createGatewayRelay({ origin: 'http://127.0.0.1:0', previewOrigin: options.separateOrigin ? 'http://localhost:0' : undefined, issuer, secret, servePage: options.servePage });
   const { url, port } = await relay.listen(0); cleanups.push(() => relay.close());
-  const previewOrigin = `http://localhost:${port}`;
+  const previewOrigin = options.separateOrigin ? `http://localhost:${port}` : url;
   async function login(subject: string) {
     const begin = await fetch(url + '/auth/login', { redirect: 'manual' });
     const cookie = begin.headers.getSetCookie()[0]!.split(';')[0]!;

@@ -318,4 +318,4 @@ Google OAuth application or manually created Durable Object is required.
 
 ## Local previews and Markdown resources
 
-See [local previews](local-previews.md) for the separate preview hostname, HTTP/SSE/WebSocket transport, Controller registration lifecycle, and session-scoped Markdown image loading.
+See [local previews](local-previews.md) for same-origin preview paths and the optional separate hostname, HTTP/SSE/WebSocket transport, Controller registration lifecycle, and session-scoped Markdown image loading.

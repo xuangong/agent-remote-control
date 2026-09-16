@@ -4,12 +4,14 @@ import { WebSocket } from 'ws';
 import { expect, it, vi } from 'vitest';
 import { previewFixture, onPreviewCleanup } from './preview-tunnel-fixture.js';
 
-it('serves authenticated binary HTTP, streaming uploads and early SSE through the real outbound Controller tunnel', async () => {
-  const f = await previewFixture(); const cookie = await f.enter('/bytes');
+it.each([false, true])('serves authenticated binary HTTP, streaming uploads and early SSE through the real outbound Controller tunnel (separate origin: %s)', async (separateOrigin) => {
+  const f = await previewFixture({ separateOrigin }); const cookie = await f.enter('/bytes');
   const path = `${f.previewOrigin}/p/${f.registration.id}`;
   expect((await fetch(path + '/bytes')).status).toBe(401);
   expect((await f.bob.request(`v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/open`, { url: f.target + '/bytes' })).status).toBe(403);
-  const binary = await fetch(path + '/bytes', { headers: { cookie } }); expect(binary.status).toBe(200);
+  expect((await fetch(path + '/bytes', { headers: { cookie: f.alice.cookie } })).status).toBe(401);
+  const binary = await fetch(path + '/bytes', { headers: { cookie: `${cookie}; ${f.alice.cookie}; app=value` } }); expect(binary.status).toBe(200);
+  expect(f.observed.cookies.at(-1)).toBe('app=value');
   expect([...new Uint8Array(await binary.arrayBuffer())]).toEqual([0, 128, 255, 65]);
   const echo = await fetch(path + '/echo', { method: 'POST', headers: { cookie, origin: f.previewOrigin }, body: Buffer.from([255, 0, 128]) });
   expect([...new Uint8Array(await echo.arrayBuffer())]).toEqual([255, 0, 128]);
@@ -23,8 +25,8 @@ it('serves authenticated binary HTTP, streaming uploads and early SSE through th
   expect((await fetch(path + '/bytes', { headers: { cookie } })).status).toBe(401);
 }, 20000);
 
-it('negotiates a real local WebSocket protocol, preserves text/binary, and closes on unregister', async () => {
-  const f = await previewFixture(); const cookie = await f.enter('/socket');
+it.each([false, true])('negotiates a real local WebSocket protocol, preserves text/binary, and closes on unregister (separate origin: %s)', async (separateOrigin) => {
+  const f = await previewFixture({ separateOrigin }); const cookie = await f.enter('/socket');
   const socket = new WebSocket(`${f.previewOrigin.replace('http:', 'ws:')}/p/${f.registration.id}/socket`, ['echo-v1'], { headers: { cookie, origin: f.previewOrigin }, handshakeTimeout: 5000 });
   onPreviewCleanup(async () => { socket.terminate(); });
   await once(socket, 'open'); expect(socket.protocol).toBe('echo-v1');
@@ -37,8 +39,8 @@ it('negotiates a real local WebSocket protocol, preserves text/binary, and close
   await closing;
 }, 20000);
 
-it('preserves HTTP ranges, conditional responses, separate cookies and multipart uploads while adapting static references', async () => {
-  const f = await previewFixture(); const cookie = await f.enter('/static');
+it.each([false, true])('preserves HTTP ranges, conditional responses, separate cookies and multipart uploads while adapting static references (separate origin: %s)', async (separateOrigin) => {
+  const f = await previewFixture({ separateOrigin }); const cookie = await f.enter('/static');
   const base = `${f.previewOrigin}/p/${f.registration.id}`;
   const headers = { cookie };
   const html = await fetch(base + '/static', { headers });

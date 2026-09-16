@@ -40,15 +40,15 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let renewalAt = Date.now() + 60_000;
   const state = createRelayState(auth, options.storage, failClosed, published);
   const sessions = createGatewaySessions(auth, state, durable);
-  const previewOrigin = options.previewOrigin ? validateGatewayOrigin(options.previewOrigin) : undefined;
-  const previewAccess = previewOrigin ? createPreviewAccess({ origin: auth.origin, previewOrigin,
+  const previewOrigin = validateGatewayOrigin(options.previewOrigin || auth.origin);
+  const previewAccess = createPreviewAccess({ origin: auth.origin, previewOrigin,
     authorize: async entry => {
       const { grant } = await sessions.authenticate(entry.source);
       if (!grant || grant.subject !== entry.subject) return false;
       const owned = [...tenants.values()].find(value => value.broker.ownsHost(entry.hostId, grant.subject));
       return !!owned && await activeOwner(owned) === 'active' && !!owned.broker.previews.lookup(entry.hostId, entry.previewId) && !!owned.broker.previews.bridge(entry.hostId);
     },
-  }) : undefined;
+  });
   const security = createSecurityPolicy(state);
   const verifyControl = createGatewayControlVerifier(auth, state);
   function failClosed() {
@@ -59,7 +59,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   function available() { if (closing || failed) throw new Error('Relay state is unavailable.'); state.assertAvailable(); }
   function published() {
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
-    void previewAccess?.enforce();
+    void previewAccess.enforce();
     if (initialized && !refreshing) queueSchedule();
   }
   function queueSchedule() {
@@ -147,7 +147,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   async function handle(request: Request): Promise<Response | undefined> {
     const url = new URL(request.url);
-    if (url.origin === previewOrigin) return handlePreview(request);
+    if (isPreviewRequest(url)) return handlePreview(request);
     if (url.origin !== auth.origin) return json(403, { error: 'Origin is not allowed.' });
     if (url.pathname === '/health' && request.method === 'GET') return json(200, { status: 'ok', service: 'agent-remote-gateway-relay' });
     if (url.pathname === '/gateway/control') {
@@ -277,7 +277,6 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const destination = routeTenant(path, grant.subject) ?? owned;
     const openPreview = /^\/v1\/remote\/hosts\/([^/]+)\/previews\/([A-Za-z0-9_-]+)\/open$/.exec(path);
     if (openPreview && request.method === 'POST') {
-      if (!previewAccess) return json(503, { error: 'Configure the Relay preview origin before opening local previews.' });
       const hostId = openPreview[1]!; const previewId = openPreview[2]!;
       if (!destination.broker.ownsHost(hostId, grant.subject)) return json(403, { error: 'Only the Host owner can open previews.' });
       const registration = destination.broker.previews.lookup(hostId, previewId);
@@ -322,8 +321,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const destination = routeTenant(new URL(relative.url).pathname, grant.subject) ?? owned;
     return await destination.broker.prepareUpgrade(relative, context(request, grant)) ?? json(404, {});
   }
+  function isPreviewRequest(url: URL): boolean {
+    return url.origin === previewOrigin && (previewOrigin !== auth.origin || url.pathname === '/_arc/enter' || url.pathname === '/p' || url.pathname.startsWith('/p/'));
+  }
   async function handlePreview(request: Request): Promise<Response> {
-    if (!previewAccess) return json(404, {});
     const entry = await previewAccess.handle(request); if (entry) return entry;
     const access = await previewAccess.authenticate(request); if (access instanceof Response) return access;
     if (request.headers.get('service-worker') === 'script' || request.headers.get('sec-fetch-dest') === 'serviceworker') return json(403, { error: 'Service workers are not supported in local previews.' });
@@ -356,7 +357,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   async function preparePreviewUpgrade(request: Request): Promise<{ protocol?: string; accept(socket: TunnelSocket): void } | Response | undefined> {
     const url = new URL(request.url);
-    if (url.origin !== previewOrigin && url.pathname !== '/ws/preview-tunnel') return undefined;
+    if (!isPreviewRequest(url) && url.pathname !== '/ws/preview-tunnel') return undefined;
     try {
       await scheduling; available();
       if (url.origin === auth.origin && url.pathname === '/ws/preview-tunnel') {
@@ -367,7 +368,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         if (status !== 'active') return json(status === 'denied' ? 401 : 503, {});
         return { accept(socket) { owned.broker.acceptTunnel(token, socket); } };
       }
-      if (!previewAccess || url.origin !== previewOrigin) return json(403, {});
+      if (url.origin !== previewOrigin) return json(403, {});
       const access = await previewAccess.authenticate(request); if (access instanceof Response) return access;
       const owned = [...tenants.values()].find(value => value.broker.ownsHost(access.hostId, access.subject));
       const registration = owned?.broker.previews.lookup(access.hostId, access.previewId);
@@ -414,7 +415,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         if (!durable) draft.tenants = draft.tenants.filter(value => tenants.has(value.namespace));
       });
       await Promise.all([sessions.refreshAll(), ...[...tenants.values()].map(owned => activeOwner(owned, true))]);
-      await previewAccess?.enforce();
+      await previewAccess.enforce();
     })();
     refreshing = operation;
     try { await operation; } finally { refreshing = undefined; queueSchedule(); await scheduling; }
@@ -436,7 +437,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     refresh,
     async close() {
       if (closing) return;
-      closing = true; previewAccess?.close(); sessions.close(); await scheduling.catch(() => undefined); await scheduler.cancel();
+      closing = true; previewAccess.close(); sessions.close(); await scheduling.catch(() => undefined); await scheduler.cancel();
       for (const owned of tenants.values()) owned.broker.close();
       await Promise.all([...tenants.values()].map(owned => owned.broker.settled()));
       await state.close(); tenants.clear();

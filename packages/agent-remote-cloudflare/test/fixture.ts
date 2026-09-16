@@ -7,7 +7,7 @@ import { Miniflare, type WebSocket } from 'miniflare';
 import { afterEach, expect } from 'vitest';
 
 export const origin = 'https://relay.example';
-export const previewOrigin = 'https://preview.example';
+export const previewOrigin = origin;
 export const issuer = 'https://gateway.example';
 export const secret = 'workers-fixture-secret-01234567890123456789';
 const closers: Array<() => Promise<void>> = [];
@@ -25,7 +25,7 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture() {
+export async function fixture(options: { previewOrigin?: string } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: `
@@ -54,7 +54,7 @@ export async function fixture() {
   async function start() {
     mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { RELAY: { className: 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
-      bindings: { AGENT_REMOTE_RELAY_URL: origin, AGENT_REMOTE_PREVIEW_URL: previewOrigin, AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
+      bindings: { AGENT_REMOTE_RELAY_URL: origin, ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },
@@ -76,7 +76,7 @@ export async function fixture() {
   closers.push(async () => { for (const socket of sockets) { try { socket.close(); } catch { /* Socket was already closed during restart. */ } } await mf.dispose(); });
   const requestAt = (requestOrigin: string, path: string, init: RequestInit = {}) => mf.dispatchFetch(requestOrigin + path, { ...init, redirect: 'manual', signal: AbortSignal.timeout(5000) } as any);
   const request = (path: string, init: RequestInit = {}) => requestAt(origin, path, init);
-  const previewRequest = (path: string, init: RequestInit = {}) => requestAt(previewOrigin, path, init);
+  const previewRequest = (path: string, init: RequestInit = {}) => requestAt(options.previewOrigin ?? previewOrigin, path, init);
   const json = (path: string, cookie: string, body?: object, method = body ? 'POST' : 'GET') => request(path, {
     method, headers: { origin, cookie, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
   async function beginLogin(subject: string) {

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { event, fixture, origin, send } from './fixture.js';
 
 it('serves hosted assets and health, authenticates browser login, and transports Host RPC and Controller frames', async () => {
-  const f = await fixture();
+  const f = await fixture({ previewOrigin: origin });
   expect((await f.request('/health')).status).toBe(200);
   const index = await f.request('/');
   expect(await index.text()).toContain('<meta name="agent-remote-auth" content="gateway">');

@@ -6,7 +6,7 @@ The hosted Controller can expose a workstation's loopback HTTP service through a
 
 A timeline block containing a loopback URL offers **Open preview**. Rendering a block does not register its port. Registration records the source session and timeline item on the Controller, then **Prepare link** creates a short-lived entry link. **Open ready preview** consumes that link in a new tab.
 
-The public route is `https://preview.xianliao.de5.net/p/<id>/<path>?<query>`. Registration selects one fixed loopback origin, including its port. HTTP paths and WebSocket handshakes cannot choose another target. No public wildcard hostname or wildcard certificate is required.
+The public route is `https://agents.xianliao.de5.net/p/<id>/<path>?<query>`. Registration selects one fixed loopback origin, including its port. HTTP paths and WebSocket handshakes cannot choose another target. No public wildcard hostname or wildcard certificate is required.
 
 The Controller opens a separate outbound WebSocket to `/ws/preview-tunnel` on the control origin. HTTP request and response bodies use multiplexed binary chunks with credit and cancellation; SSE passes through as a stream without collecting the full response. WebSockets have an independent upstream handshake, selected subprotocol, text/binary messages, and close propagation. The data connection reconnects independently of chat. Interrupted requests fail and are not replayed.
 
@@ -20,7 +20,7 @@ Only the Host owner can register targets, prepare preview access, list registrat
 
 The entry URL contains a one-use proof in its fragment, valid for 60 seconds. The entry page removes the fragment before redeeming it for an HttpOnly, host-only cookie scoped to `/p/<id>/`. No Relay login cookie or tunnel credential is forwarded to the local service. Authorization and proxy identity headers are stripped; the upstream Origin is rewritten to the registered local origin after validating the browser origin at Relay. Each HTTP request and WebSocket handshake checks the original Relay browser session, current owner access, active registration, and Controller availability. Existing streams are rechecked on lifecycle changes and at most every 15 seconds, subject to the existing Gateway authority lease.
 
-The preview origin must differ from the control origin. Preview cookies isolate accidental routing across registrations; previews still share one browser origin and must be trusted local applications. This is not hostile application isolation. Service worker registration is denied. Unknown request hostnames are rejected.
+Previews use the control origin by default. The Relay reserves `/p/<id>/` and `/_arc/enter` for previews while preserving the main UI, authentication, session APIs, and control WebSocket routes. Preview scripts share the control site browser privileges: they can call authenticated main-site APIs and access its storage. Cookie paths and upstream credential stripping do not isolate same-origin scripts. Use this mode only for trusted local applications. A separate preview origin remains configurable to isolate preview scripts from the control site; previews on that origin still share browser privileges with each other. Service worker registration through preview routes is denied. Unknown request hostnames are rejected.
 
 Targets are loopback HTTP or HTTPS origins. The Controller validates target addresses, redirects, methods, paths, headers, frame sizes, stream limits and queue bounds. Redirects are returned to the browser rather than followed by the Controller. Configure protected local ports if other administrative services listen on TCP.
 
@@ -42,7 +42,7 @@ export default {
     host: '127.0.0.1',
     hmr: {
       protocol: 'wss',
-      host: 'preview.xianliao.de5.net',
+      host: 'agents.xianliao.de5.net',
       clientPort: 443,
     },
   },
@@ -53,7 +53,7 @@ A new registration can have a new ID, requiring a corresponding base update. Mul
 
 ## Configuration
 
-On the Relay, set `AGENT_REMOTE_PREVIEW_URL=https://preview.xianliao.de5.net`. Node Docker accepts this variable in `deploy/compose.ssh.yaml`. Configure DNS, a certificate for that exact hostname, and reverse-proxy both control and preview hostnames to the same Relay listener. Preserve the original Host and Origin headers and support HTTP streaming and WebSocket upgrades. Turn off proxy response buffering for SSE. The Workers configuration declares the exact preview Custom Domain and passes it to the same Durable Object. Configuration in source does not provision or deploy the domain.
+No additional domain configuration is needed for same-origin previews. With `AGENT_REMOTE_PREVIEW_URL` unset or empty, previews use `AGENT_REMOTE_RELAY_URL`, including the existing DNS and certificate. Node Docker and Workers share this default. The Workers configuration declares only the control Custom Domain. An optional `AGENT_REMOTE_PREVIEW_URL` can select a separate origin after its DNS, certificate, and routing are configured. Reverse-proxy preview paths to the Relay listener, preserve Host and Origin headers, support WebSocket upgrades, and turn off response buffering for SSE. Configuration in source does not deploy the service.
 
 The Controller CLI enables previews with its existing managed state directory. `AGENT_HOST_PREVIEW_TTL_MS` sets the fixed registration lifetime in milliseconds; the default is `3600000`. `AGENT_HOST_PREVIEW_PROTECTED_PORTS` accepts comma-separated TCP ports. Programmatic `createAgentHost` users enable the feature through the optional `preview` configuration.
 

@@ -19,7 +19,7 @@ it('loads a prefixed Vite page through the authenticated tunnel and receives a r
   const f = await previewFixture({ target: `http://127.0.0.1:${vitePort}`, pathMode: 'preserve' });
   await vite.close();
   vite = await createServer({ configFile: false, root, base: `/p/${f.registration.id}/`, server: { host: '127.0.0.1', port: vitePort, strictPort: true,
-    hmr: { protocol: 'ws', host: 'localhost', clientPort: f.port }, cors: { origin: f.previewOrigin } } });
+    hmr: { protocol: 'ws', host: new URL(f.previewOrigin).hostname, clientPort: f.port }, cors: { origin: f.previewOrigin } } });
   await vite.listen();
   const browser = await chromium.launch({ headless: true }); onPreviewCleanup(() => browser.close());
   const page = await browser.newPage(); page.setDefaultTimeout(10_000);

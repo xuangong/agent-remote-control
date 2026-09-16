@@ -20,7 +20,6 @@ interface PreviewAccessOptions {
 export function createPreviewAccess(options: PreviewAccessOptions) {
   const origin = new URL(options.origin).origin;
   const previewOrigin = new URL(options.previewOrigin).origin;
-  if (origin === previewOrigin) throw new Error('Preview and control origins must differ.');
   if (!['https:', 'http:'].includes(new URL(previewOrigin).protocol)) throw new Error('Invalid preview origin.');
   const secure = previewOrigin.startsWith('https:');
   if (!secure && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(previewOrigin).hostname)) throw new Error('Public previews require HTTPS.');

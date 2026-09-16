@@ -16,6 +16,20 @@ const scheduler: RelayScheduler = { schedule() {}, cancel() {} };
 function setup(storage?: RelayStateStore, customScheduler = scheduler) {
   const relay = createHostedRelay({ ...auth, storage, scheduler: customScheduler }); closers.push(() => relay.close()); return relay;
 }
+
+it.each([undefined, auth.origin])('routes same-origin previews without intercepting control requests (preview origin: %s)', async previewOrigin => {
+  const relay = createHostedRelay({ ...auth, previewOrigin, scheduler });
+  closers.push(() => relay.close());
+  expect((await relay.fetch(new Request(auth.origin + '/health')))?.status).toBe(200);
+  expect((await relay.fetch(new Request(auth.origin + '/auth/login')))?.status).toBe(303);
+  const entry = await relay.fetch(new Request(auth.origin + '/_arc/enter'));
+  expect(entry?.status).toBe(200);
+  expect(await entry?.text()).toContain('Opening preview');
+  expect((await relay.fetch(new Request(auth.origin + '/p/unknown/')))?.status).toBe(401);
+  expect(await relay.preparePreviewUpgrade(new Request(auth.origin + '/ws/remote-host'))).toBeUndefined();
+  expect(await relay.preparePreviewUpgrade(new Request(auth.origin + '/u/alice/v1/sessions/agent/events'))).toBeUndefined();
+  expect((await relay.preparePreviewUpgrade(new Request(auth.origin + '/ws/preview-tunnel'))) as Response).toHaveProperty('status', 401);
+}, 10000);
 function control(operation = 'hosts') {
   const body = JSON.stringify({ subject: 'alice', operation }); const iat = Math.floor(Date.now() / 1000);
   const input = [{ alg: 'HS256', typ: 'arc-gateway-service+jwt' }, { iss: auth.issuer, aud: auth.origin, op: 'control',

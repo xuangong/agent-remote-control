@@ -15,7 +15,7 @@ export const AgentToolDetail = Type.Union([
   Strict({ type: Type.Literal('write'), filePath: NonEmptyString }),
   Strict({ type: Type.Literal('search'), query: NonEmptyString }),
   Strict({ type: Type.Literal('fetch'), url: NonEmptyString }),
-  Strict({ type: Type.Literal('other'), description: NonEmptyString }),
+  Strict({ type: Type.Literal('other'), description: NonEmptyString, sessionReference: Type.Optional(Strict({ nativeSessionId: NonEmptyString, title: NonEmptyString })) }),
 ]);
 export type AgentToolDetail = Static<typeof AgentToolDetail>;
 

@@ -58,3 +58,26 @@ it('shows output and command metadata inside the existing disclosure without int
   expect(result?.textContent).toContain('"count": 2');
   expect(container.querySelector('img')).toBeNull();
 });
+
+it('links normalized session identity independently of the tool disclosure and reports navigation failure', async () => {
+  const opened: string[] = [];
+  const item: Extract<AgentTimelineItem, { type: 'tool_call' }> = {
+    type: 'tool_call', callId: 'activity', name: 'agent.activity', status: 'completed', error: null,
+    detail: { type: 'other', description: 'Agent /root/review: interacted', sessionReference: { nativeSessionId: 'review-id', title: '/root/review' } },
+  };
+  const container = await render(<ToolCallItem item={item} resolveSessionLink={id => ({ href: '/?session=review-id', open: async () => { opened.push(id); } })} />);
+  const link = container.querySelector<HTMLAnchorElement>('a')!;
+  expect(link.textContent).toBe('/root/review');
+  expect(link.closest('button')).toBeNull();
+  await act(async () => link.click());
+  expect(opened).toEqual(['review-id']);
+  expect(container.querySelector<HTMLElement>('.agent-tool-details')!.hidden).toBe(true);
+  await act(async () => container.querySelector<HTMLButtonElement>('.agent-tool-name-toggle')!.click());
+  expect(container.querySelector<HTMLElement>('.agent-tool-details')!.hidden).toBe(false);
+  await rerender(container, <ToolCallItem item={item} resolveSessionLink={() => ({ href: '/?session=review-id', open: async () => { throw new Error('Child is unavailable'); } })} />);
+  await act(async () => container.querySelector<HTMLAnchorElement>('a')!.click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe('Child is unavailable');
+  await rerender(container, <ToolCallItem item={item} resolveSessionLink={() => undefined} />);
+  expect(container.querySelector('a')).toBeNull();
+  expect(container.querySelector('.agent-tool-summary')?.textContent).toBe('Agent /root/review: interacted');
+});

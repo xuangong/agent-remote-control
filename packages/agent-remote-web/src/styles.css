@@ -152,6 +152,10 @@
 .agent-tool-toggle strong { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-tool-chevron { color: var(--agent-muted); }
 .agent-tool-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--agent-muted); font-size: .92em; }
+.agent-tool-linked { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; cursor: default; }
+.agent-tool-name-toggle { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.agent-session-reference { color: var(--agent-signal); text-decoration: underline; text-underline-offset: 3px; }
+.agent-session-reference:focus-visible, .agent-tool-name-toggle:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 .agent-tool-details { min-width: 0; padding-top: 4px; }
 .agent-tool-detail { display: flex; flex-wrap: wrap; gap: 7px 12px; align-items: baseline; min-width: 0; }
 .agent-tool-detail code { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -486,6 +490,11 @@
 
 .agent-child-sessions { margin: 12px 0; color: var(--agent-ink); }
 .agent-child-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; color: var(--agent-muted); font-size: 12px; font-weight: 600; }
+summary.agent-child-heading { cursor: pointer; list-style: none; min-height: 32px; }
+summary.agent-child-heading::-webkit-details-marker { display: none; }
+summary.agent-child-heading::before { content: '▸'; }
+details[open] > summary.agent-child-heading::before { content: '▾'; }
+summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; border-radius: 4px; }
 .agent-child-heading > span { font-weight: 400; }
 .agent-child-sessions > ul { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--agent-rule); }
 .agent-child-session { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 9px 12px; color: inherit; background: transparent; border: 0; border-radius: 4px; text-align: left; font: inherit; cursor: pointer; }

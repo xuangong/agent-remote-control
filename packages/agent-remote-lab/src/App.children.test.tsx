@@ -14,11 +14,13 @@ const snapshots = {
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
 afterEach(() => { vi.restoreAllMocks(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean } = {}) {
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean } = {}) {
   let connections = 0;
   let releaseChild: (() => void) | undefined;
   const childReady = options.deferChild ? new Promise<void>((resolve) => { releaseChild = resolve; }) : Promise.resolve();
-  const sessionSnapshots = { ...snapshots, child: options.restricted ? { ...snapshots.child, capabilities: { ...snapshots.child.capabilities, sendMessage: false, cancel: false }, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'child-plan', plan: 'Review the child plan', allowedActions: ['approve' as const] }] } : snapshots.child };
+  const sibling = { ...child, nativeSessionId: 'native-sibling', title: '/root/sibling' };
+  const sessionSnapshots = { ...snapshots, parent: options.navigation ? { ...parent, runtimeInfo: { ...parent.runtimeInfo, childSessions: [child, sibling] } } : parent,
+    sibling: { ...snapshots.child, id: 'sibling', runtimeInfo: { ...snapshots.child.runtimeInfo, sessionId: 'native-sibling' } }, child: options.restricted ? { ...snapshots.child, capabilities: { ...snapshots.child.capabilities, sendMessage: false, cancel: false }, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'child-plan', plan: 'Review the child plan', allowedActions: ['approve' as const] }] } : snapshots.child };
   const attachments: unknown[] = [];
   const directory = new SessionDirectoryClient('http://localhost/', async (input, init) => {
     const path = new URL(String(input)).pathname;
@@ -28,7 +30,8 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
       attachments.push({ path, body: JSON.parse(String(init?.body)) });
       if (path.endsWith('/child/attach')) await childReady;
       if (reject) return Response.json({ error: 'Child is unavailable.' }, { status: 409 });
-      return Response.json({ agentId: path.endsWith('/child/attach') ? 'child' : 'parent', nativeSessionId: path.endsWith('/child/attach') ? 'native-child' : 'native-parent' });
+      const nativeSessionId = JSON.parse(String(init?.body)).nativeSessionId;
+      return Response.json({ agentId: nativeSessionId.replace('native-', ''), nativeSessionId });
     }
     throw new Error(`Unexpected directory path: ${path}`);
   });
@@ -39,7 +42,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     fetchSnapshot: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] }),
     fetchTimeline: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
       requestId: 'page', agentId, epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false,
-      window: { minSeq: 1, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, entries: [], hasOlder: false, hasNewer: false, error: null,
+      window: { minSeq: 1, maxSeq: options.navigation ? 1 : 0, nextSeq: options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
     } }),
     connect: (agentId, listener) => {
       connections++;
@@ -59,7 +62,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     return <><button data-testid="replace-transport" onClick={() => setActiveTransport({ ...transport })}>Replace connection</button>
       <App baseUrl="http://localhost/" directory={directory} transport={activeTransport}
         hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Not used'); } }}
-        initialState={options.live ? undefined : { ...replicaState, agent: parent, timeline: { ...replicaState.timeline, hasOlder: false } }} initialSessionStatus="ready"
+        initialState={options.live ? undefined : { ...replicaState, agent: sessionSnapshots.parent, timeline: { ...replicaState.timeline, hasOlder: false, entries: options.navigation ? [activityEntry('native-child')] : [] } }} initialSessionStatus="ready"
         actions={{ sendMessage, respondToInteraction, listCommands: async () => [{ id: 'inspect', name: 'inspect', kind: 'skill', description: 'Inspect code' }] }} />
     </>;
   }
@@ -132,13 +135,19 @@ it('does not replace a newly connected parent when an older child attach finishe
 it('uses child input capabilities while keeping its native approval actionable', async () => {
   const f = await setup(false, { restricted: true });
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
-  await draft(f.container, 'A child draft');
+  const input = f.container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  expect(input.disabled).toBe(true);
+  const hint = f.container.querySelector(`#${input.getAttribute('aria-describedby')}`)!;
+  expect(hint.textContent).toBe('This session is read-only. Direct input is disabled.');
+  expect(hint.classList.contains('agent-visually-hidden')).toBe(false);
   expect(f.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(true);
   const approve = [...f.container.querySelectorAll<HTMLButtonElement>('.agent-plan button')].find((button) => button.textContent === 'Approve');
   expect(approve?.disabled).toBe(false);
   await act(async () => approve!.click());
   expect(f.respondToInteraction).toHaveBeenCalledWith('child-plan', { kind: 'plan_approval', action: 'approve' });
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
+  expect(f.container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(false);
+  expect(f.container.textContent).not.toContain('This session is read-only.');
   await draft(f.container, 'Parent input');
   expect(f.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(false);
 });
@@ -218,4 +227,51 @@ it('navigates through the chat session manager and keeps sibling discovery after
   expect(discovery.querySelector('.lab-session-tree .lab-session-tree')?.textContent).toContain('Review transport');
   await act(async () => [...manager().querySelectorAll<HTMLButtonElement>('.lab-session-row')].find((row) => row.textContent?.includes('Parent'))!.click());
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('parent');
+});
+
+function activityEntry(nativeSessionId: string) {
+  const title = `/root/${nativeSessionId.replace('native-', '')}`;
+  return { providerId: 'codex', turnId: 'turn', timestamp: '2026-09-16T00:00:00Z', seqStart: 1, seqEnd: 1,
+    sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
+    item: { type: 'tool_call' as const, callId: 'activity', name: 'agent.activity', status: 'completed' as const, error: null,
+      detail: { type: 'other' as const, description: `Agent ${title}: interacted`, sessionReference: { nativeSessionId, title } } },
+  };
+}
+
+async function waitForSession(container: HTMLElement, agent: string) {
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain(agent);
+}
+
+it('navigates activity links between a parent and siblings with browser and conversation back/forward', async () => {
+  const f = await setup(false, { navigation: true });
+  await draft(f.container, 'Parent draft');
+  const back = () => f.container.querySelector<HTMLButtonElement>('[aria-label="Back to previous conversation"]')!;
+  const forward = () => f.container.querySelector<HTMLButtonElement>('[aria-label="Forward to next conversation"]')!;
+  expect(back().disabled).toBe(true);
+  await act(async () => f.container.querySelector<HTMLAnchorElement>('.agent-session-reference')!.click());
+  await waitForSession(f.container, 'child');
+  await draft(f.container, 'Child draft');
+  await act(async () => f.container.querySelector<HTMLAnchorElement>('.agent-session-reference')!.click());
+  await waitForSession(f.container, 'sibling');
+  expect(f.attachments).toEqual([
+    { path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } },
+    { path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-sibling' } },
+  ]);
+  await act(async () => back().click());
+  await waitForSession(f.container, 'child');
+  expect(f.container.querySelector('textarea')!.value).toBe('Child draft');
+  await act(async () => window.history.back());
+  await waitForSession(f.container, 'parent');
+  expect(f.container.querySelector('textarea')!.value).toBe('Parent draft');
+  expect(back().disabled).toBe(true);
+  await act(async () => forward().click());
+  await waitForSession(f.container, 'child');
+  await act(async () => window.history.forward());
+  await waitForSession(f.container, 'sibling');
+  expect(forward().disabled).toBe(true);
+  await act(async () => f.container.querySelector<HTMLAnchorElement>('.agent-session-reference')!.click());
+  await waitForSession(f.container, 'parent');
+  await act(async () => back().click());
+  await waitForSession(f.container, 'sibling');
 });

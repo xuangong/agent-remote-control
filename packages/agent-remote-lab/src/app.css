@@ -1005,3 +1005,7 @@ textarea {
   .gateway-security-list > li { flex-direction: column; gap: 10px; }
   .gateway-security-audit > li { gap: 4px; }
 }
+
+.lab-conversation-history { display: flex; align-items: center; gap: 2px; }
+.lab-conversation-history button { min-width: 32px; min-height: 32px; padding: 2px 6px; }
+@media (max-width: 760px) { .lab-conversation-history button { min-width: 44px; min-height: 44px; } }

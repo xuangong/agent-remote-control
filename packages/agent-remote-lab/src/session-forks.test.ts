@@ -109,3 +109,11 @@ it('keeps separate forks and fresh delivery state across browser instances', asy
   expect(a.get(first.id).delivery).toBe('sent');
   expect(a.get(first.id).target?.agentId).toBe('reattached');
 });
+
+it('captures normalized session references as bounded context without treating them as text fields', async () => {
+  const reference = { nativeSessionId: 'child', title: '/root/review' };
+  const tool: ProjectedTimelineEntry = { ...entry(1, ''), item: { type: 'tool_call', callId: 'activity', name: 'agent.activity', status: 'completed', error: null,
+    detail: { type: 'other', description: 'Agent /root/review: interacted', sessionReference: reference } } };
+  const context = await captureForkContext({ fetchTimeline: async () => page([tool]) }, source);
+  expect(JSON.parse(JSON.parse(context.text)[0].text).detail.sessionReference).toBe(JSON.stringify(reference));
+});

@@ -35,7 +35,8 @@ import { HostPairing, type HostPairingService, type RemoteHost } from './compone
 import { DirectoryError, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
-import { sessionKey } from './session-tree.js';
+import { useConversationHistory } from './hooks/useConversationHistory.js';
+import { sessionKey, sessionRootKey } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
 import { TimelineDisplay } from '@borgee/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
@@ -407,8 +408,8 @@ export function App({
     setOpenedSessions((current) => [item, ...current.filter((entry) => !((entry.hostId ?? 'local') === (item.hostId ?? 'local') && entry.providerId === item.providerId && entry.nativeSessionId === item.nativeSessionId) && entry.agentId !== item.agentId)]);
   }
 
-  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }): Promise<void> {
-    if (!directory || transitionRef.current) return;
+  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }): Promise<boolean> {
+    if (!directory || transitionRef.current) return false;
     const hostId = item.hostId ?? selectedHost.id;
     const key = sessionKey({ ...item, hostId });
     const visible = stackPath.find(entry => sessionKey(entry) === key);
@@ -418,7 +419,7 @@ export function App({
       setFailure(undefined);
       setActiveView('workbench');
       if (compactLayoutRef.current) { setContextOpen(false); setInspectorOpen(false); }
-      return;
+      return true;
     }
     const generation = navigationGeneration.current;
     transitionRef.current = true;
@@ -429,13 +430,15 @@ export function App({
       const result = item.parentNativeSessionId
         ? await target.attachChild(item.providerId, item.parentNativeSessionId, item.nativeSessionId)
         : await target.attach(item.providerId, item.nativeSessionId);
-      if (navigationGeneration.current !== generation) return;
+      if (navigationGeneration.current !== generation) return false;
+      if (currentSession?.agentId) rememberSession({ ...currentSession, agentId: currentSession.agentId });
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
       rememberSession({ ...prior, ...item, hostId, agentId: result.agentId });
       setProviderName(providerConnectionName(hostId, item.providerId));
       setSideFocus(undefined);
       attach(result.agentId);
-    } catch (error) { setFailure(message(error, 'Session could not be connected.')); }
+      return true;
+    } catch (error) { setFailure(message(error, 'Session could not be connected.')); return false; }
     finally { transitionRef.current = false; setTransitioning(false); }
   }
 
@@ -624,11 +627,16 @@ export function App({
   const focusedWindow = stackPath[stackRange.end];
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
-  useEffect(() => {
-    if (!addressSession) return;
-    const path = controllerPath({ ...addressSession, hostId: addressSession.hostId ?? 'local' });
-    window.history.replaceState(null, '', path);
-  }, [addressSession?.hostId, addressSession?.providerId, addressSession?.nativeSessionId, addressSession?.agentId, addressSession?.parentNativeSessionId]);
+  const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
+
+  function resolveSessionLink(nativeSessionId: string) {
+    if (!currentSession || !directory || hostOffline || transitioning) return undefined;
+    const target = sessionEntries.find(item => item.nativeSessionId === nativeSessionId && item.providerId === currentSession.providerId && (item.hostId ?? 'local') === (currentSession.hostId ?? 'local'));
+    if (!target || sessionRootKey(target, sessionEntries) !== sessionRootKey(currentSession, sessionEntries)) return undefined;
+    return { href: controllerPath({ ...target, hostId: target.hostId ?? 'local' }), open: async () => {
+      if (!await openSession(target)) throw new Error('This session could not be opened.');
+    } };
+  }
 
   function nextSideRequest(source: OpenedSession): number {
     const key = sessionKey(source);
@@ -893,7 +901,10 @@ export function App({
           onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
-          sessionManager={<>{directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}{stackRoot ? <SessionLink session={stackRoot} /> : null}</>}
+          sessionManager={<><nav className="lab-conversation-history" aria-label="Conversation history">
+            <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || hostOffline || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
+            <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={transitioning || hostOffline || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
+          </nav>{directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}{stackRoot ? <SessionLink session={stackRoot} /> : null}</>}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
               <button type="button" disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
@@ -901,6 +912,7 @@ export function App({
             </span>)}
             <span aria-current="page">{activeOpened?.title}</span>
           </nav> : null}
+          resolveSessionLink={resolveSessionLink}
           onOpenChildSession={directory && !hostOffline && !transitioning ? openChildSession : undefined}
           messageDraft={activeAgentId ? messageDrafts[activeAgentId] ?? '' : ''}
           onMessageDraftChange={activeAgentId ? (text) => setMessageDrafts((current) => ({ ...current, [activeAgentId]: text })) : undefined}
@@ -966,9 +978,10 @@ function rememberedAgent(): string | undefined {
 }
 
 function rememberAgent(agentId: string): void {
+  if (window.history.state?.agentRemoteVisit) return;
   const url = new URL(window.location.href);
   url.searchParams.set('agent', agentId);
-  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 function message(error: unknown, fallback: string): string {

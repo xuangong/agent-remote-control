@@ -58,3 +58,18 @@ export function sessionStatusLabel(item: SessionEntry): string {
   if (item.observation === 'saved_history') return 'Saved history';
   return item.status === 'running' ? 'Working' : item.status === 'waiting' ? 'Waiting' : item.status === 'closed' ? 'Closed' : item.status === 'failed' ? 'Failed' : item.status === 'starting' ? 'Starting' : item.status === 'idle' ? 'Idle' : '';
 }
+
+/** Resolve a native family without crossing Host or Provider boundaries. */
+export function sessionRootKey(session: SessionEntry, known: readonly SessionEntry[]): string {
+  const entries = new Map(known.map(item => [sessionKey(item), item]));
+  let current = session;
+  const visited = new Set<string>();
+  while (current.parentNativeSessionId) {
+    const key = sessionKey(current);
+    if (visited.has(key)) return sessionKey(session);
+    visited.add(key);
+    const parent = { hostId: current.hostId, providerId: current.providerId, nativeSessionId: current.parentNativeSessionId, title: 'Parent session' };
+    current = entries.get(sessionKey(parent)) ?? parent;
+  }
+  return sessionKey(current);
+}

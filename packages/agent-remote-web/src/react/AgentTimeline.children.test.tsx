@@ -35,6 +35,7 @@ describe('AgentTimeline child sessions', () => {
     const container = await render(<AgentTimeline state={state([child('one', 'turn-one')], entries)} onOpenChildSession={(item) => { selected.push(item.nativeSessionId); }} />);
     const rows = container.querySelectorAll<HTMLButtonElement>('[data-child-session-id]');
     expect(rows).toHaveLength(1);
+    expect(rows[0]!.closest('details')).toBeNull();
     expect(rows[0]!.closest('[data-entry-key]')?.textContent).toContain('Review underway');
     expect(rows[0]!.textContent).toContain('Reviewer');
     await act(async () => rows[0]!.click());
@@ -42,6 +43,25 @@ describe('AgentTimeline child sessions', () => {
     await rerender(container, <AgentTimeline state={state([child('one', 'turn-one')], [...entries, entry(4, 'turn-one', 'Review finished')])} />);
     expect(container.querySelectorAll('[data-child-session-id]')).toHaveLength(1);
     expect(container.querySelector('[data-child-session-id]')?.closest('[data-entry-key]')?.textContent).toContain('Review finished');
+  });
+
+  it('starts session subagents collapsed, preserves expansion during updates, and resets for another session', async () => {
+    const selected: string[] = [];
+    const initial = state([child('one')], []);
+    const onOpen = (item: AgentChildSession) => { selected.push(item.nativeSessionId); };
+    const container = await render(<AgentTimeline state={initial} onOpenChildSession={onOpen} />);
+    const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]');
+    expect(details).not.toBeNull();
+    expect(details!.open).toBe(false);
+    expect(details!.querySelector('summary')?.textContent).toBe('Session subagents 1');
+    await act(async () => details!.querySelector('summary')!.click());
+    expect(details!.open).toBe(true);
+    await act(async () => details!.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
+    expect(selected).toEqual(['one']);
+    await rerender(container, <AgentTimeline state={state([{ ...child('one'), status: 'idle' }], [])} onOpenChildSession={onOpen} />);
+    expect(container.querySelector<HTMLDetailsElement>('details')!.open).toBe(true);
+    await rerender(container, <AgentTimeline state={{ ...initial, agent: { ...initial.agent!, id: 'another-parent' } }} />);
+    expect(container.querySelector<HTMLDetailsElement>('details')!.open).toBe(false);
   });
 
   it('keeps unknown or unloaded origins separate and preserves creation order as statuses change', async () => {

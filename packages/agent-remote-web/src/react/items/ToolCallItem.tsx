@@ -1,5 +1,5 @@
 import { ToolResultView } from './ToolResultView.js';
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ToolResultPreview } from './ToolResultPreview.js';
 import { ContentPreview } from './ContentPreview.js';
@@ -9,12 +9,34 @@ const statusLabels = {
   running: 'Running', completed: 'Completed', failed: 'Failed', canceled: 'Canceled',
 } as const;
 
-export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineItem, { type: 'tool_call' }> }) {
+export type SessionLinkResolver = (nativeSessionId: string) => { href: string; open(): Promise<void> } | undefined;
+
+export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extract<AgentTimelineItem, { type: 'tool_call' }>; resolveSessionLink?: SessionLinkResolver }) {
   const { expanded, preview, toggle } = useItemDisclosure();
   const detailsId = useId();
+  const [failure, setFailure] = useState<string>();
+  const reference = item.detail.type === 'other' ? item.detail.sessionReference : undefined;
+  const target = reference && resolveSessionLink?.(reference.nativeSessionId);
+  const summary = toolSummary(item.detail);
+  const offset = reference ? summary.indexOf(reference.title) : -1;
+  const toggleLabel = <><span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span><strong>{item.name}</strong></>;
+  const linkedSummary = reference && target ? <span className="agent-tool-summary">
+    {offset >= 0 ? summary.slice(0, offset) : `${summary} `}
+    <a href={target.href} title={reference.title} className="agent-session-reference" onClick={(event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      setFailure(undefined);
+      void target.open().catch(error => setFailure(error instanceof Error ? error.message : 'This session could not be opened.'));
+    }}>{reference.title}</a>
+    {offset >= 0 ? summary.slice(offset + reference.title.length) : ''}
+  </span> : null;
   return <article className={`agent-timeline-item agent-tool agent-state-${item.status}`}>
     <header className="agent-item-header">
-      <button
+      {linkedSummary ? <div className="agent-tool-toggle agent-tool-linked">
+        <button type="button" className="agent-tool-name-toggle" aria-expanded={expanded} aria-controls={detailsId} onClick={toggle}>{toggleLabel}</button>
+        {linkedSummary}
+        <span className="agent-state-label">{statusLabels[item.status]}</span>
+      </div> : <button
         className="agent-tool-toggle"
         type="button"
         aria-expanded={expanded}
@@ -25,7 +47,7 @@ export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineIte
         <strong>{item.name}</strong>
         <span className="agent-tool-summary">{toolSummary(item.detail)}</span>
         <span className="agent-state-label">{statusLabels[item.status]}</span>
-      </button>
+      </button>}
     </header>
     {preview ? <div className="agent-tool-preview">
       {item.detail.type === 'shell' ? <ContentPreview code text={item.detail.command} /> : null}
@@ -38,6 +60,7 @@ export function ToolCallItem({ item }: { readonly item: Extract<AgentTimelineIte
       {expanded ? <><ToolCallDetails detail={item.detail} />
       {item.result ? <ToolResultView result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} /> : null}</> : null}
     </div>
+    {failure ? <p className="agent-history-error" role="alert">{failure}</p> : null}
     {item.error ? <pre className="agent-tool-error" role="alert" tabIndex={0}>{item.error}</pre> : null}
   </article>;
 }

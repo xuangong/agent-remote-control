@@ -43,7 +43,7 @@ export async function captureForkContext(transport: Pick<RemoteAgentTransport, '
         const half = Math.floor(limit / 2);
         return `${text.slice(0, half)}\n[${text.length - half * 2} characters omitted]\n${text.slice(-half)}`;
       };
-      const detail = Object.fromEntries(Object.entries(item.detail).map(([key, value]) => [key, excerpt(value, 400)]));
+      const detail = Object.fromEntries(Object.entries(item.detail).map(([key, value]) => [key, excerpt(typeof value === 'string' ? value : JSON.stringify(value), 400)]));
       const output = item.result?.content.map((part) => part.type === 'text' ? part.text : JSON.stringify(part.value)).join('\n');
       const result = item.result ? { excerpt: excerpt(output ?? '', 1_200), exitCode: item.result.exitCode, durationMs: item.result.durationMs, truncated: item.result.truncated } : undefined;
       const error = item.error === null ? null : excerpt(item.error, 600);

@@ -175,3 +175,38 @@ it('offers console commands independently of provider capabilities and scopes bo
   await act(async () => inputs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   expect(execute).toHaveBeenCalledWith('console:side', ' explain');
 });
+
+it('updates direct input permissions without losing drafts or disabling console navigation', async () => {
+  const send = vi.fn(async () => {});
+  const execute = vi.fn(async () => ({}));
+  const listCommands = vi.fn(async () => []);
+  const command = { id: 'console:side', name: 'side', description: 'Open side chat', kind: 'command' as const };
+  function Permissions() {
+    const [readOnly, setReadOnly] = useState(false);
+    return <><button onClick={() => setReadOnly((value) => !value)}>Toggle input permission</button>
+      <LiveControlPanel state={{ ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, sendMessage: !readOnly, commands: true } } }}
+        consoleCommands={[command]} onExecuteConsoleCommand={execute} onSendMessage={send} onListCommands={listCommands} />
+    </>;
+  }
+  const container = await render(<Permissions />);
+  const input = container.querySelector('textarea')!;
+  await type(input, 'Keep this draft');
+  await act(async () => container.querySelector('button')!.click());
+  expect(input.disabled).toBe(true);
+  expect(input.value).toBe('Keep this draft');
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  expect(send).not.toHaveBeenCalled();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.click());
+  expect(listCommands).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain('Loading native commands');
+  expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
+  await act(async () => container.querySelector<HTMLButtonElement>('[role="option"]')!.click());
+  expect(execute).toHaveBeenCalledWith('console:side', '');
+  expect(input.value).toBe('Keep this draft');
+  await act(async () => container.querySelector('button')!.click());
+  expect(input.disabled).toBe(false);
+  expect(container.textContent).not.toContain('This session is read-only.');
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  expect(send).toHaveBeenCalledExactlyOnceWith('Keep this draft');
+});

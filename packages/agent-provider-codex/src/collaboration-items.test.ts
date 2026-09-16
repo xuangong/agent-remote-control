@@ -29,3 +29,12 @@ describe('Codex raw response envelopes', () => {
     expect(projector.projectNotification(method, { threadId: 'parent', item: { type: 'function_call_output', output: 'PRIVATE_ANSWER_SENTINEL' } })).toBeNull();
   });
 });
+
+it('normalizes activity navigation identically in live and saved history', () => {
+  const projector = new CodexEventProjector('parent');
+  const item = { type: 'subAgentActivity', id: 'activity', kind: 'interacted', agentThreadId: 'child-id', agentPath: '/root/review' };
+  const live = projector.projectNotification('item/completed', { threadId: 'parent', turnId: 'turn', item });
+  expect(live?.event).toMatchObject({ item: { detail: { sessionReference: { nativeSessionId: 'child-id', title: '/root/review' } } } });
+  expect(projector.projectHistoryItem(item, 'turn')?.event).toEqual(live?.event);
+  expect(projector.projectHistoryItem({ ...item, agentThreadId: undefined })?.event).not.toHaveProperty('item.detail.sessionReference');
+});

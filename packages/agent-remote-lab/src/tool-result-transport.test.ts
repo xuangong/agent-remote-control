@@ -8,8 +8,8 @@ import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@borgee/agent-remote-web';
 import { createProtocolValidationServer } from './server.js';
 
-it.each(['codex', 'dsh', 'codex-files'])('preserves %s results over live transport, history, and reconnection without duplicating calls', async (scenario) => {
-  const providerId = scenario === 'codex-files' ? 'codex' : scenario;
+it.each(['codex', 'dsh', 'codex-files', 'codex-activity'])('preserves %s results over live transport, history, and reconnection without duplicating calls', async (scenario) => {
+  const providerId = scenario.startsWith('codex') ? 'codex' : scenario;
   const [running, completed] = observations(scenario);
   const start = deferred();
   const finish = deferred();
@@ -42,11 +42,12 @@ it.each(['codex', 'dsh', 'codex-files'])('preserves %s results over live transpo
     start.resolve();
     await vi.waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'running' }));
     finish.resolve();
-    const content = scenario === 'codex-files' ? [{ type: 'json', value: { format: 'file_changes', version: 1, files: [
+    const content = scenario === 'codex-activity' ? [{ type: 'json', value: { kind: 'interacted', agentThreadId: 'child', agentPath: '/root/review' } }] : scenario === 'codex-files' ? [{ type: 'json', value: { format: 'file_changes', version: 1, files: [
       { path: '/workspace/a.ts', kind: 'modified', diff: '@@ -1 +1 @@\n-old\n+new\n' },
     ] } }] : [expect.objectContaining({ type: 'text', text: 'hello\n' })];
     await vi.waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'completed', result: { content } }));
     expect(first.replica.getState().timeline.entries).toHaveLength(1);
+    if (scenario === 'codex-activity') expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ detail: { sessionReference: { nativeSessionId: 'child', title: '/root/review' } } });
     first.client.stop();
     const reconnected = await connect();
     const entries = reconnected.replica.getState().timeline.entries;
@@ -60,6 +61,11 @@ it.each(['codex', 'dsh', 'codex-files'])('preserves %s results over live transpo
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 function observations(providerId: string): ProviderObservation[] {
+  if (providerId === 'codex-activity') {
+    const projector = new CodexEventProjector('thread');
+    const item = { id: 'activity', type: 'subAgentActivity', kind: 'interacted', agentThreadId: 'child', agentPath: '/root/review' };
+    return [projector.projectNotification('item/started', { threadId: 'thread', item })!, projector.projectNotification('item/completed', { threadId: 'thread', item })!];
+  }
   if (providerId === 'codex-files') {
     const projector = new CodexEventProjector('thread');
     const item = { id: 'file-call', type: 'fileChange', changes: [{ path: '/workspace/a.ts', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-old\n+new\n' }] };

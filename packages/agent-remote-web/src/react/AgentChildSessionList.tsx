@@ -4,6 +4,7 @@ import type { AgentChildSession } from '@borgee/agent-remote-protocol';
 export interface AgentChildSessionListProps {
   readonly children: readonly AgentChildSession[];
   readonly label?: string;
+  readonly collapsible?: boolean;
   readonly onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>;
 }
 
@@ -11,7 +12,7 @@ const statusLabels: Record<AgentChildSession['status'], string> = {
   starting: 'Starting', idle: 'Ready', running: 'Working', waiting: 'Waiting for response', failed: 'Failed', closed: 'Closed',
 };
 
-export function AgentChildSessionList({ children, label = 'Subagents', onOpenChildSession }: AgentChildSessionListProps) {
+export function AgentChildSessionList({ children, label = 'Subagents', collapsible = false, onOpenChildSession }: AgentChildSessionListProps) {
   const inFlight = useRef(false);
   const [opening, setOpening] = useState<string>();
   const [failure, setFailure] = useState<string>();
@@ -25,8 +26,10 @@ export function AgentChildSessionList({ children, label = 'Subagents', onOpenChi
     finally { inFlight.current = false; setOpening(undefined); }
   }
   if (children.length === 0) return null;
-  return <section className="agent-child-sessions" aria-label={label}>
-    <p className="agent-child-heading">{label} <span>{children.length}</span></p>
+  const Container = collapsible ? 'details' : 'section';
+  const Heading = collapsible ? 'summary' : 'p';
+  return <Container className="agent-child-sessions" aria-label={label}>
+    <Heading className="agent-child-heading">{label} <span>{children.length}</span></Heading>
     <ul>
       {children.map((child) => <li key={child.nativeSessionId}>
         <button type="button" className="agent-child-session" data-child-session-id={child.nativeSessionId}
@@ -46,5 +49,5 @@ export function AgentChildSessionList({ children, label = 'Subagents', onOpenChi
       </li>)}
     </ul>
     {failure ? <p className="agent-history-error" role="alert">{failure}</p> : null}
-  </section>;
+  </Container>;
 }

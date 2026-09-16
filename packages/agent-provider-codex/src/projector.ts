@@ -458,8 +458,10 @@ export class CodexEventProjector {
     const description = activity
       ? `Agent ${readString(item.agentPath) || readString(item.agentThreadId) || 'activity'}: ${readString(item.kind) || 'activity'}`
       : readString(item.prompt) || `Agent ${readString(item.tool) || 'collaboration'}`;
+    const nativeSessionId = activity ? readString(item.agentThreadId) : undefined;
+    const sessionReference = nativeSessionId ? { nativeSessionId, title: readString(item.agentPath) || nativeSessionId } : undefined;
     return this.toolItem(readString(item.id)!, name, normalizeStatus(item.status, lifecycle),
-      { type: 'other', description }, readErrorMessage(item.error),
+      { type: 'other', description, ...(sessionReference ? { sessionReference } : {}) }, readErrorMessage(item.error),
       lifecycle === 'completed' ? codexToolResult(item) : undefined);
   }
 

@@ -6,6 +6,7 @@ import type {
 } from '@borgee/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
+import type { SessionLinkResolver } from './items/ToolCallItem.js';
 import { AgentChildSessionList } from './AgentChildSessionList.js';
 import { InteractionPanel } from './InteractionPanel.js';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
@@ -18,6 +19,7 @@ export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
   readonly state: AgentReplicaState;
+  readonly resolveSessionLink?: SessionLinkResolver;
   readonly registry?: RendererRegistry;
   readonly showHeader?: boolean;
   readonly onOpenChildSession?: (child: AgentChildSession) => void | Promise<void>;
@@ -33,6 +35,7 @@ export interface AgentTimelineProps {
 export function AgentTimeline({
   state,
   registry,
+  resolveSessionLink,
   showHeader = true,
   onLoadOlder,
   historyLoading,
@@ -90,14 +93,14 @@ export function AgentTimeline({
       {renderModel.length === 0
         ? <p className="agent-timeline-empty">No timeline activity.</p>
         : renderModel.map(({ entry, key, messageGroup }) => <div className="agent-timeline-entry" key={key} data-entry-key={key}>
-            <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} />
+            <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink} />
             {registry?.render(entry.item)}
             <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
             <AgentChildSessionList children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
           </div>)}
     </div>
 
-    <AgentChildSessionList key={identity} children={unassociated} label="Session subagents" onOpenChildSession={onOpenChildSession} />
+    <AgentChildSessionList key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
 
     {state.pendingInteractions.length > 0 ? <aside className="agent-interactions" aria-label="Pending interactions">
       {state.pendingInteractions.map((request) => <InteractionPanel

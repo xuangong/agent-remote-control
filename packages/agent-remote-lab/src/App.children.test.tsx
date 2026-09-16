@@ -138,6 +138,23 @@ it('uses child input capabilities while keeping its native approval actionable',
   expect(approve?.disabled).toBe(false);
   await act(async () => approve!.click());
   expect(f.respondToInteraction).toHaveBeenCalledWith('child-plan', { kind: 'plan_approval', action: 'approve' });
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
+  await draft(f.container, 'Parent input');
+  expect(f.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(false);
+});
+
+it('persists refreshed child titles over saved nicknames before switching conversations', async () => {
+  const key = 'agent-remote-opened:http://localhost/';
+  window.localStorage.setItem(key, JSON.stringify([
+    { agentId: 'parent', providerId: 'codex', nativeSessionId: 'native-parent', title: 'Parent' },
+    { agentId: 'child', providerId: 'codex', nativeSessionId: 'native-child', parentNativeSessionId: 'native-parent', parentAgentId: 'parent', title: 'Bohr' },
+  ]));
+  const f = await setup();
+  const saved = () => JSON.parse(window.localStorage.getItem(key)!).find((item: { agentId: string }) => item.agentId === 'child');
+  expect(saved().title).toBe('Review transport');
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
+  expect(saved().title).toBe('Review transport');
+  expect(f.container.querySelector('[aria-label="Conversation path"]')?.textContent).toContain('Review transport');
 });
 
 it('owns only one active replica subscription while revisiting parent and child chats', async () => {

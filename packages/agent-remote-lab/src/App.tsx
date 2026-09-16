@@ -581,6 +581,16 @@ export function App({
     ancestorId = ancestor.parentAgentId;
   }
   const sessionEntries = useSessionEntries(openedSessions, state);
+  useEffect(() => {
+    const childTitles = new Map(sessionEntries.filter((item) => item.parentNativeSessionId).map((item) => [sessionKey(item), item.title]));
+    setOpenedSessions((current) => {
+      const next = current.map((item) => {
+        const title = childTitles.get(sessionKey(item));
+        return title !== undefined && title !== item.title ? { ...item, title } : item;
+      });
+      return next.some((item, index) => item !== current[index]) ? next : current;
+    });
+  }, [sessionEntries]);
   const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId);
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);

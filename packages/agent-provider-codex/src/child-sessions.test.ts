@@ -3,11 +3,11 @@ import { CodexAppServerSession } from './session.js';
 import { CodexAppServerProvider } from './provider.js';
 import { createFakeChildProcess } from './test-utils/fake-child.js';
 
-async function harness(sharedProvider?: CodexAppServerProvider, process = createFakeChildProcess()) {
+async function harness(sharedProvider?: CodexAppServerProvider, process = createFakeChildProcess(), savedThreads: Record<string, unknown>[] = []) {
   const requests: Array<{ id: number; method: string; params: Record<string, unknown> }> = [];
   const replies: Array<Record<string, unknown>> = [];
   const readReply: { beforeReply?: () => void } = {};
-  const threads = new Map<string, Record<string, unknown>>();
+  const threads = new Map(savedThreads.map(thread => [String(thread.id), thread]));
   const provider = sharedProvider ?? new CodexAppServerProvider({ spawn: () => process });
   let input = '';
   const write = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -23,16 +23,18 @@ async function harness(sharedProvider?: CodexAppServerProvider, process = create
       if (message.method === 'model/list') result = { data: [{ model: 'codex', displayName: 'Codex' }, { model: 'alternative', displayName: 'Alternative' }] };
       if (message.method === 'configRequirements/read') result = { requirements: null };
       if (message.method === 'thread/start') result = { thread: { id: 'parent' }, cwd: '/workspace', model: 'codex' };
+      if (message.method === 'thread/resume') result = { thread: threads.get(message.params.threadId), cwd: '/workspace', model: 'codex' };
       if (message.method === 'thread/read') result = { thread: threads.get(message.params.threadId) };
       if (message.method === 'turn/start') result = { turn: { id: 'direct-turn' } };
       const snapshot = structuredClone(result);
       queueMicrotask(() => {
-        if (message.method === 'thread/read') readReply.beforeReply?.();
+        if (message.method === 'thread/read' && message.params.includeTurns) readReply.beforeReply?.();
         write({ id: message.id, result: snapshot });
       });
     }
   });
-  const parent = await provider.createSession({ sessionId: 'local', cwd: '/workspace' });
+  const parent = savedThreads.length ? await provider.resumeSession({ providerId: 'codex', sessionId: 'parent', opaque: JSON.stringify({ cwd: '/workspace' }) })
+    : await provider.createSession({ sessionId: 'local', cwd: '/workspace' });
   const notify = (method: string, params: unknown) => write({ method, params });
   const addChild = (id = 'child', parentId = 'parent', direct = true) => threads.set(id, {
     id, parentThreadId: parentId, name: null, agentNickname: `Name ${id}`, agentRole: 'explorer',
@@ -54,6 +56,80 @@ async function observations(session: { observe(): AsyncIterable<unknown> }, coun
 }
 
 describe('Codex native children', () => {
+  it('restores parent-controlled children from activity history without a live spawn notification', async () => {
+    const children = ['review', 'diagnosis', 'acceptance'].map((name, index) => ({ id: name, parentThreadId: 'parent',
+      source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', agent_path: `/root/${name}` } } },
+      agentNickname: `Nickname ${name}`, canAcceptDirectInput: false, createdAt: index + 1, cwd: '/workspace',
+      status: { type: index === 2 ? 'notLoaded' : 'idle' },
+      turns: [{ id: `${name}-turn`, status: 'completed', items: [{ type: 'agentMessage', id: `${name}-message`, text: 'Saved child reply' }] }],
+    }));
+    const h = await harness(undefined, createFakeChildProcess(), [{ id: 'parent', turns: [{ id: 'origin', status: 'completed',
+      items: children.flatMap(child => ['started', 'completed'].map(kind => ({ type: 'subAgentActivity', id: `${child.id}-${kind}`, kind,
+        agentThreadId: child.id, agentPath: `/root/${child.id}` }))),
+    }] }, ...children]);
+    try {
+      await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.length).toBe(3);
+      expect((await h.parent.runtimeInfo()).childSessions?.map(child => child.title)).toEqual(['/root/review', '/root/diagnosis', '/root/acceptance']);
+      for (const name of ['review', 'diagnosis', 'acceptance']) {
+        const child = await h.provider.openChildSession('parent', name);
+        expect(child.capabilities.sendMessage).toBe(false);
+        expect(await observations(child, 2)).toMatchObject([{ delivery: 'history', event: { item: { text: 'Saved child reply' } } }, { type: 'history_boundary' }]);
+      }
+      expect(h.requests.filter(({ method }) => method === 'thread/resume').map(({ params }) => params.threadId)).toEqual(['parent']);
+    } finally { await h.parent.dispose(); }
+  });
+
+  it.each(['started', 'interacted', 'completed'])('discovers parent-controlled children from %s activity and displays their native path', async (kind) => {
+    const h = await harness();
+    try {
+      h.addChild('child', 'parent', false);
+      Object.assign(h.threads.get('child')!, { name: 'A friendly name', source: { subAgent: { thread_spawn: {
+        parent_thread_id: 'parent', agent_path: '/root/review', agent_nickname: 'Hypatia',
+      } } } });
+      h.notify('item/completed', { threadId: 'parent', turnId: 'origin', item: {
+        type: 'subAgentActivity', id: 'activity', kind, agentThreadId: 'child', agentPath: '/root/review',
+      } });
+      await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions).toMatchObject([
+        { nativeSessionId: 'child', title: '/root/review', status: 'running', observation: 'live' },
+      ]);
+      const child = await h.provider.openChildSession('parent', 'child');
+      expect(child.capabilities).toMatchObject({ sendMessage: false, steer: false, cancel: false, commands: false, sessionSettings: false });
+      expect(await observations(child, 2)).toMatchObject([{ delivery: 'history', event: { item: { text: 'Early reply' } } }, { type: 'history_boundary' }]);
+      await expect(child.sendMessage('Direct input')).rejects.toThrow(/direct input/);
+      await expect(child.cancel()).rejects.toThrow(/direct input/);
+      expect(h.requests.some(({ method }) => ['thread/resume', 'turn/start', 'turn/interrupt'].includes(method))).toBe(false);
+    } finally { await h.parent.dispose(); }
+  });
+
+  it('records delayed activity provenance after discovering a child from its own notification', async () => {
+    const h = await harness();
+    try {
+      h.addChild('child', 'parent', false);
+      h.notify('thread/started', { thread: h.threads.get('child') });
+      await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.length).toBe(1);
+      h.notify('item/completed', { threadId: 'parent', turnId: 'origin', item: {
+        type: 'subAgentActivity', id: 'spawn-activity', kind: 'started', agentThreadId: 'child',
+      } });
+      expect((await h.parent.runtimeInfo()).childSessions).toMatchObject([
+        { nativeSessionId: 'child', parentTurnId: 'origin', parentCallId: 'spawn-activity' },
+      ]);
+    } finally { await h.parent.dispose(); }
+  });
+
+  it('checks native parentage before reading history for an activity reference', async () => {
+    const h = await harness();
+    try {
+      h.addChild('foreign', 'other-parent', false);
+      h.notify('item/completed', { threadId: 'parent', turnId: 'origin', item: {
+        type: 'subAgentActivity', id: 'foreign-reference', kind: 'interacted', agentThreadId: 'foreign', agentPath: '/root/foreign',
+      } });
+      await expect.poll(() => h.requests.filter(({ method }) => method === 'thread/read').length).toBeGreaterThan(0);
+      await new Promise(resolve => setImmediate(resolve));
+      expect((await h.parent.runtimeInfo()).childSessions).toEqual([]);
+      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.includeTurns === true)).toEqual([]);
+    } finally { await h.parent.dispose(); }
+  });
+
   it('opens the existing child with history and retains its creation origin after send calls', async () => {
     const h = await harness();
     try {
@@ -144,7 +220,7 @@ describe('Codex native children', () => {
       const child = await h.provider.openChildSession('parent', 'child');
       const events = await observations(child, 2);
       expect(events).toMatchObject([{ delivery: 'history', event: { item: { text: 'x'.repeat(700) } } }, { type: 'history_boundary' }]);
-      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.threadId === 'child')).toHaveLength(2);
+      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.threadId === 'child' && params.includeTurns)).toHaveLength(2);
     } finally { await h.parent.dispose(); }
   });
 
@@ -334,7 +410,7 @@ describe('Codex native children', () => {
       await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.length).toBe(1);
       const child = await h.provider.openChildSession('parent', 'child');
       expect(await observations(child, 2)).toMatchObject([{ delivery: 'history', event: { item: { text: 'Early reply after snapshot' } } }, { type: 'history_boundary' }]);
-      expect(h.requests.filter(({ method }) => method === 'thread/read')).toHaveLength(2);
+      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.includeTurns)).toHaveLength(2);
     } finally { await h.parent.dispose(); }
   });
 

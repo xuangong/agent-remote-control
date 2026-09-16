@@ -618,6 +618,7 @@ textarea {
 .lab-session-row { display: flex; flex-direction: column; gap: 4px; width: 100%; min-width: 0; padding: 10px 8px; text-align: left; border-color: transparent; background: transparent; }
 .lab-session-row[aria-current="page"] { color: var(--obs-action); background: var(--obs-surface-selected); }
 .lab-session-row strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; font-weight: 600; }
+.lab-chat-session-row strong { white-space: normal; overflow-wrap: anywhere; }
 .lab-session-row small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text-secondary); font-size: .8rem; }
 .lab-session-row > span { display: flex; align-items: center; gap: 5px; width: 100%; color: var(--obs-text-secondary); font-size: .72rem; }
 .lab-session-row time { margin-left: auto; }

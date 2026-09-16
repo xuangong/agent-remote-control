@@ -123,7 +123,22 @@ export class CodexSessionRuntime {
   }
 
   private inspectItem(parentId: string, turnId: string | undefined, item: unknown): void {
-    if (!isRecord(item) || item.type !== 'collabAgentToolCall' || !Array.isArray(item.receiverThreadIds)) return;
+    if (!isRecord(item)) return;
+    if (item.type === 'subAgentActivity') {
+      const id = readString(item.agentThreadId);
+      if (!id || id === parentId) return;
+      if (item.kind === 'started' && !this.origins.has(id)) {
+        this.origins.set(id, { parentId, turnId, callId: readString(item.id) });
+        const entry = this.children.get(id);
+        if (entry && entry.parentId === parentId) {
+          Object.assign(entry.descriptor, this.originFields(id, parentId));
+          this.sessions.get(parentId)?.notifyChildrenChanged();
+        }
+      }
+      void this.discover(id).catch(() => undefined);
+      return;
+    }
+    if (item.type !== 'collabAgentToolCall' || !Array.isArray(item.receiverThreadIds)) return;
     for (const id of item.receiverThreadIds) {
       if (typeof id !== 'string') continue;
       if (item.tool === 'spawnAgent' && !this.origins.has(id)) {
@@ -161,19 +176,21 @@ export class CodexSessionRuntime {
   }
 
   private async readChild(id: string, ancestry: string[]): Promise<CodexThreadSession | undefined> {
-    let snapshotStart = this.notificationSequence;
-    let history = await this.transport.request('thread/read', { threadId: id, includeTurns: true });
-    if (this.closed || !isRecord(history) || !isRecord(history.thread) || history.thread.id !== id) return undefined;
-    let thread = history.thread;
-    const parentId = parentThreadId(thread);
+    const metadata = await this.transport.request('thread/read', { threadId: id, includeTurns: false });
+    if (this.closed || !isRecord(metadata) || !isRecord(metadata.thread) || metadata.thread.id !== id) return undefined;
+    const parentId = parentThreadId(metadata.thread);
     if (!parentId || parentId === id) return undefined;
     if (!this.sessions.has(parentId) && !await this.discover(parentId, [...ancestry, id])) return undefined;
     const previous = this.children.get(id);
     if (previous && previous.parentId !== parentId) return undefined;
+    let snapshotStart = this.notificationSequence;
+    let history = await this.transport.request('thread/read', { threadId: id, includeTurns: true });
+    if (this.closed || !isRecord(history) || !isRecord(history.thread) || history.thread.id !== id || parentThreadId(history.thread) !== parentId) return undefined;
+    let thread = history.thread;
     const loaded = isRecord(thread.status) && thread.status.type !== 'notLoaded';
     const descriptor: AgentChildSession = {
       nativeSessionId: id,
-      title: readString(thread.name) ?? readString(thread.agentNickname) ?? readString(thread.agentRole) ?? id,
+      title: childTitle(thread, id),
       ...(readString(thread.agentRole) ? { role: readString(thread.agentRole) } : {}),
       createdAt: previous?.descriptor.createdAt ?? nativeCreatedAt(thread.createdAt),
       status: loaded ? 'starting' : 'closed', observation: loaded ? 'live' : 'saved_history',
@@ -196,7 +213,7 @@ export class CodexSessionRuntime {
         thread = history.thread;
       }
       descriptor.observation = isRecord(thread.status) && thread.status.type === 'notLoaded' ? 'saved_history' : 'live';
-      descriptor.title = readString(thread.name) ?? readString(thread.agentNickname) ?? readString(thread.agentRole) ?? id;
+      descriptor.title = childTitle(thread, id);
       if (readString(thread.agentRole)) descriptor.role = readString(thread.agentRole);
       entry.session = this.createChild(thread, history, this.buffered.get(id) ?? []);
     } catch (error) {
@@ -220,6 +237,13 @@ export class CodexSessionRuntime {
     this.closed = true;
     for (const session of new Set([this.root, ...this.sessions.values()])) session.receiveTermination(error);
   }
+}
+
+function childTitle(thread: Record<string, unknown>, id: string): string {
+  const spawn = isRecord(thread.source) && isRecord(thread.source.subAgent) && isRecord(thread.source.subAgent.thread_spawn)
+    ? thread.source.subAgent.thread_spawn : undefined;
+  return readString(thread.agentPath) ?? (spawn ? readString(spawn.agent_path) : undefined)
+    ?? readString(thread.name) ?? readString(thread.agentNickname) ?? readString(thread.agentRole) ?? id;
 }
 
 function parentThreadId(thread: Record<string, unknown>): string | undefined {

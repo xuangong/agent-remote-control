@@ -56,7 +56,27 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
     },
     async handle(request: Request): Promise<Response | undefined> {
       const url = new URL(request.url);
-      if (url.origin !== previewOrigin || url.pathname !== '/_arc/enter') return undefined;
+      if (url.origin !== previewOrigin) return undefined;
+      const renew = /^\/p\/([A-Za-z0-9_-]{1,128})\/_arc\/renew$/.exec(url.pathname);
+      if (renew) {
+        if (request.method !== 'POST') return error(405);
+        if (request.headers.get('origin') !== previewOrigin) return error(403);
+        if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return error(415);
+        const body = await readJson(request);
+        if (!body || Object.keys(body).length) return error(400);
+        const cookies = (request.headers.get('cookie') ?? '').split(';').map(value => value.trim());
+        const values = cookies.filter(value => value.startsWith(name(renew[1]!) + '='));
+        if (values.length !== 1) return error(401);
+        const token = values[0]!.slice(name(renew[1]!).length + 1);
+        const session = sessions.get(token);
+        if (!session || session.previewId !== renew[1] || !await valid(session)) return error(401);
+        // Extend the same object so existing HTTP and WebSocket watches keep their authorization.
+        session.expiresAt = now() + 60 * 60_000;
+        return Response.json({ expiresAt: session.expiresAt }, { headers: {
+          'cache-control': 'no-store', 'set-cookie': `${name(session.previewId)}=${token}; Path=/p/${session.previewId}/; HttpOnly; SameSite=Strict; Max-Age=3600${secure ? '; Secure' : ''}`,
+        } });
+      }
+      if (url.pathname !== '/_arc/enter') return undefined;
       if (request.method === 'GET') {
         const nonce = randomBytes(24).toString('base64url');
         const html = `<!doctype html><meta name="viewport" content="width=device-width"><title>Open local preview</title><p id="status">Opening preview…</p><script nonce="${nonce}">const code=location.hash.slice(1);history.replaceState(null,'',location.pathname);fetch('/_arc/enter',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code})}).then(async r=>{if(!r.ok)throw Error();const v=await r.json();location.replace(v.url)}).catch(()=>{document.getElementById('status').textContent='Preview entry expired or access is unavailable. Open it again from the Controller.'})</script>`;

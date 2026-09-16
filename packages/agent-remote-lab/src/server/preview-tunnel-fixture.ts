@@ -30,7 +30,7 @@ class LocalSession implements AgentSession {
   async runtimeInfo() { return { providerId: this.providerId, sessionId: this.nativeSessionId, status: 'idle' as const, cwd: this.cwd, persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } }; }
   async sendMessage() {} async respondToInteraction() {} async dispose() { this.release(); }
 }
-export async function previewFixture(options: { separateOrigin?: boolean; target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
+export async function previewFixture(options: { ttlMs?: number; separateOrigin?: boolean; target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-preview-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const observed = { cancelledEvents: 0, cookies: [] as string[] };
@@ -72,7 +72,7 @@ export async function previewFixture(options: { separateOrigin?: boolean; target
   const { key } = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
   const session = new LocalSession(options.workspace);
   const adapter: AgentProviderAdapter = { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async () => session, resumeSession: async () => session };
-  const host = createAgentHost({ installationId: 'preview-test', name: 'Preview host', preview: { stateDirectory: directory },
+  const host = createAgentHost({ installationId: 'preview-test', name: 'Preview host', preview: { stateDirectory: directory, ttlMs: options.ttlMs },
     registrations: [{ adapter, directory: { providerId: 'fixture', list: () => [], workspaces: () => [], create: async () => 'native', open: async () => session, close: () => session.dispose() } }],
     uplink: { url: url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: key } });
   cleanups.push(() => host.close());
@@ -82,7 +82,7 @@ export async function previewFixture(options: { separateOrigin?: boolean; target
   const { agentId } = await attached.json() as { agentId: string };
   const response = await alice.request(`v1/sessions/${agentId}/previews`, { target, itemId: 'message-1', pathMode: options.pathMode ?? 'strip' });
   expect(response.status).toBe(200);
-  const { registration } = await response.json() as { registration: { id: string } };
+  const { registration } = await response.json() as { registration: { id: string; expiresAt: number } };
   await vi.waitFor(async () => { const result = await (await alice.request(`v1/remote/hosts/${hostId}/previews`)).json(); expect(result.registrations[0].availability).toBe('online'); }, { timeout: 5000 });
   async function entryUrl(path: string) {
     const response = await alice.request(`v1/remote/hosts/${hostId}/previews/${registration.id}/open`, { url: target + path });

@@ -44,3 +44,36 @@ it('rejects cross-registration cookies, cross-origin mutations, replay after exp
   expect((await access.authenticate(new Request(previewOrigin + '/p/other/', {headers:{cookie:'__Secure-arc_preview_abc=fake'}})) as Response).status).toBe(401);
   access.close();
 }, 10000);
+
+
+it('renews the HttpOnly cookie and its existing stream authorization without bypassing revocation', async () => {
+  let now = 1000;
+  let authorized = true;
+  const access = createPreviewAccess({ origin, previewOrigin, now: () => now, authorize: async () => authorized });
+  try {
+    const entry = access.issue({ source, subject: 'alice', hostId: 'host', previewId: 'abc', path: '/' });
+    const response = await access.handle(new Request(previewOrigin + '/_arc/enter', { method: 'POST',
+      headers: { origin: previewOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(entry).hash.slice(1) }) }));
+    const cookie = response!.headers.get('set-cookie')!.split(';')[0]!;
+    const request = new Request(previewOrigin + '/p/abc/page', { headers: { cookie } });
+    const session = await access.authenticate(request);
+    if (session instanceof Response) throw new Error('Expected preview authorization');
+    let cancelled = false;
+    access.watch(session, () => { cancelled = true; });
+    now += 50 * 60_000;
+    const renew = () => access.handle(new Request(previewOrigin + '/p/abc/_arc/renew', { method: 'POST',
+      headers: { cookie, origin: previewOrigin, 'content-type': 'application/json' }, body: '{}' }));
+    const renewed = await renew();
+    expect(renewed?.status).toBe(200);
+    expect(renewed!.headers.get('set-cookie')).toContain(cookie + ';');
+    expect(renewed!.headers.get('set-cookie')).toContain('HttpOnly');
+    now += 20 * 60_000;
+    await access.enforce();
+    expect(cancelled).toBe(false);
+    expect(await access.authenticate(request)).not.toBeInstanceOf(Response);
+    authorized = false;
+    expect((await renew())?.status).toBe(401);
+    await access.enforce();
+    expect(cancelled).toBe(true);
+  } finally { access.close(); }
+}, 10000);

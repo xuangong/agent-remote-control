@@ -79,11 +79,12 @@ export function createControllerPreviews(options: { stateDirectory: string; ttlM
       if (!registry || !connection) return { status: 503, body: JSON.stringify({ error: 'Preview registry is unavailable.' }) };
       try {
         if (request.path === '/remote/previews' && request.method === 'GET') return { status: 200, body: JSON.stringify(registry.snapshot()) };
-        if (request.path !== '/remote/previews' && request.path !== '/remote/previews/unregister') return { status: 404, body: JSON.stringify({ error: 'Preview control route was not found.' }) };
+        if (request.path !== '/remote/previews' && request.path !== '/remote/previews/unregister' && request.path !== '/remote/previews/renew') return { status: 404, body: JSON.stringify({ error: 'Preview control route was not found.' }) };
         if (request.method !== 'POST') return { status: 405, body: JSON.stringify({ error: 'Preview control method is not allowed.' }) };
         const input = JSON.parse(request.body ?? '{}');
-        const registration = request.path === '/remote/previews/unregister' ? await registry.unregister(input.id) : await registry.register(input);
-        options.diagnostic?.(request.path.endsWith('unregister') ? 'preview_unregistered' : 'preview_registered');
+        const registration = request.path === '/remote/previews/unregister' ? await registry.unregister(input.id)
+          : request.path === '/remote/previews/renew' ? await registry.renew(input.id) : await registry.register(input);
+        options.diagnostic?.(request.path.endsWith('unregister') ? 'preview_unregistered' : request.path.endsWith('renew') ? 'preview_renewed' : 'preview_registered');
         return { status: 200, body: JSON.stringify({ registration }) };
       } catch { return { status: 400, body: JSON.stringify({ error: 'Cannot register this local target. Check its loopback address, port, and local preview storage.' }) }; }
     },

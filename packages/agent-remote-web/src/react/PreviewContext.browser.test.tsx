@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 
-import { render, rerender } from '../test/setup.js';
+import { render, rerender, unmount } from '../test/setup.js';
 import type { HttpPreviewClient } from '../client/preview-client.js';
 import { PreviewDock, PreviewProvider, usePreviewController, type PreviewContextValue } from './PreviewContext.js';
 
@@ -81,3 +81,76 @@ function deferred<T>() {
   const promise = new Promise<T>(accept => { resolve = accept; });
   return { promise, resolve };
 }
+
+
+it('renews retained previews while minimized, deduplicates sessions, and stops on close or manual unregister', async () => {
+  vi.useFakeTimers();
+  let now = Date.now();
+  let registration = { id: 'preview', target: 'http://localhost:5173', status: 'active' as 'active' | 'unregistered',
+    createdAt: now, expiresAt: now + 6000, revision: 1, pathMode: 'strip', sources: [], availability: 'online' };
+  const renew = vi.fn(async () => { registration = { ...registration, expiresAt: Date.now() + 6000 }; return registration; });
+  const client = { ...previewClient(vi.fn(async () => 'entry')), snapshot: vi.fn(async () => ({ registrations: [registration] })), renew } as unknown as HttpPreviewClient;
+  let controller!: PreviewContextValue;
+  const container = await render(<PreviewProvider client={client} hostId="one" canManage><Probe capture={value => controller = value} /></PreviewProvider>);
+  try {
+    await act(async () => { await controller.open('preview', registration.target, 'agent'); });
+    expect(renew).toHaveBeenCalledTimes(1);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-browser] button')!.click());
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(renew.mock.calls.length).toBeGreaterThan(1);
+    expect(registration.expiresAt).toBeGreaterThan(now + 6000);
+    await act(async () => { await controller.open('preview', registration.target, 'second-agent'); });
+    const before = renew.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(renew).toHaveBeenCalledTimes(before + 1);
+    registration = { ...registration, status: 'unregistered' };
+    await act(async () => { await controller.refresh(); });
+    const stopped = renew.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(renew).toHaveBeenCalledTimes(stopped);
+    await unmount(container);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(renew).toHaveBeenCalledTimes(stopped);
+  } finally { await unmount(container); vi.useRealTimers(); }
+});
+
+
+it('renews on browser wake and aborts a pending renewal when its last retained browser closes', async () => {
+  vi.useFakeTimers();
+  const registration = { id: 'preview', target: 'http://localhost:5173', status: 'active', createdAt: Date.now(),
+    expiresAt: Date.now() + 3600000, revision: 1, pathMode: 'strip', sources: [], availability: 'online' };
+  const request = deferred<typeof registration>();
+  const renew = vi.fn().mockResolvedValueOnce(registration).mockImplementationOnce(() => request.promise);
+  const client = { ...previewClient(vi.fn(async () => 'entry')), snapshot: vi.fn(async () => ({ registrations: [registration] })), renew } as unknown as HttpPreviewClient;
+  let controller!: PreviewContextValue;
+  const container = await render(<PreviewProvider client={client} hostId="one" canManage><Probe capture={value => controller = value} /></PreviewProvider>);
+  try {
+    await act(async () => { await controller.open('preview', registration.target, 'agent'); });
+    expect(renew).toHaveBeenCalledTimes(1);
+    await act(async () => window.dispatchEvent(new Event('pageshow')));
+    expect(renew).toHaveBeenCalledTimes(2);
+    const signal = renew.mock.calls[1]![3] as AbortSignal;
+    await act(async () => container.querySelector<HTMLButtonElement>('[title="Close preview"]')!.click());
+    expect(signal.aborted).toBe(true);
+    await act(async () => { request.resolve(registration); await vi.advanceTimersByTimeAsync(600000); });
+    expect(container.querySelector('[data-browser]')).toBeNull();
+    expect(renew).toHaveBeenCalledTimes(2);
+  } finally { await unmount(container); vi.useRealTimers(); }
+});
+
+
+it('continues renewing when the independent snapshot refresh stalls', async () => {
+  vi.useFakeTimers();
+  const registration = { id: 'preview', target: 'http://localhost:5173', status: 'active', createdAt: Date.now(),
+    expiresAt: Date.now() + 6000, revision: 1, pathMode: 'strip', sources: [], availability: 'online' };
+  const snapshot = deferred<{ registrations: typeof registration[] }>();
+  const renew = vi.fn(async () => ({ ...registration, expiresAt: Date.now() + 6000 }));
+  const client = { ...previewClient(vi.fn(async () => 'entry')), snapshot: vi.fn().mockResolvedValueOnce({ registrations: [registration] }).mockImplementation(() => snapshot.promise), renew } as unknown as HttpPreviewClient;
+  let controller!: PreviewContextValue;
+  const container = await render(<PreviewProvider client={client} hostId="one" canManage><Probe capture={value => controller = value} /></PreviewProvider>);
+  try {
+    await act(async () => { await controller.open('preview', registration.target, 'agent'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(renew.mock.calls.length).toBeGreaterThan(1);
+  } finally { await unmount(container); snapshot.resolve({ registrations: [] }); vi.useRealTimers(); }
+});

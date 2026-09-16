@@ -60,3 +60,32 @@ it.each([false, true])('preserves HTTP ranges, conditional responses, separate c
   const uploaded = await fetch(base + '/echo', { method: 'POST', headers: { ...headers, origin: f.previewOrigin, 'content-type': 'multipart/form-data; boundary=arc-test' }, body: multipart });
   expect(await uploaded.text()).toBe(multipart);
 }, 20000);
+
+
+it('renews through owner authentication and preserves the mapped URL and tunnel while refusing removal revival', async () => {
+  const f = await previewFixture({ ttlMs: 1000 });
+  const cookie = await f.enter('/bytes');
+  const route = `v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/renew`;
+  expect((await f.bob.request(route, {})).status).toBe(404);
+  const response = await f.alice.request(route, {});
+  expect(response.status).toBe(200);
+  const { registration } = await response.json() as { registration: { id: string; expiresAt: number } };
+  expect(registration.id).toBe(f.registration.id);
+  expect(registration.expiresAt).toBeGreaterThan(f.registration.expiresAt);
+  const url = `${f.previewOrigin}/p/${f.registration.id}`;
+  const renewed = await fetch(url + '/_arc/renew', { method: 'POST', headers: { cookie, origin: f.previewOrigin, 'content-type': 'application/json' }, body: '{}' });
+  expect(renewed.status).toBe(200);
+  expect(renewed.headers.getSetCookie()[0]).toContain(cookie);
+  expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(200);
+  await vi.waitFor(async () => {
+    const snapshot = await (await f.alice.request(`v1/remote/hosts/${f.hostId}/previews`)).json();
+    expect(snapshot.registrations[0].status).toBe('expired');
+  }, { timeout: 3000 });
+  const recovered = await f.alice.request(route, {});
+  expect(recovered.status).toBe(200);
+  expect((await recovered.json()).registration).toMatchObject({ id: f.registration.id, status: 'active' });
+  await vi.waitFor(async () => expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(200), { timeout: 1000 });
+  await f.alice.request(`v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/unregister`, {});
+  expect((await f.alice.request(route, {})).status).toBe(409);
+  expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(401);
+}, 20000);

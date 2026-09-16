@@ -8,6 +8,7 @@ import { canonicalizeLoopbackTarget, type LoopbackTargetOptions } from './loopba
 export type { PreviewPathMode, PreviewRegistration, PreviewSnapshot, PreviewSource } from '../types.js';
 export interface PreviewRegistry {
   register(input: { target: string; source: PreviewSource; pathMode?: PreviewPathMode }): Promise<PreviewRegistration>;
+  renew(id: string): Promise<PreviewRegistration>;
   unregister(id: string): Promise<PreviewRegistration | undefined>;
   snapshot(): PreviewSnapshot;
   subscribe(callback: (snapshot: PreviewSnapshot) => void): () => void;
@@ -150,6 +151,25 @@ export async function createPreviewRegistry(options: PreviewRegistryOptions): Pr
       const entry: PreviewRegistration = { id: randomBytes(18).toString('base64url'), target, status: 'active', createdAt: timestamp, expiresAt: timestamp + ttlMs, revision: ++revision, pathMode, sources: [clone(input.source)] };
       records.set(entry.id, entry); controllers.set(entry.id, new AbortController());
       try { await persist(); } catch (error) { records.delete(entry.id); controllers.delete(entry.id); revision--; throw error; }
+      scheduleExpiry(); notify(); return clone(entry);
+    }); },
+    renew(id) { return mutate(async () => {
+      if (closed) throw new Error('Preview registry is closed.');
+      expireDue();
+      const entry = records.get(id);
+      if (!entry || entry.status === 'unregistered') throw new Error('Preview is unavailable.');
+      canonicalizeLoopbackTarget(entry.target, options);
+      const expired = entry.status === 'expired';
+      if (expired) {
+        if ([...records.values()].filter(item => item.status === 'active').length >= maxRecords) throw new Error('Preview registration capacity is exhausted.');
+        if (options.probe !== false) await probeTarget(entry.target, options.probeTimeoutMs ?? 1000);
+      }
+      const expiresAt = Math.max(entry.expiresAt, now() + ttlMs);
+      if (!expired && expiresAt === entry.expiresAt) return clone(entry);
+      const previous = clone(entry);
+      entry.status = 'active'; entry.expiresAt = expiresAt; entry.revision = ++revision;
+      try { await persist(); } catch (error) { records.set(id, previous); revision--; throw error; }
+      if (expired) controllers.set(id, new AbortController());
       scheduleExpiry(); notify(); return clone(entry);
     }); },
     unregister(id) { return mutate(async () => {

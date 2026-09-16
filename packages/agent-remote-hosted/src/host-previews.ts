@@ -68,7 +68,7 @@ export function createHostPreviews(options: Options) {
       // Pending removals block lookup throughout reconciliation, including failed retries.
       for (const id of [...(record(hostId)?.pendingRemovals ?? [])]) {
         const value = currentSnapshot.registrations.find(value => value.id === id);
-        if (value?.status === 'active') {
+        if (value && value.status !== 'unregistered') {
           try { await options.remove(hostId, id); } catch { continue; }
           continue;
         }

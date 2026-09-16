@@ -117,7 +117,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   const port = (vite.httpServer!.address() as import('node:net').AddressInfo).port;
   let browserScript = '';
   const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
-  const f = await previewFixture({ target: `http://127.0.0.1:${port}`, servePage: async (request, response) => {
+  const f = await previewFixture({ ttlMs: 8000, target: `http://127.0.0.1:${port}`, servePage: async (request, response) => {
     if (request.url === '/workbench.js') { response.setHeader('content-type', 'application/javascript'); response.end(browserScript); return true; }
     if (request.url === '/workbench') { response.setHeader('content-type', 'text/html'); response.setHeader('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https://external.test"); response.end(`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style><div id="root"></div><script src="/workbench.js"></script>`); return true; }
     return false;
@@ -193,6 +193,10 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   await page.evaluate(() => document.querySelector('dialog')!.getAnimations().forEach(animation => animation.play()));
   await page.getByRole('dialog', { name: 'Local preview browser' }).waitFor({ state: 'hidden' });
   expect(await page.locator('iframe').count()).toBe(1);
+  await page.waitForFunction(deadline => Date.now() > deadline + 500, f.registration.expiresAt, { timeout: 10000 });
+  const renewedSnapshot = await (await f.alice.request(`v1/remote/hosts/${f.hostId}/previews`)).json();
+  expect(renewedSnapshot.registrations[0].status).toBe('active');
+  expect(renewedSnapshot.registrations[0].expiresAt).toBeGreaterThan(f.registration.expiresAt);
   expect(await page.getByRole('button', { name: /^Resume preview:/ }).evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
   await page.screenshot({ path: fileURLToPath(new URL('../../../.tmp/preview-docked-' + engine.name() + '.png', import.meta.url)) });
   await page.keyboard.press('Tab');

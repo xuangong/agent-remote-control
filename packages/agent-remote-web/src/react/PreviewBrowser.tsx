@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePreviewVisibility } from './usePreviewVisibility.js';
 
-export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMinimize, visible, browserKey, container }: {
+export function PreviewBrowser({ url, target, error, notice, returnFocus, onClose, onMinimize, visible, browserKey, container }: {
   readonly container?: HTMLElement | null;
+  readonly notice?: string;
   readonly visible: boolean; readonly browserKey: string; readonly onMinimize: () => void;
   readonly url?: string; readonly target: string; readonly error?: string; readonly returnFocus?: HTMLElement; readonly onClose: () => void;
 }) {
@@ -128,6 +129,7 @@ export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMin
         <button type="button" aria-label="Close preview" title="Close preview" onClick={onClose} autoFocus><BrowserIcon name="close" /></button>
       </header>
       <div className="agent-preview-browser-content" aria-busy={loading && !error && !failure}>
+        {notice && !error && !failure ? <p className="agent-preview-browser-message" role="status">{notice}</p> : null}
         {error || failure ? <p className="agent-preview-browser-message" role="alert">{error || failure}</p> : null}
         {loading && !error && !failure ? <p className="agent-preview-browser-loading" role="status">{url ? 'Loading preview…' : 'Opening preview…'}</p> : null}
         {url && !error ? <iframe ref={iframe} src={url} title="Local preview" onLoad={loaded} referrerPolicy="no-referrer"

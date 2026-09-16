@@ -92,3 +92,31 @@ describe('PreviewRegistry', () => {
     await expect(createPreviewRegistry({ filePath, probe: false })).rejects.toThrow(/invalid/i);
   });
 });
+
+
+test('renews the same registration across expiry and restart without reviving manual removal', async () => {
+  const filePath = await location();
+  let now = 1000;
+  const registry = await createPreviewRegistry({ filePath, ttlMs: 1000, now: () => now, probe: false });
+  try {
+    const entry = await registry.register({ target: 'http://localhost:5173', source: { sessionId: 's', itemId: 'i' } });
+    const signal = registry.signal(entry.id);
+    now = 1800;
+    const renewed = await registry.renew(entry.id);
+    expect(renewed).toMatchObject({ id: entry.id, expiresAt: 2800, sources: entry.sources, status: 'active' });
+    expect(signal.aborted).toBe(false);
+    now = 3000;
+    expect(registry.lookup(entry.id)?.status).toBe('expired');
+    const recovered = await registry.renew(entry.id);
+    expect(recovered).toMatchObject({ id: entry.id, expiresAt: 4000, status: 'active' });
+    expect(registry.signal(entry.id).aborted).toBe(false);
+    await registry.close();
+    const reopened = await createPreviewRegistry({ filePath, ttlMs: 1000, now: () => now, probe: false });
+    try {
+      expect(reopened.lookup(entry.id)?.expiresAt).toBe(4000);
+      await reopened.unregister(entry.id);
+      await expect(reopened.renew(entry.id)).rejects.toThrow(/unavailable/i);
+      await expect(reopened.renew('unknown')).rejects.toThrow(/unavailable/i);
+    } finally { await reopened.close(); }
+  } finally { await registry.close(); }
+});

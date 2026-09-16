@@ -580,12 +580,19 @@ export function createHostBroker(options: HostBrokerOptions) {
         JSON.stringify({ target, source: { sessionId: binding.agentId, itemId }, pathMode: body.pathMode ?? 'strip' }));
       return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json' } });
     }
-    const previewHost = /^\/v1\/remote\/hosts\/([^/]+)\/previews(?:\/([A-Za-z0-9_-]+)\/(unregister))?$/.exec(url.pathname);
+    const previewHost = /^\/v1\/remote\/hosts\/([^/]+)\/previews(?:\/([A-Za-z0-9_-]+)\/(unregister|renew))?$/.exec(url.pathname);
     if (previewHost) {
       requireOwner(subject); requireAccess(previewHost[1]!, subject);
       if (!previewHost[2] && request.method === 'GET') return json(200, previews.list(previewHost[1]!));
       if (previewHost[2] && request.method === 'POST') {
-        await readBody(request); await previews.unregister(previewHost[1]!, previewHost[2]);
+        await readBody(request);
+        if (previewHost[3] === 'renew') {
+          const registration = previews.list(previewHost[1]!).registrations.find(value => value.id === previewHost[2]);
+          if (!registration || registration.status === 'unregistered' || registration.pendingUnregister) return json(409, { error: 'Preview is unavailable or has been unregistered.' });
+          const result = await rpc(requireHost(previewHost[1]!), 'POST', '/remote/previews/renew', undefined, JSON.stringify({ id: previewHost[2] }));
+          return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json' } });
+        }
+        await previews.unregister(previewHost[1]!, previewHost[2]);
         return json(200, { registration: previews.list(previewHost[1]!).registrations.find(value => value.id === previewHost[2]) });
       }
       return json(405, { error: 'Method is not allowed.' });

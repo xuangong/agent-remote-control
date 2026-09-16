@@ -85,6 +85,8 @@ async function previewFixture(target = 'http://127.0.0.1:4173') {
       const body = JSON.parse(request.body);
       registration = { id: 'workers-preview', target: body.target, status: 'active', createdAt: Date.now(),
         expiresAt: Date.now() + 60_000, revision: ++revision, pathMode: body.pathMode, sources: [body.source] };
+    } else if (request.path === '/remote/previews/renew' && registration) {
+      registration = { ...registration, expiresAt: Date.now() + 60_000, revision: ++revision };
     } else if (request.path === '/remote/previews/unregister' && registration) {
       registration = { ...registration, status: 'unregistered', revision: ++revision };
     } else return;
@@ -153,6 +155,16 @@ it('negotiates protocol, transports text and binary, and propagates preview revo
   expect((await received).data).toBe('hello');
   received = socketMessage(socket); socket.send(new Uint8Array([0, 255, 128]));
   expect([...(await received).data as Uint8Array]).toEqual([0, 255, 128]);
+  const previousExpiry = setup.registration.expiresAt;
+  const renewed = await setup.f.json(setup.alice.basePath + `v1/remote/hosts/${setup.host.hostId}/previews/${setup.registration.id}/renew`, setup.alice.cookie, {});
+  expect(renewed.status).toBe(200);
+  expect((await renewed.json() as any).registration.expiresAt).toBeGreaterThan(previousExpiry);
+  const cookieRenewed = await setup.f.previewRequest(`/p/${setup.registration.id}/_arc/renew`, { method: 'POST',
+    headers: { cookie, origin: previewOrigin, 'content-type': 'application/json' }, body: '{}' });
+  expect(cookieRenewed.status).toBe(200);
+  expect(cookieRenewed.headers.get('set-cookie')).toContain(cookie);
+  received = socketMessage(socket); socket.send('still connected');
+  expect((await received).data).toBe('still connected');
   const closed = event(socket, 'close');
   const removed = await setup.f.json(setup.alice.basePath + `v1/remote/hosts/${setup.host.hostId}/previews/${setup.registration.id}/unregister`, setup.alice.cookie, {});
   expect(removed.status).toBe(200);

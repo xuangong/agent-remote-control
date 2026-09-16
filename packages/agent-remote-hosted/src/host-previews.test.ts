@@ -50,3 +50,30 @@ describe('Host previews', () => {
     previews.close();
   });
 });
+
+
+test('keeps an offline removal pending through expired snapshots until the Controller confirms unregister', async () => {
+  const removed: string[] = [];
+  let online = false;
+  const previews = createHostPreviews({ async save(_state, publish) { publish(); }, async remove(_host, id) {
+    if (!online) throw new Error('Offline');
+    removed.push(id);
+  } });
+  try {
+    const expired = snapshot(2);
+    expired.registrations[0]!.status = 'expired';
+    await previews.update('host', expired);
+    previews.disconnect('host');
+    await previews.unregister('host', 'preview-id');
+    online = true;
+    await previews.update('host', expired);
+    expect(removed).toEqual(['preview-id']);
+    expect(previews.list('host').registrations[0]?.pendingUnregister).toBe(true);
+    await previews.update('host', snapshot(3));
+    expect(previews.lookup('host', 'preview-id')).toBeUndefined();
+    const confirmed = snapshot(4);
+    confirmed.registrations[0]!.status = 'unregistered';
+    await previews.update('host', confirmed);
+    expect(previews.list('host').registrations[0]?.pendingUnregister).toBeUndefined();
+  } finally { previews.close(); }
+});

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import type { HttpPreviewClient, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 import type { PreviewController } from './PreviewActions.js';
+import { usePreviewRenewal } from './usePreviewRenewal.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
 import { PreviewWorkspaceContext } from './PreviewWorkspace.js';
 
@@ -86,6 +87,8 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
   }, [refresh, scope.version]);
 
+  const renewalErrors = usePreviewRenewal(client, hostId, canManage, currentBrowsers, currentState.registrations, refresh);
+
   const value = useMemo<PreviewContextValue>(() => ({
     registrations: currentState.registrations, canManage, loading: currentState.loading, error: currentState.error, refresh,
     register: async (agentId: string, request: PreviewRegistrationRequest) => {
@@ -131,11 +134,12 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
     {children}
     {currentBrowsers.map(browser => {
       const selected = currentState.registrations.find(item => item.id === browser.id);
-      const unavailable = selected && (selected.pendingUnregister ? 'This preview has been unregistered.'
-        : selected.status !== 'active' ? `This preview is ${selected.status}. Open it again to register.`
-        : selected.availability !== 'online' ? 'Controller offline. Close and reopen the preview after it reconnects.' : undefined);
+      const unavailable = selected?.pendingUnregister || selected?.status === 'unregistered' ? 'This preview has been unregistered.'
+        : !selected && !currentState.loading ? 'This preview registration is no longer available. Close and open it again.' : undefined;
+      const notice = selected?.status === 'expired' ? 'Renewing preview registration…'
+        : selected?.availability !== 'online' ? 'Controller offline. The preview will reconnect automatically.' : renewalErrors[browser.id];
       return <PreviewBrowser container={container} key={browser.key} browserKey={browser.key} visible={activeKey === browser.key}
-        url={browser.url} target={browser.target} error={unavailable ?? browser.error} returnFocus={browser.returnFocus}
+        url={browser.url} target={browser.target} notice={notice} error={unavailable ?? browser.error} returnFocus={browser.returnFocus}
         onMinimize={minimizeBrowser} onClose={() => closeBrowser(browser.key)} />;
     })}
   </PreviewWorkspaceContext.Provider></DockContext.Provider></Context.Provider>;

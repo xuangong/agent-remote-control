@@ -53,3 +53,19 @@ it('reports expired preview access before embedding an unauthenticated page', as
   const client = new HttpPreviewClient('https://control.test/', (async () => Response.json({ error: 'Unavailable' }, { status: 401 })) as typeof fetch);
   await expect(client.enter('https://control.test/_arc/enter#proof', 'one')).rejects.toThrow('expired or is unavailable');
 });
+
+
+it('recovers an expired preview cookie with a fresh handoff while keeping the registered ID', async () => {
+  const paths: string[] = [];
+  const client = new HttpPreviewClient('https://control.test/u/account/', (async (input: string | URL | Request) => {
+    const path = new URL(String(input)).pathname; paths.push(path);
+    if (path.endsWith('/previews/preview-one/renew')) return Response.json({ registration: registration() });
+    if (path === '/p/preview-one/_arc/renew') return Response.json({}, { status: 401 });
+    if (path.endsWith('/open')) return Response.json({ entryUrl: 'https://control.test/_arc/enter#fresh-proof' });
+    if (path === '/_arc/enter') return Response.json({ url: '/p/preview-one/docs' });
+    throw new Error('Unexpected request');
+  }) as typeof fetch);
+  expect((await client.renew('host-one', 'preview-one', 'http://localhost:5173/docs')).id).toBe('preview-one');
+  expect(paths).toEqual(['/u/account/v1/remote/hosts/host-one/previews/preview-one/renew', '/p/preview-one/_arc/renew',
+    '/u/account/v1/remote/hosts/host-one/previews/preview-one/open', '/_arc/enter']);
+});

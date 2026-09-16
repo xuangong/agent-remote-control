@@ -41,6 +41,21 @@ export class HttpPreviewClient {
     return value.registration;
   }
 
+  async renew(hostId: string, id: string, target: string, signal?: AbortSignal): Promise<PreviewRegistration> {
+    const { registration } = await this.request<{ registration: PreviewRegistration }>(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/${encodeURIComponent(id)}/renew`, {
+      method: 'POST', body: '{}', headers: { 'content-type': 'application/json' }, signal,
+    });
+    const origin = new URL(this.baseUrl, globalThis.location?.origin ?? 'http://localhost').origin;
+    const response = await this.fetcher(`${origin}/p/${encodeURIComponent(id)}/_arc/renew`, {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: '{}', signal,
+    });
+    if (response.status === 401) {
+      // A suspended browser can lose its cookie; redeem fresh access without navigating the retained iframe.
+      await this.enter(await this.open(hostId, id, target, signal), id, signal);
+    } else if (!response.ok) throw new Error('Preview access could not be renewed. Retrying when the connection is available.');
+    return registration;
+  }
+
   async open(hostId: string, id: string, originalLoopbackUrl: string, signal?: AbortSignal): Promise<string> {
     const value = await this.request<{ entryUrl: string }>(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/${encodeURIComponent(id)}/open`, {
       method: 'POST', body: JSON.stringify({ url: originalLoopbackUrl }), headers: { 'content-type': 'application/json' }, signal,

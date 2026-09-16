@@ -1,7 +1,7 @@
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from '@playwright/test';
+import { chromium, webkit } from '@playwright/test';
 import { createServer } from 'vite';
 import { expect, it } from 'vitest';
 import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
@@ -82,5 +82,101 @@ it('renders a local Markdown image from actual authorized session resource frame
   expect(await page.locator('img').getAttribute('src')).toBe('data:image/png;base64,' + png);
   expect(frames).toContain('resource_resolve_request'); expect(frames).toContain('resource_request');
   expect(urls.some(url => url.includes('/result.png') || url.includes(workspace))).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigation inside the workbench in ${engine.name()}`, async () => {
+  const { build } = await import('esbuild');
+  const { fileURLToPath } = await import('node:url');
+  const { readFile } = await import('node:fs/promises');
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-embedded-preview-')));
+  onPreviewCleanup(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, 'index.html'), `<!doctype html><h1>Local application</h1><a href="./next.html" target="_blank">Next page</a><a href="#one">One</a><a href="#two">Two</a><a href="https://external.test/">External</a><button onclick="history.pushState({},'', '?view=details');document.querySelector('h1').textContent='Details'">Details</button>`);
+  await writeFile(join(root, 'next.html'), '<!doctype html><h1>Next page</h1>');
+  const vite = await createServer({ configFile: false, root, server: { host: '127.0.0.1', port: 0, hmr: false } });
+  onPreviewCleanup(() => vite.close()); await vite.listen();
+  const port = (vite.httpServer!.address() as import('node:net').AddressInfo).port;
+  let browserScript = '';
+  const css = await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+  const f = await previewFixture({ target: `http://127.0.0.1:${port}`, servePage: async (request, response) => {
+    if (request.url === '/workbench.js') { response.setHeader('content-type', 'application/javascript'); response.end(browserScript); return true; }
+    if (request.url === '/workbench') { response.setHeader('content-type', 'text/html'); response.setHeader('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https://external.test"); response.end(`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style><div id="root"></div><script src="/workbench.js"></script>`); return true; }
+    return false;
+  } });
+  const source = `
+    import React from 'react';import {createRoot} from 'react-dom/client';
+    import {PreviewProvider,usePreviewController} from '../../agent-remote-web/src/react/PreviewContext.tsx';
+    import {PreviewActions} from '../../agent-remote-web/src/react/PreviewActions.tsx';
+    import {HttpPreviewClient} from '../../agent-remote-web/src/client/preview-client.ts';
+    function View(){const controller=usePreviewController();return <><textarea aria-label="Chat draft" defaultValue="Unsent message"/><PreviewActions controller={controller} agentId=${JSON.stringify(f.agentId)} itemId="message-1" text=${JSON.stringify(f.target + '/')} /></>;}
+    createRoot(document.getElementById('root')).render(<PreviewProvider client={new HttpPreviewClient(${JSON.stringify(f.url + f.alice.basePath)})} hostId=${JSON.stringify(f.hostId)} canManage><View/></PreviewProvider>);
+  `;
+  browserScript = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
+  const browser = await engine.launch({ headless: true }); onPreviewCleanup(() => browser.close());
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, ...(engine === webkit ? { isMobile: true, hasTouch: true } : {}) });
+  const separator = f.alice.cookie.indexOf('=');
+  await context.addCookies([{ name: f.alice.cookie.slice(0, separator), value: f.alice.cookie.slice(separator + 1), url: f.url, httpOnly: true, sameSite: 'Strict' }]);
+  const page = await context.newPage(); page.setDefaultTimeout(7000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(f.url + '/workbench');
+  await page.locator('.agent-preview-open').click();
+  const frame = page.frameLocator('iframe[title="Local preview"]');
+  await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  expect(await page.getByRole('button', { name: 'Back', exact: true }).isDisabled()).toBe(true);
+  await frame.getByRole('link', { name: 'Next page' }).click();
+  await frame.getByRole('heading', { name: 'Next page' }).waitFor();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  await page.getByRole('button', { name: 'Forward', exact: true }).click();
+  await frame.getByRole('heading', { name: 'Next page' }).waitFor();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await frame.getByRole('button', { name: 'Details', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[aria-label="Preview address"]')?.textContent?.includes('?view=details'));
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  await page.getByRole('button', { name: 'Reload preview', exact: true }).click();
+  await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  await frame.getByRole('link', { name: 'One', exact: true }).click();
+  await frame.getByRole('link', { name: 'Two', exact: true }).click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[aria-label="Preview address"]')?.textContent?.endsWith('#one') && !document.querySelector('[aria-label="Forward"]')?.hasAttribute('disabled'));
+  await page.getByRole('button', { name: 'Forward', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[aria-label="Preview address"]')?.textContent?.endsWith('#two') && !document.querySelector('[aria-label="Back"]')?.hasAttribute('disabled'));
+  expect(context.pages()).toHaveLength(1); expect(page.url()).toBe(f.url + '/workbench');
+  const bounds = await page.getByRole('dialog', { name: 'Local preview browser' }).boundingBox();
+  expect(bounds?.width).toBeCloseTo(390, 0); expect(bounds?.height).toBeCloseTo(844, 0);
+  await page.screenshot({ path: fileURLToPath(new URL('../../../.tmp/preview-' + engine.name() + '.png', import.meta.url)) });
+  if (engine === chromium) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    expect((await page.getByRole('dialog').boundingBox())?.width).toBe(960);
+    await page.getByRole('button', { name: 'Expand preview', exact: true }).click();
+    expect((await page.getByRole('dialog').boundingBox())?.width).toBe(1440);
+    await page.getByRole('button', { name: 'Restore preview size', exact: true }).click();
+  }
+  await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+  expect(await page.locator('iframe').count()).toBe(0);
+  expect(await page.getByRole('textbox', { name: 'Chat draft' }).inputValue()).toBe('Unsent message');
+  expect(await page.locator('.agent-preview-open').evaluate(element => element === document.activeElement)).toBe(true);
+  await page.route('https://external.test/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>External page</h1>' }));
+  await page.locator('.agent-preview-open').click();
+  await frame.getByRole('link', { name: 'External', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'left the preview origin' }).waitFor();
+  await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+  expect(await page.getByRole('textbox', { name: 'Chat draft' }).inputValue()).toBe('Unsent message');
+  await page.route('**/_arc/enter', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }));
+  await page.locator('.agent-preview-open').click();
+  await page.getByRole('alert').filter({ hasText: 'expired or is unavailable' }).waitFor();
+  expect(await page.locator('iframe').count()).toBe(0);
+  await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+  await page.unroute('**/_arc/enter');
+  await page.locator('.agent-preview-open').click();
+  await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  await f.alice.request(`v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/unregister`, {});
+  await page.getByRole('alert').filter({ hasText: 'unregistered' }).waitFor();
+  expect(await page.locator('iframe').count()).toBe(0);
+  await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+  await page.getByRole('button', { name: 'Open preview', exact: true }).click();
+  await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  expect(context.pages()).toHaveLength(1);
   expect(errors).toEqual([]);
 });

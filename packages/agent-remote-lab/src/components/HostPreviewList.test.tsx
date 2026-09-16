@@ -21,7 +21,7 @@ it('shows lifecycle, availability, source navigation, and owner-only unregister 
   expect(unregister).toHaveBeenCalledWith('preview-one');
 });
 
-it('keeps shared Host previews visible and requires a click before exposing an entry link', async () => {
+it('opens the preview through its controller without creating a new tab', async () => {
   const open = vi.fn(async () => 'https://preview.test/entry/one');
   const shared = value({ canManage: false, open });
   const container = await render(<HostPreviewList controller={{ ...shared, registrations: shared.registrations.map(item => ({ ...item, availability: 'online' })) }} />);
@@ -31,18 +31,18 @@ it('keeps shared Host previews visible and requires a click before exposing an e
   expect(open).not.toHaveBeenCalled();
   await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-open')?.click());
   expect(open).toHaveBeenCalledWith('preview-one', 'http://localhost:5173');
-  expect(container.querySelector<HTMLAnchorElement>('.lab-preview-ready')?.href).toBe('https://preview.test/entry/one');
+  expect(container.querySelector('a[target="_blank"]')).toBeNull();
 });
 
-it('removes prepared links when registration state no longer permits access', async () => {
+it('removes the open action when registration state no longer permits access', async () => {
   const open = vi.fn(async () => 'https://preview.test/entry/one');
   const active = value({ open, registrations: value().registrations.map(item => ({ ...item, availability: 'online' })) });
   const container = await render(<RegistrationStateHarness controller={active} />);
   await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-open')?.click());
-  expect(container.querySelector('.lab-preview-ready')).not.toBeNull();
+  expect(open).toHaveBeenCalledTimes(1);
 
   await act(async () => container.querySelector<HTMLButtonElement>('[data-action="expire"]')?.click());
-  expect(container.querySelector('.lab-preview-ready')).toBeNull();
+  expect(container.querySelector('.lab-preview-open')).toBeNull();
 });
 
 it('does not prepare a link while unregister is pending', async () => {

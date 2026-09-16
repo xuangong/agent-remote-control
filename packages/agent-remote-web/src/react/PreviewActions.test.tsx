@@ -26,7 +26,7 @@ describe('PreviewActions', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-open')?.click());
     expect(open).toHaveBeenCalledWith('preview-one', 'http://localhost:5173/docs');
-    expect(container.querySelector<HTMLAnchorElement>('.agent-preview-ready')?.href).toBe('https://preview.test/auth/one');
+    expect(container.querySelector('a[target="_blank"]')).toBeNull();
   });
 
   it('keeps offline availability separate from expiry and exposes path mode guidance', async () => {
@@ -59,17 +59,18 @@ describe('PreviewActions', () => {
     expect(container.textContent).toContain('Register again');
   });
 
-  it('removes a prepared entry link when its registration is no longer active', async () => {
+  it('offers registration again when an opened preview expires', async () => {
     const open = vi.fn(async () => 'https://preview.test/auth/one');
     const container = await render(<PreviewActions agentId="agent-one" itemId="epoch:1" text="localhost:5173"
       controller={controller({ registrations: [activeRegistration()], open })} />);
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-open')?.click());
-    expect(container.querySelector('.agent-preview-ready')).not.toBeNull();
+    expect(open).toHaveBeenCalledTimes(1);
 
-    const inactive = { ...activeRegistration(), status: 'unregistered' as const, revision: 3 };
+    const inactive = { ...activeRegistration(), status: 'expired' as const, revision: 3 };
     await rerender(container, <PreviewActions agentId="agent-one" itemId="epoch:1" text="localhost:5173"
       controller={controller({ registrations: [inactive], open })} />);
-    expect(container.querySelector('.agent-preview-ready')).toBeNull();
+    expect(container.querySelector('.agent-preview-open')).toBeNull();
+    expect(container.textContent).toContain('Register again');
   });
 
   it('disables entry preparation while unregister is pending', async () => {

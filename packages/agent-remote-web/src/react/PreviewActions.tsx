@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { PreviewPathMode, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 
@@ -42,7 +42,6 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
   const [pathMode, setPathMode] = useState<PreviewPathMode>('strip');
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string>();
-  const [entryUrl, setEntryUrl] = useState<string>();
   const origin = loopbackOrigin(target);
   const candidates = controller.registrations
     .filter(item => loopbackOrigin(item.target) === origin)
@@ -51,26 +50,25 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
   const registration = candidates.find(item => lifecyclePriority(item) === preferredLifecycle && item.pathMode === pathMode) ?? candidates[0];
   const effectiveMode = registration?.pathMode ?? pathMode;
 
-  useEffect(() => { setEntryUrl(undefined); }, [
-    registration?.id, registration?.status, registration?.revision, registration?.pendingUnregister, registration?.availability,
-  ]);
-
   async function register(): Promise<void> {
-    setPending(true); setFailure(undefined); setEntryUrl(undefined);
-    try { await controller.register(agentId, { target, itemId, pathMode }); }
+    setPending(true); setFailure(undefined);
+    try {
+      const registered = await controller.register(agentId, { target, itemId, pathMode });
+      if (pathMode === 'strip') await controller.open(registered.id, target);
+    }
     catch (error) { setFailure(message(error, 'Preview registration failed. Check that the Controller is online and the target is reachable.')); }
     finally { setPending(false); }
   }
   async function open(): Promise<void> {
     if (!registration) return;
-    setPending(true); setFailure(undefined); setEntryUrl(undefined);
-    try { setEntryUrl(await controller.open(registration.id, target)); }
+    setPending(true); setFailure(undefined);
+    try { await controller.open(registration.id, target); }
     catch (error) { setFailure(message(error, 'Preview access could not be prepared. Retry after checking Host access.')); }
     finally { setPending(false); }
   }
   async function unregister(): Promise<void> {
     if (!registration) return;
-    setPending(true); setFailure(undefined); setEntryUrl(undefined);
+    setPending(true); setFailure(undefined);
     try { await controller.unregister(registration.id); }
     catch (error) { setFailure(message(error, 'Preview could not be unregistered. Retry from the Host preview list.')); }
     finally { setPending(false); }
@@ -91,13 +89,12 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
       <button type="button" disabled={pending || !controller.canManage} onClick={() => void register()}>{pending ? 'Registering…' : registration?.status === 'expired' ? 'Register again' : 'Open preview'}</button>
     </> : <>
       <span className="agent-preview-state">{state}</span>
-      <button className="agent-preview-open" type="button" disabled={pending || registration.pendingUnregister || registration.availability !== 'online'} onClick={() => void open()}>Prepare link</button>
+      <button className="agent-preview-open" type="button" disabled={pending || registration.pendingUnregister || registration.availability !== 'online'} onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(); }}>{pending ? 'Opening…' : 'Open preview'}</button>
       {controller.canManage ? <button type="button" disabled={pending || registration.pendingUnregister} onClick={() => void unregister()}>Unregister</button> : null}
     </>}
     <small>{effectiveMode === 'preserve'
       ? `This app must be configured with /p/${registration?.id ?? '<registration-id>'}/ as its base. Register first to get the ID.`
       : 'Root paths are adapted for supported apps; arbitrary application URLs may still require configuration.'}</small>
-    {entryUrl ? <a className="agent-preview-ready" href={entryUrl} target="_blank" rel="noreferrer">Open ready preview</a> : null}
     {failure ? <p role="alert">{failure}</p> : null}
   </div>;
 }

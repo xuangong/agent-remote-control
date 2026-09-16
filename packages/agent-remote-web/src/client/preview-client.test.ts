@@ -31,3 +31,25 @@ function registration() {
     pathMode: 'preserve' as const, sources: [{ sessionId: 'agent/one', itemId: 'epoch:1' }], availability: 'online' as const,
   };
 }
+
+it('redeems the handoff with a path-scoped cookie without exposing the proof in the destination', async () => {
+  const fetcher = vi.fn(async () => Response.json({ url: '/p/one/docs?view=mobile#section' }));
+  const client = new HttpPreviewClient('https://control.test/u/account/', fetcher as typeof fetch);
+  expect(await client.enter('https://control.test/_arc/enter#one-use-proof', 'one')).toBe('https://control.test/p/one/docs?view=mobile#section');
+  expect(fetcher).toHaveBeenCalledWith('https://control.test/_arc/enter', expect.objectContaining({
+    credentials: 'same-origin', method: 'POST', body: '{"code":"one-use-proof"}',
+  }));
+});
+
+it('rejects a handoff or destination outside the selected preview', async () => {
+  const fetcher = vi.fn(async () => Response.json({ url: '/p/another/' }));
+  const client = new HttpPreviewClient('https://control.test/u/account/', fetcher as typeof fetch);
+  await expect(client.enter('https://other.test/_arc/enter#proof', 'one')).rejects.toThrow('same Relay origin');
+  expect(fetcher).not.toHaveBeenCalled();
+  await expect(client.enter('https://control.test/_arc/enter#proof', 'one')).rejects.toThrow('destination is invalid');
+});
+
+it('reports expired preview access before embedding an unauthenticated page', async () => {
+  const client = new HttpPreviewClient('https://control.test/', (async () => Response.json({ error: 'Unavailable' }, { status: 401 })) as typeof fetch);
+  await expect(client.enter('https://control.test/_arc/enter#proof', 'one')).rejects.toThrow('expired or is unavailable');
+});

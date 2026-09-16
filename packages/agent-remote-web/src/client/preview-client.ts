@@ -41,11 +41,27 @@ export class HttpPreviewClient {
     return value.registration;
   }
 
-  async open(hostId: string, id: string, originalLoopbackUrl: string): Promise<string> {
+  async open(hostId: string, id: string, originalLoopbackUrl: string, signal?: AbortSignal): Promise<string> {
     const value = await this.request<{ entryUrl: string }>(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/${encodeURIComponent(id)}/open`, {
-      method: 'POST', body: JSON.stringify({ url: originalLoopbackUrl }), headers: { 'content-type': 'application/json' },
+      method: 'POST', body: JSON.stringify({ url: originalLoopbackUrl }), headers: { 'content-type': 'application/json' }, signal,
     });
     return value.entryUrl;
+  }
+
+  async enter(entryUrl: string, id: string, signal?: AbortSignal): Promise<string> {
+    const entry = new URL(entryUrl);
+    const origin = new URL(this.baseUrl, globalThis.location?.origin ?? 'http://localhost').origin;
+    if (entry.origin !== origin) throw new Error('Embedded previews require the same Relay origin.');
+    if (entry.pathname !== '/_arc/enter' || !entry.hash) throw new Error('The preview entry is invalid. Open it again.');
+    const response = await this.fetcher(origin + '/_arc/enter', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: entry.hash.slice(1) }),
+    });
+    const value = await response.json().catch(() => undefined) as { url?: string } | undefined;
+    if (!response.ok || !value?.url) throw new Error('Preview access expired or is unavailable. Open it again from the Controller.');
+    const destination = new URL(value.url, origin);
+    if (destination.origin !== origin || !destination.pathname.startsWith(`/p/${id}/`)) throw new Error('The preview destination is invalid.');
+    return destination.href;
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {

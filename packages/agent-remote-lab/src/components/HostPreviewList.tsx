@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
 
 export function HostPreviewList({ controller: supplied, onOpenSource }: {
@@ -9,17 +9,6 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
   const controller = supplied ?? inherited;
   const [busy, setBusy] = useState<string>();
   const [failure, setFailure] = useState<string>();
-  const [entryUrls, setEntryUrls] = useState<Record<string, string>>({});
-  const accessState = controller?.registrations.map(registration => [
-    registration.id, registration.status, registration.revision, registration.availability, registration.pendingUnregister ?? false,
-  ].join(':')).join('|');
-  useEffect(() => {
-    if (!controller) return;
-    const accessible = new Set(controller.registrations
-      .filter(registration => registration.status === 'active' && registration.availability === 'online' && !registration.pendingUnregister)
-      .map(registration => registration.id));
-    setEntryUrls(current => Object.fromEntries(Object.entries(current).filter(([id]) => accessible.has(id))));
-  }, [accessState, controller]);
   if (!controller) return null;
 
   async function unregister(id: string): Promise<void> {
@@ -32,8 +21,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
   async function open(id: string, target: string): Promise<void> {
     setBusy(id); setFailure(undefined);
     try {
-      const entryUrl = await controller!.open(id, target);
-      setEntryUrls(current => ({ ...current, [id]: entryUrl }));
+      await controller!.open(id, target);
     }
     catch (error) { setFailure(error instanceof Error && error.message ? error.message : 'Preview access could not be prepared.'); }
     finally { setBusy(undefined); }
@@ -55,8 +43,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
           onClick={() => onOpenSource?.(source.sessionId, source.itemId)}
         >Open source {index + 1}</button>)}</div> : null}
         {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
-          onClick={() => void open(registration.id, registration.target)}>Prepare link</button> : null}
-        {entryUrls[registration.id] ? <a className="lab-preview-ready" href={entryUrls[registration.id]} target="_blank" rel="noreferrer">Open ready preview</a> : null}
+          onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(registration.id, registration.target); }}>Open preview</button> : null}
         {controller.canManage ? <button className="lab-preview-unregister" type="button"
           disabled={busy === registration.id || registration.status !== 'active' || registration.pendingUnregister}
           onClick={() => void unregister(registration.id)}>{busy === registration.id ? 'Unregistering…' : 'Unregister'}</button> : null}

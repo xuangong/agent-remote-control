@@ -7,10 +7,14 @@ import type {
   AgentSession,
   ProviderStreamItem,
 } from '@agent-remote-controller/agent-provider-sdk';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { AgentManager, InteractionResponseError } from './agent-manager.js';
+import { InMemoryResourceStore } from './resources/resource-store.js';
 import { createSessionWire } from './session-wire.js';
 
 const capabilities: AgentCapabilities = {
@@ -23,6 +27,50 @@ const capabilities: AgentCapabilities = {
 };
 
 describe('AgentManager Timeline and Snapshot', () => {
+  it('resolves Markdown images only inside the session workspace and retains document context', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-manager-local-resource-'));
+    const outside = await mkdtemp(join(tmpdir(), 'agent-manager-outside-resource-'));
+    const stream = new ManualProviderStream();
+    const resourceStore = new InMemoryResourceStore();
+    stream.push({ type: 'history_boundary' });
+    await mkdir(join(workspace, 'docs', 'images'), { recursive: true });
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+    await writeFile(join(workspace, 'docs', 'images', 'result.png'), png);
+    await writeFile(join(outside, 'secret.png'), png);
+    const manager = await AgentManager.attach({
+      agentId: 'local-docs', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'e',
+      session: sessionFor(stream, {
+        runtimeInfo: async () => ({ providerId: 'codex', sessionId: 'session-1', status: 'idle', cwd: workspace }),
+      }),
+      resourceStore,
+    });
+    try {
+      await manager.ready;
+      const resolved = await manager.resolveResource('resolve-one', './images/result.png', join(workspace, 'docs', 'report.md'));
+      expect(resolved.payload.binding).toMatchObject({ locator: './images/result.png', status: 'available' });
+      expect((await manager.readResource('read-one', resolved.payload.binding.resourceId)).payload.state)
+        .toMatchObject({ status: 'available', mediaType: 'image/png', contentBase64: Buffer.from(png).toString('base64') });
+      const denied = await manager.resolveResource('resolve-two', join(outside, 'secret.png'));
+      expect(denied.payload.binding.status).toBe('unavailable');
+      expect((await manager.readResource('crafted', join(outside, 'secret.png'))).payload.state.status).toBe('unavailable');
+      const foreignStream = new ManualProviderStream();
+      foreignStream.push({ type: 'history_boundary' });
+      const foreign = await AgentManager.attach({
+        agentId: 'foreign-session', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'foreign',
+        session: sessionFor(foreignStream), resourceStore,
+      });
+      try {
+        await foreign.ready;
+        expect((await foreign.readResource('foreign-read', resolved.payload.binding.resourceId)).payload.state.status)
+          .toBe('unavailable');
+      } finally {
+        await foreign.close();
+      }
+    } finally {
+      await manager.close();
+      await Promise.all([rm(workspace, { recursive: true, force: true }), rm(outside, { recursive: true, force: true })]);
+    }
+  });
   it('replaces late native history without losing session state or duplicating subsequent rows', async () => {
     const stream = new ManualProviderStream();
     const row = (sourceKey: string, text: string, type: 'user_message' | 'assistant_message' = 'assistant_message') => ({

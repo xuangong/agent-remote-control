@@ -1,6 +1,11 @@
 import { createServer, type Server } from 'node:http';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import type { AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import type { AgentManagerEvent } from '../agent-manager-events.js';
+import { AgentManager } from '../agent-manager.js';
 import type { AgentRemoteRelay } from '../relay.js';
 import type { SessionWireAgent } from '../session-wire.js';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -15,6 +20,47 @@ afterEach(async () => {
 });
 
 describe('Agent Remote WebSocket session failures', () => {
+  it('resolves and reads document-relative Markdown image bytes through the real session socket', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-remote-session-resource-'));
+    await mkdir(join(workspace, 'docs', 'images'), { recursive: true });
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+    await writeFile(join(workspace, 'docs', 'images', 'result.png'), png);
+    const session = boundarySession(workspace);
+    const manager = await AgentManager.attach({
+      agentId: 'agent-1', provider: { providerId: 'fake', displayName: 'Fake' }, session, epoch: 'epoch-1',
+    });
+    await manager.ready;
+    const actions: string[] = [];
+    const socket = await openControlledSocket(manager, (action) => { actions.push(action); return true; });
+    const inbox = socketInbox(socket);
+    try {
+      socket.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+      await inbox.next('agent_snapshot');
+      socket.send(JSON.stringify({
+        protocolVersion: '1.4.0', type: 'resource_resolve_request',
+        payload: {
+          requestId: 'resolve-one', agentId: 'agent-1', locator: './images/result.png',
+          sourceLocator: join(workspace, 'docs', 'report.md'),
+        },
+      }));
+      const resolved = await inbox.next('resource_resolve_response');
+      const binding = (resolved.payload as { binding: { resourceId: string } }).binding;
+      socket.send(JSON.stringify({
+        protocolVersion: '1.4.0', type: 'resource_request',
+        payload: { requestId: 'read-one', agentId: 'agent-1', resourceId: binding.resourceId },
+      }));
+      const read = await inbox.next('resource_response');
+      expect(read.payload).toMatchObject({
+        requestId: 'read-one', agentId: 'agent-1', resourceId: binding.resourceId,
+        state: { status: 'available', mediaType: 'image/png', contentBase64: Buffer.from(png).toString('base64') },
+      });
+      expect(actions).toEqual(['attach', 'resolve_resource', 'read_resource']);
+    } finally {
+      socket.close();
+      await manager.close();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
   it('closes with an internal-error reason when a manager event cannot be delivered', async () => {
     const controlled = controlledAgent((emit) => {
       emit({
@@ -92,14 +138,17 @@ function validSnapshot() {
   };
 }
 
-async function openControlledSocket(agent: SessionWireAgent): Promise<WebSocket> {
+async function openControlledSocket(
+  agent: SessionWireAgent,
+  authorize: (action: string) => boolean = () => true,
+): Promise<WebSocket> {
   const server = createServer();
   const stream = attachAgentRemoteWebSocketStream(server, {
     requireAgent: () => agent,
   } as AgentRemoteRelay, {
     authorizer: {
       authenticate: () => ({ subject: 'test-user' }),
-      authorize: () => true,
+      authorize: ({ action }) => authorize(action),
     },
   });
   const port = await listen(server);
@@ -110,6 +159,43 @@ async function openControlledSocket(agent: SessionWireAgent): Promise<WebSocket>
     socket.once('error', reject);
   });
   return socket;
+}
+
+function socketInbox(socket: WebSocket) {
+  const queued: Array<Record<string, unknown>> = [];
+  const waiting: Array<{ type: string; resolve: (message: Record<string, unknown>) => void }> = [];
+  socket.on('message', (data) => {
+    const message = JSON.parse(data.toString()) as Record<string, unknown>;
+    const index = waiting.findIndex(({ type }) => message.type === type);
+    if (index === -1) queued.push(message);
+    else waiting.splice(index, 1)[0]!.resolve(message);
+  });
+  return {
+    next(type: string): Promise<Record<string, unknown>> {
+      const index = queued.findIndex((message) => message.type === type);
+      if (index !== -1) return Promise.resolve(queued.splice(index, 1)[0]!);
+      return new Promise((resolve) => waiting.push({ type, resolve }));
+    },
+  };
+}
+
+function boundarySession(cwd: string): AgentSession {
+  let finish!: () => void;
+  const closed = new Promise<void>((resolve) => { finish = resolve; });
+  return {
+    capabilities: {
+      history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
+      interactions: { question: true, planApproval: true, toolApproval: true },
+    },
+    async *observe(): AsyncIterable<ProviderStreamItem> {
+      yield { type: 'history_boundary' };
+      await closed;
+    },
+    async sendMessage() {},
+    async respondToInteraction() {},
+    async runtimeInfo() { return { providerId: 'fake', sessionId: 'session-1', status: 'idle', cwd }; },
+    async dispose() { finish(); },
+  };
 }
 
 function socketClose(socket: WebSocket): Promise<{ code: number; reason: string }> {

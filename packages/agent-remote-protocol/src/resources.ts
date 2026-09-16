@@ -36,6 +36,18 @@ export const ResourceRequest = Strict({
 });
 export type ResourceRequest = Static<typeof ResourceRequest>;
 
+export const ResourceResolveRequest = Strict({
+  protocolVersion: ProtocolVersionSchema,
+  type: Type.Literal('resource_resolve_request'),
+  payload: Strict({
+    requestId: NonEmptyString,
+    agentId: NonEmptyString,
+    locator: NonEmptyString,
+    sourceLocator: Type.Optional(NonEmptyString),
+  }),
+});
+export type ResourceResolveRequest = Static<typeof ResourceResolveRequest>;
+
 export const ResourceState = Type.Union([
   Strict({ status: Type.Literal('pending'), retryAfterMs: Type.Integer({ minimum: 1 }) }),
   Strict({
@@ -74,6 +86,17 @@ export const ResourceResponse = Strict({
   }),
 });
 export type ResourceResponse = Static<typeof ResourceResponse>;
+
+export const ResourceResolveResponse = Strict({
+  protocolVersion: ProtocolVersionSchema,
+  type: Type.Literal('resource_resolve_response'),
+  payload: Strict({
+    requestId: NonEmptyString,
+    agentId: NonEmptyString,
+    binding: ResourceBinding,
+  }),
+});
+export type ResourceResolveResponse = Static<typeof ResourceResolveResponse>;
 
 export const ResourceUpdate = Strict({
   protocolVersion: ProtocolVersionSchema,

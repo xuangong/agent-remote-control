@@ -53,10 +53,11 @@ export class ResourceIngestor {
   acquire(input: {
     agentId: string;
     locator: string;
+    normalizedLocator?: string;
     readLocator?: string;
     reader?: ResourceReader;
   }): ResourceAcquisition | undefined {
-    const normalizedLocator = normalizeFileLocator(input.locator);
+    const normalizedLocator = input.normalizedLocator ?? normalizeFileLocator(input.locator);
     if (!normalizedLocator) return undefined;
     const readIdentity = input.readLocator === undefined
       ? `locator:${normalizedLocator}`

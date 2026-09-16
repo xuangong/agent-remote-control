@@ -441,6 +441,31 @@ describe('resource and session messages', () => {
     expect(decodeResourceResponse(JSON.stringify(message)).status).toBe('ok');
   });
 
+  it('validates resource resolution without accepting filesystem controls', () => {
+    const request = {
+      protocolVersion: version,
+      type: 'resource_resolve_request',
+      payload: {
+        requestId: 'resolve-one', agentId: 'agent-7', locator: './images/result.png',
+        sourceLocator: '/workspace/docs/report.md',
+      },
+    } as const;
+    const response = {
+      protocolVersion: version,
+      type: 'resource_resolve_response',
+      payload: {
+        requestId: 'resolve-one', agentId: 'agent-7',
+        binding: { locator: './images/result.png', resourceId: 'resource-one', status: 'available' },
+      },
+    } as const;
+
+    expect(decodeClientMessage(JSON.stringify(request))).toEqual({ status: 'ok', value: request });
+    expect(decodeServerMessage(JSON.stringify(response))).toEqual({ status: 'ok', value: response });
+    expect(decodeClientMessage(JSON.stringify({
+      ...request, payload: { ...request.payload, authorizedRoot: '/' },
+    })).status).toBe('rejected');
+  });
+
   it('round trips strict resource updates without a request identity', () => {
     const message = {
       protocolVersion: version,

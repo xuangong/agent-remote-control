@@ -17,11 +17,13 @@ import {
   type AgentCommand,
   type AgentSnapshot,
   type HistoryPage,
+  type ResourceResolveResponse,
   type ResourceResponse,
 } from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { discoverTimelineLocators, normalizeFileLocator } from './resources/markdown-locators.js';
+import { createLocalFileResourceReader, type LocalFileResourceReader } from './resources/local-file-reader.js';
 import { ResourceIngestor } from './resources/resource-ingestor.js';
 import { InMemoryResourceStore, type ResourceStore } from './resources/resource-store.js';
 import { projectTimelinePage, type TimelinePageRequest } from './timeline-projector.js';
@@ -98,6 +100,7 @@ export class AgentManager {
   private commandTail: Promise<void> = Promise.resolve();
   private pendingCommandExecutions = 0;
   private commandResources = new Map<string, { commandId: string; locator: string }>();
+  private readonly localResourceReader: Promise<LocalFileResourceReader | undefined>;
 
   private constructor(
     readonly agentId: string,
@@ -110,6 +113,9 @@ export class AgentManager {
     private readonly resourceIngestor: ResourceIngestor,
   ) {
     this.timeline = new TimelineStore(epoch);
+    this.localResourceReader = runtimeInfo.cwd
+      ? createLocalFileResourceReader({ roots: [runtimeInfo.cwd] }).catch(() => undefined)
+      : Promise.resolve(undefined);
     this.state = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'agent_snapshot',
@@ -337,6 +343,31 @@ export class AgentManager {
       }
     }
     return this.resourceIngestor.readResponse(requestId, this.agentId, resourceId);
+  }
+
+  async resolveResource(
+    requestId: string,
+    locator: string,
+    sourceLocator?: string,
+  ): Promise<ResourceResolveResponse> {
+    const reader = await this.localResourceReader;
+    const identity = `local:${sourceLocator?.length ?? 0}:${sourceLocator ?? ''}:${locator.length}:${locator}`;
+    const acquisition = this.resourceIngestor.acquire({
+      agentId: this.agentId,
+      locator,
+      normalizedLocator: identity,
+      readLocator: identity,
+      reader: async () => reader
+        ? reader.read(locator, sourceLocator)
+        : { status: 'unavailable', reason: 'This Agent session has no authorized local resource root.' },
+    });
+    if (!acquisition) throw new Error('Local resource locator could not be registered.');
+    const binding = await acquisition.settled;
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'resource_resolve_response',
+      payload: { requestId, agentId: this.agentId, binding },
+    };
   }
 
   async close(): Promise<void> {

@@ -9,6 +9,8 @@ import {
 } from './interactions.js';
 import {
   ResourceRequest,
+  ResourceResolveRequest,
+  ResourceResolveResponse,
   ResourceResponse,
   ResourceUpdate,
   TimelineResourceBindingReplacement,
@@ -210,6 +212,7 @@ export const ClientMessage = Type.Union([
   TimelineRequest,
   InteractionResponseMessage,
   ResourceRequest,
+  ResourceResolveRequest,
 ]);
 export type ClientMessage = Static<typeof ClientMessage>;
 
@@ -229,6 +232,7 @@ export const ServerMessage = Type.Union([
   InteractionRequestedMessage,
   InteractionResolvedMessage,
   ResourceResponse,
+  ResourceResolveResponse,
   ResourceUpdate,
   TimelineResourceBindingReplacement,
   ProtocolErrorMessage,

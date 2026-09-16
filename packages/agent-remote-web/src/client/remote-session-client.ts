@@ -10,6 +10,8 @@ import {
   type CommandResultResponse,
   type HistoryPage,
   type InteractionResolvedMessage,
+  type ResourceBinding,
+  type ResourceResolveResponse,
   type ResourceResponse,
   type TimelineCursor,
   type TimelineDirection,
@@ -35,7 +37,7 @@ export interface RemoteSessionClientOptions {
   readonly requestId?: () => string;
 }
 
-type RemoteOperationResult = CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | CommandListResponse | CommandResultResponse;
+type RemoteOperationResult = CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
 
 interface PendingOperation {
   readonly matches: (message: RemoteServerMessage) => message is RemoteOperationResult;
@@ -228,6 +230,23 @@ export class RemoteSessionClient {
     return this.sendOperation(message, 'resource_response', (result): result is ResourceResponse => result.type === 'resource_response');
   }
 
+  async resolveResource(locator: string, sourceLocator?: string): Promise<ResourceBinding> {
+    const message = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'resource_resolve_request',
+      payload: {
+        requestId: this.createRequestId(), agentId: this.agentId, locator,
+        ...(sourceLocator === undefined ? {} : { sourceLocator }),
+      },
+    } as const;
+    const response = await this.sendOperation(
+      message,
+      'resource_resolve_response',
+      (result): result is ResourceResolveResponse => result.type === 'resource_resolve_response',
+    );
+    return response.payload.binding;
+  }
+
   async listCommands(): Promise<AgentCommand[]> {
     const response = await this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'list_commands', payload: { requestId: this.createRequestId(), agentId: this.agentId } }, 'command_list', (message): message is CommandListResponse => message.type === 'command_list' && message.payload.agentId === this.agentId);
     return response.payload.commands;
@@ -285,6 +304,9 @@ export class RemoteSessionClient {
         return;
       case 'resource_response':
         this.replica.applyResource(message);
+        this.resolvePendingOperation(message.payload.requestId, message);
+        return;
+      case 'resource_resolve_response':
         this.resolvePendingOperation(message.payload.requestId, message);
         return;
       case 'resource_update':

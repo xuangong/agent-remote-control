@@ -23,6 +23,7 @@ export interface AgentComposerProps {
   onExecuteCommand?(id: string, args: string): Promise<AgentCommandResult>;
   onInspectCommand?(command: AgentCommand): void;
   onRequestResource?(binding: ResourceBinding): Promise<void>;
+  onResolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
 }
 
 interface Draft {
@@ -41,7 +42,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string };
 }
 
-export function AgentComposer({ state, sessionControls, sessionKey, disabled = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, attachments, consoleCommands = [], onExecuteConsoleCommand }: AgentComposerProps) {
+export function AgentComposer({ state, sessionControls, sessionKey, disabled = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand }: AgentComposerProps) {
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
@@ -308,6 +309,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
     {feedback ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}
+      onResolveResource={onResolveResource} resourceScopeKey={JSON.stringify([agentId, state.timeline.epoch, currentDraft.inspectedSkill.id])}
       onClose={() => { currentDraft.inspectedSkill = undefined; refresh((value) => value + 1); }} /> : null}
   </section>;
 }

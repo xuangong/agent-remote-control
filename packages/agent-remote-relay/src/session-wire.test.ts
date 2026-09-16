@@ -4,6 +4,41 @@ import { createSessionWire, type SessionWireAgent } from './session-wire.js';
 import { describe, expect, it, vi } from 'vitest';
 
 describe('session wire negotiation', () => {
+  it('requires explicit resolve authorization before creating a local resource binding', async () => {
+    const { agent } = fakeAgent();
+    const resolveResource = vi.fn(async (requestId: string, locator: string, sourceLocator?: string) => ({
+      protocolVersion: '1.4.0' as const,
+      type: 'resource_resolve_response' as const,
+      payload: {
+        requestId, agentId: 'agent-1',
+        binding: { locator, resourceId: 'resource-one', status: 'available' as const },
+      },
+    }));
+    (agent as SessionWireAgent & { resolveResource: typeof resolveResource }).resolveResource = resolveResource;
+    let permitted = false;
+    const actions: string[] = [];
+    const output: Array<Record<string, unknown>> = [];
+    const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)), {
+      authorize: (action) => { actions.push(action); return permitted; },
+    });
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    output.length = 0;
+    const request = {
+      protocolVersion: '1.4.0', type: 'resource_resolve_request',
+      payload: { requestId: 'resolve-one', agentId: 'agent-1', locator: './result.png', sourceLocator: '/workspace/report.md' },
+    };
+
+    await wire.receive(JSON.stringify(request));
+    expect(resolveResource).not.toHaveBeenCalled();
+    expect(output).toEqual([expect.objectContaining({ type: 'protocol_error', payload: expect.objectContaining({ code: 'forbidden' }) })]);
+    permitted = true;
+    output.length = 0;
+    await wire.receive(JSON.stringify(request));
+    expect(resolveResource).toHaveBeenCalledWith('resolve-one', './result.png', '/workspace/report.md');
+    expect(output).toEqual([expect.objectContaining({ type: 'resource_resolve_response' })]);
+    expect(actions).toEqual(['resolve_resource', 'resolve_resource']);
+    wire.close();
+  });
   it('routes the native directory and returns native command output with the caller request ID', async () => {
     const { agent } = fakeAgent();
     const commands = [{ id: 'native:custom', name: 'custom', description: 'Native command', kind: 'command' as const }];

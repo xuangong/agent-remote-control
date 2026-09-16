@@ -8,6 +8,7 @@ import {
   type ClientMessage,
   type HistoryPage,
   type ResourceResponse,
+  type ResourceResolveResponse,
   type ServerMessage,
 } from '@agent-remote-controller/agent-remote-protocol';
 
@@ -29,6 +30,7 @@ export interface SessionWireAgent {
   listCommands?(): Promise<AgentCommand[]>;
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
   readResource?(requestId: string, resourceId: string): Promise<ResourceResponse>;
+  resolveResource?(requestId: string, locator: string, sourceLocator?: string): Promise<ResourceResolveResponse>;
 }
 
 export interface SessionWire {
@@ -41,7 +43,7 @@ export type SessionWireFailure =
   | { kind: 'manager_event_delivery'; error: Error };
 
 export interface SessionWireOptions {
-  authorize?: (action: 'read_resource') => boolean | Promise<boolean>;
+  authorize?: (action: 'read_resource' | 'resolve_resource') => boolean | Promise<boolean>;
   maxBufferedManagerEvents?: number;
   onFailure?: (failure: SessionWireFailure) => void;
 }
@@ -237,6 +239,23 @@ export function createSessionWire(
           }
           if (!boundAgent.readResource) throw new UnsupportedSessionCommandError('resource_request');
           sendMessage(await boundAgent.readResource(message.payload.requestId, message.payload.resourceId));
+          return;
+        case 'resource_resolve_request':
+          if (options.authorize && !await options.authorize('resolve_resource')) {
+            sendMessage(protocolError(
+              'forbidden',
+              'The authenticated principal is not authorized to resolve local resources.',
+              true,
+              message.payload.requestId,
+            ));
+            return;
+          }
+          if (!boundAgent.resolveResource) throw new UnsupportedSessionCommandError('resource_resolve_request');
+          sendMessage(await boundAgent.resolveResource(
+            message.payload.requestId,
+            message.payload.locator,
+            message.payload.sourceLocator,
+          ));
           return;
       }
     } catch (error) {

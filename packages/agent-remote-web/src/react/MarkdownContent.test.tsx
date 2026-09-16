@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { render, rerender } from '../test/setup.js';
 import { MarkdownContent } from './MarkdownContent.js';
@@ -95,5 +95,40 @@ describe('MarkdownContent', () => {
     expect(Array.from(container.querySelectorAll('a'), (link) => link.getAttribute('href'))).toEqual([
       '/docs/guide', '#result', 'mailto:hello@example.com',
     ]);
+  });
+
+  it('loads inline and reference local images through the resource path with document context', async () => {
+    const png = 'iVBORw0KGgoAAA==';
+    const binding = { locator: './images/result.png', resourceId: 'image-one', status: 'available' as const };
+    const resolveResource = vi.fn(async () => binding);
+    const resources = { 'image-one': { status: 'available' as const, mediaType: 'image/png', byteLength: 10, sha256: 'digest' } } as Record<string, any>;
+    const requestResource = vi.fn(async () => {
+      resources['image-one'] = { ...resources['image-one'], contentBase64: png };
+    });
+    const container = await render(<MarkdownContent
+      markdown={'![Inline](./images/result.png)\n\n![Reference][result]\n\n[result]: ./images/result.png'}
+      sourceLocator="/workspace/docs/report.md"
+      resourceContext={{
+        scopeKey: 'session-one', bindings: [], resolveResource, requestResource,
+        resources,
+      }}
+    />);
+
+    await expect.poll(() => container.querySelectorAll('img').length).toBe(2);
+    expect(resolveResource).toHaveBeenCalledTimes(1);
+    expect(resolveResource).toHaveBeenCalledWith('./images/result.png', '/workspace/docs/report.md');
+    expect(requestResource).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${png}`);
+  });
+
+  it('does not resolve image syntax in code fences', async () => {
+    const resolveResource = vi.fn();
+    const container = await render(<MarkdownContent
+      markdown={'```md\n![Hidden](./secret.png)\n```'}
+      resourceContext={{ scopeKey: 'session-one', bindings: [], resources: {}, resolveResource, requestResource: vi.fn() }}
+    />);
+
+    expect(container.querySelector('pre code')?.textContent).toContain('![Hidden](./secret.png)');
+    expect(resolveResource).not.toHaveBeenCalled();
   });
 });

@@ -706,6 +706,28 @@ describe('RemoteSessionClient', () => {
     });
   });
 
+  it('resolves a Markdown locator with its source document before requesting bytes', async () => {
+    const transport = new FakeTransport();
+    const client = connectedClient(transport, { requestId: () => 'resource-resolve' });
+    const pending = client.resolveResource('./images/result.png', '/workspace/docs/report.md');
+    expect(transport.sent.at(-1)).toEqual({
+      protocolVersion: '1.4.0', type: 'resource_resolve_request',
+      payload: {
+        requestId: 'resource-resolve', agentId: 'agent-one', locator: './images/result.png',
+        sourceLocator: '/workspace/docs/report.md',
+      },
+    });
+    const response = {
+      protocolVersion: '1.4.0' as const, type: 'resource_resolve_response' as const,
+      payload: {
+        requestId: 'resource-resolve', agentId: 'agent-one',
+        binding: { locator: './images/result.png', resourceId: 'resource-one', status: 'available' as const },
+      },
+    };
+    transport.emit(response);
+    await expect(pending).resolves.toEqual(response.payload.binding);
+  });
+
   it('resolves a command only after its matching acknowledgement', async () => {
     const transport = new FakeTransport();
     const client = connectedClient(transport, { requestId: () => 'send-one' });

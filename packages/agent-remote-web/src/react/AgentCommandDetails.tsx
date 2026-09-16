@@ -7,10 +7,12 @@ export interface AgentCommandDetailsProps {
   command: AgentCommand;
   resources: AgentReplicaState['resources'];
   onRequestResource?(binding: ResourceBinding): Promise<void>;
+  onResolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
+  resourceScopeKey?: string;
   onClose(): void;
 }
 
-export function AgentCommandDetails({ command, resources, onRequestResource, onClose }: AgentCommandDetailsProps) {
+export function AgentCommandDetails({ command, resources, onRequestResource, onResolveResource, resourceScopeKey, onClose }: AgentCommandDetailsProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const previous = document.activeElement;
@@ -49,7 +51,11 @@ export function AgentCommandDetails({ command, resources, onRequestResource, onC
     <div className="agent-command-details-content">
       <p className="agent-command-introduction">{command.description}</p>
       {loading ? <p role="status">Loading documentation…</p>
-        : markdown !== undefined ? <MarkdownContent markdown={markdown} />
+        : markdown !== undefined ? <MarkdownContent markdown={markdown} sourceLocator={binding?.locator}
+          resourceContext={binding && onRequestResource && onResolveResource && resourceScopeKey ? {
+            scopeKey: resourceScopeKey, bindings: [binding], resources,
+            resolveResource: onResolveResource, requestResource: onRequestResource,
+          } : undefined} />
         : <p className="agent-composer-note">{error ?? (resource?.status === 'failed' ? resource.message
           : resource?.status === 'unavailable' ? resource.reason
           : !binding || !onRequestResource ? 'This Provider exposes a description without full documentation.'

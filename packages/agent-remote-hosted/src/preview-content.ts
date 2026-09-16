@@ -5,6 +5,10 @@ const MAX_ADAPTED_BYTES = 1024 * 1024;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
+export class PreviewContentError extends Error {
+  override readonly name = 'PreviewContentError';
+}
+
 export interface PreviewContentRoute {
   readonly id: string;
   readonly target: string;
@@ -26,7 +30,8 @@ export interface AdaptedPreviewContent {
 
 export async function adaptPreviewContent(input: PreviewContentInput): Promise<AdaptedPreviewContent> {
   const contentType = input.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (!input.body || input.route.pathMode === 'preserve' || (contentType !== 'text/html' && contentType !== 'text/css')) {
+  if (!input.body || input.status === 206 || input.headers.has('content-range') || input.route.pathMode === 'preserve'
+    || (contentType !== 'text/html' && contentType !== 'text/css')) {
     return { body: input.body, headers: input.headers };
   }
   assertUtf8(input.headers);
@@ -38,7 +43,7 @@ export async function adaptPreviewContent(input: PreviewContentInput): Promise<A
   }
   let decodedBody = input.body;
   if (encoding && encoding !== 'identity') {
-    if (encoding !== 'gzip') throw new Error(`Unsupported preview content encoding "${encoding}". Configure the upstream to serve identity or gzip for adaptable HTML and CSS.`);
+    if (encoding !== 'gzip') throw new PreviewContentError(`Unsupported preview content encoding "${encoding}". Configure the upstream to serve identity or gzip for adaptable HTML and CSS.`);
     const decompressor = new DecompressionStream('gzip') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
     decodedBody = decodedBody.pipeThrough(decompressor);
   }
@@ -47,12 +52,12 @@ export async function adaptPreviewContent(input: PreviewContentInput): Promise<A
   try { bytes = await readBounded(decodedBody); }
   catch (error) {
     if (error instanceof Error && error.message.includes('1 MiB adaptation limit')) throw error;
-    if (encoding === 'gzip') throw new Error('Gzip preview content could not be decompressed. Configure the upstream to serve a valid gzip representation or use preserve path mode.');
+    if (encoding === 'gzip') throw new PreviewContentError('Gzip preview content could not be decompressed. Configure the upstream to serve a valid gzip representation or use preserve path mode.');
     throw error;
   }
   let source: string;
   try { source = decoder.decode(bytes); }
-  catch { throw new Error('Preview HTML and CSS adaptation requires valid UTF-8 content. Configure the application to serve UTF-8 or use preserve path mode.'); }
+  catch { throw new PreviewContentError('Preview HTML and CSS adaptation requires valid UTF-8 content. Configure the application to serve UTF-8 or use preserve path mode.'); }
   const output = contentType === 'text/html'
     ? rewriteHtml(source, input.route)
     : rewriteCss(source, input.route);
@@ -82,8 +87,8 @@ async function readBounded(body: ReadableStream<Uint8Array>): Promise<Uint8Array
   return output;
 }
 
-function adaptationLimitError(): Error {
-  return new Error('Preview HTML or CSS exceeds the 1 MiB adaptation limit. Configure the application with the preview base and use preserve path mode.');
+function adaptationLimitError(): PreviewContentError {
+  return new PreviewContentError('Preview HTML or CSS exceeds the 1 MiB adaptation limit. Configure the application with the preview base and use preserve path mode.');
 }
 
 function transformedHeaders(source: Headers): Headers {
@@ -102,7 +107,7 @@ function transformedHeaders(source: Headers): Headers {
 function assertUtf8(headers: Headers): void {
   const charset = headers.get('content-type')?.match(/;\s*charset\s*=\s*["']?([^;"']+)/i)?.[1]?.trim().toLowerCase();
   if (charset && charset !== 'utf-8' && charset !== 'utf8' && charset !== 'us-ascii') {
-    throw new Error(`Unsupported preview text charset "${charset}". Configure UTF-8 output or use preserve path mode.`);
+    throw new PreviewContentError(`Unsupported preview text charset "${charset}". Configure UTF-8 output or use preserve path mode.`);
   }
 }
 
@@ -180,11 +185,55 @@ function rewriteCss(source: string, route: PreviewContentRoute): string {
 }
 
 function rewriteCssValue(source: string, route: PreviewContentRoute): string {
-  return source.replace(/url\(\s*(?:(['"])(.*?)\1|([^)]*?))\s*\)/gi, (_whole, quote: string | undefined, quoted: string | undefined, bare: string | undefined) => {
-    const value = quoted ?? bare?.trim() ?? '';
-    const rewritten = rewriteReference(value, route);
-    return `url(${quote ?? ''}${rewritten}${quote ?? ''})`;
-  });
+  let output = '';
+  let cursor = 0;
+  for (let index = 0; index < source.length;) {
+    const character = source[index]!;
+    if (character === '"' || character === "'") { index = skipQuoted(source, index, character); continue; }
+    if (character === '/' && source[index + 1] === '*') { index = skipComment(source, index); continue; }
+    const prefix = source.slice(index, index + 3);
+    const previous = source[index - 1];
+    if (prefix.toLowerCase() !== 'url' || (previous && /[\w-]/.test(previous))) { index += 1; continue; }
+    let opening = index + 3;
+    while (/\s/.test(source[opening] ?? '')) opening += 1;
+    if (source[opening] !== '(') { index += 1; continue; }
+    const closing = findFunctionEnd(source, opening + 1);
+    if (closing < 0) break;
+    const inner = source.slice(opening + 1, closing);
+    const match = inner.match(/^(\s*)(?:(['"])([\s\S]*)\2|([^'"][\s\S]*?))(\s*)$/);
+    if (!match) { index = closing + 1; continue; }
+    const quote = match[2] ?? '';
+    const value = match[3] ?? match[4] ?? '';
+    output += source.slice(cursor, opening + 1);
+    output += `${match[1]}${quote}${rewriteReference(value.trim(), route)}${quote}${match[5]}`;
+    output += ')';
+    cursor = closing + 1;
+    index = cursor;
+  }
+  return output + source.slice(cursor);
+}
+
+function skipQuoted(source: string, start: number, quote: string): number {
+  for (let index = start + 1; index < source.length; index += 1) {
+    if (source[index] === '\\') index += 1;
+    else if (source[index] === quote) return index + 1;
+  }
+  return source.length;
+}
+
+function skipComment(source: string, start: number): number {
+  const end = source.indexOf('*/', start + 2);
+  return end < 0 ? source.length : end + 2;
+}
+
+function findFunctionEnd(source: string, start: number): number {
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (character === '"' || character === "'") { index = skipQuoted(source, index, character) - 1; continue; }
+    if (character === '/' && source[index + 1] === '*') { index = skipComment(source, index) - 1; continue; }
+    if (character === ')') return index;
+  }
+  return -1;
 }
 
 function rewriteImport(source: string, route: PreviewContentRoute): string {

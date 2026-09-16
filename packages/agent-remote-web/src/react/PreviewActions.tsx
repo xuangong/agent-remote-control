@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { PreviewPathMode, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 
@@ -43,10 +43,17 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [entryUrl, setEntryUrl] = useState<string>();
-  const origin = new URL(target).origin;
-  const registration = controller.registrations.find(item => new URL(item.target).origin === origin && item.pathMode === pathMode)
-    ?? controller.registrations.find(item => new URL(item.target).origin === origin);
+  const origin = loopbackOrigin(target);
+  const candidates = controller.registrations
+    .filter(item => loopbackOrigin(item.target) === origin)
+    .sort((left, right) => lifecyclePriority(right) - lifecyclePriority(left) || right.revision - left.revision);
+  const preferredLifecycle = candidates[0] && lifecyclePriority(candidates[0]);
+  const registration = candidates.find(item => lifecyclePriority(item) === preferredLifecycle && item.pathMode === pathMode) ?? candidates[0];
   const effectiveMode = registration?.pathMode ?? pathMode;
+
+  useEffect(() => { setEntryUrl(undefined); }, [
+    registration?.id, registration?.status, registration?.revision, registration?.pendingUnregister, registration?.availability,
+  ]);
 
   async function register(): Promise<void> {
     setPending(true); setFailure(undefined); setEntryUrl(undefined);
@@ -77,13 +84,14 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
   return <div className="agent-preview-target">
     <code>{target}</code>
     {!registration || registration.status !== 'active' ? <>
+      {state ? <span className="agent-preview-state">{state}</span> : null}
       <label>Path mode <select value={pathMode} disabled={pending} onChange={event => setPathMode(event.target.value as PreviewPathMode)}>
         <option value="strip">Root-mounted app</option><option value="preserve">Configured preview base</option>
       </select></label>
       <button type="button" disabled={pending || !controller.canManage} onClick={() => void register()}>{pending ? 'Registering…' : registration?.status === 'expired' ? 'Register again' : 'Open preview'}</button>
     </> : <>
       <span className="agent-preview-state">{state}</span>
-      <button className="agent-preview-open" type="button" disabled={pending || registration.availability !== 'online'} onClick={() => void open()}>Prepare link</button>
+      <button className="agent-preview-open" type="button" disabled={pending || registration.pendingUnregister || registration.availability !== 'online'} onClick={() => void open()}>Prepare link</button>
       {controller.canManage ? <button type="button" disabled={pending || registration.pendingUnregister} onClick={() => void unregister()}>Unregister</button> : null}
     </>}
     <small>{effectiveMode === 'preserve'
@@ -95,3 +103,15 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
 }
 
 function message(error: unknown, fallback: string): string { return error instanceof Error && error.message ? error.message : fallback; }
+
+function loopbackOrigin(source: string): string {
+  const url = new URL(source);
+  const host = url.hostname.toLowerCase();
+  const canonicalHost = host === 'localhost' || host === '[::1]' || /^127(?:\.\d{1,3}){3}$/.test(host) ? 'loopback' : host;
+  return `${url.protocol}//${canonicalHost}:${url.port}`;
+}
+
+function lifecyclePriority(registration: PreviewRegistration): number {
+  if (registration.status === 'active') return 2;
+  return registration.status === 'expired' ? 1 : 0;
+}

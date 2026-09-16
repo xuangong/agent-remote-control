@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { adaptPreviewContent } from './preview-content.js';
+import { adaptPreviewContent, PreviewContentError } from './preview-content.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -19,6 +19,23 @@ describe('adaptPreviewContent', () => {
       expect(result.body).toBe(body);
       expect(result.headers.get('content-length')).toBe('7');
     }
+  });
+
+  it('passes partial text representations through without rewriting their byte range', async () => {
+    const body = stream('<img src="/partial.png">');
+    const headers = new Headers({
+      'content-type': 'text/html',
+      'content-length': '12',
+      'content-range': 'bytes 0-11/26',
+      etag: '"partial"',
+    });
+    const result = await adaptPreviewContent({ body, headers, route, requestPath: '/', status: 206 });
+
+    expect(result.body).toBe(body);
+    expect(result.headers).toBe(headers);
+    expect(result.headers.get('content-range')).toBe('bytes 0-11/26');
+    expect(result.headers.get('content-length')).toBe('12');
+    expect(result.headers.get('etag')).toBe('"partial"');
   });
 
   it('rewrites supported local HTML and CSS references without modifying script text or external URLs', async () => {
@@ -59,6 +76,16 @@ describe('adaptPreviewContent', () => {
     expect(output).toContain('url("/p/preview-one/base.css")');
   });
 
+  it('does not treat url-like text inside CSS strings as a resource reference', async () => {
+    const css = `.label::before { content: "url(/literal.png)" } .hero { background: url('/hero.png') }`;
+    const result = await adaptPreviewContent({ body: stream(css), headers: new Headers({ 'content-type': 'text/css' }),
+      route, requestPath: '/app.css', status: 200 });
+    const output = await text(result.body);
+
+    expect(output).toContain('content: "url(/literal.png)"');
+    expect(output).toContain("url('/p/preview-one/hero.png')");
+  });
+
   it('decompresses gzip before adapting and removes representation headers', async () => {
     const html = '<img src="/compressed.png">';
     const compressed = stream(html).pipeThrough(new CompressionStream('gzip'));
@@ -70,8 +97,10 @@ describe('adaptPreviewContent', () => {
   });
 
   it('fails promptly for unsupported compression and decoded bodies above one MiB', async () => {
-    await expect(adaptPreviewContent({ body: stream('body'), headers: new Headers({ 'content-type': 'text/css', 'content-encoding': 'br' }),
-      route, requestPath: '/app.css', status: 200 })).rejects.toThrow('Unsupported preview content encoding');
+    const unsupported = adaptPreviewContent({ body: stream('body'), headers: new Headers({ 'content-type': 'text/css', 'content-encoding': 'br' }),
+      route, requestPath: '/app.css', status: 200 });
+    await expect(unsupported).rejects.toBeInstanceOf(PreviewContentError);
+    await expect(unsupported).rejects.toThrow('Unsupported preview content encoding');
     await expect(adaptPreviewContent({ body: stream('x'.repeat(1024 * 1024 + 1)), headers: new Headers({ 'content-type': 'text/html' }),
       route, requestPath: '/', status: 200 })).rejects.toThrow('exceeds the 1 MiB adaptation limit');
     await expect(adaptPreviewContent({ body: stream('not gzip'), headers: new Headers({ 'content-type': 'text/html', 'content-encoding': 'gzip' }),

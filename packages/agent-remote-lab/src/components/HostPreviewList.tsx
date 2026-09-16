@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
 
 export function HostPreviewList({ controller: supplied, onOpenSource }: {
@@ -10,6 +10,16 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
   const [busy, setBusy] = useState<string>();
   const [failure, setFailure] = useState<string>();
   const [entryUrls, setEntryUrls] = useState<Record<string, string>>({});
+  const accessState = controller?.registrations.map(registration => [
+    registration.id, registration.status, registration.revision, registration.availability, registration.pendingUnregister ?? false,
+  ].join(':')).join('|');
+  useEffect(() => {
+    if (!controller) return;
+    const accessible = new Set(controller.registrations
+      .filter(registration => registration.status === 'active' && registration.availability === 'online' && !registration.pendingUnregister)
+      .map(registration => registration.id));
+    setEntryUrls(current => Object.fromEntries(Object.entries(current).filter(([id]) => accessible.has(id))));
+  }, [accessState, controller]);
   if (!controller) return null;
 
   async function unregister(id: string): Promise<void> {
@@ -44,7 +54,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
           key={`${source.sessionId}:${source.itemId}`} className="lab-preview-source" type="button" disabled={!onOpenSource}
           onClick={() => onOpenSource?.(source.sessionId, source.itemId)}
         >Open source {index + 1}</button>)}</div> : null}
-        {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.availability !== 'online'}
+        {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
           onClick={() => void open(registration.id, registration.target)}>Prepare link</button> : null}
         {entryUrls[registration.id] ? <a className="lab-preview-ready" href={entryUrls[registration.id]} target="_blank" rel="noreferrer">Open ready preview</a> : null}
         {controller.canManage ? <button className="lab-preview-unregister" type="button"

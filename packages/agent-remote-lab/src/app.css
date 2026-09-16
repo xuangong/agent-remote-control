@@ -935,7 +935,9 @@ textarea {
   .lab-view-options { left: auto; right: max(8px, env(safe-area-inset-right)); top: env(safe-area-inset-top); }
   .lab-view-options-trigger { min-height: 48px; }
   .lab-view-options-panel { position: absolute; right: 0; }
-  .lab-shell.lab-header-hidden .lab-workbench-heading { min-height: 44px; padding: 0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
+  .lab-shell.lab-header-hidden .lab-workbench-layout > .lab-workbench-heading { display: none; }
+  .lab-shell.lab-header-hidden .lab-workbench-layout > .lab-timeline-stage { grid-row: 2; }
+  .lab-shell.lab-header-hidden .lab-workbench-layout > .lab-composer-dock { grid-row: 3; }
   .lab-shell .lab-collapsed-conversations { display: none; }
   .lab-side-conversation { border: 0; }
   .lab-context-rail { left: 0; right: 0; width: 100%; max-width: none; padding: 0 max(16px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(16px, env(safe-area-inset-left)); overscroll-behavior: contain; }

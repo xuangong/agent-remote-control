@@ -64,24 +64,22 @@ export function MarkdownResourceImage({
   const locator = typeof imageNode?.data?.localResourceLocator === 'string'
     ? imageNode.data.localResourceLocator
     : undefined;
-  const [binding, setBinding] = useState<ResourceBinding>();
-  const [failure, setFailure] = useState<string>();
-  const [, setRevision] = useState(0);
+  const key = JSON.stringify([context?.scopeKey, locator, sourceLocator]);
+  const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string }>();
+  const binding = result?.key === key ? result.binding : undefined;
+  const failure = result?.key === key ? result.failure : undefined;
 
   useEffect(() => {
     let current = true;
-    setBinding(undefined);
-    setFailure(undefined);
     if (!locator || !context) return () => { current = false; };
     void load(context, locator, sourceLocator).then((resolved) => {
       if (!current) return;
-      setBinding(resolved);
-      setRevision((value) => value + 1);
+      setResult({ key, binding: resolved });
     }, (error: unknown) => {
-      if (current) setFailure(error instanceof Error && error.message ? error.message : 'Image resource is unavailable.');
+      if (current) setResult({ key, failure: error instanceof Error && error.message ? error.message : 'Image resource is unavailable.' });
     });
     return () => { current = false; };
-  }, [context, locator, sourceLocator]);
+  }, [context, key, locator, sourceLocator]);
 
   if (!locator || !context) return <span>{alt}</span>;
   const detail = binding ? context.resources[binding.resourceId] : undefined;

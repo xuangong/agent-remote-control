@@ -1,3 +1,4 @@
+import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { render, rerender } from '../test/setup.js';
@@ -186,4 +187,47 @@ describe('MarkdownContent', () => {
     }} />);
     await expect.poll(() => requestResource.mock.calls.length).toBe(2);
   });
+  it('keeps a decoded image mounted when unrelated replica resources and callbacks change', async () => {
+    const binding = { locator: './stable.png', resourceId: 'stable-image', status: 'available' as const };
+    const detail = { status: 'available' as const, mediaType: 'image/png', byteLength: 1, sha256: 'one', contentBase64: 'AA==' };
+    const resolveResource = vi.fn(async () => binding);
+    const requestResource = vi.fn(async () => undefined);
+    const context = { scopeKey: 'stable-image-session', bindings: [binding], resources: { 'stable-image': detail }, resolveResource, requestResource };
+    const container = await render(<MarkdownContent markdown="![Stable](./stable.png)" resourceContext={context} />);
+    const image = container.querySelector('img');
+    expect(image).not.toBeNull();
+    const removed: Node[] = [];
+    const observer = new MutationObserver(records => records.forEach(record => removed.push(...Array.from(record.removedNodes))));
+    observer.observe(container, { childList: true, subtree: true });
+    try {
+      for (let index = 0; index < 3; index++) {
+        await rerender(container, <MarkdownContent markdown={`![Stable](./stable.png)\n\nStreaming ${index}`} resourceContext={{
+          ...context, bindings: [...context.bindings], resources: { ...context.resources, other: detail },
+          resolveResource: async () => resolveResource(), requestResource: async () => requestResource(),
+        }} />);
+        expect(container.querySelector('img')).toBe(image);
+      }
+      expect(removed).not.toContain(image);
+      expect(requestResource).not.toHaveBeenCalled();
+    } finally { observer.disconnect(); }
+  });
+
+  it('hides the previous image while a different session resolves the same locator', async () => {
+    const binding = { locator: './scoped.png', resourceId: 'shared-id', status: 'available' as const };
+    const resources = { 'shared-id': { status: 'available' as const, mediaType: 'image/png', byteLength: 1, sha256: 'one', contentBase64: 'AA==' } };
+    const requestResource = vi.fn(async () => undefined);
+    const container = await render(<MarkdownContent markdown="![Scoped](./scoped.png)" resourceContext={{
+      scopeKey: 'image-source-one', bindings: [binding], resources, resolveResource: vi.fn(async () => binding), requestResource,
+    }} />);
+    expect(container.querySelector('img')).not.toBeNull();
+    let resolve!: (value: typeof binding) => void;
+    const resolution = new Promise<typeof binding>(accept => { resolve = accept; });
+    await rerender(container, <MarkdownContent markdown="![Scoped](./scoped.png)" resourceContext={{
+      scopeKey: 'image-source-two', bindings: [], resources, resolveResource: vi.fn(() => resolution), requestResource,
+    }} />);
+    expect(container.querySelector('img')).toBeNull();
+    await act(async () => resolve(binding));
+    expect(container.querySelector('img')).not.toBeNull();
+  });
+
 });

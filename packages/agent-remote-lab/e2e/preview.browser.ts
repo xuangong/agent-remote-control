@@ -35,7 +35,7 @@ it('loads a prefixed Vite page through the authenticated tunnel and receives a r
   expect(sockets.some(url => url.startsWith(f.previewOrigin.replace('http:', 'ws:') + '/p/' + f.registration.id))).toBe(true);
 });
 
-it('renders a local Markdown image from actual authorized session resource frames without filesystem HTTP requests', async () => {
+for (const engine of [chromium, webkit]) it(`preserves local Markdown images across streaming updates in ${engine.name()}`, async () => {
   const { build } = await import('esbuild');
   const { fileURLToPath } = await import('node:url');
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'arc-markdown-browser-')));
@@ -49,7 +49,7 @@ it('renders a local Markdown image from actual authorized session resource frame
     return false;
   } });
   const source = `
-    import React, { useMemo, useSyncExternalStore } from 'react';
+    import React, { useMemo, useState, useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
     import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@agent-remote-controller/agent-remote-web/headless';
     import { MarkdownContent } from '../../agent-remote-web/src/react/MarkdownContent.tsx';
@@ -59,8 +59,10 @@ it('renders a local Markdown image from actual authorized session resource frame
     const requestResource = binding => client.requestResource(binding.resourceId);
     function View() {
       const state = useSyncExternalStore(callback => replica.subscribe(callback), () => replica.getState());
-      const context = useMemo(() => ({ scopeKey: state.agent.id, bindings: [], resources: state.resources, resolveResource, requestResource }), [state.resources]);
-      return <MarkdownContent markdown={'![Local result](./result.png)'} resourceContext={context} />;
+      const [tick, setTick] = useState(0);
+      window.updateMarkdown = () => setTick(value => value + 1);
+      const context = useMemo(() => ({ scopeKey: state.agent.id, bindings: [], resources: {...state.resources}, resolveResource, requestResource }), [state.resources, tick]);
+      return <MarkdownContent markdown={'![Local result](./result.png)\\n\\nStreaming ' + tick} resourceContext={context} />;
     }
     const root = createRoot(document.getElementById('root'));
     client.subscribeStatus(status => { window.fixtureStatus = status; if(status === 'ready') root.render(<View />); });
@@ -69,7 +71,7 @@ it('renders a local Markdown image from actual authorized session resource frame
   const bundled = await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false,
     format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
   browserScript = bundled.outputFiles[0]!.text;
-  const browser = await chromium.launch({ headless: true }); onPreviewCleanup(() => browser.close());
+  const browser = await engine.launch({ headless: true }); onPreviewCleanup(() => browser.close());
   const page = await browser.newPage(); page.setDefaultTimeout(10_000);
   const separator = f.alice.cookie.indexOf('=');
   await page.context().addCookies([{ name: f.alice.cookie.slice(0, separator), value: f.alice.cookie.slice(separator + 1), url: f.url, httpOnly: true, sameSite: 'Strict' }]);
@@ -82,6 +84,23 @@ it('renders a local Markdown image from actual authorized session resource frame
   expect(await page.locator('img').getAttribute('src')).toBe('data:image/png;base64,' + png);
   expect(frames).toContain('resource_resolve_request'); expect(frames).toContain('resource_request');
   expect(urls.some(url => url.includes('/result.png') || url.includes(workspace))).toBe(false);
+  const requestCount = frames.filter(type => type === 'resource_request').length;
+  await page.evaluate(() => {
+    const image = document.querySelector('img')!;
+    (window as any).retainedImage = image;
+    (window as any).imageLoads = 0;
+    (window as any).removedImages = 0;
+    document.addEventListener('load', event => { if ((event.target as Element)?.tagName === 'IMG') (window as any).imageLoads++; }, true);
+    new MutationObserver(records => records.forEach(record => record.removedNodes.forEach(node => {
+      if (node === image || node.contains(image)) (window as any).removedImages++;
+    }))).observe(document.getElementById('root')!, { childList: true, subtree: true });
+  });
+  for (let index = 0; index < 5; index++) {
+    await page.evaluate(async () => { (window as any).updateMarkdown(); await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
+    expect(await page.evaluate(() => document.querySelector('img') === (window as any).retainedImage)).toBe(true);
+  }
+  expect(await page.evaluate(() => [(window as any).imageLoads, (window as any).removedImages])).toEqual([0, 0]);
+  expect(frames.filter(type => type === 'resource_request')).toHaveLength(requestCount);
   expect(errors).toEqual([]);
 });
 
@@ -97,18 +116,31 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   onPreviewCleanup(() => vite.close()); await vite.listen();
   const port = (vite.httpServer!.address() as import('node:net').AddressInfo).port;
   let browserScript = '';
-  const css = await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
   const f = await previewFixture({ target: `http://127.0.0.1:${port}`, servePage: async (request, response) => {
     if (request.url === '/workbench.js') { response.setHeader('content-type', 'application/javascript'); response.end(browserScript); return true; }
     if (request.url === '/workbench') { response.setHeader('content-type', 'text/html'); response.setHeader('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https://external.test"); response.end(`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style><div id="root"></div><script src="/workbench.js"></script>`); return true; }
     return false;
   } });
   const source = `
-    import React, {useState} from 'react';import {createRoot} from 'react-dom/client';
+    import React, {useRef,useState} from 'react';import {createRoot} from 'react-dom/client';
     import {PreviewProvider,usePreviewController,PreviewDock} from '../../agent-remote-web/src/react/PreviewContext.tsx';
     import {PreviewActions} from '../../agent-remote-web/src/react/PreviewActions.tsx';
     import {HttpPreviewClient} from '../../agent-remote-web/src/client/preview-client.ts';
-    function View(){const controller=usePreviewController();const [other,setOther]=useState(false);const sessionId=other?'another-session':${JSON.stringify(f.agentId)};return <><button onClick={()=>setOther(!other)}>Switch session</button><PreviewDock sessionId={sessionId}/><textarea aria-label="Chat draft" defaultValue="Unsent message"/><PreviewActions controller={controller} agentId={sessionId} itemId="message-1" text=${JSON.stringify(f.target + '/')} /></>;}
+    import {trackFocusModality} from './focus-modality.ts';
+    import {ViewOptions} from './components/ViewOptions.tsx';
+    import {SupportingRail} from './components/SupportingRail.tsx';
+    trackFocusModality(document);
+    function ChromeControls(){
+      const view=useRef(null),settings=useRef(null);const [open,setOpen]=useState(false);
+      return <><ViewOptions triggerRef={view} headerVisible sidebarVisible inspectorVisible compact inert={false}
+        onSetAllVisible={()=>{}} onToggleHeader={()=>{}} onToggleSidebar={()=>{}} onToggleInspector={()=>{}}/>
+        <button ref={settings} onClick={()=>setOpen(true)}>Settings</button>
+        <SupportingRail id="settings-fixture" label="Settings" className="lab-context" compact open={open} triggerRef={settings} onClose={()=>setOpen(false)}>
+          <input aria-label="Setting value" />
+        </SupportingRail></>;
+    }
+    function View(){const controller=usePreviewController();const [other,setOther]=useState(false);const sessionId=other?'another-session':${JSON.stringify(f.agentId)};return <><ChromeControls/><button onClick={()=>setOther(!other)}>Switch session</button><PreviewDock sessionId={sessionId}/><textarea aria-label="Chat draft" defaultValue="Unsent message"/><PreviewActions controller={controller} agentId={sessionId} itemId="message-1" text=${JSON.stringify(f.target + '/')} /></>;}
     createRoot(document.getElementById('root')).render(<PreviewProvider client={new HttpPreviewClient(${JSON.stringify(f.url + f.alice.basePath)})} hostId=${JSON.stringify(f.hostId)} canManage><View/></PreviewProvider>);
   `;
   browserScript = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
@@ -119,12 +151,31 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   const page = await context.newPage(); page.setDefaultTimeout(7000);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(f.url + '/workbench');
+  const viewButton = page.getByRole('button', { name: 'View options', exact: true });
+  const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
+  for (const trigger of [viewButton, settingsButton]) {
+    if (engine === webkit) await trigger.tap(); else await trigger.click();
+    expect(await trigger.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
+    if (trigger === settingsButton) {
+      await page.getByRole('textbox', { name: 'Setting value' }).fill('Focus restoration');
+      if (engine === webkit) await page.getByRole('button', { name: 'Close Settings' }).tap();
+      else await page.getByRole('button', { name: 'Close Settings' }).click();
+      expect(await trigger.evaluate(element => element === document.activeElement && getComputedStyle(element).outlineStyle === 'none')).toBe(true);
+    } else {
+      await trigger.press('Escape');
+      expect(await trigger.evaluate(element => element === document.activeElement && getComputedStyle(element).outlineStyle !== 'none')).toBe(true);
+    }
+  }
   await page.locator('.agent-preview-open').click();
   const frame = page.frameLocator('dialog[open] iframe[title="Local preview"]');
   await frame.getByRole('heading', { name: 'Local application' }).waitFor();
   await frame.getByRole('textbox', { name: 'Application draft' }).fill('Keep this preview state');
+  await frame.getByRole('textbox', { name: 'Application draft' }).press('Shift+Tab');
+  expect(await page.evaluate(() => document.documentElement.dataset.inputModality)).toBe('keyboard');
+  expect(await page.evaluate(() => document.activeElement?.tagName !== 'IFRAME' && getComputedStyle(document.activeElement!).outlineStyle !== 'none')).toBe(true);
   const previewWindow = page.frames().find(item => item.url().includes('/p/'))!;
   await previewWindow.evaluate(() => { (window as any).previewIdentity = 'retained-document'; document.body.style.minHeight = '1800px'; window.scrollTo(0, 300); });
+  await page.getByRole('button', { name: 'Minimize preview', exact: true }).dispatchEvent('pointerdown', { pointerType: 'touch' });
   const shrinking = await page.evaluate(async () => {
     (document.querySelector('[aria-label="Minimize preview"]') as HTMLButtonElement).click();
     await new Promise(requestAnimationFrame);
@@ -138,7 +189,10 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   await page.evaluate(() => document.querySelector('dialog')!.getAnimations().forEach(animation => animation.play()));
   await page.getByRole('dialog', { name: 'Local preview browser' }).waitFor({ state: 'hidden' });
   expect(await page.locator('iframe').count()).toBe(1);
+  expect(await page.getByRole('button', { name: /^Resume preview:/ }).evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
   await page.screenshot({ path: fileURLToPath(new URL('../../../.tmp/preview-docked-' + engine.name() + '.png', import.meta.url)) });
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => getComputedStyle(document.activeElement!).outlineStyle)).not.toBe('none');
   await page.getByRole('textbox', { name: 'Chat draft' }).fill('Continue adjusting');
   await page.getByRole('button', { name: /^Resume preview:/ }).click();
   await frame.getByRole('heading', { name: 'Local application' }).waitFor();
@@ -162,7 +216,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('button', { name: 'Minimize preview', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  expect(await page.evaluate(() => document.getAnimations().filter(item => item.playState === 'running').length)).toBe(0);
+  expect(await page.evaluate(() => document.querySelector('dialog')!.getAnimations().filter(item => item.playState === 'running').length)).toBe(0);
   await page.getByRole('button', { name: 'Switch session', exact: true }).click();
   await page.getByRole('button', { name: /^Close preview:/ }).click();
   expect(await page.locator('iframe').count()).toBe(1);

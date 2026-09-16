@@ -1044,3 +1044,6 @@ textarea {
   .agent-preview-dock-entry { max-width: 160px; }
   .agent-preview-dock-entry button { min-height: 40px; }
 }
+
+/* Dialogs and panels restore focus without turning pointer actions into keyboard highlights. */
+html[data-input-modality="pointer"] :focus { outline: none !important; }

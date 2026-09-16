@@ -2,6 +2,8 @@
 
 Status: design record. The URL shape, on-demand block interaction, Controller-owned registration lifecycle, and self-hosted HTTP and WebSocket tunnel are agreed requirements. Protocol names and operational recommendations below describe the intended implementation, not shipped behavior. This task records the design only.
 
+Follow-up: [stack research and local experiment results](2026-09-16-local-preview-tunnel-research.md) identify an upstream path-mode refinement for base-aware apps and a Workers WS egress-backpressure limitation. Incorporate those findings before finalizing the implementation contract; the original discussion is retained below.
+
 ## Purpose and scope
 
 Open a workstation's local web application from a phone through the existing authenticated Relay. Implement the tunnel inside Agent Remote Control; do not depend on Cloudflare Tunnel, Quick Tunnels, or another public forwarding service. Support both HTTP and WebSocket as required capabilities, including streaming responses and development-server hot reload. A static HTML fetch or a rewritten link alone does not satisfy this design.

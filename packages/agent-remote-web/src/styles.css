@@ -246,6 +246,15 @@
 .agent-tool-toggle:focus-visible,
 .agent-question input:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 .agent-remote-surface button:disabled { cursor: not-allowed; opacity: .45; }
+
+.agent-preview-actions { margin: 8px 16px 12px; display: grid; gap: 8px; }
+.agent-preview-target { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--agent-rule); border-radius: 8px; background: color-mix(in srgb, var(--agent-surface) 92%, var(--agent-signal)); }
+.agent-preview-target > code { min-width: min(100%, 260px); flex: 1; overflow-wrap: anywhere; }
+.agent-preview-target > label { display: inline-flex; align-items: center; gap: 6px; }
+.agent-preview-target > small, .agent-preview-target > [role="alert"] { flex-basis: 100%; margin: 0; color: var(--agent-muted); }
+.agent-preview-target > [role="alert"] { color: var(--agent-danger); }
+.agent-preview-ready { font-weight: 650; }
+.agent-preview-state { color: var(--agent-muted); font-size: 12px; }
 .agent-interaction-unsupported { border-left-color: var(--agent-danger); }
 
 .agent-resources { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; overflow-wrap: anywhere; gap: 7px; padding: 0 18px 15px; }

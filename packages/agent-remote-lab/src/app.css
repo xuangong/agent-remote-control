@@ -139,6 +139,14 @@ textarea {
 .lab-shell .agent-remote-surface select,
 .lab-shell .agent-remote-surface textarea { border-color: var(--obs-control-border); }
 
+.lab-host-previews { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-rule); }
+.lab-host-previews ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.lab-host-previews li { display: grid; gap: 7px; padding: 10px; border: 1px solid var(--obs-control-border); border-radius: 8px; }
+.lab-host-previews li > div { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.lab-host-previews li code { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.lab-host-previews li span, .lab-host-previews li small { color: var(--obs-text-secondary); font-size: 11px; }
+.lab-preview-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+
 .lab-app-bar {
   z-index: 20;
   grid-column: 1 / -1;

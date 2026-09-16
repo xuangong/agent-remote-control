@@ -633,7 +633,7 @@ export function App({
     if (!currentSession || !directory || hostOffline || transitioning) return undefined;
     const target = sessionEntries.find(item => item.nativeSessionId === nativeSessionId && item.providerId === currentSession.providerId && (item.hostId ?? 'local') === (currentSession.hostId ?? 'local'));
     if (!target || sessionRootKey(target, sessionEntries) !== sessionRootKey(currentSession, sessionEntries)) return undefined;
-    return { href: controllerPath({ ...target, hostId: target.hostId ?? 'local' }), open: async () => {
+    return { title: target.title, href: controllerPath({ ...target, hostId: target.hostId ?? 'local' }), open: async () => {
       if (!await openSession(target)) throw new Error('This session could not be opened.');
     } };
   }

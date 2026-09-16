@@ -81,3 +81,30 @@ it('links normalized session identity independently of the tool disclosure and r
   expect(container.querySelector('a')).toBeNull();
   expect(container.querySelector('.agent-tool-summary')?.textContent).toBe('Agent /root/review: interacted');
 });
+
+it('shows all wait targets using resolved paths while retaining unresolved identities', async () => {
+  const opened: string[] = [];
+  const item: Extract<AgentTimelineItem, { type: 'tool_call' }> = {
+    type: 'tool_call', callId: 'wait', name: 'agent.wait', status: 'running', error: null,
+    detail: { type: 'other', description: 'Waiting for agent updates:', sessionReferences: [
+      { nativeSessionId: 'review-id', title: 'review-id' },
+      { nativeSessionId: 'test-id', title: 'test-id' },
+      { nativeSessionId: 'missing-id', title: 'missing-id' },
+    ] },
+  };
+  const container = await render(<ToolCallItem item={item} resolveSessionLink={id => id === 'missing-id' ? undefined : ({
+    title: id === 'review-id' ? '/root/review' : '/root/tests', href: `/?session=${id}`, open: async () => { opened.push(id); },
+  })} />);
+  const summary = container.querySelector('.agent-tool-summary')!;
+  expect(summary.textContent).toBe('Waiting for agent updates: /root/review, /root/tests, missing-id');
+  const links = [...summary.querySelectorAll('a')];
+  expect(links).toHaveLength(2);
+  for (const link of links) {
+    expect(link.closest('button')).toBeNull();
+    await act(async () => link.click());
+  }
+  expect(opened).toEqual(['review-id', 'test-id']);
+  expect(container.querySelector<HTMLElement>('.agent-tool-details')!.hidden).toBe(true);
+  await rerender(container, <ToolCallItem item={item} />);
+  expect(container.querySelector('.agent-tool-summary')!.textContent).toBe('Waiting for agent updates: review-id, test-id, missing-id');
+});

@@ -9,7 +9,7 @@ export type AgentToolDetail =
   | { type: 'write'; filePath: string }
   | { type: 'search'; query: string }
   | { type: 'fetch'; url: string }
-  | { type: 'other'; description: string; sessionReference?: { nativeSessionId: string; title: string } };
+  | { type: 'other'; description: string; sessionReference?: { nativeSessionId: string; title: string }; sessionReferences?: { nativeSessionId: string; title: string }[] };
 
 export interface AgentQuestionOption {
   value: string;

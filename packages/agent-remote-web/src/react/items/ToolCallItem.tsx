@@ -1,5 +1,5 @@
 import { ToolResultView } from './ToolResultView.js';
-import { useId, useState } from 'react';
+import { Fragment, useId, useState } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ToolResultPreview } from './ToolResultPreview.js';
 import { ContentPreview } from './ContentPreview.js';
@@ -9,18 +9,32 @@ const statusLabels = {
   running: 'Running', completed: 'Completed', failed: 'Failed', canceled: 'Canceled',
 } as const;
 
-export type SessionLinkResolver = (nativeSessionId: string) => { href: string; open(): Promise<void> } | undefined;
+export type SessionLinkResolver = (nativeSessionId: string) => { href: string; title?: string; open(): Promise<void> } | undefined;
 
 export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extract<AgentTimelineItem, { type: 'tool_call' }>; resolveSessionLink?: SessionLinkResolver }) {
   const { expanded, preview, toggle } = useItemDisclosure();
   const detailsId = useId();
   const [failure, setFailure] = useState<string>();
   const reference = item.detail.type === 'other' ? item.detail.sessionReference : undefined;
+  const references = item.detail.type === 'other' ? item.detail.sessionReferences : undefined;
   const target = reference && resolveSessionLink?.(reference.nativeSessionId);
   const summary = toolSummary(item.detail);
   const offset = reference ? summary.indexOf(reference.title) : -1;
   const toggleLabel = <><span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span><strong>{item.name}</strong></>;
-  const linkedSummary = reference && target ? <span className="agent-tool-summary">
+  const linkedSummary = references?.length ? <span className="agent-tool-summary agent-tool-references">
+    {summary}{' '}{references.map((entry, index) => {
+      const destination = resolveSessionLink?.(entry.nativeSessionId);
+      const title = entry.title === entry.nativeSessionId ? destination?.title || entry.title : entry.title;
+      return <Fragment key={`${entry.nativeSessionId}-${index}`}>
+        {index > 0 ? ', ' : ''}{destination ? <a href={destination.href} title={title} className="agent-session-reference" onClick={(event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          setFailure(undefined);
+          void destination.open().catch(error => setFailure(error instanceof Error ? error.message : 'This session could not be opened.'));
+        }}>{title}</a> : <span>{title}</span>}
+      </Fragment>;
+    })}
+  </span> : reference && target ? <span className="agent-tool-summary">
     {offset >= 0 ? summary.slice(0, offset) : `${summary} `}
     <a href={target.href} title={reference.title} className="agent-session-reference" onClick={(event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -45,7 +59,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
       >
         <span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <strong>{item.name}</strong>
-        <span className="agent-tool-summary">{toolSummary(item.detail)}</span>
+        <span className={`agent-tool-summary${item.detail.type === 'other' ? ' agent-tool-description' : ''}`}>{toolSummary(item.detail)}</span>
         <span className="agent-state-label">{statusLabels[item.status]}</span>
       </button>}
     </header>
@@ -90,7 +104,7 @@ export function ToolCallDetails({ detail }: { readonly detail: AgentToolDetail }
     case 'fetch':
       return <div className="agent-tool-detail"><span>URL</span><code>{detail.url}</code></div>;
     case 'other':
-      return <p className="agent-tool-detail">{detail.description}</p>;
+      return <p className="agent-tool-detail">{detail.description}{detail.sessionReferences?.length ? ` ${detail.sessionReferences.map(reference => reference.title).join(', ')}` : ''}</p>;
   }
 }
 

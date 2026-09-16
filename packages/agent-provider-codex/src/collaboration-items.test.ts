@@ -38,3 +38,40 @@ it('normalizes activity navigation identically in live and saved history', () =>
   expect(projector.projectHistoryItem(item, 'turn')?.event).toEqual(live?.event);
   expect(projector.projectHistoryItem({ ...item, agentThreadId: undefined })?.event).not.toHaveProperty('item.detail.sessionReference');
 });
+
+it('shows every explicit wait target before completion and preserves targets in history', () => {
+  const projector = new CodexEventProjector('parent');
+  const item = { type: 'collabAgentToolCall', id: 'wait', tool: 'wait', receiverThreadIds: ['review', 'tests', 'review'], agentsStates: {} };
+  const detail = { type: 'other', description: 'Waiting for agent updates:', sessionReferences: [
+    { nativeSessionId: 'review', title: 'review' }, { nativeSessionId: 'tests', title: 'tests' },
+  ] };
+  const started = projector.projectNotification('item/started', { threadId: 'parent', item });
+  expect(started?.event).toMatchObject({ item: { detail, status: 'running' } });
+  const completed = { ...item, status: 'completed', agentsStates: { review: { status: 'completed' } } };
+  const live = projector.projectNotification('item/completed', { threadId: 'parent', item: completed });
+  expect(live?.event).toMatchObject({ item: { detail: { ...detail, description: 'Waited for agent updates:' } } });
+  expect(projector.projectHistoryItem(completed)?.event).toEqual(live?.event);
+});
+
+it('distinguishes an untargeted mailbox wait from missing target metadata', () => {
+  const projector = new CodexEventProjector('parent');
+  const item = { type: 'collabAgentToolCall', id: 'wait', tool: 'wait', status: 'completed', agentsStates: {} };
+  expect(projector.projectHistoryItem({ ...item, receiverThreadIds: [] })?.event).toMatchObject({ item: {
+    detail: { type: 'other', description: 'Waited for updates from any sub-agent' },
+  } });
+  expect(projector.projectHistoryItem(item)?.event).toMatchObject({ item: {
+    detail: { description: 'Waited for agent updates (target unavailable)' },
+  } });
+});
+
+
+it('shows a single explicit wait target and does not invent targets from returned agent states', () => {
+  const projector = new CodexEventProjector('parent');
+  const item = { type: 'collabAgentToolCall', id: 'wait', tool: 'wait', agentsStates: { unrelated: { status: 'completed' } } };
+  expect(projector.projectNotification('item/started', { threadId: 'parent', item: { ...item, receiverThreadIds: ['child'] } })?.event).toMatchObject({ item: {
+    detail: { sessionReferences: [{ nativeSessionId: 'child', title: 'child' }] },
+  } });
+  const event = projector.projectNotification('item/started', { threadId: 'parent', item: { ...item, receiverThreadIds: [] } })?.event;
+  expect(event).toMatchObject({ item: { detail: { description: 'Waiting for updates from any sub-agent' } } });
+  expect(event).not.toHaveProperty('item.detail.sessionReferences');
+});

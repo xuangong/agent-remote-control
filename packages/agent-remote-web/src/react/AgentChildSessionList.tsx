@@ -26,13 +26,14 @@ export function AgentChildSessionList({ children, label = 'Subagents', collapsib
     finally { inFlight.current = false; setOpening(undefined); }
   }
   if (children.length === 0) return null;
+  const working = children.filter(child => child.status === 'running').length;
   const Container = collapsible ? 'details' : 'section';
   const Heading = collapsible ? 'summary' : 'p';
   return <Container className="agent-child-sessions" aria-label={label}>
-    <Heading className="agent-child-heading">{label} <span>{children.length}</span></Heading>
+    <Heading className="agent-child-heading" data-working={working > 0 || undefined}>{label} <span>{children.length}</span>{' '}{working > 0 ? <span className="agent-child-working-count">{working} working</span> : null}</Heading>
     <ul>
       {children.map((child) => <li key={child.nativeSessionId}>
-        <button type="button" className="agent-child-session" data-child-session-id={child.nativeSessionId}
+        <button type="button" className="agent-child-session" data-child-session-id={child.nativeSessionId} data-working={child.status === 'running' || undefined}
           disabled={!onOpenChildSession || opening !== undefined} aria-busy={opening === child.nativeSessionId}
           onClick={() => { void open(child); }}>
           <span className="agent-child-icon" aria-hidden="true">↳</span>

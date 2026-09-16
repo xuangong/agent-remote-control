@@ -83,6 +83,8 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 - `packages/agent-remote-protocol/src/uplink.ts:5-69`
 - `packages/agent-remote-protocol/src/remote-host-uplink.ts:18-76`
 
+Generic tool details may carry one inline `sessionReference` or a list of `sessionReferences`, each containing a native session ID and display title. These are navigation identities, not URLs or attachment permissions; clients resolve them within the current Host, Provider, and native session family. Multi-target references are available on running items as well as completed items and history.
+
 ## Tool results
 
 Protocol `1.2.0` adds optional `tool_call.result`. A result contains ordered text or JSON content blocks, optional `exitCode` and `durationMs`, and an explicit `truncated` flag. Text may identify `stdout`, `stderr`, or combined output; absent stream metadata stays unspecified. Missing results mean the Provider supplied no result, while an empty content array explicitly represents an available result with no body. Results are complete snapshots attached to the existing `callId`, not append-only output chunks. Relay and client lifecycle projection replace the result along with the call state, and history/replay use the same representation (`packages/agent-provider-sdk/src/tool-result.ts`, `packages/agent-remote-protocol/src/tool-result.ts`, `packages/agent-remote-relay/src/timeline-projector.ts`).

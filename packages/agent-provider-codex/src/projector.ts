@@ -453,6 +453,19 @@ export class CodexEventProjector {
   }
 
   private mapAgentActivity(item: JsonObject, lifecycle: 'started' | 'completed'): AgentToolCallTimelineItem {
+    if (item.type === 'collabAgentToolCall' && item.tool === 'wait') {
+      const status = normalizeStatus(item.status, lifecycle);
+      const verb = status === 'running' ? 'Waiting' : 'Waited';
+      const receivers = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : undefined;
+      const targets = [...new Set((receivers ?? []).flatMap(value => readString(value) ? [readString(value)!] : []))];
+      const description = targets.length ? `${verb} for agent updates:`
+        : receivers?.length === 0 ? `${verb} for updates from any sub-agent`
+        : `${verb} for agent updates (target unavailable)`;
+      return this.toolItem(readString(item.id)!, 'agent.wait', status, {
+        type: 'other', description,
+        ...(targets.length ? { sessionReferences: targets.map(nativeSessionId => ({ nativeSessionId, title: nativeSessionId })) } : {}),
+      }, readErrorMessage(item.error), lifecycle === 'completed' ? codexToolResult(item) : undefined);
+    }
     const activity = item.type === 'subAgentActivity';
     const name = activity ? 'agent.activity' : `agent.${readString(item.tool) || 'collaboration'}`;
     const description = activity

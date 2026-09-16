@@ -53,7 +53,7 @@ describe('AgentTimeline child sessions', () => {
     const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]');
     expect(details).not.toBeNull();
     expect(details!.open).toBe(false);
-    expect(details!.querySelector('summary')?.textContent).toBe('Session subagents 1');
+    expect(details!.querySelector('summary')?.textContent).toBe('Session subagents 1 1 working');
     await act(async () => details!.querySelector('summary')!.click());
     expect(details!.open).toBe(true);
     await act(async () => details!.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
@@ -107,4 +107,17 @@ describe('AgentTimeline child sessions', () => {
     expect(opened).toEqual(['saved']);
   });
 
+});
+
+it('reports working children while collapsed and clears the indicator when they stop', async () => {
+  const children = [child('working'), { ...child('ready'), status: 'idle' as const }, { ...child('question'), status: 'waiting' as const }];
+  const container = await render(<AgentTimeline state={state(children, [])} />);
+  const details = container.querySelector<HTMLDetailsElement>('details')!;
+  expect(details.open).toBe(false);
+  expect(details.querySelector('summary')?.textContent).toContain('1 working');
+  await act(async () => details.querySelector('summary')!.click());
+  expect(details.querySelector('[data-child-session-id="working"]')?.textContent).toContain('Working');
+  await rerender(container, <AgentTimeline state={state(children.map(item => ({ ...item, status: 'idle' })), [])} />);
+  expect(details.querySelector('summary')?.textContent).not.toContain('working');
+  expect(details.open).toBe(true);
 });

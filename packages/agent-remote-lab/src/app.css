@@ -686,6 +686,11 @@ textarea {
 .lab-chat-session-row strong { flex: 1; font-size: 12px; }
 .lab-chat-session-row small { flex-shrink: 0; font-size: 11px; }
 .lab-chat-session-row[aria-current="page"]:disabled { opacity: 1; }
+.lab-chat-sessions-heading[data-working] { color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-session-working-count { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; white-space: nowrap; }
+.lab-session-working-count::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.lab-chat-session-row[data-working] { color: var(--obs-action); background: var(--obs-surface-selected); box-shadow: inset 3px 0 var(--obs-action); }
+.lab-chat-session-row[data-working] small { color: var(--obs-action); font-weight: 600; }
 @media (max-width: 700px) {
   .lab-chat-sessions { padding-inline: 12px; }
   .lab-chat-sessions-heading, .lab-session-toggle, .lab-chat-session-row { min-height: 44px; }
@@ -695,7 +700,7 @@ textarea {
 
 
 .lab-workbench-heading > div { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.lab-workbench-heading h2 { order: -1; flex-shrink: 0; }
+.lab-workbench-heading h2 { order: -1; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-conversation-path > span[aria-current] { flex-shrink: 0; max-width: 45%; }
 .lab-conversation-path > span { max-width: 36ch; display: inline-flex; align-items: center; min-width: 0; gap: 4px; }
 .lab-conversation-path button, .lab-conversation-path [aria-current] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -765,6 +770,7 @@ textarea {
   .lab-session-summary .lab-connection-details { right: auto; left: 0; }
   .lab-workbench-heading { min-height: 44px; padding-block: 0; }
   .lab-chat-sessions-heading { min-height: 44px; }
+  .lab-chat-sessions > .lab-session-tree { width: min(360px, calc(100vw - 88px)); }
   .lab-composer-dock .agent-composer textarea { min-height: 44px; }
   .lab-composer-dock .agent-composer-actions button { min-height: 44px; }
   .lab-composer-dock .agent-session-toolbar button { max-width: 96px; padding-inline: 4px; }

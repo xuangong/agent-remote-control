@@ -8,6 +8,8 @@ const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => T
   { additionalProperties: false },
 );
 
+const SessionReference = Strict({ nativeSessionId: NonEmptyString, title: NonEmptyString });
+
 export const AgentToolDetail = Type.Union([
   Strict({ type: Type.Literal('shell'), command: NonEmptyString, cwd: Type.Optional(NonEmptyString) }),
   Strict({ type: Type.Literal('read'), filePath: NonEmptyString }),
@@ -15,7 +17,7 @@ export const AgentToolDetail = Type.Union([
   Strict({ type: Type.Literal('write'), filePath: NonEmptyString }),
   Strict({ type: Type.Literal('search'), query: NonEmptyString }),
   Strict({ type: Type.Literal('fetch'), url: NonEmptyString }),
-  Strict({ type: Type.Literal('other'), description: NonEmptyString, sessionReference: Type.Optional(Strict({ nativeSessionId: NonEmptyString, title: NonEmptyString })) }),
+  Strict({ type: Type.Literal('other'), description: NonEmptyString, sessionReference: Type.Optional(SessionReference), sessionReferences: Type.Optional(Type.Array(SessionReference)) }),
 ]);
 export type AgentToolDetail = Static<typeof AgentToolDetail>;
 

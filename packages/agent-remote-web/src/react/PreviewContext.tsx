@@ -147,7 +147,7 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
 
 export function PreviewDock({ sessionId }: { readonly sessionId?: string }) {
   const context = useContext(DockContext);
-  const entries = context?.browsers.filter(entry => entry.sessionId === sessionId) ?? [];
+  const entries = context?.browsers.filter(entry => entry.sessionId === sessionId && entry.key !== context.activeKey) ?? [];
   if (!context || entries.length === 0) return null;
   return <aside className="agent-preview-dock" aria-label="Session previews">
     {entries.map(entry => <span className="agent-preview-dock-entry" key={entry.key}>

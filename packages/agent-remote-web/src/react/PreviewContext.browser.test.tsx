@@ -22,13 +22,16 @@ it('reuses pending and loaded previews through an earlier registration callback'
     void open('preview', 'http://localhost:5173', 'agent');
   });
   expect(client.open).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[aria-label="Session previews"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[data-browser] button')!.click());
   await act(async () => { request.resolve('entry'); await pending; });
   expect(container.querySelector('[data-browser]')?.getAttribute('data-visible')).toBe('false');
   const browser = container.querySelector('[data-browser]');
-  await act(async () => { await open('preview', 'http://localhost:5173', 'agent'); });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-key]')!.click());
   expect(container.querySelector('[data-browser]')).toBe(browser);
   expect(browser?.getAttribute('data-visible')).toBe('true');
+  expect(container.querySelector('[aria-label="Session previews"]')).toBeNull();
+  await act(async () => { await open('preview', 'http://localhost:5173', 'agent'); });
   expect(client.enter).toHaveBeenCalledTimes(1);
 });
 
@@ -57,6 +60,7 @@ it('aborts a closed pending preview and ignores its result after reopening', asy
   let newPending!: Promise<string>;
   await act(async () => { oldPending = controller.open('preview', 'http://localhost:5173', 'agent'); });
   const oldSignal = vi.mocked(client.open).mock.calls[0]![3]!;
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-browser] button')!.click());
   await act(async () => container.querySelector<HTMLButtonElement>('[title="Close preview"]')!.click());
   expect(oldSignal.aborted).toBe(true);
   expect(container.querySelector('[data-browser]')).toBeNull();
@@ -130,6 +134,7 @@ it('renews on browser wake and aborts a pending renewal when its last retained b
     await act(async () => window.dispatchEvent(new Event('pageshow')));
     expect(renew).toHaveBeenCalledTimes(2);
     const signal = renew.mock.calls[1]![3] as AbortSignal;
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-browser] button')!.click());
     await act(async () => container.querySelector<HTMLButtonElement>('[title="Close preview"]')!.click());
     expect(signal.aborted).toBe(true);
     await act(async () => { request.resolve(registration); await vi.advanceTimersByTimeAsync(600000); });

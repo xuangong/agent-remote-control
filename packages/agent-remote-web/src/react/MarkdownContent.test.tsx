@@ -121,6 +121,23 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${png}`);
   });
 
+  it('shows the protocol reason when a local image resource is unavailable', async () => {
+    const binding = { locator: './images/missing.png', resourceId: 'image-missing', status: 'unavailable' as const };
+    const requestResource = vi.fn(async () => undefined);
+    const container = await render(<MarkdownContent
+      markdown="![Missing diagram](./images/missing.png)"
+      resourceContext={{
+        scopeKey: 'session-unavailable', bindings: [binding],
+        resources: { 'image-missing': { status: 'unavailable', reason: 'Provider stopped.' } },
+        resolveResource: vi.fn(async () => binding), requestResource,
+      }}
+    />);
+
+    await expect.poll(() => container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Missing diagram: Provider stopped.');
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(requestResource).not.toHaveBeenCalled();
+  });
+
   it('does not resolve image syntax in code fences', async () => {
     const resolveResource = vi.fn();
     const container = await render(<MarkdownContent

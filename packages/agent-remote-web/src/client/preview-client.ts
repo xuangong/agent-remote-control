@@ -1,25 +1,19 @@
-export type PreviewPathMode = 'strip' | 'preserve';
-export type PreviewLifecycle = 'active' | 'expired' | 'unregistered';
+import type { PreviewRegistrationSnapshot } from '@agent-remote-controller/agent-remote-protocol';
+
+type ProtocolPreviewRegistration = PreviewRegistrationSnapshot['registrations'][number];
+export type PreviewPathMode = ProtocolPreviewRegistration['pathMode'];
+export type PreviewLifecycle = ProtocolPreviewRegistration['status'];
+export type PreviewSource = ProtocolPreviewRegistration['sources'][number];
 export type PreviewAvailability = 'online' | 'controller_offline';
 
-export interface PreviewSource { readonly sessionId: string; readonly itemId: string }
-export interface PreviewRegistration {
-  readonly id: string;
-  readonly target: string;
-  readonly status: PreviewLifecycle;
-  readonly createdAt: string;
-  readonly expiresAt: string;
-  readonly revision: number;
-  readonly pathMode: PreviewPathMode;
+export type PreviewRegistration = Readonly<Omit<ProtocolPreviewRegistration, 'sources'>> & {
   readonly sources: readonly PreviewSource[];
   readonly availability: PreviewAvailability;
   readonly pendingUnregister?: boolean;
-}
-export interface PreviewSnapshot {
-  readonly epoch: string;
-  readonly revision: number;
+};
+export type PreviewSnapshot = Readonly<Omit<PreviewRegistrationSnapshot, 'registrations'>> & {
   readonly registrations: readonly PreviewRegistration[];
-}
+};
 export interface PreviewRegistrationRequest {
   readonly target: string;
   readonly itemId: string;

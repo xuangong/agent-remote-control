@@ -92,8 +92,8 @@ function controller(overrides: Partial<PreviewController> = {}): PreviewControll
 
 function activeRegistration(): PreviewRegistration {
   return {
-    id: 'preview-one', target: 'http://localhost:5173', status: 'active', createdAt: '2026-09-16T00:00:00Z',
-    expiresAt: '2026-09-16T01:00:00Z', revision: 2, pathMode: 'preserve', availability: 'online',
+    id: 'preview-one', target: 'http://localhost:5173', status: 'active', createdAt: 1_789_516_800_000,
+    expiresAt: 1_789_520_400_000, revision: 2, pathMode: 'preserve', availability: 'online',
     sources: [{ sessionId: 'agent-one', itemId: 'epoch:1' }],
   };
 }

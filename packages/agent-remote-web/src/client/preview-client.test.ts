@@ -27,7 +27,7 @@ describe('HttpPreviewClient', () => {
 function registration() {
   return {
     id: 'preview-one', target: 'http://127.0.0.1:5173', status: 'active' as const,
-    createdAt: '2026-09-16T00:00:00.000Z', expiresAt: '2026-09-16T01:00:00.000Z', revision: 2,
+    createdAt: 1_789_516_800_000, expiresAt: 1_789_520_400_000, revision: 2,
     pathMode: 'preserve' as const, sources: [{ sessionId: 'agent/one', itemId: 'epoch:1' }], availability: 'online' as const,
   };
 }

@@ -94,6 +94,10 @@ export function MarkdownResourceImage({
       decoding="async"
     />;
   }
+  if (detail?.status === 'unavailable' || binding?.status === 'unavailable') {
+    const reason = detail?.status === 'unavailable' ? detail.reason : 'Image resource is unavailable.';
+    return <span role="img" aria-label={`${alt ?? locator}: ${reason}`}>{alt ?? locator}</span>;
+  }
   if (failure) return <span role="img" aria-label={`${alt ?? locator}: ${failure}`}>{alt ?? locator}</span>;
   return <span role="status">{alt ?? locator}</span>;
 }
@@ -114,6 +118,7 @@ async function load(
     cache(resolutions, resolveKey, resolution);
   }
   const binding = await resolution;
+  if (binding.status === 'unavailable') return binding;
   const detail = context.resources[binding.resourceId];
   if (detail?.status === 'available' && 'contentBase64' in detail) return binding;
   const requestKey = JSON.stringify([context.scopeKey, binding.resourceId, detail?.status === 'available' ? detail.sha256 : null]);

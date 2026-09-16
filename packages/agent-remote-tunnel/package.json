@@ -1,0 +1,23 @@
+{
+  "name": "@agent-remote-controller/agent-remote-tunnel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./node": { "types": "./dist/node/index.d.ts", "import": "./dist/node/index.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000"
+  },
+  "dependencies": { "ws": "^8.21.0" },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/ws": "^8.18.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

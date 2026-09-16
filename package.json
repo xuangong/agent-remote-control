@@ -22,6 +22,7 @@
     "test:copilot": "node scripts/run-tests.mjs copilot",
     "start:gateway-relay": "pnpm --filter @agent-remote-controller/agent-remote-lab exec tsx src/server/gateway.ts",
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",
+    "test:preview-browser": "node scripts/run-tests.mjs preview-browser",
     "test:cloudflare": "node scripts/run-tests.mjs cloudflare",
     "build:relay": "node scripts/build-relay.mjs",
     "relay:local": "node scripts/relay-local.mjs",

@@ -315,3 +315,7 @@ For first use, open `https://agents.xianliao.de5.net`, sign in through the exist
 Gateway account, and create a Host pairing invitation in Controller. Use that
 invitation's connection details with Agent Host. No separate Agents account,
 Google OAuth application or manually created Durable Object is required.
+
+## Local previews and Markdown resources
+
+See [local previews](local-previews.md) for the separate preview hostname, HTTP/SSE/WebSocket transport, Controller registration lifecycle, and session-scoped Markdown image loading.

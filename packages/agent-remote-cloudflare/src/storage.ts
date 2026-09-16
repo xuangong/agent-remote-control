@@ -1,8 +1,9 @@
 import { createHmac } from 'node:crypto';
 import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState, type RelayStateStore } from '@agent-remote-controller/agent-remote-hosted';
 
-type RecordKind = 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
+type RecordKind = 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
 type StoredRecord = { kind: RecordKind; owner: string; key: string; version: number; value: string };
+const recordTable = (kind: RecordKind) => kind === 'preview' ? 'relay_previews' : kind === 'securityEvent' ? 'relay_security_events' : 'relay_records';
 const recordId = (record: Pick<StoredRecord, 'kind' | 'owner' | 'key'>) => JSON.stringify([record.kind, record.owner, record.key]);
 
 /** Each independently bounded domain record occupies its own versioned SQL row. */
@@ -21,17 +22,18 @@ export class SqliteRelayStore implements RelayStateStore {
         PRIMARY KEY (kind, owner, key)
       )`);
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_security_events (kind TEXT NOT NULL CHECK (kind = 'securityEvent'), owner TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 1), value TEXT NOT NULL CHECK (json_valid(value)), PRIMARY KEY (kind, owner, key))`);
+      storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_previews (kind TEXT NOT NULL CHECK (kind = 'preview'), owner TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 1), value TEXT NOT NULL CHECK (json_valid(value)), PRIMARY KEY (kind, owner, key))`);
       const metadata = storage.sql.exec('SELECT * FROM relay_metadata WHERE id = 1').toArray()[0];
       if (metadata) {
         if (metadata.version !== 2 || metadata.origin !== auth.origin || metadata.issuer !== auth.issuer || metadata.fingerprint !== fingerprint) {
           throw new Error('Relay configuration does not match persisted state.');
         }
       } else {
-        if (storage.sql.exec('SELECT key FROM relay_records LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_security_events LIMIT 1').toArray().length) throw new Error('Relay metadata is missing.');
+        if (storage.sql.exec('SELECT key FROM relay_records LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_security_events LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_previews LIMIT 1').toArray().length) throw new Error('Relay metadata is missing.');
         storage.sql.exec('INSERT INTO relay_metadata (id, version, origin, issuer, fingerprint) VALUES (1, 2, ?, ?, ?)', auth.origin, auth.issuer, fingerprint);
       }
     });
-    const rows = [...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_records').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_security_events').toArray()];
+    const rows = [...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_records').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_security_events').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_previews').toArray()];
     this.records = new Map(rows.map(row => [recordId(row), row]));
     this.initial = validateRelayState(decode(rows, auth), auth);
   }
@@ -39,11 +41,11 @@ export class SqliteRelayStore implements RelayStateStore {
     const next = encode(state);
     this.storage.transactionSync(() => {
       for (const [id, row] of this.records) {
-        if (!next.has(id)) this.storage.sql.exec(`DELETE FROM ${row.kind === 'securityEvent' ? 'relay_security_events' : 'relay_records'} WHERE kind = ? AND owner = ? AND key = ?`, row.kind, row.owner, row.key);
+        if (!next.has(id)) this.storage.sql.exec(`DELETE FROM ${recordTable(row.kind)} WHERE kind = ? AND owner = ? AND key = ?`, row.kind, row.owner, row.key);
       }
       for (const [id, row] of next) {
         if (this.records.get(id)?.value === row.value) continue;
-        this.storage.sql.exec(`INSERT INTO ${row.kind === 'securityEvent' ? 'relay_security_events' : 'relay_records'} (kind, owner, key, version, value) VALUES (?, ?, ?, 1, ?)
+        this.storage.sql.exec(`INSERT INTO ${recordTable(row.kind)} (kind, owner, key, version, value) VALUES (?, ?, ?, 1, ?)
           ON CONFLICT (kind, owner, key) DO UPDATE SET value = excluded.value`, row.kind, row.owner, row.key, row.value);
       }
     });
@@ -67,6 +69,7 @@ function encode(state: HostedRelayState) {
     add('tenant', '', owner, { subject: tenant.subject, sharing: tenant.broker.sharing !== undefined });
     for (const [key, value] of tenant.broker.keys) add('deviceKey', owner, key, value);
     for (const value of tenant.broker.hosts) add('host', owner, value.id, value);
+    for (const value of tenant.broker.previews ?? []) add('preview', owner, value.hostId, value);
     for (const value of tenant.broker.bindings) add('binding', owner, value.agentId, value);
     for (const [key, value] of tenant.broker.creations) add('creation', owner, key, value);
     for (const value of tenant.broker.sharing?.grants ?? []) add('share', owner, JSON.stringify([value.hostId, value.subject]), value);
@@ -94,6 +97,7 @@ function decode(rows: StoredRecord[], auth: GatewayAuthOptions): HostedRelayStat
       case 'consumedProof': state.consumedProofs.push([row.key, value]); break;
       case 'deviceKey': broker!.keys.push([row.key, value]); break;
       case 'host': broker!.hosts.push(value); break;
+      case 'preview': (broker!.previews ??= []).push(value); break;
       case 'binding': broker!.bindings.push(value); break;
       case 'creation': broker!.creations.push([row.key, value]); break;
       case 'share': if (!broker!.sharing) throw new Error('Relay sharing owner is missing.'); broker!.sharing.grants.push(value); break;

@@ -24,6 +24,7 @@ import {
   RemoteOperationError,
   HttpWebSocketTransport,
   RemoteSessionClient,
+  HttpPreviewClient,
   type AgentReplicaState,
   type RemoteAgentTransport,
   type RemoteSessionStatus,
@@ -38,7 +39,7 @@ import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { TimelineDisplay, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
+import { PreviewProvider, TimelineDisplay, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
@@ -54,6 +55,7 @@ import { ProviderSessionControls, type ProviderCatalogStatus } from './component
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';
 import { SupportingRail } from './components/SupportingRail.js';
 import { TraceView } from './components/TraceView.js';
+import { HostPreviewList } from './components/HostPreviewList.js';
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -72,6 +74,7 @@ export interface AppActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
   respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
   requestResource?(binding: ResourceBinding): Promise<void>;
+  resolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
   advanceFixture?(): void | Promise<void>;
   rehydrateFixture?(): void | Promise<void>;
   stopReader?(): void | Promise<void>;
@@ -115,6 +118,7 @@ export function App({
     ? { id: requestedHostId, name: 'Requested Host', online: false, providers: [], providerId: '' }
     : { id: 'local', name: 'Recorded fixture', online: true });
   const hostClient = useMemo(() => hostService ?? new RemoteHostClient(baseUrl), [baseUrl, hostService]);
+  const previewClient = useMemo(() => new HttpPreviewClient(baseUrl), [baseUrl]);
   const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
   const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined);
   const restoredHostSelection = useRef(false);
@@ -603,9 +607,19 @@ export function App({
   const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId);
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);
+  const previewHost = activeHost ?? (selectedHost.id !== 'local' ? remoteHosts.find((host) => host.id === selectedHost.id) : undefined);
   const hostOffline = activeHost?.online === false;
   const connectionProviderName = providerName ?? state?.agent?.providerId ?? 'No active Agent';
   const connectionStatusLabel = hostOffline ? 'Host offline' : state?.agent?.status === 'failed' ? 'Agent failed' : sessionStatusLabel(status);
+
+  async function openPreviewSource(sessionId: string, itemId: string): Promise<void> {
+    const source = sessionEntries.find(item => item.agentId === sessionId) ?? openedSessions.find(item => item.agentId === sessionId);
+    if (source && source.agentId !== activeAgentId && !await openSession(source)) return;
+    window.requestAnimationFrame(() => {
+      const entry = [...document.querySelectorAll<HTMLElement>('[data-entry-key]')].find(item => item.dataset.entryKey === itemId);
+      entry?.scrollIntoView({ block: 'center' });
+    });
+  }
 
 
   async function runMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -760,6 +774,7 @@ export function App({
     setPlanning: async (active) => { await runMutation(() => commandClient().setPlanning(active)); },
     respondToInteraction: async (requestId, response) => { await runMutation(() => commandClient().respondToInteraction(requestId, response)); },
     requestResource: async (binding) => { await commandClient().requestResource(binding.resourceId); },
+    resolveResource: (locator, sourceLocator) => commandClient().resolveResource(locator, sourceLocator),
     ...(fixtureAction && activeAgentId && state?.agent?.providerId === 'recorded' && !activeRemoteSession ? {
       advanceFixture: () => fixtureAction(activeAgentId, 'advance'),
       rehydrateFixture: () => fixtureAction(activeAgentId, 'rehydrate'),
@@ -769,7 +784,7 @@ export function App({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
-  return <TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       {stackPath.length > 1 ? <select aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
@@ -855,6 +870,7 @@ export function App({
         <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
       </section> : null}
       {directory ? <HostPairing managementVisible={!compactLayout || sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={compactLayout ? undefined : () => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {previewHost?.access !== 'shared' && previewHost ? <HostPreviewList onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
       <div className="lab-directory-panel" hidden={compactLayout && sessionPanel !== 'list'}>
       {compactLayout && providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
       {directory ? <SessionDirectory searchable={compactLayout} directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
@@ -968,7 +984,13 @@ export function App({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></TimelineDisplay.Provider>;
+  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope>;
+}
+
+function PreviewScope({ client, host, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly children: ReactNode }) {
+  return host && host.access !== 'shared'
+    ? <PreviewProvider client={client} hostId={host.id} canManage>{children}</PreviewProvider>
+    : children;
 }
 
 function createAgentId(): string {

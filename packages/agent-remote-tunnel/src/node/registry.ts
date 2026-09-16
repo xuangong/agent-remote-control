@@ -36,7 +36,7 @@ function validState(value: unknown): value is StoredState {
     if (!Number.isSafeInteger(item.createdAt) || !Number.isSafeInteger(item.expiresAt) || item.createdAt < 0 || item.expiresAt < item.createdAt) return false;
     if (!Number.isSafeInteger(item.revision) || item.revision < 1 || item.revision > state.revision!) return false;
     if (item.pathMode !== 'strip' && item.pathMode !== 'preserve') return false;
-    if (!Array.isArray(item.sources) || item.sources.length === 0 || item.sources.length > 1024) return false;
+    if (!Array.isArray(item.sources) || item.sources.length === 0 || item.sources.length > 256) return false;
     if (!item.sources.every(source => source && typeof source.sessionId === 'string' && source.sessionId.length > 0 && source.sessionId.length <= 256 && typeof source.itemId === 'string' && source.itemId.length > 0 && source.itemId.length <= 256)) return false;
     try { return canonicalizeLoopbackTarget(item.target) === item.target; } catch { return false; }
   });
@@ -65,13 +65,17 @@ export async function createPreviewRegistry(options: PreviewRegistryOptions): Pr
   const controllers = new Map<string, AbortController>();
   const listeners = new Set<(snapshot: PreviewSnapshot) => void>();
   let writeChain = Promise.resolve();
+  let mutationChain = Promise.resolve();
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 
   try {
     const parsed = JSON.parse(await readFile(options.filePath, 'utf8')) as unknown;
     if (!validState(parsed)) throw new Error('Preview registration state is invalid.');
     revision = parsed.revision;
-    for (const entry of parsed.registrations) records.set(entry.id, clone(entry));
+    for (const entry of parsed.registrations) {
+      records.set(entry.id, clone(entry));
+      if (entry.status === 'active') controllers.set(entry.id, new AbortController());
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
@@ -93,6 +97,11 @@ export async function createPreviewRegistry(options: PreviewRegistryOptions): Pr
     try { await directory.sync(); } finally { await directory.close(); }
   }
   function persist() { const pending = writeChain.then(writeState); writeChain = pending.catch(() => undefined); return pending; }
+  function mutate<T>(action: () => Promise<T>): Promise<T> {
+    const pending = mutationChain.then(action);
+    mutationChain = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
   function prune() {
     const tombstones = [...records.values()].filter(item => item.status !== 'active').sort((a, b) => b.revision - a.revision);
     for (const item of tombstones.slice(maxTombstones)) { records.delete(item.id); controllers.delete(item.id); }
@@ -118,14 +127,17 @@ export async function createPreviewRegistry(options: PreviewRegistryOptions): Pr
   await writeChain;
 
   return {
-    async register(input) {
+    register(input) { return mutate(async () => {
       if (closed) throw new Error('Preview registry is closed.');
+      if (!input.source || typeof input.source.sessionId !== 'string' || input.source.sessionId.length === 0 || input.source.sessionId.length > 256
+        || typeof input.source.itemId !== 'string' || input.source.itemId.length === 0 || input.source.itemId.length > 256) throw new Error('Preview source is invalid.');
       expireDue();
       const target = canonicalizeLoopbackTarget(input.target, options);
       const pathMode = input.pathMode ?? 'strip';
       const existing = [...records.values()].find(item => item.status === 'active' && item.target === target && item.pathMode === pathMode);
       if (existing) {
         if (!existing.sources.some(source => source.sessionId === input.source.sessionId && source.itemId === input.source.itemId)) {
+          if (existing.sources.length >= 256) throw new Error('Preview source capacity is exhausted.');
           const previous = clone(existing); existing.sources.push(clone(input.source)); existing.revision = ++revision;
           try { await persist(); } catch (error) { records.set(existing.id, previous); revision--; throw error; }
           notify();
@@ -139,8 +151,8 @@ export async function createPreviewRegistry(options: PreviewRegistryOptions): Pr
       records.set(entry.id, entry); controllers.set(entry.id, new AbortController());
       try { await persist(); } catch (error) { records.delete(entry.id); controllers.delete(entry.id); revision--; throw error; }
       scheduleExpiry(); notify(); return clone(entry);
-    },
-    async unregister(id) {
+    }); },
+    unregister(id) { return mutate(async () => {
       if (closed) throw new Error('Preview registry is closed.');
       expireDue();
       const entry = records.get(id);
@@ -151,11 +163,11 @@ export async function createPreviewRegistry(options: PreviewRegistryOptions): Pr
         notify();
       }
       return clone(entry);
-    },
+    }); },
     snapshot() { expireDue(); return currentSnapshot(); },
     subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },
     lookup(id) { expireDue(); const item = records.get(id); return item ? clone(item) : undefined; },
     signal(id) { expireDue(); let controller = controllers.get(id); if (!controller) { controller = new AbortController(); controller.abort(); } return controller.signal; },
-    async close() { if (closed) return; if (expiryTimer) clearTimeout(expiryTimer); await writeChain; closed = true; for (const controller of controllers.values()) controller.abort(); listeners.clear(); },
+    async close() { if (closed) return; if (expiryTimer) clearTimeout(expiryTimer); await mutationChain; await writeChain; closed = true; for (const controller of controllers.values()) controller.abort(); listeners.clear(); },
   };
 }

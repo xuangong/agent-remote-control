@@ -3,8 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "agent-remote-controller": "./dist/cli.js" },
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "bin": {
+    "agent-remote-controller": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
@@ -17,7 +24,14 @@
     "@agent-remote-controller/agent-provider-codex": "workspace:*",
     "@agent-remote-controller/agent-provider-sdk": "workspace:*",
     "@agent-remote-controller/agent-remote-protocol": "workspace:*",
-    "@agent-remote-controller/agent-remote-relay": "workspace:*"
+    "@agent-remote-controller/agent-remote-relay": "workspace:*",
+    "@agent-remote-controller/agent-remote-tunnel": "workspace:*",
+    "ws": "^8.21.0"
   },
-  "devDependencies": { "@types/node": "24.13.3", "@types/ws": "^8.18.1", "typescript": "5.9.3", "vitest": "4.1.10", "ws": "^8.21.0" }
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/ws": "^8.18.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
 }

@@ -12,6 +12,7 @@ export interface LoopbackTunnelOptions extends LoopbackTargetOptions {
   requestTimeoutMs?: number;
   maxResponseHeaderBytes?: number;
   maxWebSocketQueuedBytes?: number;
+  maxWebSocketMessageBytes?: number;
 }
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
@@ -52,23 +53,34 @@ function responseHeaders(raw: string[]): HeaderList {
 }
 
 class NodeWebSocketEndpoint implements TunnelWebSocketEndpoint {
-  private readonly listeners = new Set<(data: string | Uint8Array, binary: boolean) => void>();
+  private readonly listeners = new Set<(data: string | Uint8Array, binary: boolean) => void | Promise<void>>();
   private readonly pending: Array<{ data: string | Uint8Array; binary: boolean }> = [];
   private pendingBytes = 0;
+  private delivery = Promise.resolve();
   constructor(private readonly socket: WebSocket, private readonly maxPendingBytes: number) {
     socket.on('message', (data, binary) => {
       const value = binary ? new Uint8Array(data as Buffer) : data.toString();
-      if (this.listeners.size > 0) { this.listeners.forEach(listener => listener(value, binary)); return; }
       const bytes = typeof value === 'string' ? Buffer.byteLength(value) : value.byteLength;
       if (this.pendingBytes + bytes > this.maxPendingBytes) { socket.close(1013, 'WebSocket consumer is too slow'); return; }
+      if (this.listeners.size > 0) {
+        this.pendingBytes += bytes;
+        this.delivery = this.delivery.then(async () => { await Promise.all([...this.listeners].map(listener => listener(value, binary))); })
+          .then(() => { this.pendingBytes -= bytes; }, () => { this.pendingBytes -= bytes; socket.close(1011, 'WebSocket forwarding failed'); });
+        return;
+      }
       this.pending.push({ data: value, binary }); this.pendingBytes += bytes;
     });
   }
-  send(data: string | Uint8Array, binary = data instanceof Uint8Array) { this.socket.send(data, { binary }); }
-  onMessage(listener: (data: string | Uint8Array, binary: boolean) => void) {
+  send(data: string | Uint8Array, binary = data instanceof Uint8Array) {
+    return new Promise<void>((resolve, reject) => this.socket.send(data, { binary }, error => error ? reject(error) : resolve()));
+  }
+  onMessage(listener: (data: string | Uint8Array, binary: boolean) => void | Promise<void>) {
     this.listeners.add(listener);
-    for (const message of this.pending.splice(0)) listener(message.data, message.binary);
-    this.pendingBytes = 0;
+    for (const message of this.pending.splice(0)) {
+      const bytes = typeof message.data === 'string' ? Buffer.byteLength(message.data) : message.data.byteLength;
+      this.delivery = this.delivery.then(() => listener(message.data, message.binary))
+        .then(() => { this.pendingBytes -= bytes; }, () => { this.pendingBytes -= bytes; this.socket.close(1011, 'WebSocket forwarding failed'); });
+    }
     return () => this.listeners.delete(listener);
   }
   close(code = 1000, reason = '') { this.socket.close(normalizeNodeCloseCode(code), reason.slice(0, 123)); }
@@ -91,6 +103,7 @@ export function createLoopbackTunnelHandlers(options: LoopbackTunnelOptions): Tu
   return {
     http(request, context) {
       return new Promise((resolve, reject) => {
+        if (context.signal.aborted) { reject(new DOMException('Preview request was cancelled.', 'AbortError')); return; }
         const method = request.method.toUpperCase();
         if (!ALLOWED_METHODS.has(method)) { reject(new Error('Preview request method is not allowed.')); return; }
         if (!request.path.startsWith('/') || /[\r\n]/.test(request.path)) { reject(new Error('Preview request path is invalid.')); return; }
@@ -131,12 +144,14 @@ export function createLoopbackTunnelHandlers(options: LoopbackTunnelOptions): Tu
     },
     webSocket(request, context) {
       return new Promise((resolve, reject) => {
+        if (context.signal.aborted) { reject(new DOMException('Preview WebSocket was cancelled.', 'AbortError')); return; }
         if (!request.path.startsWith('/') || /[\r\n]/.test(request.path)) { reject(new Error('Preview WebSocket path is invalid.')); return; }
         const target = route(request.previewId);
         target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
         target.pathname = request.path.split('?')[0] || '/';
         target.search = request.path.includes('?') ? `?${request.path.split('?').slice(1).join('?')}` : '';
-        const socket = new WebSocket(target, request.protocols, { headers: outgoingHeaders(request.headers) as IncomingHttpHeaders, handshakeTimeout: options.requestTimeoutMs ?? 15_000, followRedirects: false });
+        const socket = new WebSocket(target, request.protocols, { headers: outgoingHeaders(request.headers) as IncomingHttpHeaders, handshakeTimeout: options.requestTimeoutMs ?? 15_000,
+          followRedirects: false, maxPayload: options.maxWebSocketMessageBytes ?? 256 * 1024 - 512 });
         const abort = () => { socket.terminate(); reject(new DOMException('Preview WebSocket was cancelled.', 'AbortError')); };
         context.signal.addEventListener('abort', abort, { once: true });
         socket.once('open', () => { context.signal.removeEventListener('abort', abort); resolve({ protocol: socket.protocol || undefined, socket: new NodeWebSocketEndpoint(socket, options.maxWebSocketQueuedBytes ?? 1024 * 1024) }); });

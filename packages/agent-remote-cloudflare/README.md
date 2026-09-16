@@ -56,3 +56,7 @@ authority fixture and synthetic Host messages. A test-only subclass provides
 storage fault injection and alarm inspection inside the private binding; these
 methods are absent from the production bundle. Tests do not start native provider
 CLIs or deploy remotely.
+
+## Local previews
+
+The configured `AGENT_REMOTE_PREVIEW_URL` uses the exact preview Custom Domain and the same Relay Durable Object. Preview data uses a dedicated binary WebSocket adapter and HTTP streaming. Application-facing preview WebSockets have a 16 MiB lifetime egress budget because Workers has no drain metric; reaching it closes the socket with 1013 so clients can reconnect. See [local previews](../../docs/current/agent-remote/local-previews.md) for authorization, base-path configuration, and Markdown image scope.

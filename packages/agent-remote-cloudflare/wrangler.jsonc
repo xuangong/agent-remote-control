@@ -6,12 +6,13 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{ "pattern": "agents.xianliao.de5.net", "custom_domain": true }],
+  "routes": [{ "pattern": "agents.xianliao.de5.net", "custom_domain": true }, { "pattern": "preview.xianliao.de5.net", "custom_domain": true }],
   "assets": { "directory": "../../dist/relay/web", "binding": "ASSETS", "run_worker_first": true },
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
   "vars": {
     "AGENT_REMOTE_RELAY_URL": "https://agents.xianliao.de5.net",
+    "AGENT_REMOTE_PREVIEW_URL": "https://preview.xianliao.de5.net",
     "AGENT_REMOTE_ISSUER": "https://token.xianliao.de5.net"
   }
 }

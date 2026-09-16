@@ -5,6 +5,8 @@ const controllerPolicy = "default-src 'self'; connect-src 'self'; img-src 'self'
 export default {
   async fetch(request: Request, env: RelayEnvironment): Promise<Response> {
     const url = new URL(request.url);
+    if (env.AGENT_REMOTE_PREVIEW_URL && url.origin === new URL(env.AGENT_REMOTE_PREVIEW_URL).origin) return env.RELAY.getByName('primary').fetch(request);
+    if (url.origin !== new URL(env.AGENT_REMOTE_RELAY_URL).origin) return new Response(null, { status: 403 });
     if ((request.method === 'GET' || request.method === 'HEAD') && !request.headers.has('upgrade')) {
       if (url.pathname === '/' || url.pathname === '/index.html') {
         url.pathname = '/index.html';

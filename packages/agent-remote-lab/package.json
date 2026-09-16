@@ -26,7 +26,8 @@
     "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
     "qrcode": "1.5.4",
     "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "react-dom": "^18.3.0",
+    "@agent-remote-controller/agent-remote-tunnel": "workspace:*"
   },
   "devDependencies": {
     "@agent-remote-controller/agent-remote-controller": "workspace:*",

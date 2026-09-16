@@ -9,7 +9,7 @@ type HttpState = {
 };
 type WsState = {
   kind: 'ws'; previewId: string; controller: AbortController; resolve?: (value: TunnelWebSocketAcceptance) => void; reject?: (error: Error) => void;
-  endpoint: LocalWebSocket; remote?: TunnelWebSocketEndpoint; timer?: ReturnType<typeof setTimeout>;
+  endpoint: LocalWebSocket; remote?: TunnelWebSocketEndpoint; credit: CreditWindow; timer?: ReturnType<typeof setTimeout>;
 };
 type StreamState = HttpState | WsState;
 
@@ -56,13 +56,21 @@ class BodyReceiver {
 }
 
 class LocalWebSocket implements TunnelWebSocketEndpoint {
-  private readonly messageListeners = new Set<(data: string | Uint8Array, binary: boolean) => void>();
+  private readonly messageListeners = new Set<(data: string | Uint8Array, binary: boolean) => void | Promise<void>>();
   private readonly closeListeners = new Set<(code: number, reason: string) => void>();
   private readonly pending: Array<{ data: string | Uint8Array; binary: boolean }> = [];
   private pendingBytes = 0;
-  constructor(private readonly transmit: (data: string | Uint8Array, binary: boolean) => void, private readonly terminate: (code: number, reason: string) => void, private readonly maxPendingBytes: number) {}
-  send(data: string | Uint8Array, binary = data instanceof Uint8Array) { this.transmit(data, binary); }
-  onMessage(listener: (data: string | Uint8Array, binary: boolean) => void) {
+  private sendingBytes = 0;
+  constructor(private readonly transmit: (data: string | Uint8Array, binary: boolean) => void | Promise<void>, private readonly terminate: (code: number, reason: string) => void,
+    private readonly maxPendingBytes: number, private readonly maxMessageBytes: number) {}
+  send(data: string | Uint8Array, binary = data instanceof Uint8Array) {
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength;
+    if (bytes > this.maxMessageBytes) { this.terminate(1009, 'WebSocket message is too large'); return; }
+    if (this.sendingBytes + bytes > this.maxPendingBytes) { this.terminate(1013, 'WebSocket sender is too fast'); return; }
+    this.sendingBytes += bytes;
+    return Promise.resolve(this.transmit(data, binary)).then(() => { this.sendingBytes -= bytes; }, () => { this.sendingBytes -= bytes; this.terminate(1011, 'WebSocket send failed'); });
+  }
+  onMessage(listener: (data: string | Uint8Array, binary: boolean) => void | Promise<void>) {
     this.messageListeners.add(listener);
     for (const message of this.pending.splice(0)) listener(message.data, message.binary);
     this.pendingBytes = 0;
@@ -70,8 +78,8 @@ class LocalWebSocket implements TunnelWebSocketEndpoint {
   }
   close(code = 1000, reason = '') { this.terminate(normalizeCloseCode(code), reason.slice(0, 123)); }
   onClose(listener: (code: number, reason: string) => void) { this.closeListeners.add(listener); return () => this.closeListeners.delete(listener); }
-  receive(data: string | Uint8Array, binary: boolean) {
-    if (this.messageListeners.size > 0) { this.messageListeners.forEach(listener => listener(data, binary)); return; }
+  async receive(data: string | Uint8Array, binary: boolean) {
+    if (this.messageListeners.size > 0) { await Promise.all([...this.messageListeners].map(listener => listener(data, binary))); return; }
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength;
     if (this.pendingBytes + bytes > this.maxPendingBytes) { this.terminate(1013, 'WebSocket consumer is too slow'); return; }
     this.pending.push({ data, binary }); this.pendingBytes += bytes;
@@ -102,7 +110,7 @@ export function createTunnelPeer(socket: TunnelSocket, handlers: TunnelPeerHandl
     queuedBytes += bytes;
     try {
       const sent = socket.send(encoded);
-      void Promise.resolve(sent).finally(() => { queuedBytes -= bytes; });
+      void Promise.resolve(sent).then(() => { queuedBytes -= bytes; }, () => { queuedBytes -= bytes; socket.close(1011, 'Tunnel send failed'); });
     } catch (error) {
       queuedBytes -= bytes;
       throw error;
@@ -117,11 +125,11 @@ export function createTunnelPeer(socket: TunnelSocket, handlers: TunnelPeerHandl
   function fail(id: string, code: string, message: string, notify = true) {
     const state = streams.get(id);
     if (!state) return;
+    finish(id);
     state.controller.abort(new TunnelError(code, message));
     state.reject?.(new TunnelError(code, message));
     if (state.kind === 'http') { state.requestCredit.close(); state.responseCredit.close(); state.requestReceiver?.error(new TunnelError(code, message)); state.responseReceiver?.error(new TunnelError(code, message)); }
-    else state.endpoint.closed(1011, message.slice(0, 123));
-    finish(id);
+    else { state.credit.close(); state.endpoint.closed(code === 'preview_revoked' ? 1008 : 1011, message.slice(0, 123)); }
     if (notify && !closed) transmit({ type: 'cancel', streamId: id, code, message: message.slice(0, 256) });
   }
   function allocate(kind: StreamState['kind']) {
@@ -174,8 +182,9 @@ export function createTunnelPeer(socket: TunnelSocket, handlers: TunnelPeerHandl
     }
     const state = streams.get(frame.streamId);
     if (!state) return;
-    if (frame.type === 'credit' && state.kind === 'http' && frame.direction !== 'ws') {
-      (frame.direction === 'request' ? state.requestCredit : state.responseCredit).grant(frame.bytes);
+    if (frame.type === 'credit') {
+      if (state.kind === 'ws' && frame.direction === 'ws') state.credit.grant(frame.bytes);
+      else if (state.kind === 'http' && frame.direction !== 'ws') (frame.direction === 'request' ? state.requestCredit : state.responseCredit).grant(frame.bytes);
     } else if (frame.type === 'body_chunk' && state.kind === 'http') {
       (frame.direction === 'request' ? state.requestReceiver : state.responseReceiver)?.push(frame.data);
     } else if (frame.type === 'body_end' && state.kind === 'http') {
@@ -191,20 +200,31 @@ export function createTunnelPeer(socket: TunnelSocket, handlers: TunnelPeerHandl
       if (!frame.hasBody) finish(frame.streamId);
     } else if (frame.type === 'cancel') fail(frame.streamId, frame.code, frame.message, false);
     else if (frame.type === 'ws_accept' && state.kind === 'ws') { if (state.timer) clearTimeout(state.timer); state.resolve?.({ protocol: frame.protocol, socket: state.endpoint }); }
-    else if (frame.type === 'ws_message' && state.kind === 'ws') state.endpoint.receive(frame.binary ? frame.data : new TextDecoder().decode(frame.data), frame.binary);
+    else if (frame.type === 'ws_message' && state.kind === 'ws') {
+      await state.endpoint.receive(frame.binary ? frame.data : new TextDecoder().decode(frame.data), frame.binary);
+      if (streams.has(frame.streamId)) transmit({ type: 'credit', streamId: frame.streamId, direction: 'ws', bytes: frame.data.byteLength });
+    }
     else if (frame.type === 'ws_close' && state.kind === 'ws') { state.endpoint.closed(frame.code, frame.reason); state.remote?.close(frame.code, frame.reason); finish(frame.streamId); }
   }
 
   async function acceptWebSocket(frame: Extract<TunnelFrame, { type: 'ws_open' }>) {
     if (!handlers.webSocket || streams.size >= limits.maxStreams) { transmit({ type: 'cancel', streamId: frame.streamId, code: 'capacity', message: 'WebSocket forwarding is unavailable.' }); return; }
     const controller = new AbortController();
-    const endpoint = new LocalWebSocket((data, binary) => transmit({ type: 'ws_message', streamId: frame.streamId, binary, data: typeof data === 'string' ? new TextEncoder().encode(data) : data }), (code, reason) => transmit({ type: 'ws_close', streamId: frame.streamId, code, reason }), limits.maxQueuedBytes);
-    const state: WsState = { kind: 'ws', previewId: frame.previewId, controller, endpoint };
+    const credit = new CreditWindow();
+    const endpoint = new LocalWebSocket(async (data, binary) => { const payload = typeof data === 'string' ? new TextEncoder().encode(data) : data; await credit.take(payload.byteLength); transmit({ type: 'ws_message', streamId: frame.streamId, binary, data: payload }); }, (code, reason) => transmit({ type: 'ws_close', streamId: frame.streamId, code, reason }), limits.maxQueuedBytes, limits.maxFrameBytes - 512);
+    const state: WsState = { kind: 'ws', previewId: frame.previewId, controller, endpoint, credit };
     streams.set(frame.streamId, state);
+    transmit({ type: 'credit', streamId: frame.streamId, direction: 'ws', bytes: limits.maxFrameBytes });
     try {
       const accepted = await handlers.webSocket({ previewId: frame.previewId, path: frame.path, headers: frame.headers, protocols: frame.protocols }, { signal: controller.signal });
+      if (streams.get(frame.streamId) !== state) { accepted.socket.close(1008, 'WebSocket handshake was cancelled'); return; }
       state.remote = accepted.socket;
-      accepted.socket.onMessage((data, binary) => transmit({ type: 'ws_message', streamId: frame.streamId, binary, data: typeof data === 'string' ? new TextEncoder().encode(data) : data }));
+      accepted.socket.onMessage(async (data, binary) => {
+        const payload = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+        if (payload.byteLength > limits.maxFrameBytes - 512) { accepted.socket.close(1009, 'WebSocket message is too large'); fail(frame.streamId, 'frame_too_large', 'WebSocket message is too large.'); return; }
+        await credit.take(payload.byteLength);
+        if (streams.get(frame.streamId) === state) transmit({ type: 'ws_message', streamId: frame.streamId, binary, data: payload });
+      });
       accepted.socket.onClose((code, reason) => { if (streams.has(frame.streamId)) transmit({ type: 'ws_close', streamId: frame.streamId, code: normalizeCloseCode(code), reason: reason.slice(0, 123) }); finish(frame.streamId); });
       endpoint.onMessage((data, binary) => accepted.socket.send(data, binary));
       endpoint.onClose((code, reason) => accepted.socket.close(code, reason));
@@ -213,7 +233,7 @@ export function createTunnelPeer(socket: TunnelSocket, handlers: TunnelPeerHandl
   }
 
   const removeMessage = socket.onMessage(data => {
-    try { const frame = decodeTunnelFrame(data, limits.maxFrameBytes); if (frame.type === 'ws_open') void acceptWebSocket(frame); else void handle(frame); }
+    try { const frame = decodeTunnelFrame(data, limits.maxFrameBytes); void (frame.type === 'ws_open' ? acceptWebSocket(frame) : handle(frame)).catch(() => socket.close(1011, 'Tunnel frame handling failed')); }
     catch { socket.close(1002, 'Invalid tunnel frame'); }
   });
   const removeClose = socket.onClose((_code, reason) => { closed = true; for (const id of [...streams.keys()]) fail(id, 'disconnected', reason || 'Tunnel disconnected.', false); });
@@ -237,13 +257,15 @@ export function createTunnelPeer(socket: TunnelSocket, handlers: TunnelPeerHandl
     },
     async openWebSocket(request: TunnelWebSocketRequest & { signal?: AbortSignal }) {
       const allocated = allocate('ws');
-      const endpoint = new LocalWebSocket((data, binary) => transmit({ type: 'ws_message', streamId: allocated.id, binary, data: typeof data === 'string' ? new TextEncoder().encode(data) : data }), (code, reason) => transmit({ type: 'ws_close', streamId: allocated.id, code, reason }), limits.maxQueuedBytes);
+      const credit = new CreditWindow();
+      const endpoint = new LocalWebSocket(async (data, binary) => { const payload = typeof data === 'string' ? new TextEncoder().encode(data) : data; await credit.take(payload.byteLength); transmit({ type: 'ws_message', streamId: allocated.id, binary, data: payload }); }, (code, reason) => transmit({ type: 'ws_close', streamId: allocated.id, code, reason }), limits.maxQueuedBytes, limits.maxFrameBytes - 512);
       return new Promise<TunnelWebSocketAcceptance>((resolve, reject) => {
-        const state: WsState = { kind: 'ws', previewId: request.previewId, controller: allocated.controller, endpoint, resolve, reject };
+        const state: WsState = { kind: 'ws', previewId: request.previewId, controller: allocated.controller, endpoint, credit, resolve, reject };
         state.timer = setTimeout(() => fail(allocated.id, 'timeout', 'WebSocket handshake timed out.'), limits.openTimeoutMs);
         streams.set(allocated.id, state);
         request.signal?.addEventListener('abort', () => fail(allocated.id, 'cancelled', 'WebSocket handshake cancelled.'), { once: true });
         transmit({ type: 'ws_open', streamId: allocated.id, previewId: request.previewId, path: request.path, headers: request.headers, protocols: request.protocols });
+        transmit({ type: 'credit', streamId: allocated.id, direction: 'ws', bytes: limits.maxFrameBytes });
       });
     },
     cancelPreview(previewId, code = 'preview_revoked', message = 'Preview registration was revoked.') {

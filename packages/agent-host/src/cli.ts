@@ -63,6 +63,9 @@ async function serve(daemon: boolean): Promise<void> {
   const registrations = await createHostRegistrations(environment,
     (line) => process.stderr.write(daemonDiagnosticLine(line, diagnosticSecrets)));
   const host = createAgentHost({ registrations, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+    preview: { stateDirectory: stateDir, ttlMs: Number(environment.AGENT_HOST_PREVIEW_TTL_MS ?? 3_600_000),
+      protectedPorts: (environment.AGENT_HOST_PREVIEW_PROTECTED_PORTS ?? '').split(',').filter(Boolean).map(Number),
+      diagnostic: event => { process.stderr.write(JSON.stringify({ event, time: new Date().toISOString() }) + '\n'); } },
     onDiagnostic: diagnostic => { process.stderr.write(uplinkDiagnosticLine(diagnostic)); },
     executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey, onCredential: credential => {
       diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);

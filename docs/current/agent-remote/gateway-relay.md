@@ -196,3 +196,7 @@ The cross-project browser harness also verifies sharing through actual Gateway
 APIs, selected-Host login, filtered recipient catalogs, cumulative quotas,
 idempotent retries, restart persistence and revoke/regrant. Provider CLI execution
 and a complete Host-wide activity inventory are outside this validation.
+
+## Local previews and Markdown resources
+
+See [local previews](local-previews.md) for the separate preview hostname, HTTP/SSE/WebSocket transport, Controller registration lifecycle, and session-scoped Markdown image loading.

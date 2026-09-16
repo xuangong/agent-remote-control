@@ -1,5 +1,6 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@agent-remote-controller/agent-remote-relay';
@@ -77,7 +78,7 @@ function local(request: IncomingMessage, origin: string): boolean {
 export class InvalidHttpRequest extends Error {
   constructor() { super('The HTTP request is unsupported.'); }
 }
-export function webRequest(request: IncomingMessage, url: URL, body = true): Request {
+export function webRequest(request: IncomingMessage, url: URL, body = true, signal?: AbortSignal): Request {
   try {
     const headers = new Headers();
     for (const [key, value] of Object.entries(request.headers)) {
@@ -85,7 +86,7 @@ export function webRequest(request: IncomingMessage, url: URL, body = true): Req
       else if (value !== undefined) headers.set(key, value);
     }
     const method = request.method ?? 'GET';
-    const init: RequestInit & { duplex?: 'half' } = { method, headers };
+    const init: RequestInit & { duplex?: 'half' } = { method, headers, signal };
     if (body && method !== 'GET' && method !== 'HEAD') {
       init.body = Readable.toWeb(request) as ReadableStream<Uint8Array>;
       init.duplex = 'half';
@@ -94,12 +95,14 @@ export function webRequest(request: IncomingMessage, url: URL, body = true): Req
   } catch { throw new InvalidHttpRequest(); }
 }
 export async function writeResponse(response: ServerResponse, result: Response) {
-  const body = await result.text();
   if (response.destroyed || response.writableEnded) return;
   const headers: Record<string, string | string[]> = {};
   result.headers.forEach((value, key) => { if (key !== 'set-cookie') headers[key] = value; });
   const cookies = result.headers.getSetCookie(); if (cookies.length) headers['set-cookie'] = cookies;
-  response.writeHead(result.status, headers); response.end(body);
+  response.writeHead(result.status, headers);
+  if (!result.body) { response.end(); return; }
+  response.flushHeaders();
+  await pipeline(Readable.fromWeb(result.body as import('node:stream/web').ReadableStream), response);
 }
 export function relaySocket(socket: WebSocket): RelaySocket {
   socket.on('error', () => undefined);

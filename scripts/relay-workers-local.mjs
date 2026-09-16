@@ -12,7 +12,7 @@ if (Buffer.byteLength(secret) < 32) throw new Error('The signing secret must con
 await writeFile(resolve(directory, '.dev.vars'), `AGENT_REMOTE_SIGNING_SECRET=${JSON.stringify(secret)}\n`, { mode: 0o600 });
 const config = {
   name: 'agent-remote-local', main: './worker.js', compatibility_date: '2026-06-01', compatibility_flags: ['nodejs_compat'],
-  vars: { AGENT_REMOTE_RELAY_URL: origin, AGENT_REMOTE_ISSUER: issuer },
+  vars: { AGENT_REMOTE_RELAY_URL: origin, AGENT_REMOTE_ISSUER: issuer, ...(process.env.AGENT_REMOTE_PREVIEW_URL ? { AGENT_REMOTE_PREVIEW_URL: process.env.AGENT_REMOTE_PREVIEW_URL } : {}) },
   durable_objects: { bindings: [{ name: 'RELAY', class_name: 'RelayObject' }] },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['RelayObject'] }],
   assets: { directory: '../web', binding: 'ASSETS', run_worker_first: true },

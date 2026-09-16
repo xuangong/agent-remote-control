@@ -1,4 +1,5 @@
 import { HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
+import { createControllerPreviews } from './previews.js';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
 import { AgentSessionInUseError } from '@agent-remote-controller/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
@@ -25,6 +26,7 @@ export interface AgentHostRuntime {
   close(): Promise<void>;
 }
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
+  preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
   installationId: string;
   name: string;
   onDiagnostic?: (diagnostic: AgentHostUplinkDiagnostic) => void | Promise<void>;
@@ -40,6 +42,7 @@ export interface AgentHost {
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const runtime = createAgentHostRuntime(options);
+  const previews = options.preview ? createControllerPreviews(options.preview) : undefined;
   let state: AgentHost['state'] = 'connecting';
   let generation = 0;
   let closed = false;
@@ -58,7 +61,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         credentialPersistence = pending;
         return pending;
       } : undefined,
-      resolveSession: runtime.resolveSession, control: runtime.control,
+      resolveSession: runtime.resolveSession, control: request => request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
+      previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
+        registered: info => previews.registered({ ...info, url: config.url }) } : undefined,
       onDiagnostic: options.onDiagnostic ? diagnostic => options.onDiagnostic!({ ...diagnostic, uplinkGeneration: current }) : undefined,
       onStateChange(next) { if (generation === current && !closed) state = next; } }) };
   };
@@ -82,7 +87,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     },
     close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed';
       connection.superseded = true;
-      await bounded(Promise.allSettled([connection.client.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
+      await bounded(Promise.allSettled([connection.client.close(), previews?.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
     })(); },
   };
 }

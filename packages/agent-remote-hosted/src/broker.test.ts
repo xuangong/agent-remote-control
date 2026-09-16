@@ -338,6 +338,26 @@ it('does not restore a creation ledger entry after a concurrent device revocatio
   expect(broker.snapshot().hosts).toEqual([]); expect(broker.snapshot().bindings).toEqual([]); expect(broker.snapshot().creations).toEqual([]);
 }, 10000);
 
+it('purges durable previews atomically when their Host is revoked', async () => {
+  const initialState: RemoteHostBrokerState = { ...restoredState, previews: [{ hostId: 'host', pendingRemovals: [], snapshot: {
+    epoch: 'controller', revision: 1, registrations: [{ id: 'preview', target: 'http://127.0.0.1:5173', status: 'active', createdAt: 1,
+      expiresAt: 20_000, revision: 1, pathMode: 'strip', sources: [{ sessionId: 'session', itemId: 'item' }] }],
+  } }] };
+  let saved: RemoteHostBrokerState | undefined;
+  const { broker } = await restoredFixture({ ownerSubject: 'alice', durable: true, initialState, onStateChange(state) { saved = structuredClone(state); } });
+  const response = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/revoke', { method: 'POST', body: '{}' }),
+    { principalSubject: () => 'alice' });
+  expect(response?.status).toBe(200);
+  expect(saved?.hosts).toEqual([]); expect(saved?.previews).toEqual([]); expect(broker.snapshot().previews).toEqual([]);
+  const { createHostedRelay, emptyRelayState } = await import('./index.js');
+  const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 'preview-revoke-secret-01234567890123456789' };
+  const restored = emptyRelayState(auth);
+  restored.tenants.push({ subject: 'alice', namespace: '7c1c385902e0ae7f484f5274fbad49131a97fc0771fac9b71f56d093232f49cd', broker: saved! });
+  const runtime = createHostedRelay({ ...auth, storage: { initial: restored, async commit() {} }, scheduler: { schedule() {}, cancel() {} } });
+  close.push(() => runtime.close());
+  expect((await runtime.fetch(new Request(auth.origin + '/health')))?.status).toBe(200);
+}, 10000);
+
 it('binds a temporary credential to only one installation during concurrent registration', async () => {
   const held = deferred<void>(); const entered = deferred<void>(); let commits = 0;
   const initialState = { ...restoredState, hosts: [], bindings: [], keys: restoredState.keys.map(([hash, value]) => [hash, { expires: value.expires }] as RemoteHostBrokerState['keys'][number]) };

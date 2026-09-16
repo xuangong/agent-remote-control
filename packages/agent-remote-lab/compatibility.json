@@ -75,6 +75,7 @@
         "packages/agent-remote-lab/tsconfig.node.json",
         "packages/agent-remote-lab/vite.config.ts",
         "packages/agent-remote-lab/vitest.config.ts",
+        "packages/agent-remote-lab/vitest.preview.config.ts",
         "packages/agent-remote-protocol/.gitignore",
         "packages/agent-remote-protocol/README.md",
         "packages/agent-remote-protocol/package.json",
@@ -84,13 +85,16 @@
         "packages/agent-remote-relay/package.json",
         "packages/agent-remote-relay/src",
         "packages/agent-remote-relay/tsconfig.json",
+        "packages/agent-remote-tunnel/package.json",
+        "packages/agent-remote-tunnel/src",
+        "packages/agent-remote-tunnel/tsconfig.json",
         "packages/agent-remote-web/package.json",
         "packages/agent-remote-web/scripts",
         "packages/agent-remote-web/src",
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:6c3b3dd7930097d5dd83abd8841b01b0084828caf8170791b21bd5e3acc105c1"
+      "digest": "sha256:cb7f85f759a3e9c910d1fa0d2cde6cec15b9d7e7fbb7fc64878948c7bc498662"
     }
   },
   "providers": [

@@ -11,7 +11,8 @@
     "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-remote-hosted": "workspace:*"
+    "@agent-remote-controller/agent-remote-hosted": "workspace:*",
+    "@agent-remote-controller/agent-remote-tunnel": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260601.1",

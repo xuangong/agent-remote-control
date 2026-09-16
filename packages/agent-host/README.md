@@ -245,3 +245,7 @@ starts a replacement writer or stops the daemon when a Remote connection closes.
 The default remains `private`. Existing private CLI or desktop sessions must be
 released once before they can be opened in the shared daemon. An already-running
 Host must be restarted to apply provider configuration changes.
+
+## Local previews and images
+
+The managed Controller enables authenticated loopback previews when Relay configures a separate preview origin. Registrations persist in the managed state directory, expire after one hour by default, and reconnect on startup without extending their deadline. Set `AGENT_HOST_PREVIEW_TTL_MS` to change the fixed lifetime and `AGENT_HOST_PREVIEW_PROTECTED_PORTS` to a comma-separated list of TCP ports that must not be exposed. Markdown image reads are scoped to the session working directory and use existing session resource transport. See [local previews](../../docs/current/agent-remote/local-previews.md) for the complete behavior and configuration.

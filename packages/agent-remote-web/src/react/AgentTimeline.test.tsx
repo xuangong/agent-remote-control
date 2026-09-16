@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
@@ -10,6 +10,7 @@ import { applyResourceUpdate, createReplicaState } from '../replica/reducer.js';
 import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
+import type { PreviewController } from './PreviewActions.js';
 
 function entry(
   seq: number,
@@ -42,6 +43,32 @@ function state(
 }
 
 describe('AgentTimeline', () => {
+  it('adds explicit preview actions for message and tool text while preserving transcript rendering', async () => {
+    const register = vi.fn(async () => ({
+      id: 'preview-one', target: 'http://localhost:5173', status: 'active' as const,
+      createdAt: 1_789_516_800_000, expiresAt: 1_789_520_400_000, revision: 1,
+      pathMode: 'strip' as const, sources: [{ sessionId: 'agent-one', itemId: 'epoch-one:provider-neutral:1:answer' }], availability: 'online' as const,
+    }));
+    const previews: PreviewController = { registrations: [], canManage: true, register, unregister: async () => undefined, open: async () => '' };
+    const content = state([
+      entry(1, { type: 'assistant_message', messageId: 'answer', text: 'Run http://localhost:5173/docs.' }),
+      entry(2, { type: 'tool_call', callId: 'shell', name: 'shell', status: 'completed', error: null,
+        detail: { type: 'shell', command: 'curl 127.0.0.1:4173/health' }, result: { content: [{ type: 'text', text: 'ready at http://localhost:4173' }] } }),
+    ]);
+    const container = await render(<AgentTimeline state={{ ...content, agent: {
+      id: 'agent-one', providerId: 'provider-neutral', createdAt: '2026-09-16T00:00:00Z', updatedAt: '2026-09-16T00:00:00Z',
+      status: 'idle', activeTurn: null, pendingInteractions: [],
+      capabilities: { history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
+        interactions: { question: true, toolApproval: true, planApproval: true } },
+      runtimeInfo: { providerId: 'provider-neutral', sessionId: 'native-one', status: 'idle' },
+    } }} previewController={previews} />);
+
+    expect(container.querySelectorAll('.agent-preview-target')).toHaveLength(3);
+    expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('Run http://localhost:5173/docs.');
+    expect(register).not.toHaveBeenCalled();
+    await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-target button')?.click());
+    expect(register.mock.calls[0]?.[1]).toMatchObject({ itemId: 'epoch-one:provider-neutral:1:answer' });
+  });
   it('replaces the actionable request with one completed history item when the Replica resolves it', async () => {
     const request: AgentInteractionRequest = { kind: 'plan_approval', requestId: 'plan-history', plan: 'Inspect once', allowedActions: ['approve'] };
     const response: AgentInteractionResponse = { kind: 'plan_approval', action: 'approve' };

@@ -1,12 +1,15 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@agent-remote-controller/agent-remote-protocol';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
+import { createHostPreviews, type HostPreviewState } from './host-previews.js';
+import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 
 type RpcResponse = { status: number; body: string };
 type ProviderDescriptor = { providerId: string; displayName: string };
 type DeviceCredential = { expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
+  tunnelToken?: string;
   ready?: boolean; credentialRotation?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
   pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown }>;
@@ -18,6 +21,7 @@ class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false) { super(message); }
 }
 export interface RemoteHostBrokerState {
+  previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
   hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation'>>;
@@ -75,7 +79,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
   function snapshot(): RemoteHostBrokerState {
-    return { ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
+    return { previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation }) => ({ id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
@@ -83,6 +87,11 @@ export function createHostBroker(options: HostBrokerOptions) {
   let sharing = new HostSharing(options.initialState?.sharing, () => {});
   let unavailable = false;
   let commits: Promise<unknown> = Promise.resolve();
+  const previews = createHostPreviews({ initial: options.initialState?.previews,
+    save: (value, publish) => commit(draft => { draft.previews = value; return { value: undefined, publish }; }),
+    remove: async (hostId, id) => { const result = await rpc(requireHost(hostId), 'POST', '/remote/previews/unregister', undefined, JSON.stringify({ id }));
+      if (result.status !== 200) throw new Error('Preview removal is pending.'); },
+  });
   function assertAvailable() { if (unavailable) throw new BrokerError(503, 'state_unavailable', 'Relay state is unavailable.'); }
   function failClosed() {
     unavailable = true;
@@ -181,6 +190,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   function disconnected(host: Host, socket: RelaySocket) {
     uplinkCleanups.get(socket)?.();
     if (host.socket !== socket) return;
+    previews.disconnect(host.id); host.tunnelToken = undefined;
     host.socket = undefined; host.ready = false;
     for (const pending of host.pending.values()) { clearTimeout(pending.timer); pending.reject(new BrokerError(503, 'host_offline', 'The Remote Host disconnected; the operation outcome may be unknown.')); }
     host.pending.clear();
@@ -223,7 +233,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     function registered() {
       if (retired || !host || host.socket !== socket) return;
-      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, heartbeat });
+      host.tunnelToken ??= randomBytes(32).toString('base64url');
+      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
@@ -311,6 +322,8 @@ export function createHostBroker(options: HostBrokerOptions) {
         }
       } else if (message.type === 'stream_close') {
         const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); stream?.socket.close(message.code, message.reason);
+      } else if (message.type === 'preview_snapshot') {
+        await previews.update(host.id, message.snapshot);
       } else closeConnection(1008, 'Unexpected uplink message');
       } catch (error) {
         const code = error instanceof BrokerError && error.status === 401 ? 1008 : error instanceof BrokerError && error.status === 429 ? 1013 : 1011;
@@ -555,6 +568,28 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (access?.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
     const subject = principal(context);
+    const previewSession = /^\/v1\/sessions\/([^/]+)\/previews$/.exec(url.pathname);
+    if (previewSession && request.method === 'POST') {
+      requireOwner(subject);
+      const binding = bindings.get(previewSession[1]!);
+      if (!binding || !sessionAllowed(binding, subject)) throw new BrokerError(404, 'session_unavailable', 'Session is unavailable.');
+      const body = await readBody(request);
+      const target = required(body.target, 'target'); const itemId = required(body.itemId, 'itemId');
+      if (body.pathMode !== undefined && body.pathMode !== 'strip' && body.pathMode !== 'preserve') throw new BrokerError(400, 'invalid_path_mode', 'Choose strip or preserve path mode.');
+      const result = await rpc(requireHost(binding.hostId), 'POST', '/remote/previews', undefined,
+        JSON.stringify({ target, source: { sessionId: binding.agentId, itemId }, pathMode: body.pathMode ?? 'strip' }));
+      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json' } });
+    }
+    const previewHost = /^\/v1\/remote\/hosts\/([^/]+)\/previews(?:\/([A-Za-z0-9_-]+)\/(unregister))?$/.exec(url.pathname);
+    if (previewHost) {
+      requireOwner(subject); requireAccess(previewHost[1]!, subject);
+      if (!previewHost[2] && request.method === 'GET') return json(200, previews.list(previewHost[1]!));
+      if (previewHost[2] && request.method === 'POST') {
+        await readBody(request); await previews.unregister(previewHost[1]!, previewHost[2]);
+        return json(200, { registration: previews.list(previewHost[1]!).registrations.find(value => value.id === previewHost[2]) });
+      }
+      return json(405, { error: 'Method is not allowed.' });
+    }
     if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(200, { hosts: visibleHosts(subject) });
     if (url.pathname === '/v1/remote/pairings' && request.method === 'POST') {
       requireOwner(subject);
@@ -592,11 +627,13 @@ export function createHostBroker(options: HostBrokerOptions) {
       await readBody(request);
       const host = hosts.get(revoking[1]!);
       if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
+      previews.invalidate(host.id);
       await commit(draft => {
         draft.keys = draft.keys.filter(([, credential]) => credential.installationId !== host.installationId);
         draft.bindings = draft.bindings.filter(binding => binding.hostId !== host.id);
         draft.creations = draft.creations.filter(([, value]) => draft.bindings.some(binding => binding.agentId === value.agentId));
         draft.hosts = draft.hosts.filter(value => value.id !== host.id);
+        draft.previews = (draft.previews ?? []).filter(value => value.hostId !== host.id);
         return { value: undefined, publish() {
           for (const [key, credential] of keys) if (credential.installationId === host.installationId) keys.delete(key);
           for (const [id, binding] of bindings) if (binding.hostId === host.id) {
@@ -605,6 +642,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           }
           for (const [key, value] of completedCreations) if (!bindings.has(value.agentId)) { completedCreations.delete(key); creations.delete(key); }
           hosts.delete(host.id);
+          previews.forget(host.id);
           if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(1008, 'Device revoked'); }
         } };
       });
@@ -679,6 +717,10 @@ export function createHostBroker(options: HostBrokerOptions) {
         if (now()-messageWindow >= 60_000) {messageWindow=now();messageCount=0;}
         if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');
         if (context.authorizeMessage?.(raw.toString()) === false) return client.close(1008, 'Recent authentication is required');
+        if (!owner(subject)) {
+          try { if (JSON.parse(raw).type === 'resource_resolve_request') return client.close(1008, 'Only the Host owner can resolve local files'); }
+          catch { return client.close(1008, 'Invalid session message'); }
+        }
         const expiresAt = expiry();
         if (expiresAt !== undefined && expiresAt <= now()) return client.close(1008, 'Credential expired');
         if (binary) return client.close(1003, 'Text protocol required');
@@ -707,6 +749,14 @@ export function createHostBroker(options: HostBrokerOptions) {
     return url.pathname === '/ws/remote-host' || !!(session && bindings.has(session[1]!));
   };
   return {
+    previews,
+    ownsHost: (hostId: string, subject: string) => hosts.has(hostId) && owner(subject),
+    tunnelHost: (token: string) => [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token)?.id,
+    acceptTunnel(token: string, socket: TunnelSocket) {
+      const host = [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token);
+      if (!host || unavailable) { socket.close(1008, 'Tunnel authorization expired'); return; }
+      previews.attach(host.id, socket);
+    },
     snapshot,
     activeStreamCount,
     settled: () => commits.then(() => undefined),
@@ -756,6 +806,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     close() {
       unavailable = true;
+      previews.close();
       for (const cleanup of [...uplinkCleanups.values()]) cleanup();
       for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket);
       for (const client of clients) client.close(1001, 'Broker closed');

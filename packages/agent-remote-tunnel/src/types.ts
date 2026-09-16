@@ -43,7 +43,7 @@ export interface TunnelWebSocketRequest {
 
 export interface TunnelWebSocketEndpoint {
   send(data: string | Uint8Array, binary?: boolean): void | Promise<void>;
-  onMessage(listener: (data: string | Uint8Array, binary: boolean) => void): () => void;
+  onMessage(listener: (data: string | Uint8Array, binary: boolean) => void | Promise<void>): () => void;
   close(code?: number, reason?: string): void;
   onClose(listener: (code: number, reason: string) => void): () => void;
 }

@@ -1,8 +1,10 @@
 import { createHostedRelay, validateGatewayOrigin, type RelayScheduler } from '@agent-remote-controller/agent-remote-hosted';
 import { SqliteRelayStore } from './storage.js';
 import { WorkerRelaySocket } from './socket.js';
+import { WorkerPreviewSocket } from './preview-socket.js';
 
 export interface RelayEnvironment {
+  AGENT_REMOTE_PREVIEW_URL?: string;
   AGENT_REMOTE_RELAY_URL: string;
   AGENT_REMOTE_ISSUER: string;
   AGENT_REMOTE_SIGNING_SECRET: string;
@@ -38,12 +40,22 @@ export class RelayObject {
         await this.context.storage.setAlarm(Date.now() + 60_000);
       },
     };
-    this.core = createHostedRelay({ ...auth, storage, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
+    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, storage, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
   }
   async fetch(request: Request): Promise<Response> {
     await this.ready;
     if (!this.core || this.recoveryRequired) return unavailable();
     if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+      const preview = await this.core.preparePreviewUpgrade(request);
+      if (preview) {
+        if (preview instanceof Response) return preview;
+        const pair = new WebSocketPair(); const client = pair[0]; const server = pair[1];
+        server.accept();
+        // Tunnel frames have end-to-end credit. Browser application sockets have no drain signal.
+        const socket = new WorkerPreviewSocket(server, new URL(request.url).pathname === '/ws/preview-tunnel' ? Number.MAX_SAFE_INTEGER : undefined);
+        try { preview.accept(socket); } catch { socket.close(1011, 'Preview connection failed'); }
+        return new Response(null, { status: 101, webSocket: client, headers: preview.protocol ? { 'sec-websocket-protocol': preview.protocol } : {} });
+      }
       const prepared = await this.core.prepareUpgrade(request);
       if (prepared instanceof Response) return prepared;
       if (!prepared) return new Response(null, { status: 404 });

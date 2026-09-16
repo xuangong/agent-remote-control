@@ -69,6 +69,12 @@ it('validates the portable state version and configuration and explicitly migrat
     { ...valid, loginChallenges: [['x'.repeat(43), { expiresAt: 'later' }]] }]) {
     expect(() => setup({ initial, async commit() {} })).toThrow(/state/i);
   }
+  const host = { id: 'host', installationId: 'installation', name: 'Host', providers: [], legacyDsh: false };
+  const preview = { hostId: host.id, pendingRemovals: [], snapshot: { epoch: 'controller', revision: 0, registrations: [] } };
+  const duplicatePreviews = emptyRelayState(auth);
+  duplicatePreviews.tenants.push({ subject: 'alice', namespace: createHash('sha256').update(JSON.stringify([auth.issuer, 'alice'])).digest('hex'),
+    broker: { keys: [], hosts: [host], bindings: [], creations: [], previews: [preview, structuredClone(preview)] } });
+  expect(() => setup({ initial: duplicatePreviews, async commit() {} })).toThrow(/state/i);
 }, 10000);
 
 it('prunes expired replay records and schedules the earliest remaining durable deadline', async () => {

@@ -3,6 +3,7 @@ import { WebSocket } from 'ws';
 import {
   decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
   type RemoteHostHeartbeat,
+  type PreviewRegistrationSnapshot,
 } from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
@@ -30,6 +31,12 @@ type DiagnosticDetails = Omit<RemoteHostUplinkDiagnostic, 'event'>;
 type DisconnectCause = Pick<RemoteHostUplinkDiagnostic, 'reason' | 'errorCode' | 'httpStatus'>;
 
 export interface RemoteHostUplinkClientOptions {
+  readonly previews?: {
+    snapshot(): PreviewRegistrationSnapshot | undefined;
+    subscribe(listener: (snapshot: PreviewRegistrationSnapshot) => void): () => void;
+    registered(info: { hostId: string; tunnelToken: string }): void;
+    disconnected(): void;
+  };
   readonly relay: AgentRemoteRelay;
   readonly installationId: string;
   readonly name: string;
@@ -113,6 +120,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     let cloudHeartbeat: RemoteHostHeartbeat | undefined;
     let lastHeartbeatAt: number | undefined;
     let retirement: DiagnosticDetails | undefined;
+    let unsubscribePreviews: (() => void) | undefined;
     function details(): DiagnosticDetails {
       return { connectionId, registered,
         ...(cloudHeartbeat ? { heartbeatTimeoutMs: cloudHeartbeat.intervalMs + cloudHeartbeat.timeoutMs } : {}),
@@ -128,6 +136,8 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     function retire(cause: DisconnectCause): void {
       if (retired) return;
       retired = true;
+      unsubscribePreviews?.();
+      if (registered) options.previews?.disconnected();
       retirement = { ...details(), ...cause };
       clearTimeout(registrationDeadline);
       clearTimeout(heartbeatDeadline);
@@ -213,6 +223,13 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         diagnose({ ...details(), event: 'registered' });
         attempts = 0;
         resolveReady({ hostId: decoded.value.hostId });
+        if (options.previews && decoded.value.tunnelToken) {
+          const publish = (snapshot: PreviewRegistrationSnapshot) => {
+            if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'preview_snapshot', snapshot }));
+          };
+          unsubscribePreviews = options.previews.subscribe(publish);
+          options.previews.registered({ hostId: decoded.value.hostId, tunnelToken: decoded.value.tunnelToken });
+        }
         return;
       }
       if (decoded.value.type === 'heartbeat') {

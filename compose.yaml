@@ -2,6 +2,7 @@ name: agent-remote-local
 
 x-relay-environment: &relay-environment
   AGENT_REMOTE_RELAY_URL: ${AGENT_REMOTE_RELAY_URL:?Set the public Relay origin}
+  AGENT_REMOTE_PREVIEW_URL: ${AGENT_REMOTE_PREVIEW_URL:-}
   AGENT_REMOTE_ISSUER: ${AGENT_REMOTE_ISSUER:?Set the public Gateway origin}
   AGENT_REMOTE_SIGNING_SECRET: ${AGENT_REMOTE_SIGNING_SECRET:?Set the shared signing secret}
   AGENT_REMOTE_PORT: ${AGENT_REMOTE_PORT:-5910}

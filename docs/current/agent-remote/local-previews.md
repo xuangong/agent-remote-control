@@ -1,0 +1,76 @@
+# Local previews and Markdown images
+
+The hosted Controller can expose a workstation's loopback HTTP service through an authenticated preview origin. Markdown local images use the session resource protocol independently of port registration. Both features require the updated browser, Relay, and Controller.
+
+## Preview flow
+
+A timeline block containing a loopback URL offers **Open preview**. Rendering a block does not register its port. Registration records the source session and timeline item on the Controller, then **Prepare link** creates a short-lived entry link. **Open ready preview** consumes that link in a new tab.
+
+The public route is `https://preview.xianliao.de5.net/p/<id>/<path>?<query>`. Registration selects one fixed loopback origin, including its port. HTTP paths and WebSocket handshakes cannot choose another target. No public wildcard hostname or wildcard certificate is required.
+
+The Controller opens a separate outbound WebSocket to `/ws/preview-tunnel` on the control origin. HTTP request and response bodies use multiplexed binary chunks with credit and cancellation; SSE passes through as a stream without collecting the full response. WebSockets have an independent upstream handshake, selected subprotocol, text/binary messages, and close propagation. The data connection reconnects independently of chat. Interrupted requests fail and are not replayed.
+
+The Controller persists registrations under its state directory, scoped to Relay origin and Host identity. The default fixed lifetime is one hour. Restart preserves the deadline; it does not extend it. Expired and unregistered records remain as bounded history. Active registrations reconnect after the control connection registers again. With no active registrations, the data connection closes.
+
+Full snapshots carry an epoch and revision over the control uplink. The browser refreshes the authoritative Host snapshot every five seconds and when the tab becomes visible. Connectivity and lifecycle are separate: an active registration can be offline. The Host preview list shows source links and supports unregistering. An offline unregister is durably queued at Relay, immediately blocks routing there, and is retried after Controller reconnect until an authoritative snapshot confirms removal.
+
+## Authorization
+
+Only the Host owner can register targets, prepare preview access, list registrations, or unregister. Existing Host sharing does not grant preview or arbitrary local image resolution rights.
+
+The entry URL contains a one-use proof in its fragment, valid for 60 seconds. The entry page removes the fragment before redeeming it for an HttpOnly, host-only cookie scoped to `/p/<id>/`. No Relay login cookie or tunnel credential is forwarded to the local service. Authorization and proxy identity headers are stripped; the upstream Origin is rewritten to the registered local origin after validating the browser origin at Relay. Each HTTP request and WebSocket handshake checks the original Relay browser session, current owner access, active registration, and Controller availability. Existing streams are rechecked on lifecycle changes and at most every 15 seconds, subject to the existing Gateway authority lease.
+
+The preview origin must differ from the control origin. Preview cookies isolate accidental routing across registrations; previews still share one browser origin and must be trusted local applications. This is not hostile application isolation. Service worker registration is denied. Unknown request hostnames are rejected.
+
+Targets are loopback HTTP or HTTPS origins. The Controller validates target addresses, redirects, methods, paths, headers, frame sizes, stream limits and queue bounds. Redirects are returned to the browser rather than followed by the Controller. Configure protected local ports if other administrative services listen on TCP.
+
+## Application paths
+
+| Mode | Upstream path | Supported behavior |
+| --- | --- | --- |
+| Root-mounted app (`strip`) | `/p/<id>/me` becomes `/me` | Same-target redirects, app cookie paths, and supported HTML/CSS references are rewritten under the preview prefix. |
+| Configured preview base (`preserve`) | `/p/<id>/me` stays `/p/<id>/me` | The app generates its own prefixed links and WebSocket URLs. HTML/CSS bytes pass through. |
+
+HTML/CSS adaptation is bounded to 1 MiB of decoded UTF-8 content and accepts identity or gzip encoding. Partial 206/Content-Range responses pass through unchanged. It parses static attributes and styles rather than rewriting JavaScript source. Relative references keep browser-relative semantics; supported root-relative and same-target references receive the prefix. Arbitrary JavaScript-generated URLs, service workers, cross-port APIs, and every framework's root assumptions cannot be transparently adapted. Use a configured base for development servers and complex apps.
+
+For Vite, register using **Configured preview base**, copy the returned ID, and set the base and browser-facing HMR endpoint before restarting the local server:
+
+```ts
+export default {
+  base: '/p/<id>/',
+  server: {
+    host: '127.0.0.1',
+    hmr: {
+      protocol: 'wss',
+      host: 'preview.xianliao.de5.net',
+      clientPort: 443,
+    },
+  },
+};
+```
+
+A new registration can have a new ID, requiring a corresponding base update. Multiple apps are selected by their explicit route prefix; the router does not infer an active app from Referer.
+
+## Configuration
+
+On the Relay, set `AGENT_REMOTE_PREVIEW_URL=https://preview.xianliao.de5.net`. Node Docker accepts this variable in `deploy/compose.ssh.yaml`. Configure DNS, a certificate for that exact hostname, and reverse-proxy both control and preview hostnames to the same Relay listener. Preserve the original Host and Origin headers and support HTTP streaming and WebSocket upgrades. Turn off proxy response buffering for SSE. The Workers configuration declares the exact preview Custom Domain and passes it to the same Durable Object. Configuration in source does not provision or deploy the domain.
+
+The Controller CLI enables previews with its existing managed state directory. `AGENT_HOST_PREVIEW_TTL_MS` sets the fixed registration lifetime in milliseconds; the default is `3600000`. `AGENT_HOST_PREVIEW_PROTECTED_PORTS` accepts comma-separated TCP ports. Programmatic `createAgentHost` users enable the feature through the optional `preview` configuration.
+
+A single application WebSocket message is limited to 256 KiB minus a 512-byte framing allowance. Larger payloads require application-level chunking.
+
+Workers exposes no WebSocket drain metric. Application-facing preview WebSockets therefore have a conservative 16 MiB lifetime egress budget and close with code 1013 when reached; clients can reconnect. Dedicated Controller tunnel traffic instead uses explicit peer credit to bound outstanding data. HTTP/SSE is not subject to that application-WebSocket lifetime limit.
+
+## Markdown local images
+
+`react-markdown` and a rehype image-node marker identify actual inline and reference images. Code fences and ordinary text do not trigger file reads. Local locators include `/absolute/path/image.png`, `file:///absolute/path/image.png`, and relative paths such as `./assets/image.png`. The parser does not turn these into requests to `agents.xianliao.de5.net/Users/...`.
+
+The browser resolves an unbound locator through `resource_resolve_request`, authorized separately as `resolve_resource`, then reads the returned session-scoped resource ID through `resource_request`. Existing bindings remain readable through their existing authorization. The Host captures the session's initial `runtimeInfo.cwd` as the authorized root. Relative references use the source document directory when an absolute source locator is available, otherwise the session root. A session with no valid cwd cannot resolve arbitrary local image paths.
+
+Canonical paths must remain under the authorized root after symlink resolution. Reads require a regular non-empty file, are limited to 4 MiB so Base64 responses fit the existing control-frame limit, and inspect PNG/JPEG/GIF/WebP signatures. SVG, arbitrary URI reads, directories, missing files and out-of-root paths return unavailable. The renderer shares bounded resolve/request caches, shows loading or unavailable text, and renders available bytes as an inert image data URL. It does not register a port or expose a filesystem HTTP mount.
+
+## Validation
+
+Focused tests cover real outbound Controller HTTP binary data and uploads, early SSE delivery, WebSocket subprotocol and binary messages, owner isolation, unregister cancellation, persistent registrations, and protocol queue limits. A real session WebSocket test resolves a document-relative PNG and reads exact bytes through the existing resource protocol. Renderer tests cover inline/reference images, source context, deduplication and code-fence non-resolution. Miniflare/workerd tests exercise real local HTTP/WebSocket forwarding and persist snapshots and offline removal across Durable Object restarts. `pnpm test:preview-browser` launches Chromium against a real Node Relay and Controller: it verifies a prefixed Vite app with hot reload and a local Markdown PNG loaded through actual authenticated resource frames. The browser fixture does not start a native provider CLI.
+
+The Lab regression run excludes the opt-in native Codex process suite and retains its existing skipped cases. No production Controller, external native daemon, public domain, or deployed Relay is used by this acceptance.

@@ -81,6 +81,29 @@ describe('loopback forwarding', () => {
     accepted.socket.close(1000, 'done');
   });
 
+  test('serializes WebSocket messages buffered before a consumer attaches', async () => {
+    const target = await server();
+    const wss = new WebSocketServer({ server: target.instance });
+    wss.on('connection', socket => { socket.send('one'); socket.send('two'); });
+    const handlers = createLoopbackTunnelHandlers({ lookup: () => ({ target: `http://127.0.0.1:${target.port}`, pathMode: 'strip' }) });
+    const accepted = await handlers.webSocket!({ previewId: 'p', path: '/', headers: [], protocols: [] }, { signal: new AbortController().signal });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; }); const messages: string[] = [];
+    accepted.socket.onMessage(async data => { messages.push(String(data)); if (messages.length === 1) await held; });
+    await new Promise(resolve => setTimeout(resolve, 20)); expect(messages).toEqual(['one']);
+    release(); await expect.poll(() => messages).toEqual(['one', 'two']); accepted.socket.close();
+  });
+
+  test('caps upstream WebSocket messages at the tunnel frame boundary', async () => {
+    const target = await server();
+    let closed!: (code: number) => void; const closure = new Promise<number>(resolve => { closed = resolve; });
+    const wss = new WebSocketServer({ server: target.instance });
+    wss.on('connection', socket => { socket.on('close', code => closed(code)); socket.send(new Uint8Array(17)); });
+    const handlers = createLoopbackTunnelHandlers({ lookup: () => ({ target: `http://127.0.0.1:${target.port}`, pathMode: 'strip' }), maxWebSocketMessageBytes: 16 });
+    await handlers.webSocket!({ previewId: 'p', path: '/', headers: [], protocols: [] }, { signal: new AbortController().signal });
+    expect(await closure).toBe(1009);
+  });
+
   test('carries a real loopback WS through the portable peer', async () => {
     const target = await server();
     const wss = new WebSocketServer({ server: target.instance, handleProtocols: protocols => protocols.has('chat') ? 'chat' : false });
@@ -104,6 +127,15 @@ describe('loopback forwarding', () => {
     await expect(handlers.http!({ previewId: 'p', method: 'CONNECT', path: '/', headers: [] }, { signal })).rejects.toThrow(/method/i);
     await expect(handlers.http!({ previewId: 'p', method: 'GET', path: 'http://evil.test/', headers: [] }, { signal })).rejects.toThrow(/path/i);
     await expect(handlers.http!({ previewId: 'p', method: 'GET', path: '/', headers: [['x-test', 'ok\r\ninjected: yes']] }, { signal })).rejects.toThrow(/header/i);
+  });
+
+  test('rejects requests whose cancellation signal is already aborted', async () => {
+    const controller = new AbortController(); controller.abort();
+    let lookups = 0;
+    const handlers = createLoopbackTunnelHandlers({ lookup: () => { lookups += 1; return { target: 'http://127.0.0.1:5173', pathMode: 'strip' }; } });
+    await expect(handlers.http!({ previewId: 'p', method: 'GET', path: '/', headers: [] }, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(handlers.webSocket!({ previewId: 'p', path: '/', headers: [], protocols: [] }, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(lookups).toBe(0);
   });
 
   test('allows only canonical loopback targets and protected ports', () => {

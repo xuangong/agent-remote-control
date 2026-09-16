@@ -59,4 +59,51 @@ describe('TunnelPeer', () => {
     expect(new Uint8Array(await new Response(response.body).arrayBuffer())).toEqual(bytes);
     relay.close(); controller.close();
   });
+
+  test('closes a bridged application socket without sending on the closed tunnel', async () => {
+    const [relaySocket, controllerSocket] = socketPair();
+    let applicationClosed: ((code: number, reason: string) => void) | undefined;
+    const application = {
+      send() {}, onMessage() { return () => {}; }, close() { applicationClosed?.(1000, 'closed'); },
+      onClose(listener: (code: number, reason: string) => void) { applicationClosed = listener; return () => { applicationClosed = undefined; }; },
+    };
+    const controller = createTunnelPeer(controllerSocket, { webSocket: async () => ({ socket: application }) });
+    const relay = createTunnelPeer(relaySocket, {});
+    await relay.openWebSocket({ previewId: 'p', path: '/', headers: [], protocols: [] });
+    expect(() => relay.close()).not.toThrow();
+    controller.close();
+  });
+
+  test('closes an upstream socket that accepts after its tunnel request was cancelled', async () => {
+    const [relaySocket, controllerSocket] = socketPair();
+    let resolveSocket!: (value: any) => void;
+    const accepted = new Promise<any>(resolve => { resolveSocket = resolve; });
+    const controller = createTunnelPeer(controllerSocket, { webSocket: async () => accepted });
+    const relay = createTunnelPeer(relaySocket, {});
+    const abort = new AbortController();
+    const pending = relay.openWebSocket({ previewId: 'p', path: '/', headers: [], protocols: [], signal: abort.signal });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    let close: [number, string] | undefined;
+    resolveSocket({ socket: { send() {}, onMessage() { return () => {}; }, close(code: number, reason: string) { close = [code, reason]; }, onClose() { return () => {}; } } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(close?.[0]).toBe(1008);
+    relay.close(); controller.close();
+  });
+
+  test('rejects a WebSocket message that cannot fit in one tunnel frame', async () => {
+    const [relaySocket, controllerSocket] = socketPair();
+    let applicationClosed: [number, string] | undefined;
+    const application = {
+      send() {}, onMessage() { return () => {}; }, close(code: number, reason: string) { applicationClosed = [code, reason]; }, onClose() { return () => {}; },
+    };
+    const controller = createTunnelPeer(controllerSocket, { webSocket: async () => ({ socket: application }) }, { maxFrameBytes: 1024, maxQueuedBytes: 2048 });
+    const relay = createTunnelPeer(relaySocket, {}, { maxFrameBytes: 1024, maxQueuedBytes: 2048 });
+    const accepted = await relay.openWebSocket({ previewId: 'p', path: '/', headers: [], protocols: [] });
+    accepted.socket.send(new Uint8Array(513), true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(applicationClosed?.[0]).toBe(1009);
+    relay.close(); controller.close();
+  });
 });

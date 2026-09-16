@@ -19,6 +19,7 @@ export interface LabWorkbenchActions {
   cancel?(): Promise<void>;
   respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
   requestResource?(binding: ResourceBinding): Promise<void>;
+  resolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
   setPlanning?(active: boolean): Promise<void>;
   setSessionSetting?(id: string, value: string): Promise<void>;
   listCommands?(): Promise<AgentCommand[]>;
@@ -82,6 +83,7 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
               onResourceRequest={actions.requestResource}
+              onResourceResolve={actions.resolveResource}
               questionDrafts={questionDrafts}
               onQuestionDraftChange={onQuestionDraftChange}
             />
@@ -123,11 +125,15 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
           onSetSessionSetting={actions.setSessionSetting}
           onListCommands={actions.listCommands}
           onExecuteCommand={actions.executeCommand}
+          onRequestResource={actions.requestResource}
+          onResolveResource={actions.resolveResource}
           onInspectCommand={(command) => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }}
         />
       </div>
     </div>
     {selectedCommand && state ? <AgentCommandDetails key={`${state.agent?.id}:${selectedCommand.id}`} command={selectedCommand} resources={state.resources}
-      onRequestResource={actions.requestResource} onClose={() => setInspected(undefined)} /> : null}
+      onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
+      resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch, selectedCommand.id])}
+      onClose={() => setInspected(undefined)} /> : null}
   </div>;
 }

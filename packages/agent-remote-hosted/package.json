@@ -24,7 +24,10 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-remote-protocol": "workspace:*"
+    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
+    "@agent-remote-controller/agent-remote-tunnel": "workspace:*",
+    "parse5": "^7.3.0",
+    "postcss": "^8.5.24"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

@@ -15,6 +15,17 @@ const heartbeatNonce = Type.String({ minLength: 1, maxLength: 128 });
 const rpc = { uplinkVersion: version, requestId: identity };
 const stream = { uplinkVersion: version, streamId: identity };
 const provider = Type.Object({ providerId: identity, displayName: identity }, object);
+export const PreviewRegistrationSnapshot = Type.Object({
+  epoch: identity, revision: Type.Integer({ minimum: 0 }),
+  registrations: Type.Array(Type.Object({
+    id: identity, target: Type.String({ maxLength: 2048 }),
+    status: Type.Union([Type.Literal('active'), Type.Literal('expired'), Type.Literal('unregistered')]),
+    createdAt: Type.Number(), expiresAt: Type.Number(), revision: Type.Integer({ minimum: 0 }),
+    pathMode: Type.Union([Type.Literal('strip'), Type.Literal('preserve')]),
+    sources: Type.Array(Type.Object({ sessionId: identity, itemId: identity }, object), { maxItems: 256 }),
+  }, object), { maxItems: 1024 }),
+}, object);
+export type PreviewRegistrationSnapshot = Static<typeof PreviewRegistrationSnapshot>;
 const closeCode = Type.Union([
   ...[1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014].map((code) => Type.Literal(code)),
   Type.Integer({ minimum: 3000, maximum: 4999 }),
@@ -22,7 +33,7 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|models|child/attach|attach|create|stop)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|models|child/attach|attach|create|stop|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
@@ -34,7 +45,8 @@ export const RemoteHostUplinkMessage = Type.Union([
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity, heartbeat: RemoteHostHeartbeat }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity, heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat_ack'), nonce: heartbeatNonce }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_request'), method: Type.Union([Type.Literal('GET'), Type.Literal('POST')]),
@@ -80,6 +92,7 @@ function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplink
     const sessionScoped = pathname === '/remote/attach' || pathname === '/remote/child/attach' || pathname === '/remote/create' || pathname === '/v1/providers'
       || /^\/v1\/sessions\/[^/]+\/(snapshot|timeline)$/.test(pathname);
     if (sessionScoped !== (value.sessionId !== undefined)) return false;
+    if (pathname === '/remote/previews') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
     if (pathname.startsWith('/remote/')) {
       const isRead = pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
         || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/models';

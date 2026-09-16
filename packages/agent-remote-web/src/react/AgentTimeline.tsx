@@ -13,6 +13,8 @@ import { ResourceList } from './ResourceList.js';
 import type { RendererRegistry } from './renderer-registry.js';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
 import { createTimelineRenderModel } from './timeline-render-model.js';
+import { PreviewActions, type PreviewController } from './PreviewActions.js';
+import { usePreviewController } from './PreviewContext.js';
 
 export type AgentTimelineState = AgentReplicaState;
 
@@ -28,8 +30,10 @@ export interface AgentTimelineProps {
   readonly onLoadOlder?: () => void | Promise<void>;
   readonly onInteractionResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void>;
+  readonly onResourceResolve?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
   readonly questionDrafts?: Readonly<Record<string, QuestionDraft>>;
   readonly onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void;
+  readonly previewController?: PreviewController;
 }
 
 export function AgentTimeline({
@@ -44,9 +48,13 @@ export function AgentTimeline({
   onOpenChildSession,
   onInteractionResponse,
   onResourceRequest,
+  onResourceResolve,
   questionDrafts,
   onQuestionDraftChange,
+  previewController,
 }: AgentTimelineProps) {
+  const inheritedPreviewController = usePreviewController();
+  const previews = previewController ?? inheritedPreviewController;
   const renderModel = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
   const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);
@@ -96,7 +104,11 @@ export function AgentTimeline({
       {renderModel.length === 0
         ? <p className="agent-timeline-empty">No timeline activity.</p>
         : renderModel.map(({ entry, key, messageGroup }) => <div className="agent-timeline-entry" key={key} data-entry-key={key}>
-            <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink} />
+            <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
+              resources={state.resources} resourceBindings={entry.resources}
+              resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch])}
+              onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
+            {previews && state.agent?.id ? <PreviewActions agentId={state.agent.id} itemId={key} text={previewText(entry.item)} controller={previews} /> : null}
             {registry?.render(entry.item)}
             <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
             <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
@@ -115,6 +127,31 @@ export function AgentTimeline({
       />)}
     </aside> : null}
   </section>;
+}
+
+function previewText(item: AgentReplicaState['timeline']['entries'][number]['item']): string {
+  switch (item.type) {
+    case 'user_message':
+    case 'assistant_message':
+    case 'reasoning': return item.text;
+    case 'error': return item.message;
+    case 'tool_call': return [toolDetailText(item.detail), ...(item.result?.content.map(content => content.type === 'text' ? content.text : JSON.stringify(content.value)) ?? [])].join('\n');
+    case 'todo': return item.items.map(task => task.text).join('\n');
+    case 'interaction': return JSON.stringify(item.request);
+    case 'compaction': return '';
+  }
+}
+
+function toolDetailText(detail: Extract<AgentReplicaState['timeline']['entries'][number]['item'], { type: 'tool_call' }>['detail']): string {
+  switch (detail.type) {
+    case 'shell': return detail.command;
+    case 'read':
+    case 'edit':
+    case 'write': return detail.filePath;
+    case 'search': return detail.query;
+    case 'fetch': return detail.url;
+    case 'other': return detail.description;
+  }
 }
 
 function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onLoadOlder?: () => void | Promise<void>; loading?: boolean; error?: string }) {

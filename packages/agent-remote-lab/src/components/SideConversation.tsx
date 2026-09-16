@@ -41,6 +41,7 @@ export function SideConversation({ session, transport, store, draft, onDraftChan
     setPlanning: async (value) => { await active.setPlanning(value); }, setSessionSetting: async (id, value) => { await active.setSessionSetting(id, value); },
     listCommands: () => active.listCommands(), executeCommand: (id, args) => active.executeCommand(id, args),
     respondToInteraction: async (id, response) => { await active.respondToInteraction(id, response); }, requestResource: async (binding) => { await active.requestResource(binding.resourceId); },
+    resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
   } : {};
   return <aside className="lab-side-conversation" aria-label="Side conversation" ref={panel} onFocusCapture={onFocus} hidden={!expanded} style={{ order: position }}>
     <LabWorkbench state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}

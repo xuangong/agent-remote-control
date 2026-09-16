@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePreviewVisibility } from './usePreviewVisibility.js';
 
-export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMinimize, visible, browserKey }: {
+export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMinimize, visible, browserKey, container }: {
+  readonly container?: HTMLElement | null;
   readonly visible: boolean; readonly browserKey: string; readonly onMinimize: () => void;
   readonly url?: string; readonly target: string; readonly error?: string; readonly returnFocus?: HTMLElement; readonly onClose: () => void;
 }) {
@@ -13,7 +14,6 @@ export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMin
   const [navigation, setNavigation] = useState({ address: '', back: false, forward: false });
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string>();
-  const [expanded, setExpanded] = useState(false);
 
   usePreviewVisibility(dialog, visible, browserKey);
 
@@ -112,8 +112,8 @@ export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMin
     iframe.current.src = address;
   }
 
-  return createPortal(<dialog ref={dialog} className={`agent-preview-browser${expanded ? ' agent-preview-browser-expanded' : ''}`}
-    aria-label="Local preview browser" onCancel={event => { event.preventDefault(); onClose(); }}>
+  return createPortal(<dialog ref={dialog} className="agent-preview-browser"
+    aria-label="Local preview browser" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } }} onCancel={event => { event.preventDefault(); onClose(); }}>
     <div className="agent-preview-browser-layout">
       <header className="agent-preview-browser-toolbar">
         <nav aria-label="Preview navigation">
@@ -121,10 +121,9 @@ export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMin
           <button type="button" aria-label="Forward" title="Forward" disabled={!navigation.forward || loading || !!error} onClick={() => navigate(1)}><BrowserIcon name="forward" /></button>
           <button type="button" aria-label="Reload preview" title="Reload preview" disabled={!url || !!error} onClick={reload}><BrowserIcon name="reload" /></button>
         </nav>
-        <div className="agent-preview-browser-address" aria-label="Preview address" title={navigation.address || target}>
-          <span>{navigation.address || target}</span>
+        <div className="agent-preview-browser-address" aria-label="Preview address" title={`${target} → ${navigation.address || 'Opening…'}`}>
+          <span className="agent-preview-source-address">{target}</span><span className="agent-preview-address-arrow">→</span><span className="agent-preview-mapped-address">{navigation.address || 'Opening…'}</span>
         </div>
-        <button className="agent-preview-browser-expand" type="button" aria-label={expanded ? 'Restore preview size' : 'Expand preview'} title={expanded ? 'Restore preview size' : 'Expand preview'} onClick={() => setExpanded(value => !value)}><BrowserIcon name={expanded ? 'restore' : 'expand'} /></button>
         <button type="button" aria-label="Minimize preview" title="Minimize preview" onClick={onMinimize}><BrowserIcon name="minimize" /></button>
         <button type="button" aria-label="Close preview" title="Close preview" onClick={onClose} autoFocus><BrowserIcon name="close" /></button>
       </header>
@@ -135,11 +134,11 @@ export function PreviewBrowser({ url, target, error, returnFocus, onClose, onMin
           sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" allow="fullscreen" /> : null}
       </div>
     </div>
-  </dialog>, document.body);
+  </dialog>, container ?? document.body);
 }
 
-function BrowserIcon({ name }: { readonly name: 'back' | 'forward' | 'reload' | 'close' | 'expand' | 'restore' | 'minimize' }) {
+function BrowserIcon({ name }: { readonly name: 'back' | 'forward' | 'reload' | 'close' | 'minimize' }) {
   const paths = { minimize: 'M5 17h14', back: 'm14 5-7 7 7 7', forward: 'm10 5 7 7-7 7', close: 'm6 6 12 12M18 6 6 18',
-    reload: 'M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 12a8 8 0 0 0-2-5', expand: 'M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5', restore: 'M3 8h5V3m8 0v5h5M8 21v-5H3m18 0h-5v5' };
+    reload: 'M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 12a8 8 0 0 0-2-5' };
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }

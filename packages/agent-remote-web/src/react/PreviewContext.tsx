@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { HttpPreviewClient, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 import type { PreviewController } from './PreviewActions.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
+import { PreviewWorkspaceContext } from './PreviewWorkspace.js';
 
 export interface PreviewContextValue extends PreviewController {
   readonly loading: boolean;
@@ -41,6 +42,7 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
     setBrowsers(browserEntries.current);
   }, []);
   const [activeKey, setActiveKey] = useState<string>();
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const requests = useMemo(() => new Map<string, AbortController>(), [scope]);
   const currentBrowsers = browsers.filter(entry => entry.version === scope.version);
   const closeBrowser = useCallback((key: string) => {
@@ -125,17 +127,18 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
   }), [canManage, client, currentState, hostId, refresh, scope, requests, updateBrowsers]);
 
   return <Context.Provider value={value}><DockContext.Provider value={{ browsers: currentBrowsers, activeKey, resume: resumeBrowser, close: closeBrowser }}>
+    <PreviewWorkspaceContext.Provider value={{ open: currentBrowsers.some(entry => entry.key === activeKey), setContainer }}>
     {children}
     {currentBrowsers.map(browser => {
       const selected = currentState.registrations.find(item => item.id === browser.id);
       const unavailable = selected && (selected.pendingUnregister ? 'This preview has been unregistered.'
         : selected.status !== 'active' ? `This preview is ${selected.status}. Open it again to register.`
         : selected.availability !== 'online' ? 'Controller offline. Close and reopen the preview after it reconnects.' : undefined);
-      return <PreviewBrowser key={browser.key} browserKey={browser.key} visible={activeKey === browser.key}
+      return <PreviewBrowser container={container} key={browser.key} browserKey={browser.key} visible={activeKey === browser.key}
         url={browser.url} target={browser.target} error={unavailable ?? browser.error} returnFocus={browser.returnFocus}
         onMinimize={minimizeBrowser} onClose={() => closeBrowser(browser.key)} />;
     })}
-  </DockContext.Provider></Context.Provider>;
+  </PreviewWorkspaceContext.Provider></DockContext.Provider></Context.Provider>;
 }
 
 export function PreviewDock({ sessionId }: { readonly sessionId?: string }) {

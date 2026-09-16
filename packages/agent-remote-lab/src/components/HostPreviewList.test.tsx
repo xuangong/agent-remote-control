@@ -72,3 +72,17 @@ function RegistrationStateHarness({ controller }: { readonly controller: Preview
   } : controller;
   return <><HostPreviewList controller={current} /><button data-action="expire" onClick={() => setExpired(true)}>Expire</button></>;
 }
+
+it('only lists active previews and shows an empty state after the last one expires', async () => {
+  const active = value().registrations[0]!;
+  const container = await render(<HostPreviewList controller={value({ registrations: [active,
+    { ...active, id: 'expired', target: 'http://localhost:6001', status: 'expired' },
+    { ...active, id: 'unregistered', target: 'http://localhost:6002', status: 'unregistered' },
+  ] })} />);
+  expect(container.querySelectorAll('li')).toHaveLength(1);
+  expect(container.textContent).not.toContain('localhost:6001');
+  expect(container.textContent).not.toContain('localhost:6002');
+  const empty = await render(<HostPreviewList controller={value({ registrations: [{ ...active, status: 'expired' }] })} />);
+  expect(empty.querySelectorAll('li')).toHaveLength(0);
+  expect(empty.textContent).toContain('No active previews');
+});

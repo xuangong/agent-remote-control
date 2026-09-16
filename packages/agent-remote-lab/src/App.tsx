@@ -39,7 +39,7 @@ import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { PreviewProvider, TimelineDisplay, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
+import { PreviewProvider, PreviewWorkspace, TimelineDisplay, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
@@ -870,7 +870,7 @@ export function App({
         <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
       </section> : null}
       {directory ? <HostPairing managementVisible={!compactLayout || sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={compactLayout ? undefined : () => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
-      {previewHost?.access !== 'shared' && previewHost ? <HostPreviewList onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
+      {previewHost?.access !== 'shared' && previewHost ? <HostPreviewList showInactive={compactLayout} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
       <div className="lab-directory-panel" hidden={compactLayout && sessionPanel !== 'list'}>
       {compactLayout && providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
       {directory ? <SessionDirectory searchable={compactLayout} directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
@@ -903,7 +903,7 @@ export function App({
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       {compactLayout && sessionPanel === 'list' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}>New session</button></footer> : null}
     </SupportingRail>
-    <section className="lab-main-stage" {...backgroundInert}>
+    <PreviewWorkspace className="lab-main-stage" {...backgroundInert}>
       <section
         ref={workbenchPanelRef}
         id="lab-workbench"
@@ -967,7 +967,7 @@ export function App({
       >
         <TraceView state={state} />
       </section>
-    </section>
+    </PreviewWorkspace>
     <SupportingRail
       id="lab-inspector"
       label="Replica Inspector"

@@ -126,10 +126,12 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
     import React, {useRef,useState} from 'react';import {createRoot} from 'react-dom/client';
     import {PreviewProvider,usePreviewController,PreviewDock} from '../../agent-remote-web/src/react/PreviewContext.tsx';
     import {PreviewActions} from '../../agent-remote-web/src/react/PreviewActions.tsx';
+    import {PreviewWorkspace} from '../../agent-remote-web/src/react/PreviewWorkspace.tsx';
     import {HttpPreviewClient} from '../../agent-remote-web/src/client/preview-client.ts';
     import {trackFocusModality} from './focus-modality.ts';
     import {ViewOptions} from './components/ViewOptions.tsx';
     import {SupportingRail} from './components/SupportingRail.tsx';
+    import {HostPreviewList} from './components/HostPreviewList.tsx';
     trackFocusModality(document);
     function ChromeControls(){
       const view=useRef(null),settings=useRef(null);const [open,setOpen]=useState(false);
@@ -141,7 +143,8 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
         </SupportingRail></>;
     }
     function View(){const controller=usePreviewController();const [other,setOther]=useState(false);const sessionId=other?'another-session':${JSON.stringify(f.agentId)};return <><ChromeControls/><button onClick={()=>setOther(!other)}>Switch session</button><PreviewDock sessionId={sessionId}/><textarea aria-label="Chat draft" defaultValue="Unsent message"/><PreviewActions controller={controller} agentId={sessionId} itemId="message-1" text=${JSON.stringify(f.target + '/')} /></>;}
-    createRoot(document.getElementById('root')).render(<PreviewProvider client={new HttpPreviewClient(${JSON.stringify(f.url + f.alice.basePath)})} hostId=${JSON.stringify(f.hostId)} canManage><View/></PreviewProvider>);
+    function Workspace(){const controller=usePreviewController();const [open,setOpen]=useState(false);const trigger=useRef(null);return <><button style={{position:'fixed',bottom:0,left:0,zIndex:5}} ref={trigger} onClick={()=>setOpen(true)}>Host previews</button><SupportingRail id="preview-rail" label="Context" className="lab-context-rail" compact open={open} triggerRef={trigger} onClose={()=>setOpen(false)}><HostPreviewList controller={controller} onOpen={()=>setOpen(false)}/></SupportingRail><PreviewWorkspace {...(open?{inert:''}:{})} style={{height:'100dvh'}}><View/></PreviewWorkspace></>;}
+    createRoot(document.getElementById('root')).render(<PreviewProvider client={new HttpPreviewClient(${JSON.stringify(f.url + f.alice.basePath)})} hostId=${JSON.stringify(f.hostId)} canManage><Workspace/></PreviewProvider>);
   `;
   browserScript = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
   const browser = await engine.launch({ headless: true }); onPreviewCleanup(() => browser.close());
@@ -169,6 +172,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   await page.locator('.agent-preview-open').click();
   const frame = page.frameLocator('dialog[open] iframe[title="Local preview"]');
   await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  expect(await page.locator('[aria-label="Preview address"]').textContent()).toContain(f.target + '/→');
   await frame.getByRole('textbox', { name: 'Application draft' }).fill('Keep this preview state');
   await frame.getByRole('textbox', { name: 'Application draft' }).press('Shift+Tab');
   expect(await page.evaluate(() => document.documentElement.dataset.inputModality)).toBe('keyboard');
@@ -247,17 +251,60 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   const bounds = await page.getByRole('dialog', { name: 'Local preview browser' }).boundingBox();
   expect(bounds?.width).toBeCloseTo(390, 0); expect(bounds?.height).toBeCloseTo(844, 0);
   await page.screenshot({ path: fileURLToPath(new URL('../../../.tmp/preview-' + engine.name() + '.png', import.meta.url)) });
-  if (engine === chromium) {
+  {
     await page.setViewportSize({ width: 1440, height: 900 });
-    expect((await page.getByRole('dialog').boundingBox())?.width).toBe(960);
-    await page.getByRole('button', { name: 'Expand preview', exact: true }).click();
-    expect((await page.getByRole('dialog').boundingBox())?.width).toBe(1440);
-    await page.getByRole('button', { name: 'Restore preview size', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('dialog[open]')?.matches(':modal'));
+    expect((await page.getByRole('dialog').boundingBox())?.width).toBe(720);
+    expect(await page.getByRole('dialog').evaluate(element => element.matches(':modal'))).toBe(false);
+    const conversation = page.locator('.agent-preview-workspace-content');
+    expect((await conversation.boundingBox())?.width).toBe(720);
+    await page.getByRole('textbox', { name: 'Chat draft' }).fill('Edit while preview stays open');
+    await frame.getByRole('textbox', { name: 'Application draft' }).fill('Interactive preview');
+    expect(await page.getByRole('textbox', { name: 'Chat draft' }).inputValue()).toBe('Edit while preview stays open');
+    expect(await frame.getByRole('textbox', { name: 'Application draft' }).inputValue()).toBe('Interactive preview');
+    const divider = page.getByRole('separator', { name: 'Resize conversation and preview' });
+    const handle = (await divider.boundingBox())!;
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + 90);
+    await page.mouse.down(); await page.mouse.move(900, handle.y + 90, { steps: 6 }); await page.mouse.up();
+    expect((await conversation.boundingBox())?.width).toBeCloseTo(900, 0);
+    expect((await page.getByRole('dialog').boundingBox())?.width).toBeCloseTo(540, 0);
+    await divider.press('ArrowLeft');
+    expect((await conversation.boundingBox())?.width).toBeCloseTo(871.2, 0);
+    await page.getByRole('button', { name: 'Minimize preview', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    expect((await conversation.boundingBox())?.width).toBe(1440);
+    await page.getByRole('button', { name: /^Resume preview:/ }).click();
+    expect((await conversation.boundingBox())?.width).toBeCloseTo(871.2, 0);
+    expect(await frame.getByRole('textbox', { name: 'Application draft' }).inputValue()).toBe('Interactive preview');
+    await divider.dblclick();
+    expect((await conversation.boundingBox())?.width).toBe(720);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => document.querySelector('dialog')?.matches(':modal'));
+    expect(await frame.getByRole('textbox', { name: 'Application draft' }).inputValue()).toBe('Interactive preview');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForFunction(() => !document.querySelector('dialog')?.matches(':modal'));
+    expect(await frame.getByRole('textbox', { name: 'Application draft' }).inputValue()).toBe('Interactive preview');
+    await page.getByRole('textbox', { name: 'Chat draft' }).fill('Unsent message');
+    await page.screenshot({ path: fileURLToPath(new URL('../../../.tmp/preview-desktop-split-' + engine.name() + '.png', import.meta.url)) });
   }
   await page.getByRole('button', { name: 'Close preview', exact: true }).click();
   expect(await page.locator('iframe').count()).toBe(0);
   expect(await page.getByRole('textbox', { name: 'Chat draft' }).inputValue()).toBe('Unsent message');
   expect(await page.locator('.agent-preview-open').evaluate(element => element === document.activeElement)).toBe(true);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.getByRole('button', { name: 'Host previews', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Context', exact: true }).getByRole('button', { name: 'Open preview', exact: true }).click();
+  await frame.getByRole('heading', { name: 'Local application' }).waitFor();
+  expect(await page.getByRole('dialog', { name: 'Context', exact: true }).count()).toBe(0);
+  expect(await page.locator('.agent-preview-workspace').getAttribute('inert')).toBeNull();
+  await page.getByRole('separator').press('End');
+  expect((await page.getByRole('dialog', { name: 'Local preview browser' }).boundingBox())?.width).toBeCloseTo(280, 0);
+  const closeBounds = (await page.getByRole('button', { name: 'Close preview', exact: true }).boundingBox())!;
+  expect(closeBounds.x + closeBounds.width).toBeLessThanOrEqual(1024);
+  await frame.getByRole('textbox', { name: 'Application draft' }).fill('Opened from Host previews');
+  await page.getByRole('textbox', { name: 'Chat draft' }).fill('Unsent message');
+  await page.getByRole('button', { name: 'Close preview', exact: true }).press('Escape');
+  expect(await page.locator('iframe').count()).toBe(0);
   await page.route('https://external.test/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>External page</h1>' }));
   await page.locator('.agent-preview-open').click();
   await frame.getByRole('link', { name: 'External', exact: true }).click();

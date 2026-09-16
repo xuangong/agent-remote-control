@@ -1,7 +1,15 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 export function usePreviewVisibility(dialog: RefObject<HTMLDialogElement>, visible: boolean, key: string) {
   const shown = useRef(false);
+  const [modal, setModal] = useState(() => window.matchMedia('(max-width: 760px)').matches);
+  const previousModal = useRef(modal);
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 760px)');
+    const update = () => setModal(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
   useEffect(() => {
     const element = dialog.current;
     if (!element) return;
@@ -13,14 +21,18 @@ export function usePreviewVisibility(dialog: RefObject<HTMLDialogElement>, visib
       return rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < window.innerWidth && rect.bottom > 0 && rect.top < window.innerHeight;
     });
     const minimize = () => {
+      const restoreFocus = element.contains(document.activeElement);
       element.close();
       animation?.cancel();
-      dock?.focus({ preventScroll: true });
+      if (restoreFocus) dock?.focus({ preventScroll: true });
     };
-    if (visible) element.showModal();
+    const changedMode = previousModal.current !== modal;
+    previousModal.current = modal;
+    if (changedMode && element.open) element.close();
+    if (visible) { if (modal) element.showModal(); else element.show(); }
     if (!element.open) return;
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduced || !element.animate || (visible && !shown.current)) {
+    if (changedMode || reduced || !element.animate || (visible && !shown.current)) {
       if (!visible) minimize();
       shown.current = true;
       return;
@@ -44,5 +56,5 @@ export function usePreviewVisibility(dialog: RefObject<HTMLDialogElement>, visib
     }).catch(() => {});
     shown.current = true;
     return () => { cancelled = true; animation?.cancel(); delete element.dataset.motion; };
-  }, [dialog, visible, key]);
+  }, [dialog, visible, key, modal]);
 }

@@ -48,3 +48,5 @@ export { AgentChildSessionList } from './react/AgentChildSessionList.js';
 export type { AgentChildSessionListProps, AgentChildSessionView } from './react/AgentChildSessionList.js';
 
 export type { SessionLinkResolver } from './react/items/ToolCallItem.js';
+
+export { PreviewWorkspace } from './react/PreviewWorkspace.js';

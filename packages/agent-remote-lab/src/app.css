@@ -302,7 +302,7 @@ textarea {
   background: var(--obs-surface);
 }
 
-.lab-main-stage > section { width: 100%; height: 100%; outline-offset: -3px; }
+.lab-main-stage > .agent-preview-workspace-content > section { width: 100%; height: 100%; outline-offset: -3px; }
 
 .lab-workbench-layout,
 .lab-trace-layout {

@@ -542,9 +542,8 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-child-arrow { display: none; }
 }
 
-.agent-preview-browser { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(960px, 76vw); height: 100dvh; max-width: 100vw; max-height: 100dvh; padding: 0; border: 0; border-left: 1px solid var(--agent-rule); color: var(--agent-ink); background: var(--agent-panel); font: 14px/1.5 system-ui, sans-serif; box-sizing: border-box; overflow: hidden; }
+.agent-preview-browser { position: fixed; inset: 0 0 0 auto; margin: 0; width: 50vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; padding: 0; border: 0; border-left: 1px solid var(--agent-rule); color: var(--agent-ink); background: var(--agent-panel); font: 14px/1.5 system-ui, sans-serif; box-sizing: border-box; overflow: hidden; }
 .agent-preview-browser::backdrop { background: color-mix(in oklab, var(--agent-ink) 18%, transparent); }
-.agent-preview-browser-expanded { width: 100vw; border: 0; }
 .agent-preview-browser-layout { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .agent-preview-browser-toolbar { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) 6px max(6px, env(safe-area-inset-left)); border-bottom: 1px solid var(--agent-rule); background: var(--agent-surface-muted); }
 .agent-preview-browser-toolbar nav { display: flex; gap: 2px; }
@@ -562,7 +561,6 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-preview-browser { width: 100vw; height: 100dvh; border: 0; }
   .agent-preview-browser-toolbar { gap: 2px; }
   .agent-preview-browser-toolbar button { width: 40px; height: 44px; }
-  .agent-preview-browser-toolbar .agent-preview-browser-expand { display: none; }
   .agent-preview-browser-address { padding-inline: 6px; }
 }
 .agent-preview-browser { transform-origin: top left; }
@@ -577,3 +575,20 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-preview-dock-entry button:hover { background: var(--agent-surface-selected); }
 .agent-preview-dock-entry button:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .agent-preview-browser::backdrop { transition: none; } }
+
+.agent-preview-workspace { position: relative; min-width: 0; min-height: 0; }
+.agent-preview-workspace-content { isolation: isolate; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.agent-preview-divider, .agent-preview-resize-shield { display: none; }
+.agent-preview-browser-address { display: flex; align-items: center; gap: 5px; }
+.agent-preview-browser-address .agent-preview-source-address { flex: 0 1 auto; max-width: 45%; }
+.agent-preview-browser-address .agent-preview-mapped-address { flex: 1; min-width: 0; }
+.agent-preview-browser-address .agent-preview-address-arrow { flex: 0 0 auto; }
+@media (min-width: 761px) {
+  .agent-preview-workspace[data-preview-open] > .agent-preview-workspace-content { width: calc(100% - var(--agent-preview-width, 50%)); }
+  .agent-preview-workspace > .agent-preview-browser { position: absolute; width: var(--agent-preview-width, 50%); height: 100%; max-height: 100%; z-index: 1; }
+  .agent-preview-divider { display: block; position: absolute; z-index: 4; inset: 0 auto 0 calc(100% - var(--agent-preview-width, 50%) - 4px); width: 8px; cursor: col-resize; touch-action: none; }
+  .agent-preview-divider::after { content: ''; position: absolute; left: 3px; width: 2px; height: 100%; background: transparent; }
+  .agent-preview-divider:hover::after, .agent-preview-divider:focus-visible::after { background: var(--agent-signal); }
+  .agent-preview-divider:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: -2px; }
+  .agent-preview-resize-shield { display: block; position: absolute; inset: 0; z-index: 3; cursor: col-resize; user-select: none; }
+}

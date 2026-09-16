@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
 
-export function HostPreviewList({ controller: supplied, onOpenSource }: {
+export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, showInactive = false }: {
+  readonly showInactive?: boolean;
+  readonly onOpen?: () => void;
   readonly controller?: PreviewContextValue;
   readonly onOpenSource?: (sessionId: string, itemId: string) => void;
 }) {
@@ -10,6 +12,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
   const [busy, setBusy] = useState<string>();
   const [failure, setFailure] = useState<string>();
   if (!controller) return null;
+  const registrations = controller.registrations.filter(item => showInactive || item.status === 'active');
 
   async function unregister(id: string): Promise<void> {
     setBusy(id); setFailure(undefined);
@@ -21,7 +24,9 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
   async function open(id: string, target: string): Promise<void> {
     setBusy(id); setFailure(undefined);
     try {
-      await controller!.open(id, target);
+      const opened = controller!.open(id, target);
+      onOpen?.();
+      await opened;
     }
     catch (error) { setFailure(error instanceof Error && error.message ? error.message : 'Preview access could not be prepared.'); }
     finally { setBusy(undefined); }
@@ -30,9 +35,9 @@ export function HostPreviewList({ controller: supplied, onOpenSource }: {
   return <section className="lab-host-previews" aria-label="Host previews">
     <div className="lab-directory-heading"><h2>Previews</h2><button type="button" disabled={controller.loading} onClick={() => void controller.refresh()}>Refresh</button></div>
     {controller.error ? <p className="lab-control-note" role="alert">{controller.error} Check that preview tunneling is enabled and the Controller is connected.</p> : null}
-    {!controller.loading && controller.registrations.length === 0 ? <p className="lab-control-note">No previews are registered for this Host.</p> : null}
+    {!controller.loading && registrations.length === 0 ? <p className="lab-control-note">{showInactive ? 'No previews are registered for this Host.' : 'No active previews for this Host.'}</p> : null}
     <ul>
-      {controller.registrations.map(registration => <li key={registration.id}>
+      {registrations.map(registration => <li key={registration.id}>
         <div><code>{registration.target}</code><span>{lifecycle(registration.status)}</span>
           {registration.pendingUnregister ? <span>Unregister pending</span> : null}
           {registration.availability === 'controller_offline' ? <span>Controller offline</span> : null}

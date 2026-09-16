@@ -498,8 +498,8 @@ details[open] > summary.agent-child-heading::before { content: '▾'; }
 summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; border-radius: 4px; }
 .agent-child-heading > span { font-weight: 400; }
 .agent-child-sessions > ul { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--agent-rule); }
-.agent-child-branch-row { display: flex; align-items: stretch; min-width: 0; }
-.agent-child-branch-row > .agent-child-session { flex: 1; min-width: 0; }
+.agent-child-branch-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: stretch; min-width: 0; }
+.agent-child-branch-row > .agent-child-session { grid-column: 2; min-width: 0; }
 .agent-child-toggle { flex-shrink: 0; width: 32px; border: 0; background: transparent; color: var(--agent-muted); cursor: pointer; }
 .agent-child-toggle:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: -2px; }
 .agent-child-nested { list-style: none; padding: 0; margin: 0 0 0 16px; border-left: 2px solid var(--agent-rule); }
@@ -524,6 +524,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-child-status-waiting { color: var(--agent-running); font-weight: 600; }
 .agent-child-status-failed { color: var(--agent-danger); }
 @media (max-width: 560px) {
+  .agent-child-branch-row { grid-template-columns: 44px minmax(0, 1fr); }
   .agent-child-toggle { width: 44px; min-height: 44px; }
   .agent-child-nested { margin-left: 8px; }
   .agent-child-session { gap: 7px; padding: 8px; }

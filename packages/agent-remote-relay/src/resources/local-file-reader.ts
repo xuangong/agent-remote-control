@@ -1,10 +1,11 @@
-import { open, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
 
-import { DEFAULT_MAX_RESOURCE_BYTES } from './resource-ingestor.js';
+export const DEFAULT_MAX_LOCAL_RASTER_BYTES = 4 * 1024 * 1024;
 
 export interface LocalFileResourceReader {
   read(locator: string, sourceLocator?: string): Promise<AgentResourceReadResult>;
@@ -18,7 +19,7 @@ export interface LocalFileResourceReaderOptions {
 export async function createLocalFileResourceReader(
   options: LocalFileResourceReaderOptions,
 ): Promise<LocalFileResourceReader> {
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_RESOURCE_BYTES;
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_LOCAL_RASTER_BYTES;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new RangeError('Local resource byte limit must be positive.');
   const roots = [...new Set(await Promise.all(options.roots.map((root) => realpath(root))))];
   if (roots.length === 0) throw new Error('At least one local resource root is required.');
@@ -39,15 +40,24 @@ export async function createLocalFileResourceReader(
 
       let handle;
       try {
-        handle = await open(canonical, 'r');
-        const stat = await handle.stat();
-        if (!stat.isFile()) return unavailable('Local resource is not a regular file.');
-        if (stat.size === 0) return unavailable('Local resource is empty.');
-        if (stat.size > maxBytes) return unavailable('Local resource exceeds the configured byte limit.');
-        const bytes = new Uint8Array(await handle.readFile());
-        if (bytes.byteLength !== stat.size || bytes.byteLength > maxBytes) {
+        const expected = await stat(canonical);
+        handle = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        const opened = await handle.stat();
+        if (!opened.isFile()) return unavailable('Local resource is not a regular file.');
+        if (opened.dev !== expected.dev || opened.ino !== expected.ino) return unavailable('Local resource changed while it was opened.');
+        if (opened.size === 0) return unavailable('Local resource is empty.');
+        if (opened.size > maxBytes) return unavailable('Local resource exceeds the configured byte limit.');
+        const buffer = new Uint8Array(maxBytes + 1);
+        let length = 0;
+        while (length <= maxBytes) {
+          const result = await handle.read(buffer, length, buffer.byteLength - length, null);
+          if (result.bytesRead === 0) break;
+          length += result.bytesRead;
+        }
+        if (length !== opened.size || length > maxBytes) {
           return unavailable('Local resource changed while it was read.');
         }
+        const bytes = buffer.slice(0, length);
         const mediaType = rasterMediaType(bytes);
         return mediaType
           ? { status: 'available', bytes, mediaType }
@@ -65,10 +75,11 @@ function localPath(locator: string, sourceLocator: string | undefined, roots: re
   if (!locator || locator.includes('\0') || locator.startsWith('//')) return undefined;
   let path: string;
   try {
-    path = locator.startsWith('file:') ? fileURLToPath(new URL(locator)) : locator;
+    path = locator.startsWith('file:') ? fileURLToPath(new URL(locator)) : decodeURI(locator);
   } catch {
     return undefined;
   }
+  if (path.includes('\0')) return undefined;
   if (/^[a-z][a-z\d+.-]*:/i.test(path)) return undefined;
   if (isAbsolute(path)) return path;
 

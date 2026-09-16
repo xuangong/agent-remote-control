@@ -131,4 +131,20 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('pre code')?.textContent).toContain('![Hidden](./secret.png)');
     expect(resolveResource).not.toHaveBeenCalled();
   });
+
+  it('requests image bytes again after the session replica loses its resource payload', async () => {
+    const binding = { locator: './reset.png', resourceId: 'reset-image', status: 'available' as const };
+    const resolveResource = vi.fn(async () => binding);
+    const first: Record<string, any> = {};
+    const requestResource = vi.fn(async () => { first['reset-image'] = { status: 'available', mediaType: 'image/png', byteLength: 1, sha256: 'one', contentBase64: 'AA==' }; });
+    const container = await render(<MarkdownContent markdown="![Reset](./reset.png)" resourceContext={{
+      scopeKey: 'replica-reset-session', bindings: [binding], resources: first, resolveResource, requestResource,
+    }} />);
+    await expect.poll(() => requestResource.mock.calls.length).toBe(1);
+
+    await rerender(container, <MarkdownContent markdown="![Reset](./reset.png)" resourceContext={{
+      scopeKey: 'replica-reset-session', bindings: [binding], resources: {}, resolveResource, requestResource,
+    }} />);
+    await expect.poll(() => requestResource.mock.calls.length).toBe(2);
+  });
 });

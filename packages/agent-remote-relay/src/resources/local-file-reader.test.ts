@@ -31,6 +31,8 @@ describe('local file resource reader', () => {
     });
     await expect(reader.read(image)).resolves.toMatchObject({ status: 'available', mediaType: 'image/png' });
     await expect(reader.read(`file://${image}`)).resolves.toMatchObject({ status: 'available', mediaType: 'image/png' });
+    await writeFile(join(root, 'docs', 'my image.png'), PNG);
+    await expect(reader.read('./my%20image.png', document)).resolves.toMatchObject({ status: 'available', mediaType: 'image/png' });
   });
 
   test('denies paths outside the authorized roots including traversal and symlink escapes', async () => {
@@ -58,6 +60,16 @@ describe('local file resource reader', () => {
     await expect(reader.read('empty.png')).resolves.toMatchObject({ status: 'unavailable' });
     await expect(reader.read('large.png')).resolves.toMatchObject({ status: 'unavailable' });
     await expect(reader.read('directory.png')).resolves.toMatchObject({ status: 'unavailable' });
+  });
+
+  test('keeps the default raster payload within the single-frame transport budget', async () => {
+    const root = await workspace();
+    const bytes = new Uint8Array(4 * 1024 * 1024 + 1);
+    bytes.set(PNG);
+    await writeFile(join(root, 'transport-oversized.png'), bytes);
+    const reader = await createLocalFileResourceReader({ roots: [root] });
+
+    await expect(reader.read('transport-oversized.png')).resolves.toMatchObject({ status: 'unavailable' });
   });
 });
 

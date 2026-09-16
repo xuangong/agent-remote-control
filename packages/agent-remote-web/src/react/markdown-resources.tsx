@@ -119,11 +119,12 @@ async function load(
   const requestKey = JSON.stringify([context.scopeKey, binding.resourceId, detail?.status === 'available' ? detail.sha256 : null]);
   let request = requests.get(requestKey);
   if (!request) {
-    request = context.requestResource(binding).catch((error) => {
-      requests.delete(requestKey);
-      throw error;
-    });
+    request = context.requestResource(binding);
     cache(requests, requestKey, request);
+    void request.then(
+      () => { if (requests.get(requestKey) === request) requests.delete(requestKey); },
+      () => { if (requests.get(requestKey) === request) requests.delete(requestKey); },
+    );
   }
   await request;
   return binding;

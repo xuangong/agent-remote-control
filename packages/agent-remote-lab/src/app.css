@@ -342,6 +342,7 @@ textarea {
 .lab-empty-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border-radius: 50%; color: var(--obs-action); background: var(--obs-surface-selected); font-size: 20px; }
 
 .lab-composer-dock {
+  position: relative;
   z-index: 5;
   padding: 6px clamp(12px, 2vw, 24px) calc(6px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--obs-border);
@@ -349,7 +350,9 @@ textarea {
 }
 
 .lab-composer-dock .agent-composer textarea { min-height: 40px; max-height: 200px; resize: none; padding: 8px 10px; font-size: 14px; }
-.lab-composer-toggle { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 24px; min-height: 16px; margin: 0 max(12px, calc((100% - 900px) / 2 + 12px)) -1px auto; padding: 0 4px; border: 1px solid var(--obs-border); border-bottom: 0; border-radius: 4px 4px 0 0; background: var(--obs-surface); color: var(--obs-text-secondary); }
+.lab-composer-dock[data-collapsed] { padding-block: 0; }
+.lab-composer-toggle { position: absolute; bottom: calc(100% - 1px); right: max(12px, calc((100% - 900px) / 2 + 12px)); z-index: 1; display: flex; align-items: center; justify-content: center; width: 24px; min-height: 16px; margin: 0; padding: 0 4px; border: 1px solid var(--obs-border); border-bottom: 0; border-radius: 4px 4px 0 0; background: var(--obs-surface); color: var(--obs-text-secondary); }
+.lab-composer-dock[data-collapsed] .lab-composer-toggle { bottom: max(0px, env(safe-area-inset-bottom)); }
 .lab-composer-toggle svg { width: 12px; height: 12px; }
 .lab-composer-toggle:hover, .lab-composer-toggle:focus-visible { color: var(--obs-action); background: var(--obs-surface-selected); }
 .lab-composer-toggle:active:not(:disabled) { transform: none; }

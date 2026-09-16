@@ -138,6 +138,21 @@ describe('MarkdownContent', () => {
     expect(requestResource).not.toHaveBeenCalled();
   });
 
+  it('resolves a relative image against its source document instead of reusing an unscoped binding', async () => {
+    const existing = { locator: './image.png', resourceId: 'other-document-image', status: 'available' as const };
+    const resolved = { locator: './image.png', resourceId: 'current-document-image', status: 'unavailable' as const };
+    const resolveResource = vi.fn(async () => resolved);
+    const container = await render(<MarkdownContent markdown="![Scoped](./image.png)" sourceLocator="/workspace/current/report.md"
+      resourceContext={{
+        scopeKey: 'source-scoping', bindings: [existing], resources: {
+          'current-document-image': { status: 'unavailable', reason: 'Current document image is unavailable.' },
+        }, resolveResource, requestResource: vi.fn(),
+      }} />);
+
+    await expect.poll(() => container.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain('Current document image is unavailable.');
+    expect(resolveResource).toHaveBeenCalledWith('./image.png', '/workspace/current/report.md');
+  });
+
   it('does not resolve image syntax in code fences', async () => {
     const resolveResource = vi.fn();
     const container = await render(<MarkdownContent
@@ -158,6 +173,13 @@ describe('MarkdownContent', () => {
       scopeKey: 'replica-reset-session', bindings: [binding], resources: first, resolveResource, requestResource,
     }} />);
     await expect.poll(() => requestResource.mock.calls.length).toBe(1);
+
+    await rerender(container, <MarkdownContent markdown="![Reset](./reset.png)" resourceContext={{
+      scopeKey: 'replica-reset-session', bindings: [binding],
+      resources: { 'reset-image': { status: 'unavailable', reason: 'Provider stopped.' } }, resolveResource, requestResource,
+    }} />);
+    await expect.poll(() => container.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain('Provider stopped.');
+    expect(requestResource).toHaveBeenCalledTimes(1);
 
     await rerender(container, <MarkdownContent markdown="![Reset](./reset.png)" resourceContext={{
       scopeKey: 'replica-reset-session', bindings: [binding], resources: {}, resolveResource, requestResource,

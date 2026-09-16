@@ -107,7 +107,7 @@ async function load(
   locator: string,
   sourceLocator: string | undefined,
 ): Promise<ResourceBinding> {
-  const existing = context.bindings.find((binding) => binding.locator === locator);
+  const existing = sourceLocator === undefined ? context.bindings.find((binding) => binding.locator === locator) : undefined;
   const resolveKey = JSON.stringify([context.scopeKey, sourceLocator ?? null, locator]);
   let resolution = existing ? Promise.resolve(existing) : resolutions.get(resolveKey);
   if (!resolution) {
@@ -120,6 +120,7 @@ async function load(
   const binding = await resolution;
   if (binding.status === 'unavailable') return binding;
   const detail = context.resources[binding.resourceId];
+  if (detail?.status === 'unavailable') return binding;
   if (detail?.status === 'available' && 'contentBase64' in detail) return binding;
   const requestKey = JSON.stringify([context.scopeKey, binding.resourceId, detail?.status === 'available' ? detail.sha256 : null]);
   let request = requests.get(requestKey);

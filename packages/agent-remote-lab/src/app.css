@@ -349,6 +349,13 @@ textarea {
 }
 
 .lab-composer-dock .agent-composer textarea { min-height: 40px; max-height: 200px; resize: none; padding: 8px 10px; font-size: 14px; }
+.lab-composer-toggle { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 56px; min-height: 28px; margin: 0 auto -1px; padding: 2px 12px; border: 1px solid var(--obs-control-border); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--obs-surface); color: var(--obs-text-secondary); box-shadow: 0 -2px 5px color-mix(in oklab, var(--obs-text) 4%, transparent); }
+.lab-composer-toggle:hover, .lab-composer-toggle:focus-visible { color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-composer-toggle:active:not(:disabled) { transform: none; }
+.lab-composer-dock[data-collapsed] .lab-composer-toggle { color: var(--obs-action); background: var(--obs-surface-selected); }
+@media (pointer: coarse) {
+  .lab-composer-toggle { min-height: 44px; }
+}
 .agent-composer-actions { display: flex; align-items: center; gap: 10px; }
 .agent-composer-actions > .agent-composer-note { flex: 1; }
 .agent-composer-actions > button { min-width: 108px; }

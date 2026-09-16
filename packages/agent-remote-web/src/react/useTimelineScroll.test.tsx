@@ -24,7 +24,7 @@ function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, conti
         top = Math.max(0, Math.min(top, height - 100));
         return height;
       } },
-      scrollTop: { get: () => top, set: (value: number) => { top = Math.max(0, Math.min(value, element.scrollHeight - 100)); } },
+      scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = Math.max(0, Math.min(value, element.scrollHeight - 100)); } },
     });
     element.getBoundingClientRect = () => ({ top: 0, bottom: 100 } as DOMRect);
   }}>
@@ -147,4 +147,33 @@ it('does not automatically retry a failed cursor or load an exhausted conversati
   act(() => root.render(<Surface identity="another" history={{ ...history, hasOlder: false }} />));
   await act(async () => readEarlier());
   expect(load).toHaveBeenCalledTimes(1);
+});
+
+
+it('lets bottom rubber-banding settle without repeatedly correcting the browser', () => {
+  act(() => root.render(<Surface />));
+  let nativeTop = 900;
+  const write = vi.fn((value: number) => { nativeTop = Math.min(value, viewport().scrollHeight - viewport().clientHeight); });
+  Object.defineProperty(viewport(), 'scrollTop', { configurable: true, get: () => nativeTop, set: write });
+  for (const top of [912, 940, 924, 903, 900.4, 900]) {
+    nativeTop = top;
+    act(() => viewport().dispatchEvent(new Event('scroll')));
+    act(() => root.render(<Surface />));
+    expect(nativeTop).toBe(top);
+  }
+  expect(write).not.toHaveBeenCalled();
+  act(() => root.render(<Surface entryCount={11} />));
+  expect(nativeTop).toBe(1000);
+});
+
+it('lets a downward gesture reach the end before resuming automatic following', () => {
+  act(() => root.render(<Surface />));
+  readEarlier();
+  act(() => { viewport().scrollTop = 850; viewport().dispatchEvent(new Event('scroll')); });
+  expect(viewport().scrollTop).toBe(850);
+  act(() => root.render(<Surface />));
+  expect(viewport().scrollTop).toBe(850);
+  act(() => { viewport().scrollTop = 899.5; viewport().dispatchEvent(new Event('scroll')); });
+  act(() => root.render(<Surface entryCount={11} />));
+  expect(viewport().scrollTop).toBe(1000);
 });

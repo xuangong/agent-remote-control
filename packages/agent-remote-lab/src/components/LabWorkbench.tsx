@@ -1,5 +1,5 @@
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
-import { useContext, useMemo, useState, type ReactNode } from 'react';
+import { useContext, useId, useMemo, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -29,6 +29,8 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
   const readingPositions = recoveryPositions ?? localPositions;
+  const [composerHidden, setComposerHidden] = useState(false);
+  const composerId = useId();
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
@@ -96,25 +98,34 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
       </div>
       {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
     </div>
-    <div className="lab-composer-dock" hidden={!state?.agent}>
-      {composerContext}
-      {composerNotice}
-      <LiveControlPanel
-        consoleCommands={consoleCommands}
-        onExecuteConsoleCommand={onExecuteConsoleCommand}
-        sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
-        state={state}
-        sessionKey={state?.agent?.id}
-        draft={messageDraft}
-        onDraftChange={onMessageDraftChange}
-        disabled={sessionStatus !== 'ready'}
-        onSendMessage={actions.sendMessage}
-        onCancel={actions.cancel}
-        onSetSessionSetting={actions.setSessionSetting}
-        onListCommands={actions.listCommands}
-        onExecuteCommand={actions.executeCommand}
-        onInspectCommand={(command) => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }}
-      />
+    <div className="lab-composer-dock" hidden={!state?.agent} data-collapsed={composerHidden || undefined}>
+      <button type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
+        aria-label={composerHidden ? 'Show message input' : 'Hide message input'} title={composerHidden ? 'Show message input' : 'Hide message input'}
+        onClick={() => setComposerHidden(hidden => !hidden)}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d={composerHidden ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'} />
+        </svg>
+      </button>
+      <div id={composerId} className="lab-composer-body" hidden={composerHidden}>
+        {composerContext}
+        {composerNotice}
+        <LiveControlPanel
+          consoleCommands={consoleCommands}
+          onExecuteConsoleCommand={onExecuteConsoleCommand}
+          sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
+          state={state}
+          sessionKey={state?.agent?.id}
+          draft={messageDraft}
+          onDraftChange={onMessageDraftChange}
+          disabled={sessionStatus !== 'ready'}
+          onSendMessage={actions.sendMessage}
+          onCancel={actions.cancel}
+          onSetSessionSetting={actions.setSessionSetting}
+          onListCommands={actions.listCommands}
+          onExecuteCommand={actions.executeCommand}
+          onInspectCommand={(command) => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }}
+        />
+      </div>
     </div>
     {selectedCommand && state ? <AgentCommandDetails key={`${state.agent?.id}:${selectedCommand.id}`} command={selectedCommand} resources={state.resources}
       onRequestResource={actions.requestResource} onClose={() => setInspected(undefined)} /> : null}

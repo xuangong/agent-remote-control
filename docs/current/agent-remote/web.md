@@ -82,6 +82,7 @@ flowchart LR
 
 - Composer submission excludes IME confirmation and Shift+Enter, preserves failed text, and clears only the submitted draft after acknowledgement. A host can disable remote operations without changing the public capability declaration (`packages/agent-remote-web/src/react/AgentComposer.tsx:58`).
 - Optional history prefetch starts on upward wheel, touch, keyboard, or scrollbar intent within the larger of 600 pixels and 1.5 viewport heights from the top. It shares manual loading, attempts each cursor once automatically, and never starts merely because the initial page is short.
+- Returning within one pixel of the bottom resumes following. The return-to-latest button stays hidden within 64 pixels without pulling an unfinished gesture to the end. Bottom overscroll and subpixel anchor differences do not trigger corrective scroll writes.
 - Scroll following pauses on upward reading intent and history loading; prepended content preserves the visible entry and offset. An identity replacement resumes following by default, while a host continuity identity preserves that intent and the last valid scroll position without carrying an entry key across epochs. Scroll events and layout restoration share the same return-to-latest visibility rule, and unchanged visibility does not schedule another render (`packages/agent-remote-web/src/react/useTimelineScroll.ts:24`).
 
 ## Non-Goals

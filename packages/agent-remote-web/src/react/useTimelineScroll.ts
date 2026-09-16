@@ -83,11 +83,16 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     const viewport = viewportRef.current;
     if (!viewport || !isVisible.current || !viewport.clientHeight) return;
     if (following.current) {
-      viewport.scrollTop = viewport.scrollHeight;
+      const bottom = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      // Native bottom bounce can exceed the scroll range; let it settle without corrective writes.
+      if (bottom - viewport.scrollTop > 1) viewport.scrollTop = bottom;
     } else if (anchor.current) {
       const saved = anchor.current;
       const entry = Array.from(viewport.querySelectorAll<HTMLElement>('[data-entry-key]')).find((element) => element.dataset.entryKey === saved.key);
-      if (entry) viewport.scrollTop += entry.getBoundingClientRect().top - viewport.getBoundingClientRect().top - saved.offset;
+      if (entry) {
+        const adjustment = entry.getBoundingClientRect().top - viewport.getBoundingClientRect().top - saved.offset;
+        if (Math.abs(adjustment) > 1) viewport.scrollTop += adjustment;
+      }
     } else if (pendingScrollTop.current !== undefined && viewport.querySelector('[data-entry-key]')) {
       viewport.scrollTop = pendingScrollTop.current;
       pendingScrollTop.current = undefined;
@@ -160,7 +165,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       }
       following.current = false;
       historyIntent.current = true;
-    } else if (viewport.scrollTop > lastScrollTop.current && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 64) {
+    } else if (viewport.scrollTop > lastScrollTop.current && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1) {
       following.current = true;
     }
     expectedScroll.current = undefined;

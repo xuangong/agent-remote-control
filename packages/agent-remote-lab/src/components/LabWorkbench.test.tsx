@@ -1,3 +1,4 @@
+import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import { render } from '../test/setup.js';
@@ -82,4 +83,22 @@ describe('LabWorkbench', () => {
     expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Agent failed');
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
   });
+});
+
+
+it('collapses the input dock while preserving its draft and timeline', async () => {
+  const container = await render(<LabWorkbench state={replicaState} sessionStatus="ready" messageDraft="Keep my draft" actions={{}} />);
+  const input = container.querySelector('textarea')!;
+  const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Hide message input"]');
+  expect(toggle).not.toBeNull();
+  await act(async () => toggle!.click());
+  const body = container.querySelector<HTMLElement>('.lab-composer-body')!;
+  expect(body.hidden).toBe(true);
+  expect(toggle!.getAttribute('aria-label')).toBe('Show message input');
+  expect(toggle!.getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
+  await act(async () => toggle!.click());
+  expect(body.hidden).toBe(false);
+  expect(container.querySelector('textarea')).toBe(input);
+  expect(input.value).toBe('Keep my draft');
 });

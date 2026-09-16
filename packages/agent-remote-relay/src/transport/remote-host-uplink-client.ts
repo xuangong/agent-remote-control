@@ -2,11 +2,32 @@ import { WebSocket } from 'ws';
 
 import {
   decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
+  type RemoteHostHeartbeat,
 } from '@borgee/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
 import { createRemoteHostPluginHost, type RemoteHostPluginHostOptions } from './remote-host-plugin.js';
 import { createUplinkWriter } from './uplink-writer.js';
+
+export interface RemoteHostUplinkDiagnostic {
+  readonly event: 'connecting' | 'registered' | 'disconnected' | 'reconnect_scheduled' | 'reconnect_stopped' | 'closed';
+  readonly connectionId: number;
+  readonly registered: boolean;
+  readonly reason?: 'heartbeat_timeout' | 'registration_timeout' | 'socket_error' | 'socket_closed' | 'http_rejected'
+    | 'protocol_error' | 'write_failure' | 'host_failure' | 'credential_persistence_failed' | 'client_closed';
+  readonly closeCode?: number;
+  /** A known broker close reason, independently of the local first cause. */
+  readonly peerReason?: 'heartbeat_timeout' | 'heartbeat_delivery_failed' | 'connection_replaced' | 'broker_closed';
+  readonly httpStatus?: number;
+  readonly errorCode?: string;
+  readonly retryAttempt?: number;
+  readonly retryDelayMs?: number;
+  /** The complete local silence deadline, including the cloud interval and acknowledgement timeout. */
+  readonly heartbeatTimeoutMs?: number;
+  readonly lastHeartbeatAgeMs?: number;
+}
+type DiagnosticDetails = Omit<RemoteHostUplinkDiagnostic, 'event'>;
+type DisconnectCause = Pick<RemoteHostUplinkDiagnostic, 'reason' | 'errorCode' | 'httpStatus'>;
 
 export interface RemoteHostUplinkClientOptions {
   readonly relay: AgentRemoteRelay;
@@ -26,6 +47,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly reconnectBaseDelayMs?: number;
   readonly reconnectMaxDelayMs?: number;
   readonly onStateChange?: (state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed') => void;
+  readonly onDiagnostic?: (diagnostic: RemoteHostUplinkDiagnostic) => void | Promise<void>;
 }
 
 export interface RemoteHostUplinkClient {
@@ -55,17 +77,26 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   let retireConnection: (() => void) | undefined;
   let connectionClosed: Promise<void> = Promise.resolve();
   let closePromise: Promise<void> | undefined;
+  let connectionSequence = 0;
+  let describeConnection: () => DiagnosticDetails = () => ({ connectionId: 0, registered: false });
 
-  function scheduleReconnect(): void {
+  function diagnose(diagnostic: RemoteHostUplinkDiagnostic): void {
+    try { void Promise.resolve(options.onDiagnostic?.(diagnostic)).catch(() => undefined); } catch {}
+  }
+  function scheduleReconnect(details: DiagnosticDetails): void {
     if (closed || terminal) return;
     const upper = Math.min(reconnectMaxDelay, reconnectBaseDelay * 2 ** Math.min(attempts, 20));
     attempts += 1;
-    retry = setTimeout(connect, Math.floor(upper * (0.5 + Math.random() * 0.5)));
+    const delay = Math.floor(upper * (0.5 + Math.random() * 0.5));
+    retry = setTimeout(connect, delay);
+    diagnose({ ...details, event: 'reconnect_scheduled', retryAttempt: attempts, retryDelayMs: delay });
   }
 
   function connect(): void {
     if (closed || terminal) return;
     if (credentialWrite) { void credentialWrite.then(connect); return; }
+    const connectionId = ++connectionSequence;
+    diagnose({ event: 'connecting', connectionId, registered: false });
     options.onStateChange?.('connecting');
     const socket = new WebSocket(options.url, {
       headers: { authorization: `Bearer ${remoteKey}` },
@@ -78,45 +109,64 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     let registeredHostId: string | undefined;
     let retired = false;
     let registrationDeadline: ReturnType<typeof setTimeout> | undefined;
+    let heartbeatDeadline: ReturnType<typeof setTimeout> | undefined;
+    let cloudHeartbeat: RemoteHostHeartbeat | undefined;
+    let lastHeartbeatAt: number | undefined;
+    let retirement: DiagnosticDetails | undefined;
+    function details(): DiagnosticDetails {
+      return { connectionId, registered,
+        ...(cloudHeartbeat ? { heartbeatTimeoutMs: cloudHeartbeat.intervalMs + cloudHeartbeat.timeoutMs } : {}),
+        ...(lastHeartbeatAt === undefined ? {} : { lastHeartbeatAgeMs: Math.max(0, Math.floor(performance.now() - lastHeartbeatAt)) }) };
+    }
+    describeConnection = details;
     const writer = createUplinkWriter(socket, {
-      maxMessages: maxQueuedMessages, maxBytes: maxQueuedBytes, writeTimeoutMs: writeTimeout, onFailure: () => retire(),
+      maxMessages: maxQueuedMessages, maxBytes: maxQueuedBytes, writeTimeoutMs: writeTimeout, onFailure: error => retire({ reason: 'write_failure', errorCode: safeErrorCode(error) }),
     });
     const host = createRemoteHostPluginHost(options.relay, {
-      resolveSession: options.resolveSession, control: options.control, send: (json) => writer.send(json), onFailure: () => retire(),
+      resolveSession: options.resolveSession, control: options.control, send: (json) => writer.send(json), onFailure: () => retire({ reason: 'host_failure' }),
     });
-    function retire(): void {
+    function retire(cause: DisconnectCause): void {
       if (retired) return;
       retired = true;
+      retirement = { ...details(), ...cause };
       clearTimeout(registrationDeadline);
+      clearTimeout(heartbeatDeadline);
       host.close();
       writer.close();
       socket.terminate();
     }
-    retireConnection = retire;
+    retireConnection = () => retire({ reason: 'client_closed' });
     connectionClosed = new Promise<void>((resolve) => {
-      socket.once('close', (code) => {
+      socket.once('close', (code, reason) => {
         if (code === 1008) {
           terminal = true;
           options.onStateChange?.('rejected');
           if (!registered) rejectReady(new Error('Remote Host uplink authorization was rejected.'));
         } else if (!closed && !terminal) options.onStateChange?.('disconnected');
-        retire();
+        retire({ reason: 'socket_closed' });
+        const peerReason = safePeerReason(reason.toString());
+        const disconnected = { ...retirement!, closeCode: code, ...(peerReason ? { peerReason } : {}) };
+        if (retirement!.reason !== 'client_closed') diagnose({ ...disconnected, event: 'disconnected' });
         resolve();
-        scheduleReconnect();
+        scheduleReconnect(disconnected);
       });
     });
-    socket.on('error', () => retire());
+    socket.on('error', error => retire({ reason: error.message === 'Opening handshake has timed out' ? 'registration_timeout' : 'socket_error', errorCode: safeErrorCode(error) }));
+    function resetCloudDeadline(): void {
+      clearTimeout(heartbeatDeadline);
+      heartbeatDeadline = setTimeout(() => retire({ reason: 'heartbeat_timeout' }), cloudHeartbeat!.intervalMs + cloudHeartbeat!.timeoutMs);
+    }
     socket.on('unexpected-response', (_request, response) => {
       if (response.statusCode === 401 || response.statusCode === 403) {
         terminal = true;
         options.onStateChange?.('rejected');
         if (!registered) rejectReady(new Error('Remote Host uplink authorization was rejected.'));
       }
-      retire();
+      retire({ reason: 'http_rejected', httpStatus: response.statusCode });
     });
     socket.once('open', () => {
-      if (closed || terminal || retired) { retire(); return; }
-      registrationDeadline = setTimeout(retire, registrationTimeout);
+      if (closed || terminal || retired) { retire({ reason: closed ? 'client_closed' : 'protocol_error' }); return; }
+      registrationDeadline = setTimeout(() => retire({ reason: 'registration_timeout' }), registrationTimeout);
       writer.send(JSON.stringify({
         uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'register', installationId: options.installationId,
         ...(options.onCredential ? { credentialRotation: true } : {}),
@@ -125,11 +175,11 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     socket.on('message', (data, isBinary) => {
       if (closed || retired) return;
-      if (isBinary) { retire(); return; }
+      if (isBinary) { retire({ reason: 'protocol_error' }); return; }
       const decoded = decodeRemoteHostUplinkMessage(data.toString());
-      if (decoded.status !== 'ok') { retire(); return; }
+      if (decoded.status !== 'ok') { retire({ reason: 'protocol_error' }); return; }
       if (decoded.value.type === 'credential_issued') {
-        if (!options.onCredential || credentialWrite) { retire(); return; }
+        if (!options.onCredential || credentialWrite) { retire({ reason: 'protocol_error' }); return; }
         const credential = decoded.value.credential;
         credentialWrite = Promise.resolve().then(() => options.onCredential!(credential)).then(() => {
           // The saved key is authoritative even when this connection disappeared during fsync.
@@ -137,25 +187,39 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
           if (!closed && !retired) writer.send(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'credential_saved' }));
         }).catch(() => {
           terminal = true;
+          clearTimeout(retry);
+          if (!closed && retired) diagnose({ ...details(), event: 'reconnect_stopped', reason: 'credential_persistence_failed' });
           if (!closed) options.onStateChange?.('rejected');
           rejectReady(new Error('Remote Host could not durably save its device credential. Pair again after fixing local storage.'));
-          retire();
+          retire({ reason: 'credential_persistence_failed' });
         }).finally(() => { credentialWrite = undefined; });
         return;
       }
       if (registered && decoded.value.type === 'registered') {
-        if (decoded.value.hostId !== registeredHostId) retire();
+        if (decoded.value.hostId !== registeredHostId
+          || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
+          || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
       }
       if (!registered) {
-        if (credentialWrite) { retire(); return; }
-        if (decoded.value.type !== 'registered') { retire(); return; }
+        if (credentialWrite) { retire({ reason: 'protocol_error' }); return; }
+        if (decoded.value.type !== 'registered') { retire({ reason: 'protocol_error' }); return; }
         clearTimeout(registrationDeadline);
         registered = true;
         registeredHostId = decoded.value.hostId;
+        cloudHeartbeat = decoded.value.heartbeat;
+        resetCloudDeadline();
         options.onStateChange?.('registered');
+        diagnose({ ...details(), event: 'registered' });
         attempts = 0;
         resolveReady({ hostId: decoded.value.hostId });
+        return;
+      }
+      if (decoded.value.type === 'heartbeat') {
+        if (!cloudHeartbeat) { retire({ reason: 'protocol_error' }); return; }
+        lastHeartbeatAt = performance.now();
+        resetCloudDeadline();
+        writer.send(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'heartbeat_ack', nonce: decoded.value.nonce }));
         return;
       }
       host.receive(data.toString());
@@ -168,6 +232,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     close(): Promise<void> {
       if (closePromise) return closePromise;
       closed = true;
+      diagnose({ ...describeConnection(), event: 'closed', reason: 'client_closed' });
       options.onStateChange?.('closed');
       clearTimeout(retry);
       rejectReady(new Error('Remote Host uplink closed before registration.'));
@@ -205,4 +270,25 @@ function validateConfiguration(options: RemoteHostUplinkClientOptions): void {
 function positive(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new RangeError('Remote Host uplink limits and deadlines must be positive integers.');
   return value;
+}
+
+const diagnosticErrorCodes = new Set([
+  'EAI_AGAIN', 'ECONNABORTED', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTDOWN', 'EHOSTUNREACH', 'ENETDOWN', 'ENETUNREACH',
+  'ENOTFOUND', 'EPIPE', 'ETIMEDOUT', 'EADDRNOTAVAIL', 'ERR_TLS_CERT_ALTNAME_INVALID', 'CERT_HAS_EXPIRED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_SSL_WRONG_VERSION_NUMBER',
+  'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH', 'WS_ERR_INVALID_CLOSE_CODE', 'WS_ERR_INVALID_UTF8',
+]);
+function safeErrorCode(error: unknown): string | undefined {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && diagnosticErrorCodes.has(code) ? code : undefined;
+}
+
+function safePeerReason(reason: string): RemoteHostUplinkDiagnostic['peerReason'] {
+  switch (reason) {
+    case 'Host heartbeat timed out': return 'heartbeat_timeout';
+    case 'Host heartbeat delivery failed': return 'heartbeat_delivery_failed';
+    case 'Host connection replaced': return 'connection_replaced';
+    case 'Broker closed': return 'broker_closed';
+    default: return undefined;
+  }
 }

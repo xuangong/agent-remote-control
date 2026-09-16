@@ -22,7 +22,7 @@ it('advertises durable credentials only with a callback and acknowledges after p
   const relay = await server(socket => socket.on('message', data => {
     const message = JSON.parse(data.toString());
     if (message.type === 'register') { advertised = message.credentialRotation; send(socket, { type: 'credential_issued', credential: 'device' }); }
-    if (message.type === 'credential_saved') { acknowledged = true; send(socket, { type: 'registered', hostId: 'host' }); }
+    if (message.type === 'credential_saved') { acknowledged = true; send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }); }
   }));
   const client = createRemoteHostUplinkClient({ ...base, url: relay.url, onCredential: async credential => { offered = credential; await new Promise<void>(resolve => { save = resolve; }); } });
   try {
@@ -38,7 +38,7 @@ it('reconnects with a saved offered credential when the enrollment acknowledgmen
       const message = JSON.parse(data.toString());
       if (message.type === 'register') {
         if (authorizations.length === 1) send(socket, { type: 'credential_issued', credential: 'rotated-device' });
-        else send(socket, { type: 'registered', hostId: 'host' });
+        else send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } });
       }
       if (message.type === 'credential_saved') socket.terminate();
     });
@@ -51,7 +51,7 @@ it('accepts later rotation after registration and refuses to acknowledge a faile
   let socket!: WebSocket; let acknowledgments = 0;
   const relay = await server(value => { socket = value; value.on('message', data => {
     const message = JSON.parse(data.toString());
-    if (message.type === 'register') send(value, { type: 'registered', hostId: 'host' });
+    if (message.type === 'register') send(value, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } });
     if (message.type === 'credential_saved') acknowledgments++;
   }); });
   const states: string[] = [];
@@ -64,7 +64,7 @@ it('accepts later rotation after registration and refuses to acknowledge a faile
 it('keeps legacy hosts registered without advertising credential rotation', async () => {
   let advertised: unknown = 'unseen';
   const relay = await server(socket => socket.on('message', data => { const message = JSON.parse(data.toString());
-    if (message.type === 'register') { advertised = message.credentialRotation; send(socket, { type: 'registered', hostId: 'host' }); }
+    if (message.type === 'register') { advertised = message.credentialRotation; send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }); }
   }));
   const client = createRemoteHostUplinkClient({ ...base, url: relay.url });
   try { await client.ready; expect(advertised).toBeUndefined(); } finally { await client.close(); await relay.close(); }
@@ -75,7 +75,7 @@ it('waits for an in-flight durable write before reconnecting a disconnected enro
     authorizations.push(authorization);
     socket.on('message', data => { if (JSON.parse(data.toString()).type !== 'register') return;
       if (authorizations.length === 1) send(socket, { type: 'credential_issued', credential: 'saved-after-disconnect' });
-      else send(socket, { type: 'registered', hostId: 'host' });
+      else send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } });
     });
     if (authorizations.length === 1) void (async () => {
       await expect.poll(() => entered).toBe(true); socket.terminate();
@@ -98,7 +98,7 @@ it('rotates an already registered host and reconnects with the rotated credentia
     socket.on('message', data => {
       const message = JSON.parse(data.toString());
       if (message.type === 'register') {
-        send(socket, { type: 'registered', hostId: 'host' });
+        send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } });
         if (authorizations.length === 1) send(socket, { type: 'credential_issued', credential: 'next-device' });
       }
       if (message.type === 'credential_saved') socket.terminate();
@@ -115,9 +115,9 @@ it('accepts the matching registered rotation acknowledgment without disconnectin
     connections++;
     socket.on('message', data => {
       const message = JSON.parse(data.toString());
-      if (message.type === 'register') { send(socket, { type: 'registered', hostId: 'host' }); send(socket, { type: 'credential_issued', credential: 'new-device' }); }
+      if (message.type === 'register') { send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }); send(socket, { type: 'credential_issued', credential: 'new-device' }); }
       if (message.type === 'credential_saved') {
-        send(socket, { type: 'registered', hostId: 'host' });
+        send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } });
         send(socket, { type: 'rpc_request', requestId: 'after-rotation', method: 'POST', path: '/remote/stop', body: '{}' });
       }
       if (message.type === 'rpc_response') response = message;
@@ -133,7 +133,7 @@ it('rejects a rotation acknowledgment that changes the registered Host identity'
   const states: string[] = [];
   const relay = await server(socket => socket.on('message', data => {
     if (JSON.parse(data.toString()).type === 'register') {
-      send(socket, { type: 'registered', hostId: 'host' }); send(socket, { type: 'registered', hostId: 'different-host' });
+      send(socket, { type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }); send(socket, { type: 'registered', hostId: 'different-host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } });
     }
   }));
   const client = createRemoteHostUplinkClient({ ...base, url: relay.url, onStateChange: state => states.push(state) });

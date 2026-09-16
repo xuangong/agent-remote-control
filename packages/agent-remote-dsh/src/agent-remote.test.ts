@@ -60,7 +60,7 @@ async function startRemoteHost(native: ReturnType<typeof remoteNativeHost>, over
       const message = JSON.parse(data.toString());
       if (message.type === 'register') {
         registrations.push(message);
-        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host-one' }));
+        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host-one', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
       }
       if (message.type === 'rpc_response') {
         pending.get(message.requestId)?.(new Response(message.body, { status: message.status }));
@@ -148,7 +148,7 @@ describe('DSH Remote Host plugin', () => {
       const message = JSON.parse(data.toString()) as { type?: string; name?: string };
       if (message.type !== 'register') return;
       registrations.push({ name: message.name ?? '' });
-      socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: `host-${registrations.length}` }));
+      socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: `host-${registrations.length}`, heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
     }));
     const identityHome = await mkdtemp(join(tmpdir(), 'agent-remote-control-apply-'));
     const priorHome = process.env.DSH_HOME;

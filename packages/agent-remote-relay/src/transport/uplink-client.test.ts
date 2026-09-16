@@ -79,7 +79,7 @@ describe('outbound Agent Remote uplink client', () => {
     });
     closeables.push(() => client.close());
     await vi.waitFor(() => expect(b.connections).toHaveLength(1));
-    b.connections[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host-one' }));
+    b.connections[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host-one', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
     await client.ready;
     b.connections[0]!.close(1008, 'Remote key revoked');
     await vi.waitFor(() => expect(states).toEqual(['connecting', 'registered', 'rejected']));

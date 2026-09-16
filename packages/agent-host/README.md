@@ -74,9 +74,7 @@ The packaged Copilot CLI is 1.0.83 with SDK 1.0.11. Codex and Claude use their
 existing native login/profile. Copilot uses its native authentication as well.
 Copilot's native auto-update mechanism can select a different installed version,
 including a prerelease rejected by Host version validation. To use the packaged
-version, export `COPILOT_AUTO_UPDATE=false` before starting the Host. This applies
-only to that process environment and must also be set on subsequent starts; it
-is not retained in the Host connection settings.
+version, export `COPILOT_AUTO_UPDATE=false` before starting the Host. This setting is retained privately with the provider configuration and reused by login startup.
 DSH connects through its own Host plugin; `dsh` is not an `AGENT_HOST_PROVIDERS`
 value.
 
@@ -106,22 +104,39 @@ Do not share this directory or its connection file.
 ## Lifecycle and upgrades
 
 ```sh
-agent-remote-controller status      # Check daemon and uplink state
-agent-remote-controller stop        # Stop this Host and its owned native sessions
-agent-remote-controller start       # Start using saved connection settings
-agent-remote-controller foreground # Run in this terminal instead; Ctrl+C stops it
+agent-remote-controller status            # Check daemon and uplink state
+agent-remote-controller stop              # Stop this Host and release its owned resources
+agent-remote-controller start             # Start using saved connection settings
+agent-remote-controller autostart status  # Check macOS login startup and service state
+agent-remote-controller autostart disable # Disable login startup and stop the managed service
+agent-remote-controller autostart enable  # Enable login startup and start the managed service
+agent-remote-controller foreground        # Run in this terminal instead; Ctrl+C stops it
 ```
 
-The background daemon survives terminal closure, but is not automatically
-started at OS boot. `status` reports the uplink state; process startup alone does
-not prove registration succeeded. A rejected/expired pairing requires a new key.
-With a running daemon, set `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY` together
-and run `agent-remote-controller pair` to replace the connection without restarting sessions.
+On macOS, the first `start` enables login startup by default. A per-user LaunchAgent starts the Controller after login and restarts it if the process exits. This runs in the logged-in user's session, not before login. Saved connection and provider settings are reused, and the heartbeat mechanism reconnects when the network returns. `foreground` does not configure login startup. Other platforms retain the manually started background daemon.
+
+`stop` unloads the running service before shutting down, so it stays stopped for the current login session and releases the Controller's connections and owned native resources. The login-startup preference remains enabled: a later `start` or the next login can start it again. Shared native daemons remain owned by their original applications and are not terminated. Stopping or restarting the Controller can interrupt active work; persisted native history is retained.
+
+`autostart disable` stops a launchd-managed Controller and persistently disables login startup. Later `start` commands respect that choice and run a manual background daemon until `autostart enable` is used. If a manual daemon is already running, enabling login startup preserves it and takes effect on the next login; stop it and start again to use launchd immediately. Keep the same `AGENT_HOST_STATE_DIR` when managing an installation.
+
+`status` reports the uplink state; process startup alone does not prove registration succeeded. A rejected/expired pairing requires a new key. With a running daemon, set `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY` together and run `agent-remote-controller pair` to replace the connection without restarting sessions.
 
 To apply an updated tarball, stop the existing Host, install the new tarball,
 and run `agent-remote-controller start`. Installing a package does not replace already running
 processes. Native session history remains in the native profiles; in-flight
 requests and active work may be interrupted by a restart.
+
+## Connection diagnostics
+
+The background Controller appends connection diagnostics to `agent-host.log` in its state directory. Each diagnostic is a JSON line with a UTC timestamp, process ID, uplink generation, and connection ID. These fields correlate retries, pairing replacements, and process restarts. In foreground mode, the same diagnostics go to standard error.
+
+Events cover connection attempts, successful registration, the first observed disconnect cause, scheduled reconnect delays, terminal retry cancellation, and deliberate closure. Reasons distinguish missing Relay heartbeats, registration deadlines, socket failures, HTTP handshake rejection, invalid protocol messages, and local credential-persistence failures. Numeric WebSocket close codes, HTTP statuses, safe network error codes, and heartbeat timing are included when available. A `peerReason` field classifies a small set of known Relay reports, including a missing heartbeat acknowledgment, heartbeat delivery failure, connection replacement, and broker closure; it is a remote report, not a locally confirmed cause. Normal heartbeat traffic is not logged.
+
+```sh
+tail -f "${AGENT_HOST_STATE_DIR:-$HOME/.agent-remote-control/agent-host}/agent-host.log"
+```
+
+`heartbeat_timeout` means the Controller did not receive a heartbeat within the configured silence budget; it does not establish whether the cause was sleep, the network, or the Relay. A later socket close does not overwrite that initial observation. Pairing credentials, management tokens, protocol payloads, raw remote close text, and raw network-error messages are excluded from connection diagnostics. Diagnostics begin with the updated Controller; they cannot reconstruct causes missing from older logs.
 
 ## Local execution policy
 

@@ -3,7 +3,7 @@ import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@bo
 import { AgentSessionInUseError } from '@borgee/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
-  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteSessionSummary } from '@borgee/agent-remote-relay';
+  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary } from '@borgee/agent-remote-relay';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
@@ -27,8 +27,10 @@ export interface AgentHostRuntime {
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
   installationId: string;
   name: string;
+  onDiagnostic?: (diagnostic: AgentHostUplinkDiagnostic) => void | Promise<void>;
   uplink: { url: string; remoteKey: string; onCredential?: (credential: string) => Promise<void> };
 }
+export interface AgentHostUplinkDiagnostic extends RemoteHostUplinkDiagnostic { uplinkGeneration: number }
 export interface AgentHost {
   readonly ready: Promise<{ hostId: string }>;
   readonly state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed';
@@ -57,6 +59,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return pending;
       } : undefined,
       resolveSession: runtime.resolveSession, control: runtime.control,
+      onDiagnostic: options.onDiagnostic ? diagnostic => options.onDiagnostic!({ ...diagnostic, uplinkGeneration: current }) : undefined,
       onStateChange(next) { if (generation === current && !closed) state = next; } }) };
   };
   connection = connect(options.uplink);
@@ -79,7 +82,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     },
     close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed';
       connection.superseded = true;
-      try { await connection.client.close(); } finally { await runtime.close(); }
+      await bounded(Promise.allSettled([connection.client.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
     })(); },
   };
 }

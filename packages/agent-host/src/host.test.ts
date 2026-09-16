@@ -1,9 +1,12 @@
 import type { AgentCapabilities, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createCodexSessionDirectory } from './directory.js';
-import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory } from './host.js';
+import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory, type AgentHostUplinkDiagnostic } from './host.js';
 import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
+import { CodexAppServerTransport } from '../../agent-provider-codex/src/app-server-transport.js';
 import { createScriptedAppServer } from '../../agent-provider-codex/src/test-utils/scripted-app-server.js';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
@@ -38,6 +41,35 @@ function fixture(providerId: string) {
 }
 
 describe('Agent Host runtime', () => {
+  it('preserves uplink diagnostics for replaced connections and explicit Host closure', async () => {
+    const first = await uplinkBroker('first'), second = await uplinkBroker('second');
+    const diagnostics: AgentHostUplinkDiagnostic[] = [];
+    const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'installation', name: 'Host',
+      uplink: { url: first.url, remoteKey: 'first-key' }, onDiagnostic(diagnostic) { diagnostics.push(diagnostic); } });
+    try {
+      await host.ready;
+      await host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
+      await host.close();
+      expect(diagnostics.filter(value => value.event === 'registered').map(value => value.uplinkGeneration)).toEqual([1, 2]);
+      expect(diagnostics.filter(value => value.event === 'closed')).toEqual([
+        expect.objectContaining({ uplinkGeneration: 1, connectionId: 1, reason: 'client_closed' }),
+        expect.objectContaining({ uplinkGeneration: 2, connectionId: 1, reason: 'client_closed' }),
+      ]);
+      expect(diagnostics.some(value => value.event === 'disconnected')).toBe(false);
+    } finally { await host.close(); await first.close(); await second.close(); }
+  });
+
+  it('isolates rejected diagnostic callbacks from Host registration and closure', async () => {
+    const broker = await uplinkBroker('host');
+    const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'installation', name: 'Host',
+      uplink: { url: broker.url, remoteKey: 'key' }, async onDiagnostic() { throw new Error('Diagnostic sink failed'); } });
+    try {
+      await expect(host.ready).resolves.toEqual({ hostId: 'host' });
+      await host.close();
+      expect(host.state).toBe('closed');
+    } finally { await host.close(); await broker.close(); }
+  });
+
   it('preserves unknown and observed activity over the real uplink for all native providers', async () => {
     const broker = await uplinkBroker('host');
     const registrations = ['codex', 'claude', 'copilot'].map(fixture);
@@ -257,6 +289,32 @@ describe('Agent Host runtime', () => {
       expect(codex.createCount()).toBe(1);
     } finally { await host.close(); await first.close(); await second.close(); }
   });
+  it('preserves the native session when cloud heartbeat silence forces an uplink reconnect', async () => {
+    const broker = await uplinkBroker('host', true, { intervalMs: 180, timeoutMs: 60 });
+    const codex = fixture('codex');
+    const host = createAgentHost({ registrations: [codex], installationId: 'installation', name: 'Host',
+      uplink: { url: broker.url, remoteKey: 'key' } });
+    try {
+      await host.ready;
+      const created = await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' });
+      expect(JSON.parse(created.body)).toEqual({ agentId: 'relay', nativeSessionId: 'codex-1' });
+      const session = codex.sessions.get('codex-1')!;
+      await expect.poll(broker.heartbeatAcknowledgements, { timeout: 2000 }).toBeGreaterThan(0);
+      const silentSocket = broker.pauseHeartbeat();
+      expect(silentSocket.readyState).toBe(1);
+      await expect.poll(() => broker.registrations() >= 2 && host.state === 'registered', { timeout: 4000 }).toBe(true);
+      expect(silentSocket.readyState).toBe(3);
+      expect(session.disposed).toBe(false);
+      const attached = await broker.rpc('POST', '/remote/attach', 'relay', { providerId: 'codex', nativeSessionId: 'codex-1' });
+      const recovered = await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' });
+      expect(attached).toEqual(created);
+      expect(recovered).toEqual(created);
+      expect(codex.sessions.get('codex-1')).toBe(session);
+      expect(codex.createCount()).toBe(1);
+      expect(session.observeCount).toBe(1);
+      expect(session.disposed).toBe(false);
+    } finally { await host.close(); await broker.close(); }
+  });
   it('recovers a completed creation across real uplink replacement despite a new proposed Agent identity', async () => {
     const first = await uplinkBroker('host-first'); const second = await uplinkBroker('host-second');
     const codex = fixture('codex');
@@ -346,22 +404,78 @@ describe('Agent Host runtime', () => {
     await host.close(); await host.close();
     expect(session.disposed).toBe(true);
   });
+
+  it('closes native sessions within the shutdown deadline while credential persistence is blocked', async () => {
+    const broker = await uplinkBroker('host'); const codex = fixture('codex');
+    let releasePersistence!: () => void;
+    const persistence = new Promise<void>(resolve => { releasePersistence = resolve; });
+    let persistenceStarted!: () => void;
+    const started = new Promise<void>(resolve => { persistenceStarted = resolve; });
+    const host = createAgentHost({ registrations: [codex], installationId: 'installation', name: 'Host', shutdownTimeoutMs: 30,
+      uplink: { url: broker.url, remoteKey: 'key', onCredential: async () => { persistenceStarted(); await persistence; } } });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await host.ready;
+      expect((await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' })).status).toBe(200);
+      const session = codex.sessions.get('codex-1')!;
+      broker.issueCredential('rotated-key'); await started;
+      const closed = host.close();
+      expect(await Promise.race([closed.then(() => 'closed'), new Promise<string>(resolve => { deadline = setTimeout(() => resolve('blocked'), 300); })])).toBe('closed');
+      expect(session.disposed).toBe(true);
+      expect(host.state).toBe('closed');
+      expect(host.close()).toBe(closed);
+    } finally { clearTimeout(deadline); releasePersistence(); await host.close(); await broker.close(); }
+  });
+
+  it('releases its private native subprocess when the Host closes', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const exited = once(child, 'exit');
+    const transport = new CodexAppServerTransport(child);
+    const codex = fixture('codex'); const host = createAgentHostRuntime({ registrations: [codex] });
+    try {
+      await once(child, 'spawn');
+      expect(child.exitCode).toBeNull(); expect(child.signalCode).toBeNull();
+      await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', requestId: 'create' }) });
+      const session = codex.sessions.get('codex-1')!, dispose = session.dispose.bind(session);
+      session.dispose = async () => { await transport.dispose(); await dispose(); };
+      await host.close();
+      await exited;
+      expect(child.signalCode).toBe('SIGTERM');
+      expect(session.disposed).toBe(true);
+    } finally {
+      await host.close(); await transport.dispose();
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await exited;
+    }
+  });
 });
 
-async function uplinkBroker(hostId: string, autoRegister = true) {
+async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { intervalMs: 30000, timeoutMs: 10000 }) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>((resolve) => server.once('listening', resolve));
   let socket: WebSocket | undefined;
   let providers: unknown;
+  let pausedSocket: WebSocket | undefined;
+  let registrationCount = 0, heartbeatAcknowledgementCount = 0;
   let resolveConnected!: () => void;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
   server.on('connection', (connection) => {
     socket = connection;
     resolveConnected();
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    connection.on('close', () => clearInterval(heartbeatTimer));
     connection.on('message', (data) => {
       const message = JSON.parse(data.toString()) as { type: string; providers?: unknown };
-      if (message.type === 'register') providers = message.providers;
-      if (message.type === 'register' && autoRegister) connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId }));
+      if (message.type === 'register') { providers = message.providers; registrationCount += 1; }
+      if (message.type === 'heartbeat_ack') heartbeatAcknowledgementCount += 1;
+      if (message.type === 'register' && autoRegister) {
+        connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat }));
+        let nonce = 0;
+        heartbeatTimer = setInterval(() => {
+          if (connection !== pausedSocket && connection.readyState === 1)
+            connection.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat', nonce: String(++nonce) }));
+        }, heartbeat.intervalMs);
+      }
     });
   });
   const address = server.address() as { port: number };
@@ -370,8 +484,11 @@ async function uplinkBroker(hostId: string, autoRegister = true) {
     url: `ws://127.0.0.1:${address.port}/ws/remote-host`,
     connected,
     advertisedProviders: () => providers,
+    registrations: () => registrationCount,
+    heartbeatAcknowledgements: () => heartbeatAcknowledgementCount,
+    pauseHeartbeat() { if (!socket) throw new Error('Broker has no Host connection.'); pausedSocket = socket; return socket; },
     issueCredential(credential: string) { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_issued', credential })); },
-    register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId })); },
+    register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat })); },
     rpc(method: 'GET' | 'POST', path: string, sessionId?: string, body?: unknown): Promise<{ status: number; body: string }> {
       const requestId = `rpc-${++sequence}`;
       return new Promise((resolve, reject) => {

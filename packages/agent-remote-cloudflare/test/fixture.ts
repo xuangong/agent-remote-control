@@ -103,6 +103,10 @@ export async function fixture() {
       send(socket, { type: 'credential_saved' }); message = await saved;
     }
     expect(message.type).toBe('registered');
+    socket.addEventListener('message', event => {
+      const frame = JSON.parse(String(event.data));
+      if (frame.type === 'heartbeat') send(socket, { type: 'heartbeat_ack', nonce: frame.nonce });
+    });
     return { socket, hostId: message.hostId as string, key };
   }
   function control(body: Record<string, unknown>) {

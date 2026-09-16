@@ -29,6 +29,8 @@ export interface HostBrokerOptions {
   userStreamCount?(subject: string): number;
   origin: string;
   rpcTimeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
   keyLifetimeMs?: number;
   publicUrl?: string;
   onPairing?(key: string, expiresAt: number): void;
@@ -44,6 +46,11 @@ export function createHostBroker(options: HostBrokerOptions) {
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
+  const heartbeat = { intervalMs: options.heartbeatIntervalMs ?? 30_000, timeoutMs: options.heartbeatTimeoutMs ?? 10_000 };
+  if (!Number.isSafeInteger(heartbeat.intervalMs) || !Number.isSafeInteger(heartbeat.timeoutMs) || heartbeat.timeoutMs < 1 || heartbeat.timeoutMs >= heartbeat.intervalMs || heartbeat.intervalMs > 600_000) {
+    throw new RangeError('Host heartbeat deadlines require 0 < timeout < interval <= 600000 milliseconds.');
+  }
+  const uplinkCleanups = new Map<RelaySocket, () => void>();
   const clients = new Set<RelaySocket>();
   function track(client: RelaySocket) { clients.add(client); client.onClose(() => clients.delete(client)); }
   const keys = new Map<string, DeviceCredential>();
@@ -79,6 +86,8 @@ export function createHostBroker(options: HostBrokerOptions) {
   function assertAvailable() { if (unavailable) throw new BrokerError(503, 'state_unavailable', 'Relay state is unavailable.'); }
   function failClosed() {
     unavailable = true;
+    for (const cleanup of [...uplinkCleanups.values()]) cleanup();
+    for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket);
     for (const client of clients) client.close(1011, 'Relay state is unavailable');
   }
   function commit<T>(stage: (draft: RemoteHostBrokerState) => { value: T; publish(): void }): Promise<T> {
@@ -126,16 +135,20 @@ export function createHostBroker(options: HostBrokerOptions) {
 
   const permitted = async (context: BrokerRequestContext) => !context.authorize || await context.authorize() === true;
   const expiryChecks = new Set<() => void>();
-  function expire(client: RelaySocket, expiry: () => number | undefined, code: () => number = () => 1008) {
+  function expire(client: RelaySocket, expiry: () => number | undefined, code: () => number = () => 1008, close = (code: number) => client.close(code, 'Credential expired')) {
     let timer: unknown;
+    let active = true;
     const check = () => {
+      if (!active) return;
       clearTimeout(timer);
       const expiresAt = expiry();
       if (expiresAt === undefined) return;
-      if (expiresAt <= now()) { client.close(code(), 'Credential expired'); return; }
+      if (expiresAt <= now()) { cleanup(); close(code()); return; }
       timer = setTimeout(check, Math.min(60_000, expiresAt - now()));
     };
-    expiryChecks.add(check); check(); client.onClose(() => { clearTimeout(timer); expiryChecks.delete(check); });
+    const cleanup = () => { active = false; clearTimeout(timer); expiryChecks.delete(check); };
+    expiryChecks.add(check); client.onClose(cleanup); check();
+    return cleanup;
   }
   const keyHash = (key: string) => createHash('sha256').update(key).digest('hex');
   const requireHost = (id: string) => {
@@ -166,38 +179,75 @@ export function createHostBroker(options: HostBrokerOptions) {
     });
   }
   function disconnected(host: Host, socket: RelaySocket) {
+    uplinkCleanups.get(socket)?.();
     if (host.socket !== socket) return;
     host.socket = undefined; host.ready = false;
     for (const pending of host.pending.values()) { clearTimeout(pending.timer); pending.reject(new BrokerError(503, 'host_offline', 'The Remote Host disconnected; the operation outcome may be unknown.')); }
     host.pending.clear();
-    for (const stream of host.streams.values()) stream.socket.close(1012, 'Remote Host disconnected');
+    for (const stream of host.streams.values()) { clearTimeout(stream.timer); stream.socket.close(1012, 'Remote Host disconnected'); }
     host.streams.clear();
   }
   function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
-    expire(socket, () => keys.get(credentialHash) === credential ? Math.min(credential.expires, context.connectionExpiresAt?.() ?? credential.expires) : 0, () => keys.get(credentialHash) !== credential ? 1008 : context.connectionExpiryCode?.() ?? 1008);
-    const timer = setTimeout(() => socket.close(1008, 'Registration deadline exceeded'), 10_000);
-    socket.onError(() => undefined);
-    socket.onClose(() => { clearTimeout(timer); if (host) disconnected(host, socket); });
+    let retired = false, heartbeatStarted = false;
+    let timer: unknown, heartbeatTimer: unknown, heartbeatDeadline: unknown;
+    let pendingNonce: string | undefined;
+    let cancelExpiry = () => {};
+    function cleanup() {
+      retired = true;
+      clearTimeout(timer); clearTimeout(heartbeatTimer); clearTimeout(heartbeatDeadline);
+      pendingNonce = undefined; cancelExpiry(); uplinkCleanups.delete(socket);
+    }
+    function closeConnection(code: number, reason: string) {
+      if (retired) return;
+      cleanup(); if (host) disconnected(host, socket);
+      socket.close(code, reason);
+    }
+    uplinkCleanups.set(socket, cleanup);
+    cancelExpiry = expire(socket, () => keys.get(credentialHash) === credential ? Math.min(credential.expires, context.connectionExpiresAt?.() ?? credential.expires) : 0, () => keys.get(credentialHash) !== credential ? 1008 : context.connectionExpiryCode?.() ?? 1008, code => closeConnection(code, 'Credential expired'));
+    if (!retired) timer = setTimeout(() => closeConnection(1008, 'Registration deadline exceeded'), 10_000);
+    socket.onError(() => closeConnection(1011, 'Host transport failed'));
+    socket.onClose(() => { cleanup(); if (host) disconnected(host, socket); });
+    const current = () => !retired && host?.socket === socket && host.ready === true;
+    function sendHeartbeat() {
+      if (!current()) return;
+      const nonce = randomUUID(); pendingNonce = nonce;
+      heartbeatDeadline = setTimeout(() => {
+        if (current() && pendingNonce === nonce) closeConnection(1012, 'Host heartbeat timed out');
+      }, heartbeat.timeoutMs);
+      heartbeatTimer = setTimeout(sendHeartbeat, heartbeat.intervalMs);
+      try { send(host!, { uplinkVersion: 2, type: 'heartbeat', nonce }); }
+      catch { closeConnection(1012, 'Host heartbeat delivery failed'); }
+    }
+    function registered() {
+      if (retired || !host || host.socket !== socket) return;
+      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, heartbeat });
+      if (retired || host.socket !== socket) return;
+      host.ready = true;
+      if (!heartbeatStarted) {
+        heartbeatStarted = true; heartbeatTimer = setTimeout(sendHeartbeat, heartbeat.intervalMs);
+      }
+    }
     let registration: Promise<void> | undefined;
     socket.onMessage((raw, binary) => {
-      return receive(raw, binary).catch(() => socket.close(1011, 'Host message could not be processed'));
+      return receive(raw, binary).catch(() => closeConnection(1011, 'Host message could not be processed'));
     });
     async function receive(raw: string, binary: boolean) {
       if (registration) await registration;
+      if (retired) return;
       try {
       assertAvailable();
-      if (socket.readyState !== RELAY_SOCKET_OPEN || keys.get(credentialHash) !== credential) return socket.close(1008, 'Device credential revoked');
-      if (context.connectionExpiresAt && Math.min(credential.expires, context.connectionExpiresAt() ?? credential.expires) <= now()) return socket.close(credential.expires <= now() ? 1008 : (context.connectionExpiryCode?.() ?? 1008), 'Credential expired');
+      if (socket.readyState !== RELAY_SOCKET_OPEN || keys.get(credentialHash) !== credential) return closeConnection(1008, 'Device credential revoked');
+      if (context.connectionExpiresAt && Math.min(credential.expires, context.connectionExpiresAt() ?? credential.expires) <= now()) return closeConnection(credential.expires <= now() ? 1008 : (context.connectionExpiryCode?.() ?? 1008), 'Credential expired');
       const decoded = binary ? undefined : decodeRemoteHostUplinkMessage(raw.toString());
-      if (!decoded || decoded.status !== 'ok') return socket.close(1008, 'Invalid uplink envelope');
+      if (!decoded || decoded.status !== 'ok') return closeConnection(1008, 'Invalid uplink envelope');
       const message = decoded.value;
       if (!host) {
-        if (message.type !== 'register' || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return socket.close(1008, 'Registration is not authorized');
+        if (message.type !== 'register' || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return closeConnection(1008, 'Registration is not authorized');
         const invitation = credential.requiresRotation === true || credential.installationId === undefined;
-        if (credential.requiresRotation && !message.credentialRotation) return socket.close(1008, 'Update Agent Host to enroll this device');
+        if (credential.requiresRotation && !message.credentialRotation) return closeConnection(1008, 'Update Agent Host to enroll this device');
         registration = commit(draft => {
           if (keys.get(credentialHash) !== credential || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) throw new BrokerError(401, 'device_revoked', 'Registration is not authorized');
           const savedCredential = draft.keys.find(([hash]) => hash === credentialHash)![1];
@@ -219,11 +269,11 @@ export function createHostBroker(options: HostBrokerOptions) {
             hosts.set(host.id, host);
             if (host.socket) { const previous = host.socket; disconnected(host, previous); previous.close(1012, 'Host connection replaced'); }
             Object.assign(host, next); host.generation += 1; clearTimeout(timer);
-            if (socket.readyState === RELAY_SOCKET_OPEN) {
+            if (!retired && socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
               host.issueCredential = message.credentialRotation ? () => issueCredential(false) : undefined;
               if (!options.durable || !message.credentialRotation || credential.kind === 'device') {
-                send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id }); host.ready = true;
+                registered();
               }
             }
           } };
@@ -234,7 +284,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       }
       if (host.socket !== socket) return;
       if (message.type === 'credential_saved') {
-        if (!pendingCredential) return socket.close(1008, 'No pending device credential');
+        if (!pendingCredential) return closeConnection(1008, 'No pending device credential');
         const pending = pendingCredential;
         await commit(draft => {
           if (!host || host.socket !== socket || !draft.keys.some(([hash]) => hash === pending.hash)) throw new BrokerError(401, 'device_revoked', 'Device credential is unavailable.');
@@ -244,7 +294,9 @@ export function createHostBroker(options: HostBrokerOptions) {
             credentialHash = pending.hash; credential = keys.get(pending.hash)!; pendingCredential = undefined;
           }};
         });
-        send(host, {uplinkVersion:2,type:'registered',hostId:host.id}); host.ready = true;
+        registered();
+      } else if (message.type === 'heartbeat_ack') {
+        if (pendingNonce === message.nonce) { clearTimeout(heartbeatDeadline); pendingNonce = undefined; }
       } else if (message.type === 'rpc_response') {
         const pending = host.pending.get(message.requestId);
         if (pending) { clearTimeout(pending.timer); host.pending.delete(message.requestId); pending.resolve(message); }
@@ -259,10 +311,10 @@ export function createHostBroker(options: HostBrokerOptions) {
         }
       } else if (message.type === 'stream_close') {
         const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); stream?.socket.close(message.code, message.reason);
-      } else socket.close(1008, 'Unexpected uplink message');
+      } else closeConnection(1008, 'Unexpected uplink message');
       } catch (error) {
         const code = error instanceof BrokerError && error.status === 401 ? 1008 : error instanceof BrokerError && error.status === 429 ? 1013 : 1011;
-        socket.close(code, code === 1011 ? 'Host message could not be processed' : (error as Error).message);
+        closeConnection(code, code === 1011 ? 'Host message could not be processed' : (error as Error).message);
       }
     }
     async function issueCredential(consumeInvitation: boolean): Promise<void> {
@@ -704,6 +756,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     close() {
       unavailable = true;
+      for (const cleanup of [...uplinkCleanups.values()]) cleanup();
       for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket);
       for (const client of clients) client.close(1001, 'Broker closed');
       clients.clear();

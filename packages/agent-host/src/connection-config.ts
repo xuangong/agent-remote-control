@@ -8,9 +8,10 @@ const restartSettings = [
   'AGENT_HOST_CODEX_CONNECTION', 'AGENT_HOST_CODEX_SOCKET', 'AGENT_HOST_CODEX_TRUST_SHARED',
   'AGENT_HOST_ALLOWED_WORKSPACE_ROOTS', 'AGENT_HOST_TRUSTED_FULL_CONTROL',
   'AGENT_HOST_COPILOT', 'AGENT_HOST_COPILOT_HOME', 'AGENT_HOST_WORKSPACE', 'AGENT_HOST_NAME',
+  'COPILOT_AUTO_UPDATE',
   'AGENT_REMOTE_CODEX_EXECUTABLE', 'AGENT_REMOTE_CODEX_HOME', 'AGENT_REMOTE_WORKSPACE',
 ] as const;
-function retainedEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function retainedHostEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(restartSettings.flatMap(name => typeof env[name] === 'string' ? [[name, env[name]]] : []));
 }
 async function readSaved(stateDir: string): Promise<HostConnection | undefined> {
@@ -20,7 +21,7 @@ async function readSaved(stateDir: string): Promise<HostConnection | undefined> 
   try {
     const value = JSON.parse(text) as HostConnection;
     if (!value || typeof value.serverUrl !== 'string' || !value.serverUrl.trim() || typeof value.remoteKey !== 'string' || !value.remoteKey.trim() || !value.environment || typeof value.environment !== 'object') throw new Error();
-    return { serverUrl: value.serverUrl, remoteKey: value.remoteKey, environment: retainedEnvironment(value.environment) };
+    return { serverUrl: value.serverUrl, remoteKey: value.remoteKey, environment: retainedHostEnvironment(value.environment) };
   } catch { throw new Error('Private Agent Host connection settings are invalid. Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together to pair again.'); }
 }
 export async function resolveHostConnection(stateDir: string, env: NodeJS.ProcessEnv): Promise<HostConnection> {
@@ -63,7 +64,7 @@ async function writeConnection(stateDir: string, connection: HostConnection): Pr
   try {
     const file = await open(temporary, 'wx', 0o600);
     try {
-      await file.writeFile(JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, environment: retainedEnvironment(connection.environment) }));
+      await file.writeFile(JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, environment: retainedHostEnvironment(connection.environment) }));
       await file.sync();
     } finally { await file.close(); }
     await rename(temporary, join(stateDir, 'connection.json'));

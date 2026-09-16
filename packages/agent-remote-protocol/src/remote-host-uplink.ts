@@ -8,6 +8,10 @@ export const REMOTE_HOST_UPLINK_VERSION = 2;
 const identity = Type.String({ minLength: 1, maxLength: 512 });
 const version = Type.Literal(REMOTE_HOST_UPLINK_VERSION);
 const object = { additionalProperties: false } as const;
+const heartbeatDuration = Type.Integer({ minimum: 1, maximum: 600000 });
+export const RemoteHostHeartbeat = Type.Object({ intervalMs: heartbeatDuration, timeoutMs: heartbeatDuration }, object);
+export type RemoteHostHeartbeat = Static<typeof RemoteHostHeartbeat>;
+const heartbeatNonce = Type.String({ minLength: 1, maxLength: 128 });
 const rpc = { uplinkVersion: version, requestId: identity };
 const stream = { uplinkVersion: version, streamId: identity };
 const provider = Type.Object({ providerId: identity, displayName: identity }, object);
@@ -30,7 +34,9 @@ export const RemoteHostUplinkMessage = Type.Union([
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity, heartbeat: RemoteHostHeartbeat }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat_ack'), nonce: heartbeatNonce }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_request'), method: Type.Union([Type.Literal('GET'), Type.Literal('POST')]),
     path: requestPath, sessionId: Type.Optional(identity), body: Type.Optional(Type.String()) }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_response'), status: Type.Integer({ minimum: 200, maximum: 599 }),
@@ -44,7 +50,7 @@ export const RemoteHostUplinkMessage = Type.Union([
 
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'credential_issued' | 'registered' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+  { type: 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;
@@ -66,6 +72,7 @@ export function encodeRemoteHostUplinkMessage(value: RemoteHostUplinkMessage): W
 
 function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplinkMessage {
   if (!Value.Check(RemoteHostUplinkMessage, value)) return false;
+  if (value.type === 'registered' && value.heartbeat.timeoutMs >= value.heartbeat.intervalMs) return false;
   if (value.type === 'register' && 'providers' in value
     && new Set(value.providers.map((provider) => provider.providerId)).size !== value.providers.length) return false;
   if (value.type === 'rpc_request') {

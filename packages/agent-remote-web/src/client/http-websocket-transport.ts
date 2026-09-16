@@ -15,7 +15,7 @@ import {
   type ResumeAgentRequest,
   type TimelineCursor,
   type TimelineDirection,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import { RemoteOperationError } from './transport.js';
 import type {

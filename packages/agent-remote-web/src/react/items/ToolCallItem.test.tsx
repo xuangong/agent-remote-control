@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
-import type { AgentTimelineItem } from '@borgee/agent-remote-protocol';
+import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
 
 import { render, rerender } from '../../test/setup.js';
 import { ToolCallItem } from './ToolCallItem.js';

@@ -1,6 +1,6 @@
-# @borgee/agent-remote-protocol
+# @agent-remote-controller/agent-remote-protocol
 
-`@borgee/agent-remote-protocol` is the exact-version JSON boundary between the Agent Remote relay and a pure Web client.
+`@agent-remote-controller/agent-remote-protocol` is the exact-version JSON boundary between the Agent Remote relay and a pure Web client.
 
 ## Boundary
 

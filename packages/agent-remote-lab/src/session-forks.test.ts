@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@borgee/agent-remote-protocol';
+import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
 import { captureForkContext, ForkStore, contextPrefix } from './session-forks.js';
 
 const source = { agentId: 'parent', nativeSessionId: 'native-parent', providerId: 'codex', title: 'Parent', hostId: 'local' };

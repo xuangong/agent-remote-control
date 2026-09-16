@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@borgee/agent-remote-protocol';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 import { AgentCommandDetails } from './AgentCommandDetails.js';
 import { useAgentCommands } from './useAgentCommands.js';
 import { AgentActivityStatus } from './AgentActivityStatus.js';

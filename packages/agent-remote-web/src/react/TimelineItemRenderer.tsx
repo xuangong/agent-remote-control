@@ -1,4 +1,4 @@
-import type { AgentTimelineItem } from '@borgee/agent-remote-protocol';
+import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
 
 import type { MessageGroupPosition } from './timeline-render-model.js';
 import { AssistantMessageItem, UserMessageItem } from './items/MessageItem.js';

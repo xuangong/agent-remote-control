@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { TimelineReadingPosition } from '@borgee/agent-remote-web/react';
+import type { TimelineReadingPosition } from '@agent-remote-controller/agent-remote-web/react';
 
 const prefix = 'agent-remote:recovery:';
 export const RecoveryScope = createContext<ReadingPositions | undefined>(undefined);

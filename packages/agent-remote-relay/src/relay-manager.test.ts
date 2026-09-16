@@ -1,4 +1,4 @@
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession } from '@borgee/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
 import { AgentAlreadyExistsError, AgentNotFoundError, RelayClosedError, createAgentRemoteRelay } from './relay.js';

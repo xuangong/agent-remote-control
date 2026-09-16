@@ -1,5 +1,5 @@
-import type { AgentTimelineItem } from '@borgee/agent-remote-protocol';
-import type { AgentReplicaState } from '@borgee/agent-remote-web';
+import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
 
 export function TraceView({ state }: { state?: AgentReplicaState }) {
   const timeline = state?.timeline;

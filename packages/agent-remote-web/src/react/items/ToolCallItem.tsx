@@ -3,7 +3,7 @@ import { Fragment, useId, useState } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ToolResultPreview } from './ToolResultPreview.js';
 import { ContentPreview } from './ContentPreview.js';
-import type { AgentTimelineItem, AgentToolDetail } from '@borgee/agent-remote-protocol';
+import type { AgentTimelineItem, AgentToolDetail } from '@agent-remote-controller/agent-remote-protocol';
 
 const statusLabels = {
   running: 'Running', completed: 'Completed', failed: 'Failed', canceled: 'Canceled',

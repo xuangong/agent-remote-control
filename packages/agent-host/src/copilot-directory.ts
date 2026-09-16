@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { CopilotSessionSummary } from '@borgee/agent-provider-copilot';
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession } from '@borgee/agent-provider-sdk';
+import type { CopilotSessionSummary } from '@agent-remote-controller/agent-provider-copilot';
+import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 /** Owns native queries independently of the currently paired uplink. */

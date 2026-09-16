@@ -8,7 +8,7 @@ import type {
   AgentSessionConfig,
   ProviderObservation,
   ProviderStreamItem,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
 import { DshPlayback, type PlaybackClock, type PlaybackMode } from './playback.js';
 import { DshProjector } from './projector.js';

@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { SessionId, type SessionHeader } from '@deepseek-ai/dsh-session';
-import type { LiveDshProvider } from '@borgee/agent-provider-dsh';
+import type { LiveDshProvider } from '@agent-remote-controller/agent-provider-dsh';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { createDshSessionDirectory, type DshDirectoryContext } from './session-directory.js';
 

@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
-import type { AgentResourceReadResult, AgentTimelineItem, ProviderResourceReference } from '@borgee/agent-provider-sdk';
+import type { AgentResourceReadResult, AgentTimelineItem, ProviderResourceReference } from '@agent-remote-controller/agent-provider-sdk';
 
 import { isRecord, readString } from './native.js';
 

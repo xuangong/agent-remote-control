@@ -1,4 +1,4 @@
-import type { AgentReplicaState } from '@borgee/agent-remote-web';
+import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
 
 export const replicaState: AgentReplicaState = {
   agent: {

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import type { AgentReplica as AgentReplicaInstance, WebSocketLike } from '@borgee/agent-remote-web/headless';
+import type { AgentReplica as AgentReplicaInstance, WebSocketLike } from '@agent-remote-controller/agent-remote-web/headless';
 
 const debuggerDirectory = fileURLToPath(new URL('..', import.meta.url));
 const repositoryDirectory = fileURLToPath(new URL('../../..', import.meta.url));
@@ -53,9 +53,9 @@ type ReplicaJson = {
 
 const children = new Map<ChildProcessWithoutNullStreams, Promise<ChildClose>>();
 let createRecordedValidationServer: typeof import('../../agent-remote-lab/src/server/recorded.js')['createRecordedValidationServer'];
-let AgentReplica: typeof import('@borgee/agent-remote-web/headless')['AgentReplica'];
-let HttpWebSocketTransport: typeof import('@borgee/agent-remote-web/headless')['HttpWebSocketTransport'];
-let RemoteSessionClient: typeof import('@borgee/agent-remote-web/headless')['RemoteSessionClient'];
+let AgentReplica: typeof import('@agent-remote-controller/agent-remote-web/headless')['AgentReplica'];
+let HttpWebSocketTransport: typeof import('@agent-remote-controller/agent-remote-web/headless')['HttpWebSocketTransport'];
+let RemoteSessionClient: typeof import('@agent-remote-controller/agent-remote-web/headless')['RemoteSessionClient'];
 let server: ReturnType<typeof createRecordedValidationServer>;
 let relayUrl = '';
 let temporaryDirectory = '';
@@ -77,7 +77,7 @@ beforeAll(async () => {
     expect(build.status, `${packageDirectory}: ${build.stderr}`).toBe(0);
   }
   ({ createRecordedValidationServer } = await import('../../agent-remote-lab/src/server/recorded.js'));
-  ({ AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@borgee/agent-remote-web/headless'));
+  ({ AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@agent-remote-controller/agent-remote-web/headless'));
   server = createRecordedValidationServer();
   relayUrl = (await server.http.listen(0, '127.0.0.1')).url;
   temporaryDirectory = await mkdtemp(join(tmpdir(), 'borgee-bdb-process-'));

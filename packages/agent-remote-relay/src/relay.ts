@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentProviderDescriptor } from '@borgee/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentProviderAdapter, AgentProviderDescriptor } from '@agent-remote-controller/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentSessionResponse,
   type CreateAgentRequest,
   type ResumeAgentRequest,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import { AgentManager } from './agent-manager.js';
 import { ProviderRegistry } from './provider-registry.js';

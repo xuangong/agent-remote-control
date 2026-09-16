@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ClaudeAgentProvider, ClaudeSessionSummary } from '@borgee/agent-provider-claude';
-import type { AgentPersistenceHandle, AgentSession } from '@borgee/agent-provider-sdk';
+import type { ClaudeAgentProvider, ClaudeSessionSummary } from '@agent-remote-controller/agent-provider-claude';
+import type { AgentPersistenceHandle, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 /** Owns native queries independently of the currently paired uplink. */

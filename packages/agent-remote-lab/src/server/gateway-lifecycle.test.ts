@@ -89,7 +89,7 @@ it('does not extend access during an authority outage', async () => {
 }, 10000);
 
 it('lets the production Host uplink reconnect after an authority outage without pairing again', async () => {
-  const { createAgentRemoteRelay, createRemoteHostUplinkClient } = await import('@borgee/agent-remote-relay');
+  const { createAgentRemoteRelay, createRemoteHostUplinkClient } = await import('@agent-remote-controller/agent-remote-relay');
   const f = await fixture();
   const pair = await (await f.request(f.state.basePath + 'v1/remote/pairings', {})).json();
   const native = createAgentRemoteRelay({ providers: [] }); cleanups.push(() => native.close());

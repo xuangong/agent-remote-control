@@ -1,11 +1,11 @@
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
 import { useContext, useId, useMemo, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
-} from '@borgee/agent-remote-protocol';
-import type { AgentReplicaState, RemoteSessionStatus } from '@borgee/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@borgee/agent-remote-web/react';
+} from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
+import { AgentCommandDetails, AgentTimeline, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
 
 import { RecoveryScope } from '../conversation-recovery.js';
 import { LiveControlPanel } from './LiveControlPanel.js';

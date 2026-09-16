@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type AgentChildSession } from '@borgee/agent-remote-protocol';
-import { AgentReplica } from '@borgee/agent-remote-web';
+import { PROTOCOL_VERSION, type AgentChildSession } from '@agent-remote-controller/agent-remote-protocol';
+import { AgentReplica } from '@agent-remote-controller/agent-remote-web';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { render } from './test/setup.js';

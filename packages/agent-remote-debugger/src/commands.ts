@@ -1,8 +1,8 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 
-import { PROTOCOL_VERSION, encodeClientMessage, type AgentInteractionResponse, type AgentPersistenceHandle, type AgentSessionConfig, type ResourceResponse } from '@borgee/agent-remote-protocol';
-import { HttpWebSocketTransport, RemoteOperationError } from '@borgee/agent-remote-web/headless';
+import { PROTOCOL_VERSION, encodeClientMessage, type AgentInteractionResponse, type AgentPersistenceHandle, type AgentSessionConfig, type ResourceResponse } from '@agent-remote-controller/agent-remote-protocol';
+import { HttpWebSocketTransport, RemoteOperationError } from '@agent-remote-controller/agent-remote-web/headless';
 
 import { DebuggerError } from './errors.js';
 import { parseExactJson, readTextInput, resolveOrigin, resolveRelayUrl } from './input.js';

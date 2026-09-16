@@ -2,12 +2,12 @@ import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
   AgentStreamEvent,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 import type {
   AgentSnapshot,
   ResourceBinding,
   ResourceState,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import type { CanonicalTimelineRow } from './timeline-store.js';
 

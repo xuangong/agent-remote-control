@@ -6,7 +6,7 @@ import type {
   AgentRuntimeInfo,
   AgentSession,
   ProviderStreamItem,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';

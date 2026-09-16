@@ -4,7 +4,7 @@ import type {
   AgentTimelineItem,
   HistoryPage,
   ProjectedTimelineEntry,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import {
   applyHistoryPage,

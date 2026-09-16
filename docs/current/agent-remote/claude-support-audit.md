@@ -71,9 +71,9 @@ export NODE_OPTIONS=--no-experimental-webstorage
 python3 - <<'PYTEST'
 import subprocess
 result = subprocess.run([
-    'pnpm', '-r', '--filter', '@borgee/agent-provider-dsh',
-    '--filter', '@borgee/agent-provider-codex', '--filter', '@borgee/agent-provider-claude',
-    '--filter', '@agent-remote-control/dsh', '--filter', '@agent-remote-control/agent-remote-controller',
+    'pnpm', '-r', '--filter', '@agent-remote-controller/agent-provider-dsh',
+    '--filter', '@agent-remote-controller/agent-provider-codex', '--filter', '@agent-remote-controller/agent-provider-claude',
+    '--filter', '@agent-remote-controller/dsh', '--filter', '@agent-remote-controller/agent-remote-controller',
     'run', 'test', '--hookTimeout=30000',
 ], timeout=180)
 raise SystemExit(result.returncode)

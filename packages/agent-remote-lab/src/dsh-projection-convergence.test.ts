@@ -5,16 +5,16 @@ import {
   LiveDshSession,
   type DshNativeObservation,
   type DshOwnedAgent,
-} from '@borgee/agent-provider-dsh';
-import type { AgentProviderAdapter, AgentSession, ProviderObservation, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-dsh';
+import type { AgentProviderAdapter, AgentSession, ProviderObservation, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import {
   createAgentRemoteRelay,
   InMemoryResourceStore,
   type AgentManager,
   type AgentManagerEvent,
   type ResourceStore,
-} from '@borgee/agent-remote-relay';
-import { AgentReplica } from '@borgee/agent-remote-web';
+} from '@agent-remote-controller/agent-remote-relay';
+import { AgentReplica } from '@agent-remote-controller/agent-remote-web';
 
 import { createAgentRemoteRelay as createSourceAgentRemoteRelay } from '../../agent-remote-relay/src/relay.js';
 

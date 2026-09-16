@@ -1,12 +1,12 @@
 {
-  "name": "@borgee/agent-provider-codex",
+  "name": "@agent-remote-controller/agent-provider-codex",
   "version": "0.1.0",
   "private": false,
   "publishConfig": {
     "access": "public"
   },
   "type": "module",
-  "description": "Codex app-server provider for Borgee Agent Remote.",
+  "description": "Codex app-server provider for Agent Remote Controller.",
   "license": "Apache-2.0",
   "exports": {
     ".": {
@@ -27,7 +27,7 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@borgee/agent-provider-sdk": "workspace:*",
+    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
     "ws": "^8.21.0"
   },
   "devDependencies": {

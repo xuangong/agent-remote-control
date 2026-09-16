@@ -1,6 +1,6 @@
 # Agent Remote Lab
 
-`agent-remote-lab` is a local chat and protocol debugging console. Run its DSH plugin inside DSH Web to use the same native session from both interfaces, then open the Lab to inspect the public protocol and client Replica. The console uses shared React components from `@borgee/agent-remote-web`; it is not a Borgee product service or a complete Provider control plane.
+`@agent-remote-controller/agent-remote-lab` is a local chat and protocol debugging console. Run its DSH plugin inside DSH Web to use the same native session from both interfaces, then open the Lab to inspect the public protocol and client Replica. The console uses shared React components from `@agent-remote-controller/agent-remote-web`; it is not a Borgee product service or a complete Provider control plane.
 
 For temporary-key pairing, native Host discovery, and real session control, use the [Agent Remote Control guide](../../README.md). The fixture plugin and launch commands below provide additional protocol validation modes.
 
@@ -42,15 +42,15 @@ export BORGEE_LIVE_DSH_WORKSPACE="$LAB_RUNTIME/workspace"
 mkdir -p "$DSH_HOME" "$BORGEE_LIVE_DSH_WORKSPACE"
 printf '%s\n' "$LAB_RUNTIME"
 
-"$LAB_PNPM" --filter agent-remote-lab... run build
-"$LAB_PNPM" --filter agent-remote-lab run build:dsh-plugin
-export LAB_DSH_PLUGIN="$LAB_ROOT/packages/agent-remote-lab/dist/dsh-plugin/borgee-agent-remote-lab-dsh-0.1.0.tgz"
+"$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab... run build
+"$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab run build:dsh-plugin
+export LAB_DSH_PLUGIN="$LAB_ROOT/packages/agent-remote-lab/dist/dsh-plugin/agent-remote-controller-agent-remote-lab-dsh-0.1.0.tgz"
 test -f "$LAB_DSH_PLUGIN"
 ```
 
-The package is `@borgee/agent-remote-lab-dsh`. Its declared DSH bundle inserts the Agent Remote plugin into the Web profile, injects `sessionController`, `agentPresets`, `userQuestions`, and `approval`, and selects `runtimeMode: shared-web`. Installing it with `dsh plugin` activates that bundle; no hand-written patch or global configuration change is needed.
+The package is `@agent-remote-controller/agent-remote-lab-dsh`. Its declared DSH bundle inserts the Agent Remote plugin into the Web profile, injects `sessionController`, `agentPresets`, `userQuestions`, and `approval`, and selects `runtimeMode: shared-web`. Installing it with `dsh plugin` activates that bundle; no hand-written patch or global configuration change is needed.
 
-This debugging package bundles the Borgee adapter and Relay while using the DSH installation's native services. It carries its own compatibility manifest and registers the real DSH Provider only. It does not require a Codex executable. The independent outbound Host bundle uses `@agent-remote-control/dsh-host` and connects to the workbench broker.
+This debugging package bundles the standalone adapter and Relay while using the DSH installation's native services. It carries its own compatibility manifest and registers the real DSH Provider only. It does not require a Codex executable. The independent outbound Host bundle uses `@agent-remote-controller/dsh-host` and connects to the workbench broker.
 
 Keep the printed runtime path. Reuse its `home` and `workspace` on subsequent launches; creating a new runtime directory gives you a fresh isolated DSH configuration and session store. Runtime files are local and gitignored.
 
@@ -65,7 +65,7 @@ This mode targets the exact `@deepseek-ai/dsh@0.1.2-rc.1` npm package and matchi
 Use an isolated installation to pin the CLI and its native dependency graph together. Checking only `dsh --version` is insufficient when transitive dependencies have resolved to newer versions. The preparation command reads published package metadata and writes exact native-version overrides; it does not change a global DSH installation.
 
 ```bash
-"$LAB_PNPM" --filter agent-remote-lab run prepare:dsh-release "$LAB_RUNTIME/dsh-release"
+"$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab run prepare:dsh-release "$LAB_RUNTIME/dsh-release"
 npm --prefix "$LAB_RUNTIME/dsh-release" install
 LAB_DSH_COMMAND=("$LAB_NODE" "$LAB_RUNTIME/dsh-release/node_modules/@deepseek-ai/dsh/lib/bin.js")
 test "$("${LAB_DSH_COMMAND[@]}" --version)" = '0.1.2-rc.1'
@@ -186,7 +186,7 @@ The Recorded Provider is deterministic. It proves the public Snapshot/Timeline p
 
 ```bash
 cd "$LAB_ROOT"
-env -u DSH_REPO -u BORGEE_CODEX_TEST_EXECUTABLE /usr/bin/perl -e 'alarm 240; exec @ARGV' "$LAB_PNPM" --filter agent-remote-lab exec playwright test e2e/recorded.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=120000
+env -u DSH_REPO -u BORGEE_CODEX_TEST_EXECUTABLE /usr/bin/perl -e 'alarm 240; exec @ARGV' "$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab exec playwright test e2e/recorded.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=120000
 ```
 
 ### Node and Go Relay conformance
@@ -194,7 +194,7 @@ env -u DSH_REPO -u BORGEE_CODEX_TEST_EXECUTABLE /usr/bin/perl -e 'alarm 240; exe
 After the workspace dependency installation and Agent Remote package builds, run this from the repository root with the configured Go toolchain available:
 
 ```bash
-pnpm --filter agent-remote-lab run test:conformance
+pnpm --filter @agent-remote-controller/agent-remote-lab run test:conformance
 ```
 
 The launcher creates an isolated Go product host and one recorded runtime. Production Web clients compare the direct Node HTTP/WebSocket route with the same runtime reached through the outbound plugin uplink and authenticated Go routes. The scenarios cover creation, Snapshot and Timeline paging, message/control acknowledgements, Question and plan responses, resource bytes and replacement, browser recovery, and uplink recovery with concurrent browser streams and no command replay.
@@ -212,7 +212,7 @@ cd "$LAB_ROOT"
 export BORGEE_CODEX_TEST_EXECUTABLE="$(command -v codex)"
 test -n "$BORGEE_CODEX_TEST_EXECUTABLE" && test "${BORGEE_CODEX_TEST_EXECUTABLE#/}" != "$BORGEE_CODEX_TEST_EXECUTABLE"
 "$BORGEE_CODEX_TEST_EXECUTABLE" --version
-env -u DSH_REPO /usr/bin/perl -e 'alarm 240; exec @ARGV' "$LAB_PNPM" --filter agent-remote-lab exec playwright test e2e/codex.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=180000
+env -u DSH_REPO /usr/bin/perl -e 'alarm 240; exec @ARGV' "$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab exec playwright test e2e/codex.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=180000
 ```
 
 The executable check must print `codex-cli 0.148.0`; a suffix such as `nightly` is intentionally rejected by the Lab before the Provider is built (`src/server/codex.ts:30-49`). The visible flow selects `Codex (fixture)`, answers the rendered question, observes its continuation, reloads, and asserts one copy of the transcript (`e2e/codex.spec.ts:9-35`).
@@ -232,7 +232,7 @@ test -f "$DSH_REPO/package.json"
 test "$("$LAB_NODE" -e 'console.log(require(process.argv[1]).version)' "$DSH_REPO/package.json")" = '0.1.2-rc.1'
 test "$(git -C "$DSH_REPO" rev-parse HEAD)" = 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'
 "$BORGEE_CODEX_TEST_EXECUTABLE" --version
-/usr/bin/perl -e 'alarm 600; exec @ARGV' "$LAB_PNPM" --filter agent-remote-lab exec playwright test e2e/live-dsh.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=360000
+/usr/bin/perl -e 'alarm 600; exec @ARGV' "$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab exec playwright test e2e/live-dsh.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=360000
 ```
 
 The live desktop scenario exercises visible plan approval, file read, todo projection, a session-owned generated write, tool approval, Provider resource-reader shutdown, reload, older history, and byte-identical download (`e2e/live-dsh.spec.ts:14-77`). The live patch composes the native `ask_user_question` tool, and the Provider maps its question service into public Question requests (`live-dsh.patch.yml`, `packages/agent-provider-dsh/src/runtime.ts`).
@@ -282,7 +282,7 @@ These commands validate the Lab documentation's launch assumptions without runni
 
 ```bash
 cd "$LAB_ROOT"
-/usr/bin/perl -e 'alarm 180; exec @ARGV' "$LAB_PNPM" --filter agent-remote-lab exec vitest run src/server/compatibility.test.ts src/server/live-launcher.test.ts --testTimeout=10000
-/usr/bin/perl -e 'alarm 180; exec @ARGV' "$LAB_PNPM" --filter agent-remote-lab run typecheck
-/usr/bin/perl -e 'alarm 180; exec @ARGV' "$LAB_PNPM" --filter agent-remote-lab run build
+/usr/bin/perl -e 'alarm 180; exec @ARGV' "$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab exec vitest run src/server/compatibility.test.ts src/server/live-launcher.test.ts --testTimeout=10000
+/usr/bin/perl -e 'alarm 180; exec @ARGV' "$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab run typecheck
+/usr/bin/perl -e 'alarm 180; exec @ARGV' "$LAB_PNPM" --filter @agent-remote-controller/agent-remote-lab run build
 ```

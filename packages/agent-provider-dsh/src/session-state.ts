@@ -1,4 +1,4 @@
-import type { AgentToolCallTimelineItem } from '@borgee/agent-provider-sdk';
+import type { AgentToolCallTimelineItem } from '@agent-remote-controller/agent-provider-sdk';
 
 import type { DshImageReference } from './content.js';
 

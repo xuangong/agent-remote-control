@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentChildSession, AgentSession } from '@borgee/agent-provider-sdk';
+import type { AgentChildSession, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
 import { DshChildSession } from './child-session.js';
 import { withDshChildren } from './parent-session.js';
 

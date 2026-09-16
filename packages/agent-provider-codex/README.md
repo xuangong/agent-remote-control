@@ -1,6 +1,6 @@
 # Borgee Codex app-server Provider
 
-This package adapts the native `codex app-server` JSON-RPC protocol to `@borgee/agent-provider-sdk`. It owns transport lifecycle, session creation and resume, native event projection, typed interaction mapping, and Provider history/live handoff.
+This package adapts the native `codex app-server` JSON-RPC protocol to `@agent-remote-controller/agent-provider-sdk`. It owns transport lifecycle, session creation and resume, native event projection, typed interaction mapping, and Provider history/live handoff.
 
 | Capability | Support |
 |---|---|

@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
-import { BROKER_MAX_FRAME_BYTES, createHostedRelay, migrateLegacyNodeState, validateGatewayOrigin, type GatewayAuthOptions } from '@borgee/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES, createHostedRelay, migrateLegacyNodeState, validateGatewayOrigin, type GatewayAuthOptions } from '@agent-remote-controller/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
 

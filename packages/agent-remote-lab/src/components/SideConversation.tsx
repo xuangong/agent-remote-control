@@ -1,8 +1,8 @@
 import { SessionLink } from './SessionLink.js';
 import { useEffect, useRef, useState } from 'react';
-import { AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionStatus } from '@borgee/agent-remote-web';
-import type { AgentCommandResult } from '@borgee/agent-remote-protocol';
-import type { QuestionDraft } from '@borgee/agent-remote-web/react';
+import { AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
+import type { AgentCommandResult } from '@agent-remote-controller/agent-remote-protocol';
+import type { QuestionDraft } from '@agent-remote-controller/agent-remote-web/react';
 import type { OpenedSession } from '../directory-client.js';
 import { forkDisplayState, type ForkStore, type SessionFork } from '../session-forks.js';
 import { forkActions, forkCommands } from '../fork-actions.js';

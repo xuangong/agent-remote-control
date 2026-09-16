@@ -1,4 +1,4 @@
-import type { AgentUsage } from '@borgee/agent-provider-sdk';
+import type { AgentUsage } from '@agent-remote-controller/agent-provider-sdk';
 import { record } from './projector.js';
 
 /** Query cost is cumulative; result token counts cover this turn's main loop only. */

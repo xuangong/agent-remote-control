@@ -21,7 +21,7 @@ export async function createClaudeHostRegistration(options: ClaudeHostRegistrati
   const supported = match && (Number(match[1]) > 2 || Number(match[1]) === 2 &&
     (Number(match[2]) > 1 || Number(match[2]) === 1 && Number(match[3]) >= 247));
   if (!supported) throw new Error(`Claude executable must be version 2.1.247 or newer; got ${stdout.trim() || 'unknown'}.`);
-  const { ClaudeAgentProvider } = await import('@borgee/agent-provider-claude');
+  const { ClaudeAgentProvider } = await import('@agent-remote-controller/agent-provider-claude');
   const provider = new ClaudeAgentProvider({ executable, env, restrictedNative: options.restrictedNative, requestTimeoutMs: options.requestTimeoutMs, onDiagnostic: options.onDiagnostic });
   return { adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? []) };
 }

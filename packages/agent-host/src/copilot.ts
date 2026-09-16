@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { CopilotAgentProvider, resolveCopilotExecutable } from '@borgee/agent-provider-copilot';
+import { CopilotAgentProvider, resolveCopilotExecutable } from '@agent-remote-controller/agent-provider-copilot';
 import { createCopilotSessionDirectory } from './copilot-directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
 

@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { open, opendir } from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentCommand, AgentResourceReadResult } from '@borgee/agent-provider-sdk';
+import type { AgentCommand, AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
 

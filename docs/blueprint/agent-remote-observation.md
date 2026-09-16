@@ -55,13 +55,13 @@ Each row names one independently reusable component.
 
 | Component | Responsibility | Excluded responsibility |
 | --- | --- | --- |
-| `@borgee/agent-provider-sdk` | Provider descriptors, session lifecycle, capabilities, normalized events, Timeline item types, typed interactions, command descriptors, persistence handles, and resource reads. | Native SDK implementations, public wire encoding, Relay storage, UI, or product authorization. |
-| `@borgee/agent-provider-dsh` | DSH session ownership, history and live handoff, native event projection, interaction mapping, and authorized generated-resource reads. | Relay transport, public history projection, UI, or authority decisions. |
-| `@borgee/agent-provider-codex` | Codex app-server transport, session ownership, history and live handoff, native projection, and typed interaction mapping. | Relay transport, public history projection, UI, or authority decisions. |
-| `@borgee/agent-remote-protocol` | Strict versioned public requests, responses, Snapshot, Timeline pages, interactions, resource messages, and runtime codecs. | Native event interpretation, Provider process ownership, UI, or deciding Agent ownership. |
-| `@borgee/agent-remote-relay` | Provider registry, session ownership, current state, Timeline storage and projection, resource acquisition, manager dispatch, and HTTP and WebSocket transport. | Provider-native interpretation, presentation, or substituting capabilities for product authorization. |
-| `@borgee/agent-remote-web` | Public-wire transport, recoverable headless replica, deterministic reducer, selectors, and React DOM components. | Provider sessions, Relay-internal dispatch, product layout, or authoritative access control. |
-| `@borgee/agent-remote-debugger` | Command-line operation and observation through the shared headless client. | A second reducer, direct Provider access, or bypassing Owner authorization. |
+| `@agent-remote-controller/agent-provider-sdk` | Provider descriptors, session lifecycle, capabilities, normalized events, Timeline item types, typed interactions, command descriptors, persistence handles, and resource reads. | Native SDK implementations, public wire encoding, Relay storage, UI, or product authorization. |
+| `@agent-remote-controller/agent-provider-dsh` | DSH session ownership, history and live handoff, native event projection, interaction mapping, and authorized generated-resource reads. | Relay transport, public history projection, UI, or authority decisions. |
+| `@agent-remote-controller/agent-provider-codex` | Codex app-server transport, session ownership, history and live handoff, native projection, and typed interaction mapping. | Relay transport, public history projection, UI, or authority decisions. |
+| `@agent-remote-controller/agent-remote-protocol` | Strict versioned public requests, responses, Snapshot, Timeline pages, interactions, resource messages, and runtime codecs. | Native event interpretation, Provider process ownership, UI, or deciding Agent ownership. |
+| `@agent-remote-controller/agent-remote-relay` | Provider registry, session ownership, current state, Timeline storage and projection, resource acquisition, manager dispatch, and HTTP and WebSocket transport. | Provider-native interpretation, presentation, or substituting capabilities for product authorization. |
+| `@agent-remote-controller/agent-remote-web` | Public-wire transport, recoverable headless replica, deterministic reducer, selectors, and React DOM components. | Provider sessions, Relay-internal dispatch, product layout, or authoritative access control. |
+| `@agent-remote-controller/agent-remote-debugger` | Command-line operation and observation through the shared headless client. | A second reducer, direct Provider access, or bypassing Owner authorization. |
 | `agent-remote-lab` | Loopback-only composition of Providers, Relay, Workbench, public trace, and protocol inspector. | Production authorization, durable storage, or product navigation. |
 
 ## Provider Contract

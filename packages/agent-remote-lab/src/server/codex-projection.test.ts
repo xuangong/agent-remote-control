@@ -1,5 +1,5 @@
-import { CodexEventProjector } from '@borgee/agent-provider-codex';
-import { PROTOCOL_VERSION, encodeAgentStreamMessage } from '@borgee/agent-remote-protocol';
+import { CodexEventProjector } from '@agent-remote-controller/agent-provider-codex';
+import { PROTOCOL_VERSION, encodeAgentStreamMessage } from '@agent-remote-controller/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 describe('Codex projected wire events', () => {

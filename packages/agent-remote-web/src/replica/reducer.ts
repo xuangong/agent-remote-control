@@ -10,7 +10,7 @@ import type {
   ResourceResponse,
   ResourceUpdate,
   TimelineResourceBindingReplacement,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import type {
   AgentReplicaState,

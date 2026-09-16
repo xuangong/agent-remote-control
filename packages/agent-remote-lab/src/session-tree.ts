@@ -1,4 +1,4 @@
-import type { AgentChildSession } from '@borgee/agent-remote-protocol';
+import type { AgentChildSession } from '@agent-remote-controller/agent-remote-protocol';
 import type { OpenedSession } from './directory-client.js';
 
 export interface SessionEntry extends Partial<AgentChildSession> {

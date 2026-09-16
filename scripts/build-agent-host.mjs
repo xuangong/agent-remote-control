@@ -22,7 +22,7 @@ for (const provider of ['claude', 'copilot']) {
   }
 }
 console.log('Building Agent Host and its workspace dependencies...');
-await exec(pnpm, ['--filter', '@agent-remote-control/agent-remote-controller...', 'run', 'build'], { cwd: root, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+await exec(pnpm, ['--filter', '@agent-remote-controller/agent-remote-controller...', 'run', 'build'], { cwd: root, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
 const require = createRequire(join(root, 'packages/agent-remote-lab/package.json'));
 const { build } = require('esbuild');
 const stage = await mkdtemp(join(tmpdir(), 'agent-host-package-'));

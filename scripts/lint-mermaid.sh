@@ -217,7 +217,7 @@ plant_fixtures() {
 
 ```mermaid
 flowchart LR
-  sdk["@borgee/plugin-sdk"]
+  sdk["@agent-remote-controller/agent-provider-sdk"]
   sdk --> server["server-go"]
 ```
 
@@ -236,7 +236,7 @@ FIXTURE
 
 ```mermaid
 flowchart LR
-  sdk[@borgee/plugin-sdk]
+  sdk[@agent-remote-controller/agent-provider-sdk]
   sdk --> server[server-go]
 ```
 FIXTURE
@@ -248,13 +248,13 @@ FIXTURE
 
 ```bash
 flowchart LR
-  sdk[@borgee/plugin-sdk]
+  sdk[@agent-remote-controller/agent-provider-sdk]
 ```
 
 ````
 ```mermaid
 flowchart LR
-  sdk[@borgee/plugin-sdk]
+  sdk[@agent-remote-controller/agent-provider-sdk]
 ```
 ````
 FIXTURE
@@ -266,7 +266,7 @@ FIXTURE
 
   ```mermaid
   flowchart LR
-    sdk[@borgee/plugin-sdk]
+    sdk[@agent-remote-controller/agent-provider-sdk]
   ```
 FIXTURE
 
@@ -389,8 +389,8 @@ plant_doc() {
 	local path="$1" kind="$2"
 	mkdir -p "$(dirname "$path")"
 	case "$kind" in
-	good) printf '# D\n\n```mermaid\nflowchart LR\n  sdk["@borgee/plugin-sdk"]\n```\n' >"$path" ;;
-	broken) printf '# D\n\n```mermaid\nflowchart LR\n  sdk[@borgee/plugin-sdk]\n```\n' >"$path" ;;
+	good) printf '# D\n\n```mermaid\nflowchart LR\n  sdk["@agent-remote-controller/agent-provider-sdk"]\n```\n' >"$path" ;;
+	broken) printf '# D\n\n```mermaid\nflowchart LR\n  sdk[@agent-remote-controller/agent-provider-sdk]\n```\n' >"$path" ;;
 	*)
 		echo "internal error: unknown fixture kind '$kind'" >&2
 		exit 2

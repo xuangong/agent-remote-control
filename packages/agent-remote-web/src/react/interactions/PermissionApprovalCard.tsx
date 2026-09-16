@@ -1,4 +1,4 @@
-import type { AgentInteractionRequest, AgentInteractionResponse } from '@borgee/agent-remote-protocol';
+import type { AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-remote-protocol';
 
 interface Props {
   request: Extract<AgentInteractionRequest, { kind: 'permission_approval' }>;

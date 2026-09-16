@@ -1,5 +1,5 @@
 {
-  "name": "@borgee/agent-remote-relay",
+  "name": "@agent-remote-controller/agent-remote-relay",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {
@@ -26,8 +26,8 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@borgee/agent-provider-sdk": "workspace:*",
-    "@borgee/agent-remote-protocol": "workspace:*",
+    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
+    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
     "ws": "^8.21.0"
   },
   "devDependencies": {

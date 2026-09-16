@@ -1,4 +1,4 @@
-import type { AgentProviderAdapter, AgentSessionConfig } from '@borgee/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,13 +21,13 @@ vi.mock('@deepseek-ai/dsh-agent', () => ({
   installModelSelection: composition.installModelSelection,
 }));
 
-vi.mock('@borgee/agent-provider-dsh', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@borgee/agent-provider-dsh')>(),
+vi.mock('@agent-remote-controller/agent-provider-dsh', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@agent-remote-controller/agent-provider-dsh')>(),
   createDshWebInteractionAdapter: () => composition.interactions,
 }));
 
-vi.mock('@agent-remote-control/dsh', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@agent-remote-control/dsh')>(),
+vi.mock('@agent-remote-controller/dsh', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@agent-remote-controller/dsh')>(),
   createDshAgentRemoteProvider: composition.providerFactory,
 }));
 

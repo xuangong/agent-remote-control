@@ -1,5 +1,5 @@
 {
-  "name": "agent-remote-lab",
+  "name": "@agent-remote-controller/agent-remote-lab",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,21 +15,21 @@
     "test:conformance": "node scripts/run-relay-conformance.mjs"
   },
   "dependencies": {
-    "@agent-remote-control/dsh": "workspace:*",
-    "@borgee/agent-provider-codex": "workspace:*",
-    "@borgee/agent-provider-dsh": "workspace:*",
-    "@borgee/agent-provider-sdk": "workspace:*",
-    "@borgee/agent-remote-hosted": "workspace:*",
-    "@borgee/agent-remote-protocol": "workspace:*",
-    "@borgee/agent-remote-relay": "workspace:*",
-    "@borgee/agent-remote-web": "workspace:*",
+    "@agent-remote-controller/dsh": "workspace:*",
+    "@agent-remote-controller/agent-provider-codex": "workspace:*",
+    "@agent-remote-controller/agent-provider-dsh": "workspace:*",
+    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
+    "@agent-remote-controller/agent-remote-hosted": "workspace:*",
+    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
+    "@agent-remote-controller/agent-remote-relay": "workspace:*",
+    "@agent-remote-controller/agent-remote-web": "workspace:*",
     "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
     "qrcode": "1.5.4",
     "react": "^18.3.0",
     "react-dom": "^18.3.0"
   },
   "devDependencies": {
-    "@agent-remote-control/agent-remote-controller": "workspace:*",
+    "@agent-remote-controller/agent-remote-controller": "workspace:*",
     "@playwright/test": "^1.50.0",
     "@types/node": "^24.3.0",
     "@types/qrcode": "1.5.6",

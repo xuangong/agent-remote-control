@@ -37,22 +37,22 @@ importers:
 
   packages/agent-host:
     dependencies:
-      '@borgee/agent-provider-claude':
+      '@agent-remote-controller/agent-provider-claude':
         specifier: workspace:*
         version: link:../agent-provider-claude
-      '@borgee/agent-provider-codex':
+      '@agent-remote-controller/agent-provider-codex':
         specifier: workspace:*
         version: link:../agent-provider-codex
-      '@borgee/agent-provider-copilot':
+      '@agent-remote-controller/agent-provider-copilot':
         specifier: workspace:*
         version: link:../agent-provider-copilot
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@borgee/agent-remote-protocol':
+      '@agent-remote-controller/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@borgee/agent-remote-relay':
+      '@agent-remote-controller/agent-remote-relay':
         specifier: workspace:*
         version: link:../agent-remote-relay
     devDependencies:
@@ -77,7 +77,7 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.247
         version: 0.3.247(@anthropic-ai/sdk@0.125.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(zod@4.4.3)
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
     devDependencies:
@@ -93,7 +93,7 @@ importers:
 
   packages/agent-provider-codex:
     dependencies:
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
       ws:
@@ -115,7 +115,7 @@ importers:
 
   packages/agent-provider-copilot:
     dependencies:
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
       '@github/copilot':
@@ -137,7 +137,7 @@ importers:
 
   packages/agent-provider-dsh:
     dependencies:
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
       '@deepseek-ai/cordis':
@@ -180,10 +180,10 @@ importers:
 
   packages/agent-remote-debugger:
     dependencies:
-      '@borgee/agent-remote-protocol':
+      '@agent-remote-controller/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@borgee/agent-remote-web':
+      '@agent-remote-controller/agent-remote-web':
         specifier: workspace:*
         version: link:../agent-remote-web
       ws:
@@ -205,13 +205,13 @@ importers:
 
   packages/agent-remote-dsh:
     dependencies:
-      '@borgee/agent-provider-dsh':
+      '@agent-remote-controller/agent-provider-dsh':
         specifier: workspace:*
         version: link:../agent-provider-dsh
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@borgee/agent-remote-relay':
+      '@agent-remote-controller/agent-remote-relay':
         specifier: workspace:*
         version: link:../agent-remote-relay
       '@deepseek-ai/cordis':
@@ -248,7 +248,7 @@ importers:
 
   packages/agent-remote-hosted:
     dependencies:
-      '@borgee/agent-remote-protocol':
+      '@agent-remote-controller/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
     devDependencies:
@@ -264,28 +264,28 @@ importers:
 
   packages/agent-remote-lab:
     dependencies:
-      '@agent-remote-control/dsh':
+      '@agent-remote-controller/dsh':
         specifier: workspace:*
         version: link:../agent-remote-dsh
-      '@borgee/agent-provider-codex':
+      '@agent-remote-controller/agent-provider-codex':
         specifier: workspace:*
         version: link:../agent-provider-codex
-      '@borgee/agent-provider-dsh':
+      '@agent-remote-controller/agent-provider-dsh':
         specifier: workspace:*
         version: link:../agent-provider-dsh
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@borgee/agent-remote-hosted':
+      '@agent-remote-controller/agent-remote-hosted':
         specifier: workspace:*
         version: link:../agent-remote-hosted
-      '@borgee/agent-remote-protocol':
+      '@agent-remote-controller/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@borgee/agent-remote-relay':
+      '@agent-remote-controller/agent-remote-relay':
         specifier: workspace:*
         version: link:../agent-remote-relay
-      '@borgee/agent-remote-web':
+      '@agent-remote-controller/agent-remote-web':
         specifier: workspace:*
         version: link:../agent-remote-web
       '@deepseek-ai/dsh-agent':
@@ -301,7 +301,7 @@ importers:
         specifier: ^18.3.0
         version: 18.3.1(react@18.3.1)
     devDependencies:
-      '@agent-remote-control/agent-remote-controller':
+      '@agent-remote-controller/agent-remote-controller':
         specifier: workspace:*
         version: link:../agent-host
       '@playwright/test':
@@ -365,10 +365,10 @@ importers:
 
   packages/agent-remote-relay:
     dependencies:
-      '@borgee/agent-provider-sdk':
+      '@agent-remote-controller/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@borgee/agent-remote-protocol':
+      '@agent-remote-controller/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
       ws:
@@ -390,7 +390,7 @@ importers:
 
   packages/agent-remote-web:
     dependencies:
-      '@borgee/agent-remote-protocol':
+      '@agent-remote-controller/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
       react-markdown:
@@ -433,7 +433,7 @@ importers:
 
   packages/agent-remote-cloudflare:
     dependencies:
-      "@borgee/agent-remote-hosted":
+      "@agent-remote-controller/agent-remote-hosted":
         specifier: workspace:*
         version: link:../agent-remote-hosted
     devDependencies:

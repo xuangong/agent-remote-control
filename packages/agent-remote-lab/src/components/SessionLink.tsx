@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { controllerPath } from '@borgee/agent-remote-hosted/controller-location';
+import { controllerPath } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import type { OpenedSession } from '../directory-client.js';
 
 export function sessionUrl(session: OpenedSession): string {

@@ -1,5 +1,5 @@
 {
-  "name": "@borgee/agent-provider-copilot",
+  "name": "@agent-remote-controller/agent-provider-copilot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@github/copilot-sdk": "1.0.11",
-    "@borgee/agent-provider-sdk": "workspace:*",
+    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
     "@github/copilot": "1.0.83"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import type { ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 const mock = vi.hoisted(() => ({client: {} as any, native: {} as any, config: {} as any, handler: undefined as any, history: [] as any[]}));
 vi.mock('@github/copilot-sdk', () => ({RuntimeConnection: {forStdio: (x: unknown) => x}, CopilotClient: class {
   constructor() { return mock.client; }

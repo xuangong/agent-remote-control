@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentSession, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import type { AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { ClaudeAgentProvider } from '../dist/provider.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 

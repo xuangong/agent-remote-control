@@ -12,7 +12,7 @@ const root = resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
 const require = createRequire(join(root, 'packages/agent-host/package.json'));
 const { WebSocketServer } = require('ws');
-const artifact = process.env.AGENT_HOST_PACKAGE ?? join(root, 'dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz');
+const artifact = process.env.AGENT_HOST_PACKAGE ?? join(root, 'dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz');
 
 test('installs the tarball independently and manages a paired daemon from a path containing spaces', { timeout: 180000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'agent host installed '));
@@ -47,12 +47,12 @@ test('installs the tarball independently and manages a paired daemon from a path
     { cwd: directory, timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
   assert.match((await run(['--help'])).stdout, /Usage: agent-remote-controller/);
   assert.match((await run(['--help'])).stdout, /autostart/);
-  const packageRoot = join(prefix, 'lib/node_modules/@agent-remote-control/agent-remote-controller');
+  const packageRoot = join(prefix, 'lib/node_modules/@agent-remote-controller/agent-remote-controller');
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
-  assert.equal(manifest.name, '@agent-remote-control/agent-remote-controller');
+  assert.equal(manifest.name, '@agent-remote-controller/agent-remote-controller');
   assert.deepEqual(Object.keys(manifest.bin), ['agent-remote-controller']);
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
-  assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@borgee/')));
+  assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@agent-remote-controller/')));
   await assert.rejects(run(['start']), /AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required/);
   await assert.rejects(run(['start'], { AGENT_HOST_REMOTE_KEY: 'key-without-relay' }), /Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together/);
   for (const [provider, version] of [['codex', 'codex-cli 0.148.0'], ['claude', '2.1.247 (Claude Code)']]) {

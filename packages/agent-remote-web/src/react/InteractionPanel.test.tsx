@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentInteractionRequest } from '@borgee/agent-remote-protocol';
+import type { AgentInteractionRequest } from '@agent-remote-controller/agent-remote-protocol';
 
 import { render, rerender } from '../test/setup.js';
 import { InteractionPanel } from './InteractionPanel.js';

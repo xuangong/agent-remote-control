@@ -1,4 +1,4 @@
-import type { ProviderObservation } from '@borgee/agent-provider-sdk';
+import type { ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
 
 import { isRecord, readNumber, readString, type JsonObject } from './native.js';
 import { CodexEventProjector, type CodexEventProjectorOptions } from './projector.js';

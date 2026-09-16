@@ -1,6 +1,6 @@
 import { DshCommands } from './commands.js';
 import { DshSessionSettings } from './session-settings.js';
-import { validateInteractionResponse } from '@borgee/agent-provider-sdk';
+import { validateInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
 import type {
   AgentCommand,
   AgentCommandResult,
@@ -9,7 +9,7 @@ import type {
   AgentPersistenceHandle,
   AgentRuntimeInfo,
   AgentSessionConfig,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, AgentHandle, AgentSetup } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
@@ -27,7 +27,7 @@ export interface AgentRuntimeInfoValue {
   readonly cwd?: string;
   readonly model?: string | null;
   readonly planning?: { active: boolean; requested?: boolean };
-  readonly settings?: import('@borgee/agent-provider-sdk').AgentSessionSetting[];
+  readonly settings?: import('@agent-remote-controller/agent-provider-sdk').AgentSessionSetting[];
 }
 
 export interface DshOwnedRuntimeFeatures {
@@ -66,7 +66,7 @@ export interface DshOwnedAgent {
   setSessionSetting?(id: string, value: string): Promise<void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): boolean | Promise<boolean>;
   readImage(reference: DshImageReference): Promise<DshStoredImage>;
-  readDocumentation?(locator: string): Promise<import('@borgee/agent-provider-sdk').AgentResourceReadResult>;
+  readDocumentation?(locator: string): Promise<import('@agent-remote-controller/agent-provider-sdk').AgentResourceReadResult>;
   flush(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -488,7 +488,7 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
   loadSettings(): Promise<void> { return this.settings.load(); }
 
   listCommands(): Promise<AgentCommand[]> { return this.commands.list(); }
-  readDocumentation(locator: string): Promise<import('@borgee/agent-provider-sdk').AgentResourceReadResult> { return this.commands.readDocumentation(locator); }
+  readDocumentation(locator: string): Promise<import('@agent-remote-controller/agent-provider-sdk').AgentResourceReadResult> { return this.commands.readDocumentation(locator); }
   executeCommand(id: string, args: string): Promise<AgentCommandResult> { return this.commands.execute(id, args); }
 
   private assertCommandIdle(): void {

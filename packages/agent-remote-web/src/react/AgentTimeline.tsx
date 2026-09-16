@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
 import type { SessionLinkResolver } from './items/ToolCallItem.js';

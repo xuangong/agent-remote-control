@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import type {
   AgentRemoteHttpMutationPolicy,
   AgentRemoteWebSocketAuthorizer,
-} from '@borgee/agent-remote-relay';
+} from '@agent-remote-controller/agent-remote-relay';
 
 const localSubject = 'local-lab';
 

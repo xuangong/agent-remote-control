@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { GatewayController } from './GatewayController.js';
 import { App } from './App.js';
 import './app.css';
-import '@borgee/agent-remote-web/styles.css';
+import '@agent-remote-controller/agent-remote-web/styles.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Lab root element is missing.');

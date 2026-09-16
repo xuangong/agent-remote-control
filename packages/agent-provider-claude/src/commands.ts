@@ -1,4 +1,4 @@
-import { validateCommandDirectory, type AgentCommand } from '@borgee/agent-provider-sdk';
+import { validateCommandDirectory, type AgentCommand } from '@agent-remote-controller/agent-provider-sdk';
 import type { Query } from '@anthropic-ai/claude-agent-sdk';
 import { record } from './projector.js';
 

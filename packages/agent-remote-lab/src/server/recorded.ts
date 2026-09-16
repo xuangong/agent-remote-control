@@ -11,7 +11,7 @@ import type {
   AgentStreamEvent,
   ProviderObservation,
   ProviderStreamItem,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
 import { createProtocolValidationServer } from '../server.js';
 

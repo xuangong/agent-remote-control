@@ -6,7 +6,7 @@ import {
   encodeServerMessage,
   type AgentSnapshot,
   type HistoryPage,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 import type NodeWebSocket from 'ws';
 
 import { HttpWebSocketTransport, type HttpWebSocketTransportDependencies } from './http-websocket-transport.js';

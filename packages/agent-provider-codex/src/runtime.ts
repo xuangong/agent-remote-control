@@ -1,4 +1,4 @@
-import type { AgentChildSession, AgentRuntimeInfo } from '@borgee/agent-provider-sdk';
+import type { AgentChildSession, AgentRuntimeInfo } from '@agent-remote-controller/agent-provider-sdk';
 import { CodexServerRequestCanceled } from './app-server-transport.js';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { collectCodexThreadHistoryItems } from './history.js';

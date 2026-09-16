@@ -256,6 +256,7 @@
 .agent-resources li > div > code { min-width: 0; white-space: pre-wrap; }
 .agent-resources .agent-state-label { flex-shrink: 0; }
 .agent-resources .agent-resource-actions { flex-wrap: wrap; }
+.agent-resource-image { display: block; max-width: 100%; width: auto; height: auto; max-height: 70vh; object-fit: contain; border-radius: 4px; }
 .agent-resources li > small { color: var(--agent-muted); }
 .agent-resources button { justify-self: start; min-height: 28px; font-size: 12px; }
 .agent-extension-error { display: block; padding: 0 18px 12px; color: var(--agent-danger); }

@@ -1,14 +1,14 @@
 import { createRoot } from 'react-dom/client';
-import type { AgentInteractionRequest, AgentTimelineItem, AgentToolDetail } from '@borgee/agent-remote-protocol';
-import type { AgentReplicaState } from '@borgee/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline } from '@borgee/agent-remote-web/react';
+import type { AgentInteractionRequest, AgentTimelineItem, AgentToolDetail } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
+import { AgentCommandDetails, AgentTimeline } from '@agent-remote-controller/agent-remote-web/react';
 import { App } from '../../src/App.js';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
 import { TraceView } from '../../src/components/TraceView.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/app.css';
-import '@borgee/agent-remote-web/styles.css';
+import '@agent-remote-controller/agent-remote-web/styles.css';
 
 const long = 'Unbroken0123456789'.repeat(40);
 const markdown = `${long}\n\n[${long}](https://example.test/${long})\n\n\`${long}\`\n\n\`\`\`text\n${long}\n\`\`\`\n\n| ${Array(8).fill('Column').join(' | ')} |\n| ${Array(8).fill('---').join(' | ')} |\n| ${Array(8).fill(long).join(' | ')} |`;

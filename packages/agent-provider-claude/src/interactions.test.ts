@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClaudeInteractions } from './interactions.js';
-import type { AgentStreamEvent } from '@borgee/agent-provider-sdk';
+import type { AgentStreamEvent } from '@agent-remote-controller/agent-provider-sdk';
 
 describe('Claude native permissions', () => {
   it('waits for a validated one-time approval and rejects broader scopes', async () => {

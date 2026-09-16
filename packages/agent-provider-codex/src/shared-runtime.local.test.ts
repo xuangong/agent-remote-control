@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { expect, it } from 'vitest';
-import type { AgentSession, AgentStreamEvent, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import type { AgentSession, AgentStreamEvent, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { CodexAppServerProvider } from './provider.js';
 
 const executable = process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE;

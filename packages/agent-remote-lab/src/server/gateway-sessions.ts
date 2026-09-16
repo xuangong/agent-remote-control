@@ -1,1 +1,1 @@
-export * from '@borgee/agent-remote-hosted/sessions';
+export * from '@agent-remote-controller/agent-remote-hosted/sessions';

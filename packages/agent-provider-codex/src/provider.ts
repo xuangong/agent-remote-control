@@ -8,7 +8,7 @@ import type {
   AgentProviderDescriptor,
   AgentSession,
   AgentSessionConfig,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
 import { CodexAppServerTransport } from './app-server-transport.js';
 import { spawnCodexAppServer } from './native.js';

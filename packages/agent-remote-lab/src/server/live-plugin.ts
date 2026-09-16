@@ -1,9 +1,9 @@
 import { isAbsolute } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { createDshAgentRemoteProvider, createDshSessionDirectory, mountSharedDshPreset, type DshSharedWebServices, type DshDirectoryContext } from '@agent-remote-control/dsh';
-import { createDshWebInteractionAdapter, type CordisDshRuntimeOptions, type LiveDshProvider, type LiveDshSession } from '@borgee/agent-provider-dsh';
-import type { AgentProviderAdapter, AgentSessionConfig } from '@borgee/agent-provider-sdk';
+import { createDshAgentRemoteProvider, createDshSessionDirectory, mountSharedDshPreset, type DshSharedWebServices, type DshDirectoryContext } from '@agent-remote-controller/dsh';
+import { createDshWebInteractionAdapter, type CordisDshRuntimeOptions, type LiveDshProvider, type LiveDshSession } from '@agent-remote-controller/agent-provider-dsh';
+import type { AgentProviderAdapter, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
 import { installModelSelection, type ModelSelection } from '@deepseek-ai/dsh-agent';
 
 import { createProtocolValidationServer } from '../server.js';

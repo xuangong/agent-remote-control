@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest';
-import type { AgentSession } from '@borgee/agent-provider-sdk';
+import type { AgentSession } from '@agent-remote-controller/agent-provider-sdk';
 import { createProtocolValidationServer } from '../server.js';
 import { createRecordedLabProvider } from './recorded.js';
 import type { SessionDirectorySource } from './session-directory.js';

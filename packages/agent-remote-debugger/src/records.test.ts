@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentSnapshot, HistoryPage, InteractionRequestedMessage, InteractionResolvedMessage, ProjectedTimelineEntry, ResourceResponse } from '@borgee/agent-remote-protocol';
-import { AgentReplica, type RemoteSessionStatus } from '@borgee/agent-remote-web/headless';
+import type { AgentSnapshot, HistoryPage, InteractionRequestedMessage, InteractionResolvedMessage, ProjectedTimelineEntry, ResourceResponse } from '@agent-remote-controller/agent-remote-protocol';
+import { AgentReplica, type RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web/headless';
 
 import { observeReplica, type DebuggerRecord } from './records.js';
 

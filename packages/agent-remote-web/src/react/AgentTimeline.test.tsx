@@ -4,7 +4,7 @@ import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
   ProjectedTimelineEntry,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import { applyResourceUpdate, createReplicaState } from '../replica/reducer.js';
 import type { AgentReplicaState } from '../replica/types.js';
@@ -388,11 +388,10 @@ describe('AgentTimeline', () => {
     expect(container.querySelector('button[data-resource-id="pending"]')).toBeNull();
     expect(container.querySelector('button[data-resource-id="failed"]')).toBeNull();
     expect(container.querySelector('button[data-resource-id="missing"]')).toBeNull();
-    await act(async () => container.querySelector<HTMLButtonElement>('button[data-resource-id="ready"]')?.click());
     expect(requests).toEqual(['ready']);
   });
 
-  it('renders pushed available metadata as an authorized resource request action', async () => {
+  it('automatically requests images after pushed available metadata', async () => {
     const binding = { locator: 'output.png', resourceId: 'resource-one', status: 'pending' as const };
     const requests: string[] = [];
     const updated = applyResourceUpdate(
@@ -413,7 +412,6 @@ describe('AgentTimeline', () => {
 
     expect(container.textContent).toContain('Available');
     expect(container.textContent).toContain('image/png · 42 bytes');
-    await act(async () => container.querySelector<HTMLButtonElement>('button[data-resource-id="resource-one"]')?.click());
     expect(requests).toEqual(['resource-one']);
   });
 

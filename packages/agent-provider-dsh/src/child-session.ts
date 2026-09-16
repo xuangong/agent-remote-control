@@ -1,4 +1,4 @@
-import type { AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import type { AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { DshChildSessions, DshObservationQueue, dshRuntimeObservation, dshChildLifecycleKey, type DshChildEvent } from './children.js';
 import { DshProjector } from './projector.js';
 

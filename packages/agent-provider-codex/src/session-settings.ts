@@ -1,4 +1,4 @@
-import { validateSessionSetting, type AgentSessionSetting, type AgentSessionSettingOption } from '@borgee/agent-provider-sdk';
+import { validateSessionSetting, type AgentSessionSetting, type AgentSessionSettingOption } from '@agent-remote-controller/agent-provider-sdk';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
 

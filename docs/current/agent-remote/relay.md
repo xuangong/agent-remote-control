@@ -2,7 +2,7 @@
 
 ## Role
 
-`@borgee/agent-remote-relay` owns Provider session attachment, current Agent state, ordered canonical Timeline rows, resource ingestion, and public transport composition. Its state engine can run inside a plugin without opening a listener (`packages/agent-remote-relay/src/agent-manager.ts:71-180`, `packages/agent-remote-relay/src/timeline-store.ts:29-68`, `packages/agent-remote-relay/src/transport/plugin-host.ts:36-43`).
+`@agent-remote-controller/agent-remote-relay` owns Provider session attachment, current Agent state, ordered canonical Timeline rows, resource ingestion, and public transport composition. Its state engine can run inside a plugin without opening a listener (`packages/agent-remote-relay/src/agent-manager.ts:71-180`, `packages/agent-remote-relay/src/timeline-store.ts:29-68`, `packages/agent-remote-relay/src/transport/plugin-host.ts:36-43`).
 
 ## Boundary
 

@@ -1,1 +1,1 @@
-export { useTimelineScroll } from '@borgee/agent-remote-web/react';
+export { useTimelineScroll } from '@agent-remote-controller/agent-remote-web/react';

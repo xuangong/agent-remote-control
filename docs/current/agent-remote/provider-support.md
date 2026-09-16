@@ -6,7 +6,7 @@ This is the comparison target for adding a Provider, and the implementation inve
 
 Source audit: **2026-09-11**, initial implementation commit **`614d9fe`**, updated by the native parity implementation following **`821d1c6`**, branch **`feat/claude-provider`**. At audit time `main` was `b016e46`; this is a feature-branch inventory, not a claim that all changes are on main or published. Public Remote protocol is **1.4.0**, Remote Host uplink is **2**. Native targets come from [compatibility.json](../../../packages/agent-remote-lab/compatibility.json): DSH `0.1.2-rc.1` / `a66e4702047846cdaa10c66c9d3df3951f5ea70d`, Codex CLI `0.148.0`, Claude Code `2.1.247` with Agent SDK `0.3.247`. Copilot admission adds CLI `1.0.83` and official SDK `1.0.11` on `feat/copilot-provider`; see its audit for separate evidence. Newer native releases are not covered automatically.
 
-DSH means the live adapter **through the standalone DSH plugin**, currently `packages/agent-remote-dsh` (`@agent-remote-control/dsh`). It does not mean Recorded fixtures, an uncompleted `plugins/dsh` move, or Borgee's separate integration. Codex, Claude and Copilot mean their adapters through Agent Host. Native product capabilities that have no exposed Remote path are not counted.
+DSH means the live adapter **through the standalone DSH plugin**, currently `packages/agent-remote-dsh` (`@agent-remote-controller/dsh`). It does not mean Recorded fixtures, an uncompleted `plugins/dsh` move, or Borgee's separate integration. Codex, Claude and Copilot mean their adapters through Agent Host. Native product capabilities that have no exposed Remote path are not counted.
 
 | Mark | Meaning |
 | --- | --- |

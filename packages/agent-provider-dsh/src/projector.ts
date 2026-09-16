@@ -8,7 +8,7 @@ import type {
   AgentToolCallTimelineItem,
   ProviderObservation,
   ProviderResourceReference,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
 import { readDshContent, type DshImageReference } from './content.js';
 import { normalizeGeneratedResourceLocator } from './generated-resource.js';

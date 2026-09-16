@@ -5,7 +5,7 @@ import type {
   ProjectedTimelineEntry,
   ResourceResponse,
   ResourceState,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 export interface ReplicaDiagnostic {
   readonly code: string;

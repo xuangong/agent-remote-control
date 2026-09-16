@@ -1,7 +1,7 @@
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { CodexAppServerProvider, type CodexAppServerProviderOptions } from '@borgee/agent-provider-codex';
+import { CodexAppServerProvider, type CodexAppServerProviderOptions } from '@agent-remote-controller/agent-provider-codex';
 import { createCodexSessionDirectory } from './directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
 

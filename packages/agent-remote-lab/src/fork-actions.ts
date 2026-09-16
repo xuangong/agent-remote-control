@@ -1,5 +1,5 @@
-import type { AgentCommandResult } from '@borgee/agent-remote-protocol';
-import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport } from '@borgee/agent-remote-web';
+import type { AgentCommandResult } from '@agent-remote-controller/agent-remote-protocol';
+import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 

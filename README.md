@@ -31,8 +31,8 @@ The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages 
 
 ## Install Agent Host as a standalone command
 
-Run `pnpm build:agent-remote-controller` to create `dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz`.
-Install it with `npm install -g ./dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz --registry=https://mirrors.cloud.tencent.com/npm/`.
+Run `pnpm build:agent-remote-controller` to create `dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz`.
+Install it with `npm install -g ./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz --registry=https://mirrors.cloud.tencent.com/npm/`.
 The installed `agent-remote-controller` command runs without a repository checkout or pnpm.
 See the [Agent Host CLI guide](packages/agent-host/README.md) for native CLI requirements,
 pairing, background operation and upgrades. Run `pnpm test:agent-remote-controller-package` after
@@ -93,13 +93,13 @@ For manual installation:
 Build the independent outbound Host plugin:
 
 ```bash
-pnpm --filter @agent-remote-control/dsh build:bundle
+pnpm --filter @agent-remote-controller/dsh build:bundle
 ```
 
-The archive is `packages/agent-remote-dsh/dist/host-bundle/agent-remote-control-dsh-host-0.1.0.tgz`. Install it into a compatible DSH Web profile using the DSH CLI associated with that installation:
+The archive is `packages/agent-remote-dsh/dist/host-bundle/agent-remote-controller-dsh-host-0.1.0.tgz`. Install it into a compatible DSH Web profile using the DSH CLI associated with that installation:
 
 ```bash
-dsh plugin --profile web add "file:$(pwd)/packages/agent-remote-dsh/dist/host-bundle/agent-remote-control-dsh-host-0.1.0.tgz"
+dsh plugin --profile web add "file:$(pwd)/packages/agent-remote-dsh/dist/host-bundle/agent-remote-controller-dsh-host-0.1.0.tgz"
 ```
 
 In the workbench, generate a temporary key. Start DSH Web with its existing home and workspace so its native session catalog remains available:
@@ -140,9 +140,9 @@ Test scripts enforce per-test and outer process deadlines. Browser tests use sep
 | `agent-remote-web` | Browser transport, recovery, replica, and reusable React DOM rendering. |
 | `agent-remote-debugger` | Terminal operations over the public protocol. |
 | `agent-remote-dsh` | Native catalog, shared-session setup, and independent DSH Host bundle. |
-| `agent-remote-lab` | Workbench, local server, pairing broker, directory, and validation fixtures. |
+| `@agent-remote-controller/agent-remote-lab` | Workbench, local server, pairing broker, directory, and validation fixtures. |
 
-Existing `@borgee/*` library package names remain compatible. The standalone DSH runtime uses `@agent-remote-control/dsh`; its installable profile bundle is `@agent-remote-control/dsh-host`.
+All workspace packages use the `@agent-remote-controller` scope. The standalone DSH runtime uses `@agent-remote-controller/dsh`; its installable profile bundle is `@agent-remote-controller/dsh-host`.
 
 See the [product design](docs/blueprint/agent-remote-observation.md), [architecture map](docs/current/agent-remote/README.md), and [source and license notices](NOTICE.md).
 

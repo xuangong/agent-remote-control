@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
-import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@agent-remote-control/dsh';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@borgee/agent-provider-sdk';
-import type { AgentRemoteRelay } from '@borgee/agent-remote-relay';
+import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@agent-remote-controller/dsh';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentRemoteRelay } from '@agent-remote-controller/agent-remote-relay';
 import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
 export interface SessionDirectorySource {

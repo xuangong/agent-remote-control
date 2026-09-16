@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { forkActions } from './fork-actions.js';
 import { ForkStore, forkDisplayState, contextPrefix } from './session-forks.js';
 import { replicaState } from './test/fixtures.js';
-import type { RemoteAgentTransport } from '@borgee/agent-remote-web';
+import type { RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
 
 const source = { agentId: 'source', nativeSessionId: 'native-source', providerId: 'codex', title: 'Source' };
 afterEach(() => localStorage.clear());

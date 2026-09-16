@@ -1,5 +1,5 @@
 {
-  "name": "@borgee/agent-remote-web",
+  "name": "@agent-remote-controller/agent-remote-web",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {
@@ -32,7 +32,7 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@borgee/agent-remote-protocol": "workspace:*",
+    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1"

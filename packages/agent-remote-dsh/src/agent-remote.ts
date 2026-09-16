@@ -1,13 +1,13 @@
-import type { AgentSession } from '@borgee/agent-provider-sdk';
+import type { AgentSession } from '@agent-remote-controller/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
-import { DshChildSessions, createDshWebInteractionAdapter, type DshWebInteractionAdapter } from '@borgee/agent-provider-dsh';
+import { DshChildSessions, createDshWebInteractionAdapter, type DshWebInteractionAdapter } from '@agent-remote-controller/agent-provider-dsh';
 import {
   createAgentRemoteRelay, createRemoteHostUplinkClient, type RemoteHostControlRequest,
-} from '@borgee/agent-remote-relay';
+} from '@agent-remote-controller/agent-remote-relay';
 import type { Context } from '@deepseek-ai/cordis';
 import { type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent';
 import Schema from '@deepseek-ai/schemastery';

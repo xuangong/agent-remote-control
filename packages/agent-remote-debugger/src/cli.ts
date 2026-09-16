@@ -5,7 +5,7 @@ import { executeCommand, type CliEnvironment, type OutputFormat, type ParsedInvo
 import { DebuggerError } from './errors.js';
 import type { DebuggerIo } from './output.js';
 import { writeStructuredError } from './output.js';
-import { RemoteOperationError } from '@borgee/agent-remote-web/headless';
+import { RemoteOperationError } from '@agent-remote-controller/agent-remote-web/headless';
 
 export type { CliEnvironment } from './commands.js';
 

@@ -2,7 +2,7 @@ import type {
   AgentPersistenceHandle,
   AgentProviderAdapter,
   AgentSessionConfig,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
 import { LiveDshSession } from './live-session.js';
 import type { DshRuntime } from './runtime.js';

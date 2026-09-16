@@ -1,4 +1,4 @@
-import type { AgentInteractionRequest, AgentInteractionResponse } from '@borgee/agent-provider-sdk';
+import type { AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval';

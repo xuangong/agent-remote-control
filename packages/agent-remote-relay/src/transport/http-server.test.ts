@@ -10,7 +10,7 @@ import type {
   AgentSession,
   AgentSessionConfig,
   ProviderStreamItem,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 import {
   decodeAgentSessionResponse,
   decodeAgentSnapshot,
@@ -19,7 +19,7 @@ import {
   decodeServerMessage,
   encodeCreateAgentRequest,
   encodeResumeAgentRequest,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket, { type RawData } from 'ws';
 

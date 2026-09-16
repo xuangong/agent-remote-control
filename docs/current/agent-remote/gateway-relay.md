@@ -135,7 +135,7 @@ scripted WebSocket Host, reads its session catalog, and verifies isolation in a
 second browser context, including rejection of a forwarded login link, automatic entry, session renewal, actual Relay process restart, stable Host/native binding recovery, device revoke and logout. It enforces a 90-second process deadline and per-operation
 deadlines, cleans up child processes, and saves a screenshot in the reported
 temporary evidence directory. Install Playwright Chromium if the browser is not
-already available (`pnpm --filter agent-remote-lab exec playwright install chromium`).
+already available (`pnpm --filter @agent-remote-controller/agent-remote-lab exec playwright install chromium`).
 
 `gateway-relay.test.ts` additionally covers session attach, snapshot and bidirectional
 stream routing, tenant/Host identity collision, reconnect, role separation and

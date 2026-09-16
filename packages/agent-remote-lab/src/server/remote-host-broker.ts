@@ -2,11 +2,11 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@borgee/agent-remote-relay';
-import { BROKER_MAX_FRAME_BYTES, createHostBroker, type BrokerRequestContext, type HostBrokerOptions, type RelaySocket } from '@borgee/agent-remote-hosted';
+import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@agent-remote-controller/agent-remote-relay';
+import { BROKER_MAX_FRAME_BYTES, createHostBroker, type BrokerRequestContext, type HostBrokerOptions, type RelaySocket } from '@agent-remote-controller/agent-remote-hosted';
 import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
-export type { RemoteHostBrokerState } from '@borgee/agent-remote-hosted';
+export type { RemoteHostBrokerState } from '@agent-remote-controller/agent-remote-hosted';
 export interface RemoteHostBrokerOptions extends HostBrokerOptions {
   principalSubject?(request: IncomingMessage): string | undefined;
   accessPolicy?: AgentRemoteRequestAccessPolicy;

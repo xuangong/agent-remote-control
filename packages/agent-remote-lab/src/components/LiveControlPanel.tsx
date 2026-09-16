@@ -1,2 +1,2 @@
-export { AgentComposer as LiveControlPanel } from '@borgee/agent-remote-web/react';
-export type { AgentComposerProps as LiveControlPanelProps } from '@borgee/agent-remote-web/react';
+export { AgentComposer as LiveControlPanel } from '@agent-remote-controller/agent-remote-web/react';
+export type { AgentComposerProps as LiveControlPanelProps } from '@agent-remote-controller/agent-remote-web/react';

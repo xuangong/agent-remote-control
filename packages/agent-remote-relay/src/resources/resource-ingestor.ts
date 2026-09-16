@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { AgentResourceReadResult } from '@borgee/agent-provider-sdk';
+import type { AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type ResourceBinding,
   type ResourceResponse,
   type ResourceState,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import { normalizeFileLocator } from './markdown-locators.js';
 import type { ResourceStore, StoredResourceState } from './resource-store.js';

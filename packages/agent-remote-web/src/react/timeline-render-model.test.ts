@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectedTimelineEntry } from '@borgee/agent-remote-protocol';
+import type { ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
 
 import { createTimelineRenderModel } from './timeline-render-model.js';
 

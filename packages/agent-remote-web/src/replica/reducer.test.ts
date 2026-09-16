@@ -6,7 +6,7 @@ import type {
   HistoryPage,
   ProjectedTimelineEntry,
   ResourceBinding,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import {
   applyAgentSnapshot,

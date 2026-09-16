@@ -1,4 +1,4 @@
-import { runAgentProviderContractTests, validateAgentSessionCapabilities } from '@borgee/agent-provider-sdk/testing';
+import { runAgentProviderContractTests, validateAgentSessionCapabilities } from '@agent-remote-controller/agent-provider-sdk/testing';
 import { expect, it } from 'vitest';
 
 import { createLiveDshProvider } from './live-provider.js';

@@ -1,6 +1,6 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { AgentRuntimeInfo, AgentSession } from '@borgee/agent-provider-sdk';
+import type { AgentRuntimeInfo, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
 import type { AgentHostDirectory } from './host.js';
 
 /** Trusted local admission policy. A cwd check is not a filesystem sandbox. */

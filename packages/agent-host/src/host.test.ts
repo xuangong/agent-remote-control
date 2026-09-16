@@ -1,4 +1,4 @@
-import type { AgentCapabilities, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import type { AgentCapabilities, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';

@@ -13,7 +13,7 @@ import type {
   AgentSession,
   ProviderObservation,
   ProviderStreamItem,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
 import { isRecord, safeNonNegativeInteger, type DshNativeObservation } from './native.js';
 import { DshGeneratedResourceReader } from './generated-resource.js';

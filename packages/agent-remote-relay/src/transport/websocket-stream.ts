@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 
-import { PROTOCOL_VERSION, encodeServerMessage } from '@borgee/agent-remote-protocol';
+import { PROTOCOL_VERSION, encodeServerMessage } from '@agent-remote-controller/agent-remote-protocol';
 import { WebSocketServer, WebSocket } from 'ws';
 
 import type { AgentRemoteRelay } from '../relay.js';

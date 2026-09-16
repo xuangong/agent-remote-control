@@ -44,7 +44,7 @@ export async function fixture() {
       }
       export default worker;
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'neutral',
-      conditions: ['workerd', 'worker', 'import'], external: ['node:*', 'cloudflare:*'], alias: { '@borgee/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
+      conditions: ['workerd', 'worker', 'import'], external: ['node:*', 'cloudflare:*'], alias: { '@agent-remote-controller/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
   const script = result.outputFiles[0]!.text;
   let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   const sockets: WebSocket[] = [];

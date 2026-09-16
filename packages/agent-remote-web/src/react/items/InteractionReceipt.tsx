@@ -1,4 +1,4 @@
-import type { AgentInteractionRequest, AgentInteractionResponse } from '@borgee/agent-remote-protocol';
+import type { AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-remote-protocol';
 
 export function InteractionReceipt({ request, response }: { request: AgentInteractionRequest; response: AgentInteractionResponse }) {
   if (request.kind === 'form' && response.kind === 'form') {

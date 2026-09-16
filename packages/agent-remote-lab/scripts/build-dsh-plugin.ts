@@ -9,7 +9,7 @@ import { loadCompatibilityManifest, requireProviderCompatibility } from '../src/
 
 const labRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packagesRoot = resolve(labRoot, '..');
-const packageName = '@borgee/agent-remote-lab-dsh';
+const packageName = '@agent-remote-controller/agent-remote-lab-dsh';
 
 export interface DshPluginBuildOptions {
   outputRoot?: string;
@@ -25,8 +25,8 @@ export async function buildDshPlugin(options: DshPluginBuildOptions = {}): Promi
     const alias = Object.fromEntries([
       'agent-provider-sdk', 'agent-provider-dsh', 'agent-provider-codex',
       'agent-remote-protocol', 'agent-remote-relay',
-    ].map((name) => [`@borgee/${name}`, join(packagesRoot, name, 'src/index.ts')]));
-    alias['@agent-remote-control/dsh'] = join(packagesRoot, 'agent-remote-dsh/src/index.ts');
+    ].map((name) => [`@agent-remote-controller/${name}`, join(packagesRoot, name, 'src/index.ts')]));
+    alias['@agent-remote-controller/dsh'] = join(packagesRoot, 'agent-remote-dsh/src/index.ts');
     const bundle = await build({
       entryPoints: [join(labRoot, 'src/server/installed-dsh-plugin.ts')],
       outfile: join(stage, 'lib/index.js'),

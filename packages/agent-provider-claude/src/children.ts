@@ -1,4 +1,4 @@
-import type { AgentChildSession } from '@borgee/agent-provider-sdk';
+import type { AgentChildSession } from '@agent-remote-controller/agent-provider-sdk';
 import { ClaudeChildSession } from './child-session.js';
 import type { ClaudeCatalog } from './catalog.js';
 import { record } from './projector.js';

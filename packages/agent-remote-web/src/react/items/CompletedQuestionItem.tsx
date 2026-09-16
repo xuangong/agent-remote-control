@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ContentPreview } from './ContentPreview.js';
-import type { AgentInteractionRequest, AgentInteractionResponse } from '@borgee/agent-remote-protocol';
+import type { AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-remote-protocol';
 
 import { MarkdownContent } from '../MarkdownContent.js';
 

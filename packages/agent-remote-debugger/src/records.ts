@@ -1,5 +1,5 @@
-import type { AgentInteractionRequest, AgentSnapshotPayload, ProjectedTimelineEntry, ResourceResponseState, ResourceState } from '@borgee/agent-remote-protocol';
-import type { AgentReplica, ReplicaDiagnostic, RemoteSessionStatus } from '@borgee/agent-remote-web/headless';
+import type { AgentInteractionRequest, AgentSnapshotPayload, ProjectedTimelineEntry, ResourceResponseState, ResourceState } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentReplica, ReplicaDiagnostic, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web/headless';
 
 import { stableJsonValue } from './structural.js';
 import { redactDebuggerValue } from './redaction.js';

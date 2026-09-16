@@ -1,7 +1,7 @@
-import { controllerPath, readControllerLocation } from '@borgee/agent-remote-hosted/controller-location';
+import { controllerPath, readControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { signInReturnKey } from '@borgee/agent-remote-hosted/access-page';
+import { signInReturnKey } from '@agent-remote-controller/agent-remote-hosted/access-page';
 import { SecurityPanel } from './components/SecurityPanel.js';
 import { AccessPage } from './components/AccessPage.js';
 

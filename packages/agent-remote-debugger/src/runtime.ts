@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import type { AgentCapabilities, ClientMessage, ServerMessage } from '@borgee/agent-remote-protocol';
+import type { AgentCapabilities, ClientMessage, ServerMessage } from '@agent-remote-controller/agent-remote-protocol';
 import {
   AgentReplica,
   HttpWebSocketTransport,
@@ -10,7 +10,7 @@ import {
   type RemoteSessionStatus,
   type RemoteTransportDiagnostic,
   type WebSocketLike,
-} from '@borgee/agent-remote-web/headless';
+} from '@agent-remote-controller/agent-remote-web/headless';
 
 import { DebuggerError } from './errors.js';
 import { resolveOrigin, resolveRelayUrl } from './input.js';

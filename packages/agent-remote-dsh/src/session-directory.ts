@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Agent } from '@deepseek-ai/dsh-agent';
-import type { AgentSession, AgentSessionConfig } from '@borgee/agent-provider-sdk';
-import { DshChildSessions, type LiveDshProvider } from '@borgee/agent-provider-dsh';
+import type { AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
+import { DshChildSessions, type LiveDshProvider } from '@agent-remote-controller/agent-provider-dsh';
 import { createNativeSessionCatalog, type NativeSessionCatalogServices } from './native-session-catalog.js';
 import type { RemoteSessionSummary } from './remote-host-catalog.js';
 import type { DshSharedWebServices } from './shared-web-session.js';

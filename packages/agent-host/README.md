@@ -1,6 +1,6 @@
 # Agent Remote Controller CLI
 
-The `@agent-remote-control/agent-remote-controller` package provides the
+The `@agent-remote-controller/agent-remote-controller` package provides the
 `agent-remote-controller` command. It runs the local Agent Host and connects
 Codex, Claude Code and GitHub Copilot sessions to a Relay for the browser
 controller. Requires Node.js 22 or newer. No repository checkout or pnpm is
@@ -13,7 +13,7 @@ From the source checkout, install dependencies and run:
 
 ```sh
 pnpm build:agent-remote-controller
-npm install -g ./dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz \
+npm install -g ./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz \
   --registry=https://mirrors.cloud.tencent.com/npm/
 agent-remote-controller --help
 ```
@@ -27,7 +27,7 @@ For installation without administrator permissions, use a user-owned prefix and
 add its bin directory to PATH:
 
 ```sh
-npm install -g --prefix "$HOME/.local" ./dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz \
+npm install -g --prefix "$HOME/.local" ./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz \
   --registry=https://mirrors.cloud.tencent.com/npm/
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -36,7 +36,7 @@ To run the tarball without a global installation, use:
 
 ```sh
 npm exec --yes --registry=https://mirrors.cloud.tencent.com/npm/ \
-  --package=./dist/agent-remote-controller/agent-remote-control-agent-remote-controller-0.1.0.tgz \
+  --package=./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz \
   -- agent-remote-controller foreground
 ```
 

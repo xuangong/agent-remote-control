@@ -1,4 +1,4 @@
-import { boundToolResult, fileChangesResult, type AgentFileChange, type AgentToolResult, type AgentToolResultContent, type AgentToolResultJson } from '@borgee/agent-provider-sdk';
+import { boundToolResult, fileChangesResult, type AgentFileChange, type AgentToolResult, type AgentToolResultContent, type AgentToolResultJson } from '@agent-remote-controller/agent-provider-sdk';
 import { isRecord, type JsonObject } from './native.js';
 
 export function codexToolResult(item: JsonObject): AgentToolResult | undefined {

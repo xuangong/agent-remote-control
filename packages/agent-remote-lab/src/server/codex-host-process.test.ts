@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type RemoteSessionStatus } from '@borgee/agent-remote-web/headless';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web/headless';
 
 it('keeps a native Codex session usable when an independent Host pairs to a restarted backend', async () => {
   const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE;

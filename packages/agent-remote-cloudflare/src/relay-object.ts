@@ -1,4 +1,4 @@
-import { createHostedRelay, validateGatewayOrigin, type RelayScheduler } from '@borgee/agent-remote-hosted';
+import { createHostedRelay, validateGatewayOrigin, type RelayScheduler } from '@agent-remote-controller/agent-remote-hosted';
 import { SqliteRelayStore } from './storage.js';
 import { WorkerRelaySocket } from './socket.js';
 

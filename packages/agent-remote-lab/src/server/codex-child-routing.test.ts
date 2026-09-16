@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { CodexAppServerProvider } from '@borgee/agent-provider-codex';
+import { CodexAppServerProvider } from '@agent-remote-controller/agent-provider-codex';
 import {
   AgentReplica, HttpWebSocketTransport, RemoteSessionClient,
   type RemoteSessionStatus, type WebSocketLike,
-} from '@borgee/agent-remote-web';
+} from '@agent-remote-controller/agent-remote-web';
 import { createFakeChildProcess, type FakeChildProcess } from '../../../agent-provider-codex/src/test-utils/fake-child.js';
 import { createProtocolValidationServer } from '../server.js';
 import { createCodexDirectory } from './codex-directory.js';

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createHmac, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@borgee/agent-remote-relay';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@agent-remote-controller/agent-remote-relay';
 import { createGatewayRelay } from '../src/server/gateway-relay.js';
 import { createGatewayStaticPages } from '../src/server/gateway-static.js';
 import { createRecordedLabProvider } from '../src/server/recorded.js';

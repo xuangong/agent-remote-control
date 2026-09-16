@@ -1,4 +1,4 @@
-import type { AgentInteractionRequest } from '@borgee/agent-provider-sdk';
+import type { AgentInteractionRequest } from '@agent-remote-controller/agent-provider-sdk';
 import { isRecord, readString } from './native.js';
 
 type Permission = Extract<AgentInteractionRequest, { kind: 'permission_approval' }>['permissions'][number];

@@ -20,9 +20,9 @@ import type {
   AgentSessionConfig,
   ProviderObservation,
   ProviderStreamItem,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
-import { AgentSessionInUseError, CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@borgee/agent-provider-sdk';
+import { AgentSessionInUseError, CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
 import { mapCodexQuestion, mapCodexQuestionResponse } from './questions.js';
 import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.js';
 import { mapCodexPermissions } from './permissions.js';

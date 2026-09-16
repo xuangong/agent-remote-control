@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { CodexEventProjector } from '@borgee/agent-provider-codex';
-import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@borgee/agent-provider-sdk';
-import { PROTOCOL_VERSION, type AgentStreamMessage } from '@borgee/agent-remote-protocol';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@borgee/agent-remote-web';
+import { CodexEventProjector } from '@agent-remote-controller/agent-provider-codex';
+import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
+import { PROTOCOL_VERSION, type AgentStreamMessage } from '@agent-remote-controller/agent-remote-protocol';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@agent-remote-controller/agent-remote-web';
 import { createProtocolValidationServer } from './server.js';
 
 it.each([

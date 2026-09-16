@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@borgee/agent-remote-protocol';
+import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@agent-remote-controller/agent-remote-protocol';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 

@@ -1,4 +1,4 @@
-import type { AgentQuestion, AgentInteractionRequest, AgentInteractionResponse } from '@borgee/agent-provider-sdk';
+import type { AgentQuestion, AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
 import { isRecord, readString } from './native.js';
 
 export function mapCodexQuestion(value: unknown, index: number): AgentQuestion {

@@ -1,4 +1,4 @@
-import type { AgentTimelineItem } from '@borgee/agent-remote-protocol';
+import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
 
 export function CompactionItem({ item }: { readonly item: Extract<AgentTimelineItem, { type: 'compaction' }> }) {
   return <article className="agent-timeline-item agent-compaction" aria-label="Context compaction">

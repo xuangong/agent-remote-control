@@ -4,8 +4,8 @@ import {
   PROTOCOL_VERSION,
   type AgentProviderDescriptor,
   type AgentSessionResponse,
-} from '@borgee/agent-remote-protocol';
-import type { RemoteTransportListener } from '@borgee/agent-remote-web';
+} from '@agent-remote-controller/agent-remote-protocol';
+import type { RemoteTransportListener } from '@agent-remote-controller/agent-remote-web';
 
 import { App, type LabTransport } from './App.js';
 import { render } from './test/setup.js';

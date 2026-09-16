@@ -1,4 +1,4 @@
-import type { AgentTimelineItem, ProjectedTimelineEntry } from '@borgee/agent-remote-protocol';
+import type { AgentTimelineItem, ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
 
 export type MessageGroupPosition = 'single' | 'first' | 'middle' | 'last';
 

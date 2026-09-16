@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentCapabilities, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
-  AgentStreamEvent, ProviderStreamItem } from '@borgee/agent-provider-sdk';
-import { validateSessionSetting, type AgentSessionSetting } from '@borgee/agent-provider-sdk';
+  AgentStreamEvent, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import { validateSessionSetting, type AgentSessionSetting } from '@agent-remote-controller/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
 import { ClaudeInteractions } from './interactions.js';
 import { ClaudeUsage } from './usage.js';

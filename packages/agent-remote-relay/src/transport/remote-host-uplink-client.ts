@@ -3,7 +3,7 @@ import { WebSocket } from 'ws';
 import {
   decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
   type RemoteHostHeartbeat,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
 import { createRemoteHostPluginHost, type RemoteHostPluginHostOptions } from './remote-host-plugin.js';

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { AgentStreamEvent } from '@borgee/agent-provider-sdk';
+import type { AgentStreamEvent } from '@agent-remote-controller/agent-provider-sdk';
 import { ClaudeInteractions } from './interactions.js';
 
 function pendingPlan(approve: () => Promise<void>, plan: unknown = '# Native plan\nChange one file.') {

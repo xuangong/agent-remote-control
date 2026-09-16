@@ -1,4 +1,4 @@
-import type { AgentInteractionResponse } from '@borgee/agent-provider-sdk';
+import type { AgentInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
 import { Inbox } from '@deepseek-ai/dsh-agent';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import { describe, expect, it, vi } from 'vitest';

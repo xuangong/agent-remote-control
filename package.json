@@ -20,7 +20,7 @@
     "bdb": "node packages/agent-remote-debugger/dist/cli.js",
     "agent-remote-controller": "node packages/agent-host/dist/cli.js",
     "test:copilot": "node scripts/run-tests.mjs copilot",
-    "start:gateway-relay": "pnpm --filter agent-remote-lab exec tsx src/server/gateway.ts",
+    "start:gateway-relay": "pnpm --filter @agent-remote-controller/agent-remote-lab exec tsx src/server/gateway.ts",
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",
     "test:cloudflare": "node scripts/run-tests.mjs cloudflare",
     "build:relay": "node scripts/build-relay.mjs",

@@ -1,4 +1,4 @@
-import type { AgentTaskItem, AgentTimelineItem } from '@borgee/agent-remote-protocol';
+import type { AgentTaskItem, AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
 
 function status(item: AgentTaskItem): 'pending' | 'in_progress' | 'completed' {
   if (item.status) return item.status;

@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@github/copilot-sdk';
-import type { AgentCapabilities, AgentChildSession, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import type { AgentCapabilities, AgentChildSession, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { Channel } from './channel.js';
 import { Projector, record } from './projector.js';
 import type { CopilotAgentSession } from './session.js';

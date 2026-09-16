@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import type { ResourceBinding } from '@borgee/agent-remote-protocol';
+import { useEffect, useRef, useState } from 'react';
+import type { ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
-import { ResourceCard } from './ResourceCard.js';
+import { canPreviewImage, ResourceCard } from './ResourceCard.js';
 
 export interface ResourceListProps {
   readonly bindings: readonly ResourceBinding[];
@@ -13,6 +13,7 @@ export interface ResourceListProps {
 export function ResourceList({ bindings, resources, onRequest }: ResourceListProps) {
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const [failures, setFailures] = useState<Readonly<Record<string, string>>>({});
+  const requestedImages = useRef(new Set<string>());
 
   async function request(binding: ResourceBinding): Promise<void> {
     if (!onRequest || pending.has(binding.resourceId)) return;
@@ -36,6 +37,18 @@ export function ResourceList({ bindings, resources, onRequest }: ResourceListPro
       });
     }
   }
+
+  useEffect(() => {
+    if (!onRequest) return;
+    for (const binding of bindings) {
+      const detail = resources[binding.resourceId];
+      if (detail?.status !== 'available' || 'contentBase64' in detail || !canPreviewImage(detail.mediaType) || pending.has(binding.resourceId)) continue;
+      const key = JSON.stringify([binding.resourceId, detail.sha256]);
+      if (requestedImages.current.has(key)) continue;
+      requestedImages.current.add(key);
+      void request(binding);
+    }
+  });
 
   if (bindings.length === 0) return null;
   return <section className="agent-resources" aria-label="Referenced resources">

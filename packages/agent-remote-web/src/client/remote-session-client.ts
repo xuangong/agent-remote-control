@@ -13,7 +13,7 @@ import {
   type ResourceResponse,
   type TimelineCursor,
   type TimelineDirection,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentReplica } from '../replica/store.js';
 import type { TimelineReduction } from '../replica/types.js';

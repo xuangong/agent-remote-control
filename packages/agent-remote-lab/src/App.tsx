@@ -1,7 +1,7 @@
-import { controllerPath, readControllerLocation, type ControllerLocation } from '@borgee/agent-remote-hosted/controller-location';
+import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
 import { SessionLink } from './components/SessionLink.js';
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
 import {
   useCallback,
   useEffect,
@@ -18,7 +18,7 @@ import type {
   AgentSessionConfig,
   AgentSessionResponse,
   ResourceBinding,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 import {
   AgentReplica,
   RemoteOperationError,
@@ -27,7 +27,7 @@ import {
   type AgentReplicaState,
   type RemoteAgentTransport,
   type RemoteSessionStatus,
-} from '@borgee/agent-remote-web';
+} from '@agent-remote-controller/agent-remote-web';
 import { ReadingPositions, RecoveryScope, readDrafts, saveDrafts } from './conversation-recovery.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
@@ -38,7 +38,7 @@ import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { TimelineDisplay, type AgentChildSessionView } from '@borgee/agent-remote-web/react';
+import { TimelineDisplay, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
@@ -48,7 +48,7 @@ import { captureForkContext, forkDisplayState, ForkStore, type SessionFork } fro
 import { CollapsedConversations } from './components/CollapsedConversations.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
-import type { QuestionDraft } from '@borgee/agent-remote-web/react';
+import type { QuestionDraft } from '@agent-remote-controller/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';

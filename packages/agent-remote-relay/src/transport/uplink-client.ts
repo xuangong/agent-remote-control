@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { decodeUplinkMessage, UPLINK_MAX_FRAME_BYTES, UPLINK_VERSION } from '@borgee/agent-remote-protocol';
+import { decodeUplinkMessage, UPLINK_MAX_FRAME_BYTES, UPLINK_VERSION } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentRemoteRelay } from '../relay.js';
 import { createAgentRemotePluginHost, type AgentRemotePluginHostOptions } from './plugin-host.js';
 import { createUplinkWriter } from './uplink-writer.js';

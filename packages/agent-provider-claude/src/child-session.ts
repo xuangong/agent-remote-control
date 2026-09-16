@@ -1,4 +1,4 @@
-import type { AgentChildSession, AgentSession, AgentRuntimeInfo, ProviderObservation, ProviderStreamItem } from '@borgee/agent-provider-sdk';
+import type { AgentChildSession, AgentSession, AgentRuntimeInfo, ProviderObservation, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { Channel } from './channel.js';
 import { ClaudeEventProjector, record } from './projector.js';
 

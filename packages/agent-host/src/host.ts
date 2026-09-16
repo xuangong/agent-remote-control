@@ -1,9 +1,9 @@
 import { HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@borgee/agent-provider-sdk';
-import { AgentSessionInUseError } from '@borgee/agent-provider-sdk';
-import { PROTOCOL_VERSION } from '@borgee/agent-remote-protocol';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
+import { AgentSessionInUseError } from '@agent-remote-controller/agent-provider-sdk';
+import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
-  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary } from '@borgee/agent-remote-relay';
+  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary } from '@agent-remote-controller/agent-remote-relay';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {

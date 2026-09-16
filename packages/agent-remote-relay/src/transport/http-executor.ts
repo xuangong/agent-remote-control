@@ -12,7 +12,7 @@ import {
   type TimelineDirection,
   type WireDecodeResult,
   type WireEncodeResult,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import { ProviderNotFoundError } from '../provider-registry.js';
 import {

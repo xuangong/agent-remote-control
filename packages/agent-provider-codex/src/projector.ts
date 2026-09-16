@@ -8,7 +8,7 @@ import type {
   AgentTimelineItem,
   AgentToolCallTimelineItem,
   ProviderObservation,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 
 import {
   isRecord,
@@ -492,7 +492,7 @@ export class CodexEventProjector {
     status: 'running' | 'completed' | 'failed' | 'canceled',
     detail: AgentToolCallTimelineItem['detail'],
     error?: string,
-    result?: import('@borgee/agent-provider-sdk').AgentToolResult,
+    result?: import('@agent-remote-controller/agent-provider-sdk').AgentToolResult,
   ): AgentToolCallTimelineItem {
     if (status === 'failed') return { type: 'tool_call', callId, name, detail, status, error: error ?? 'Tool failed', ...(result ? { result } : {}) };
     return { type: 'tool_call', callId, name, detail, status, error: null, ...(result ? { result } : {}) };

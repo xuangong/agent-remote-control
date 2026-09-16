@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@borgee/agent-provider-sdk';
-import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@borgee/agent-provider-sdk';
+import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@agent-remote-controller/agent-provider-sdk';
+import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
 import type {
   AgentInteractionResponse,
   AgentMessageOptions,
@@ -11,14 +11,14 @@ import type {
   AgentSession,
   AgentStreamEvent,
   ProviderObservation,
-} from '@borgee/agent-provider-sdk';
+} from '@agent-remote-controller/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentCommand,
   type AgentSnapshot,
   type HistoryPage,
   type ResourceResponse,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { discoverTimelineLocators, normalizeFileLocator } from './resources/markdown-locators.js';

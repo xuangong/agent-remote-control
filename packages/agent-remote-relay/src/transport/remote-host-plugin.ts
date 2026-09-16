@@ -2,7 +2,7 @@ import {
   decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage,
   REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES, UPLINK_MAX_PUBLIC_REQUEST_BYTES,
   type RemoteHostUplinkMessage,
-} from '@borgee/agent-remote-protocol';
+} from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
 import { createSessionWire, type SessionWire, type SessionWireAgent } from '../session-wire.js';

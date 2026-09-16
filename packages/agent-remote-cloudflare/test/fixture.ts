@@ -7,6 +7,7 @@ import { Miniflare, type WebSocket } from 'miniflare';
 import { afterEach, expect } from 'vitest';
 
 export const origin = 'https://relay.example';
+export const previewOrigin = 'https://preview.example';
 export const issuer = 'https://gateway.example';
 export const secret = 'workers-fixture-secret-01234567890123456789';
 const closers: Array<() => Promise<void>> = [];
@@ -43,8 +44,8 @@ export async function fixture() {
         }
       }
       export default worker;
-    `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'neutral',
-      conditions: ['workerd', 'worker', 'import'], external: ['node:*', 'cloudflare:*'], alias: { '@agent-remote-controller/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
+    `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
+      conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: { '@agent-remote-controller/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
   const script = result.outputFiles[0]!.text;
   let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   const sockets: WebSocket[] = [];
@@ -53,7 +54,7 @@ export async function fixture() {
   async function start() {
     mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { RELAY: { className: 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
-      bindings: { AGENT_REMOTE_RELAY_URL: origin, AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
+      bindings: { AGENT_REMOTE_RELAY_URL: origin, AGENT_REMOTE_PREVIEW_URL: previewOrigin, AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },
@@ -73,7 +74,9 @@ export async function fixture() {
   }
   await start();
   closers.push(async () => { for (const socket of sockets) { try { socket.close(); } catch { /* Socket was already closed during restart. */ } } await mf.dispose(); });
-  const request = (path: string, init: RequestInit = {}) => mf.dispatchFetch(origin + path, { ...init, redirect: 'manual', signal: AbortSignal.timeout(5000) } as any);
+  const requestAt = (requestOrigin: string, path: string, init: RequestInit = {}) => mf.dispatchFetch(requestOrigin + path, { ...init, redirect: 'manual', signal: AbortSignal.timeout(5000) } as any);
+  const request = (path: string, init: RequestInit = {}) => requestAt(origin, path, init);
+  const previewRequest = (path: string, init: RequestInit = {}) => requestAt(previewOrigin, path, init);
   const json = (path: string, cookie: string, body?: object, method = body ? 'POST' : 'GET') => request(path, {
     method, headers: { origin, cookie, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
   async function beginLogin(subject: string) {
@@ -90,9 +93,12 @@ export async function fixture() {
     const cookie = response.headers.getSetCookie().find(value => value.startsWith('__Host-arc_session='))!.split(';')[0]!;
     return { cookie, ticket, loginCookie, ...await response.json() as { basePath: string } };
   }
-  async function upgrade(path: string, headers: Record<string, string>) {
-    const response = await request(path, { headers: { ...headers, upgrade: 'websocket' } });
-    expect(response.status).toBe(101); const socket = response.webSocket!; socket.accept(); sockets.push(socket); return socket;
+  async function upgradeResponse(path: string, headers: Record<string, string>, requestOrigin = origin) {
+    const response = await requestAt(requestOrigin, path, { headers: { ...headers, upgrade: 'websocket' } });
+    expect(response.status).toBe(101); const socket = response.webSocket!; socket.accept(); sockets.push(socket); return { response, socket };
+  }
+  async function upgrade(path: string, headers: Record<string, string>, requestOrigin = origin) {
+    return (await upgradeResponse(path, headers, requestOrigin)).socket;
   }
   async function host(key: string) {
     const socket = await upgrade('/ws/remote-host', { authorization: `Bearer ${key}` });
@@ -107,14 +113,14 @@ export async function fixture() {
       const frame = JSON.parse(String(event.data));
       if (frame.type === 'heartbeat') send(socket, { type: 'heartbeat_ack', nonce: frame.nonce });
     });
-    return { socket, hostId: message.hostId as string, key };
+    return { socket, hostId: message.hostId as string, tunnelToken: message.tunnelToken as string, key };
   }
   function control(body: Record<string, unknown>) {
     const serialized = JSON.stringify(body); const iat = Math.floor(Date.now() / 1000);
     const token = sign('arc-gateway-service+jwt', { iss: issuer, aud: origin, op: 'control', bodyHash: createHash('sha256').update(serialized).digest('base64url'), iat, exp: iat + 60, jti: randomUUID() });
     return () => request('/gateway/control', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: serialized });
   }
-  return { request, json, beginLogin, login, upgrade, host, control, directory,
+  return { request, previewRequest, json, beginLogin, login, upgrade, upgradeResponse, host, control, directory,
     setAuthority(status: number, duration = 120_000) { authorityStatus = status; leaseMs = duration; },
     setAuthenticatedAt(value: number) { authenticatedAt = value; },
     get authorityCalls() { return authorityCalls; },

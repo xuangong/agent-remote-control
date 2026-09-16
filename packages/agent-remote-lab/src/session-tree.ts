@@ -1,7 +1,7 @@
 import type { AgentChildSession } from '@borgee/agent-remote-protocol';
 import type { OpenedSession } from './directory-client.js';
 
-export interface SessionEntry {
+export interface SessionEntry extends Partial<AgentChildSession> {
   hostId?: string;
   providerId: string;
   nativeSessionId: string;
@@ -72,4 +72,10 @@ export function sessionRootKey(session: SessionEntry, known: readonly SessionEnt
     current = entries.get(sessionKey(parent)) ?? parent;
   }
   return sessionKey(current);
+}
+
+/** Reuse native relationships observed in the session directory, scoped to one Host and Provider. */
+export function sessionChildren(parent: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>, entries: readonly SessionEntry[]): SessionEntry[] {
+  return entries.filter(entry => entry.parentNativeSessionId === parent.nativeSessionId
+    && entry.providerId === parent.providerId && (entry.hostId ?? 'local') === (parent.hostId ?? 'local'));
 }

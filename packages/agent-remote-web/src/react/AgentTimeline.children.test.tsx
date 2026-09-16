@@ -48,7 +48,7 @@ describe('AgentTimeline child sessions', () => {
   it('starts session subagents collapsed, preserves expansion during updates, and resets for another session', async () => {
     const selected: string[] = [];
     const initial = state([child('one')], []);
-    const onOpen = (item: AgentChildSession) => { selected.push(item.nativeSessionId); };
+    const onOpen = (item: Pick<AgentChildSession, 'nativeSessionId'>) => { selected.push(item.nativeSessionId); };
     const container = await render(<AgentTimeline state={initial} onOpenChildSession={onOpen} />);
     const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]');
     expect(details).not.toBeNull();
@@ -120,4 +120,10 @@ it('reports working children while collapsed and clears the indicator when they 
   await rerender(container, <AgentTimeline state={state(children.map(item => ({ ...item, status: 'idle' })), [])} />);
   expect(details.querySelector('summary')?.textContent).not.toContain('working');
   expect(details.open).toBe(true);
+});
+
+it('retains known children when the active snapshot has no direct child metadata', async () => {
+  const container = await render(<AgentTimeline state={state([], [])} childrenFor={id => id === 'native-parent' ? [child('known')] : []} />);
+  expect(container.querySelector('[data-child-session-id="known"]')?.textContent).toContain('Review known');
+  expect(container.querySelector('summary')?.textContent).toContain('1 working');
 });

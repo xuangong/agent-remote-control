@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sessionForest, type SessionEntry } from './session-tree.js';
+import { sessionForest, sessionChildren, type SessionEntry } from './session-tree.js';
 const entry = (nativeSessionId: string, parentNativeSessionId?: string, extra: Partial<SessionEntry> = {}): SessionEntry => ({ nativeSessionId, parentNativeSessionId, providerId: 'codex', title: nativeSessionId, ...extra });
 describe('sessionForest', () => {
   it('groups nested children by native identity and creation time while preserving root order', () => {
@@ -19,4 +19,10 @@ describe('sessionForest', () => {
   it('keeps malformed cycles visible without recursively following them', () => {
     expect(sessionForest([entry('a', 'b'), entry('b', 'a'), entry('self', 'self')])).toHaveLength(3);
   });
+});
+
+it('resolves descendants from recorded identity without mixing Hosts or Providers or inventing status', () => {
+  const entries = [entry('review', 'parent'), entry('nested', 'review'), entry('foreign', 'review', { hostId: 'remote' }), entry('foreign-provider', 'review', { providerId: 'claude' })];
+  expect(sessionChildren(entry('review'), entries)).toEqual([entry('nested', 'review')]);
+  expect(sessionChildren(entry('review'), entries)[0]?.status).toBeUndefined();
 });

@@ -41,6 +41,6 @@ export type { AgentPlanningControlProps } from './react/AgentPlanningControl.js'
 export { useTimelineScroll } from './react/useTimelineScroll.js';
 export type { TimelineReadingContinuity, TimelineReadingContinuityPosition, TimelineReadingContinuityPositions, TimelineReadingPosition, TimelineReadingPositions } from './react/useTimelineScroll.js';
 export { AgentChildSessionList } from './react/AgentChildSessionList.js';
-export type { AgentChildSessionListProps } from './react/AgentChildSessionList.js';
+export type { AgentChildSessionListProps, AgentChildSessionView } from './react/AgentChildSessionList.js';
 
 export type { SessionLinkResolver } from './react/items/ToolCallItem.js';

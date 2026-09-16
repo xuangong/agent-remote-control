@@ -14,13 +14,15 @@ const snapshots = {
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
 afterEach(() => { vi.restoreAllMocks(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean } = {}) {
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean } = {}) {
   let connections = 0;
   let releaseChild: (() => void) | undefined;
   const childReady = options.deferChild ? new Promise<void>((resolve) => { releaseChild = resolve; }) : Promise.resolve();
   const sibling = { ...child, nativeSessionId: 'native-sibling', title: '/root/sibling' };
   const sessionSnapshots = { ...snapshots, parent: options.navigation ? { ...parent, runtimeInfo: { ...parent.runtimeInfo, childSessions: [child, sibling] } } : parent,
     sibling: { ...snapshots.child, id: 'sibling', runtimeInfo: { ...snapshots.child.runtimeInfo, sessionId: 'native-sibling' } }, child: options.restricted ? { ...snapshots.child, capabilities: { ...snapshots.child.capabilities, sendMessage: false, cancel: false }, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'child-plan', plan: 'Review the child plan', allowedActions: ['approve' as const] }] } : snapshots.child };
+  if (options.nested) sessionSnapshots.child = { ...sessionSnapshots.child, runtimeInfo: Object.assign({}, sessionSnapshots.child.runtimeInfo, { childSessions: [{ ...child, nativeSessionId: 'native-grandchild', title: '/root/review/evidence', status: 'running' as const }] }) };
+  Object.assign(sessionSnapshots, { grandchild: { ...snapshots.child, id: 'grandchild', runtimeInfo: { providerId: 'codex', sessionId: 'native-grandchild', status: 'idle' } } });
   const attachments: unknown[] = [];
   const directory = new SessionDirectoryClient('http://localhost/', async (input, init) => {
     const path = new URL(String(input)).pathname;
@@ -274,4 +276,19 @@ it('navigates activity links between a parent and siblings with browser and conv
   await waitForSession(f.container, 'parent');
   await act(async () => back().click());
   await waitForSession(f.container, 'sibling');
+});
+
+it('shows known grandchildren in the parent timeline and attaches through their actual parent', async () => {
+  const f = await setup(false, { nested: true });
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id="native-child"]')!.click());
+  await waitForSession(f.container, 'child');
+  expect(f.container.querySelector('[data-child-session-id="native-grandchild"]')?.textContent).toContain('Working');
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Back to previous conversation"]')!.click());
+  await waitForSession(f.container, 'parent');
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Expand subagents of Review transport"]')!.click());
+  const nested = f.container.querySelector<HTMLButtonElement>('[data-child-session-id="native-grandchild"]')!;
+  expect(nested).not.toBeNull();
+  await act(async () => nested.click());
+  await waitForSession(f.container, 'grandchild');
+  expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-child', nativeSessionId: 'native-grandchild' } });
 });

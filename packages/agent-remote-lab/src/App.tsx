@@ -1,7 +1,7 @@
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@borgee/agent-remote-hosted/controller-location';
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
 import { SessionLink } from './components/SessionLink.js';
-import type { AgentChildSession, AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@borgee/agent-remote-protocol';
 import {
   useCallback,
   useEffect,
@@ -36,9 +36,9 @@ import { DirectoryError, RemoteHostClient, SessionDirectoryClient, type CreateSe
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
-import { sessionKey, sessionRootKey } from './session-tree.js';
+import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { TimelineDisplay } from '@borgee/agent-remote-web/react';
+import { TimelineDisplay, type AgentChildSessionView } from '@borgee/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
@@ -442,7 +442,13 @@ export function App({
     finally { transitionRef.current = false; setTransitioning(false); }
   }
 
-  async function openChildSession(child: AgentChildSession): Promise<void> {
+  async function openChildSession(child: AgentChildSessionView): Promise<void> {
+    const known = currentSession && sessionEntries.find(entry => entry.nativeSessionId === child.nativeSessionId
+      && entry.providerId === currentSession.providerId && (entry.hostId ?? 'local') === (currentSession.hostId ?? 'local'));
+    if (known && currentSession && sessionRootKey(known, sessionEntries) === sessionRootKey(currentSession, sessionEntries)) {
+      if (!await openSession(known)) throw new Error('This subagent could not be opened.');
+      return;
+    }
     const parent = state?.agent;
     const parentNativeSessionId = parent?.runtimeInfo.sessionId;
     if (!directory || !parent || !parentNativeSessionId) throw new Error('The parent session is unavailable.');
@@ -913,6 +919,7 @@ export function App({
             <span aria-current="page">{activeOpened?.title}</span>
           </nav> : null}
           resolveSessionLink={resolveSessionLink}
+          childrenFor={currentSession ? nativeSessionId => sessionChildren({ ...currentSession, nativeSessionId }, sessionEntries) : undefined}
           onOpenChildSession={directory && !hostOffline && !transitioning ? openChildSession : undefined}
           messageDraft={activeAgentId ? messageDrafts[activeAgentId] ?? '' : ''}
           onMessageDraftChange={activeAgentId ? (text) => setMessageDrafts((current) => ({ ...current, [activeAgentId]: text })) : undefined}

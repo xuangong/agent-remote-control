@@ -565,3 +565,15 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-preview-browser-toolbar .agent-preview-browser-expand { display: none; }
   .agent-preview-browser-address { padding-inline: 6px; }
 }
+.agent-preview-browser { transform-origin: top left; }
+.agent-preview-browser::backdrop { opacity: 1; transition: opacity 200ms ease-out; }
+.agent-preview-browser[data-motion="minimizing"]::backdrop { opacity: 0; }
+.agent-preview-dock { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.agent-preview-dock-entry { display: inline-flex; align-items: center; max-width: 180px; border: 1px solid var(--agent-rule); border-radius: 8px; background: var(--agent-panel); box-shadow: 0 2px 8px color-mix(in oklab, var(--agent-ink) 10%, transparent); pointer-events: auto; }
+.agent-preview-dock-entry button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 34px; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--agent-action-text); cursor: pointer; }
+.agent-preview-dock-entry button > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; }
+.agent-preview-dock-entry button > svg { flex: 0 0 auto; }
+.agent-preview-dock-entry button:last-child { flex: 0 0 auto; padding-inline: 7px; color: var(--agent-muted); }
+.agent-preview-dock-entry button:hover { background: var(--agent-surface-selected); }
+.agent-preview-dock-entry button:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .agent-preview-browser::backdrop { transition: none; } }

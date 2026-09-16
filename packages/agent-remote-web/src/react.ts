@@ -4,7 +4,7 @@ export type { TimelineDisplayMode } from './react/TimelineDisplay.js';
 export type { AgentTimelineProps, AgentTimelineState } from './react/AgentTimeline.js';
 export { PreviewActions, discoverLoopbackTargets } from './react/PreviewActions.js';
 export type { PreviewController } from './react/PreviewActions.js';
-export { PreviewProvider, usePreviewController } from './react/PreviewContext.js';
+export { PreviewProvider, usePreviewController, PreviewDock } from './react/PreviewContext.js';
 export type { PreviewContextValue } from './react/PreviewContext.js';
 export { InteractionPanel } from './react/InteractionPanel.js';
 export type { InteractionPanelProps } from './react/InteractionPanel.js';

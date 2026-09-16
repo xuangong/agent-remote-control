@@ -7,7 +7,7 @@ export interface PreviewController {
   readonly canManage: boolean;
   register(agentId: string, request: PreviewRegistrationRequest): Promise<PreviewRegistration>;
   unregister(id: string): Promise<void>;
-  open(id: string, originalLoopbackUrl: string): Promise<string>;
+  open(id: string, originalLoopbackUrl: string, sessionId?: string): Promise<string>;
 }
 
 export function discoverLoopbackTargets(text: string): string[] {
@@ -54,7 +54,7 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
     setPending(true); setFailure(undefined);
     try {
       const registered = await controller.register(agentId, { target, itemId, pathMode });
-      if (pathMode === 'strip') await controller.open(registered.id, target);
+      if (pathMode === 'strip') await controller.open(registered.id, target, agentId);
     }
     catch (error) { setFailure(message(error, 'Preview registration failed. Check that the Controller is online and the target is reachable.')); }
     finally { setPending(false); }
@@ -62,7 +62,7 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
   async function open(): Promise<void> {
     if (!registration) return;
     setPending(true); setFailure(undefined);
-    try { await controller.open(registration.id, target); }
+    try { await controller.open(registration.id, target, agentId); }
     catch (error) { setFailure(message(error, 'Preview access could not be prepared. Retry after checking Host access.')); }
     finally { setPending(false); }
   }

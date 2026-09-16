@@ -25,7 +25,7 @@ describe('PreviewActions', () => {
     expect(open).not.toHaveBeenCalled();
 
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-open')?.click());
-    expect(open).toHaveBeenCalledWith('preview-one', 'http://localhost:5173/docs');
+    expect(open).toHaveBeenCalledWith('preview-one', 'http://localhost:5173/docs', 'agent-one');
     expect(container.querySelector('a[target="_blank"]')).toBeNull();
   });
 
@@ -47,7 +47,7 @@ describe('PreviewActions', () => {
     expect(container.textContent).toContain('Registered');
     expect(container.textContent).not.toContain('Register again');
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-open')?.click());
-    expect(open).toHaveBeenCalledWith('preview-active', 'http://localhost:5173/docs');
+    expect(open).toHaveBeenCalledWith('preview-active', 'http://localhost:5173/docs', 'agent-one');
   });
 
   it('shows inactive lifecycle state explicitly', async () => {

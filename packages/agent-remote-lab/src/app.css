@@ -1035,3 +1035,12 @@ textarea {
 .lab-conversation-history { display: flex; align-items: center; gap: 2px; }
 .lab-conversation-history button { min-width: 32px; min-height: 32px; padding: 2px 6px; }
 @media (max-width: 760px) { .lab-conversation-history button { min-width: 44px; min-height: 44px; } }
+
+.lab-workbench-layout { position: relative; }
+.lab-workbench-layout > .agent-preview-dock { position: absolute; z-index: 20; top: 52px; right: 8px; max-height: calc(100% - 72px); overflow-y: auto; }
+@media (max-width: 760px) {
+  .lab-workbench-layout > .agent-preview-dock { top: 48px; right: 6px; }
+  .lab-shell.lab-header-hidden .lab-workbench-layout > .agent-preview-dock { top: 6px; }
+  .agent-preview-dock-entry { max-width: 160px; }
+  .agent-preview-dock-entry button { min-height: 40px; }
+}

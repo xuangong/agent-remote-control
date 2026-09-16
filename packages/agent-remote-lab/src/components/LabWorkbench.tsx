@@ -5,7 +5,7 @@ import type {
   ResourceBinding,
 } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
+import { AgentCommandDetails, AgentTimeline, PreviewDock, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
 
 import { RecoveryScope } from '../conversation-recovery.js';
 import { LiveControlPanel } from './LiveControlPanel.js';
@@ -65,6 +65,7 @@ export function LabWorkbench({ state, sessionStatus, attachingAgentId, actions, 
       {sessionManager}
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? 'Connecting' : 'Awaiting Agent'}</span>
     </header>
+    <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
     <div className="lab-timeline-stage">
       <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
         <div className="lab-conversation-content" ref={scroll.contentRef}>

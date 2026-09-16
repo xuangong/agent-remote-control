@@ -12,6 +12,16 @@ export interface PreviewContextValue extends PreviewController {
 
 const Context = createContext<PreviewContextValue | undefined>(undefined);
 
+interface BrowserEntry {
+  version: number; key: string; id: string; sessionId: string; target: string;
+  url?: string; error?: string; returnFocus?: HTMLElement;
+}
+const DockContext = createContext<{
+  browsers: readonly BrowserEntry[]; activeKey?: string;
+  resume(key: string): void; close(key: string): void;
+} | undefined>(undefined);
+
+
 export function PreviewProvider({ client, hostId, canManage, children }: {
   readonly client: HttpPreviewClient; readonly hostId: string; readonly canManage: boolean; readonly children: ReactNode;
 }) {
@@ -24,16 +34,27 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
     { version: scope.version, registrations: [], loading: true },
   );
   const currentState = state.version === scope.version ? state : { version: scope.version, registrations: [], loading: true };
-  const [browser, setBrowser] = useState<{ version: number; id: string; target: string; url?: string; error?: string }>();
-  const openRequest = useRef<AbortController>();
-  const browserTrigger = useRef<HTMLElement>();
-  const closeBrowser = useCallback(() => { openRequest.current?.abort(); setBrowser(undefined); }, []);
-  useEffect(() => () => { openRequest.current?.abort(); }, [scope]);
-  const shownBrowser = browser?.version === scope.version ? browser : undefined;
-  const selected = currentState.registrations.find(item => item.id === shownBrowser?.id);
-  const unavailable = selected && (selected.pendingUnregister ? 'This preview has been unregistered.'
-    : selected.status !== 'active' ? `This preview is ${selected.status}. Open it again to register.`
-    : selected.availability !== 'online' ? 'Controller offline. Close and reopen the preview after it reconnects.' : undefined);
+  const [browsers, setBrowsers] = useState<BrowserEntry[]>([]);
+  const browserEntries = useRef<BrowserEntry[]>([]);
+  const updateBrowsers = useCallback((update: (current: BrowserEntry[]) => BrowserEntry[]) => {
+    browserEntries.current = update(browserEntries.current);
+    setBrowsers(browserEntries.current);
+  }, []);
+  const [activeKey, setActiveKey] = useState<string>();
+  const requests = useMemo(() => new Map<string, AbortController>(), [scope]);
+  const currentBrowsers = browsers.filter(entry => entry.version === scope.version);
+  const closeBrowser = useCallback((key: string) => {
+    requests.get(key)?.abort(); requests.delete(key);
+    updateBrowsers(current => current.filter(entry => entry.key !== key));
+    setActiveKey(current => current === key ? undefined : current);
+  }, [requests, updateBrowsers]);
+  const resumeBrowser = useCallback((key: string) => setActiveKey(key), []);
+  const minimizeBrowser = useCallback(() => setActiveKey(undefined), []);
+  useEffect(() => {
+    updateBrowsers(current => current.filter(entry => entry.version === scope.version));
+    setActiveKey(undefined);
+    return () => { for (const request of requests.values()) request.abort(); };
+  }, [requests, scope.version, updateBrowsers]);
 
   const refresh = useCallback(async () => {
     const request = ++scope.request;
@@ -71,32 +92,66 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
       return registration;
     },
     unregister: async (id: string) => { await client.unregister(hostId, id); await refresh(); },
-    open: async (id: string, target: string) => {
-      openRequest.current?.abort();
-      browserTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-      const request = new AbortController(); openRequest.current = request;
-      setBrowser({ version: scope.version, id, target });
-      const deadline = window.setTimeout(() => {
-        if (!request.signal.aborted) {
-          setBrowser({ version: scope.version, id, target, error: 'Preview access timed out. Close and open it again.' });
-          request.abort();
+    open: async (id: string, target: string, agentId?: string) => {
+      if (scopeRef.current !== scope) return '';
+      const sessionId = agentId ?? currentState.registrations.find(entry => entry.id === id)?.sources[0]?.sessionId ?? '';
+      const key = JSON.stringify([scope.version, sessionId, id, target]);
+      const existing = browserEntries.current.find(entry => entry.key === key);
+      if (existing) { setActiveKey(key); return existing.url ?? ''; }
+      const request = new AbortController(); requests.set(key, request);
+      const entry: BrowserEntry = { version: scope.version, key, id, sessionId, target,
+        returnFocus: document.activeElement instanceof HTMLElement ? document.activeElement : undefined };
+      updateBrowsers(current => [...current.filter(item => item.version === scope.version && item.key !== key), entry]);
+      setActiveKey(key);
+      const update = (result: Partial<BrowserEntry>) => {
+        if (scopeRef.current === scope && requests.get(key) === request) {
+          updateBrowsers(current => current.map(item => item.key === key ? { ...item, ...result } : item));
         }
+      };
+      const deadline = window.setTimeout(() => {
+        if (!request.signal.aborted) { update({ error: 'Preview access timed out. Close and open it again.' }); request.abort(); }
       }, 20_000);
       try {
-        const entry = await client.open(hostId, id, target, request.signal);
+        const handoff = await client.open(hostId, id, target, request.signal);
         if (request.signal.aborted) return '';
-        const url = await client.enter(entry, id, request.signal);
-        if (!request.signal.aborted) setBrowser({ version: scope.version, id, target, url });
+        const url = await client.enter(handoff, id, request.signal);
+        if (!request.signal.aborted) update({ url });
         return url;
       } catch (error) {
-        if (!request.signal.aborted) setBrowser({ version: scope.version, id, target, error: message(error, 'Preview access is unavailable. Close and open it again.') });
+        if (!request.signal.aborted) update({ error: message(error, 'Preview access is unavailable. Close and open it again.') });
         return '';
-      } finally { window.clearTimeout(deadline); }
+      } finally { window.clearTimeout(deadline); if (requests.get(key) === request) requests.delete(key); }
     },
-  }), [canManage, client, currentState, hostId, refresh, scope]);
+  }), [canManage, client, currentState, hostId, refresh, scope, requests, updateBrowsers]);
 
-  return <Context.Provider value={value}>{children}{shownBrowser ? <PreviewBrowser key={`${scope.version}:${shownBrowser.id}`}
-    url={shownBrowser.url} target={shownBrowser.target} error={unavailable ?? shownBrowser.error} returnFocus={browserTrigger.current} onClose={closeBrowser} /> : null}</Context.Provider>;
+  return <Context.Provider value={value}><DockContext.Provider value={{ browsers: currentBrowsers, activeKey, resume: resumeBrowser, close: closeBrowser }}>
+    {children}
+    {currentBrowsers.map(browser => {
+      const selected = currentState.registrations.find(item => item.id === browser.id);
+      const unavailable = selected && (selected.pendingUnregister ? 'This preview has been unregistered.'
+        : selected.status !== 'active' ? `This preview is ${selected.status}. Open it again to register.`
+        : selected.availability !== 'online' ? 'Controller offline. Close and reopen the preview after it reconnects.' : undefined);
+      return <PreviewBrowser key={browser.key} browserKey={browser.key} visible={activeKey === browser.key}
+        url={browser.url} target={browser.target} error={unavailable ?? browser.error} returnFocus={browser.returnFocus}
+        onMinimize={minimizeBrowser} onClose={() => closeBrowser(browser.key)} />;
+    })}
+  </DockContext.Provider></Context.Provider>;
+}
+
+export function PreviewDock({ sessionId }: { readonly sessionId?: string }) {
+  const context = useContext(DockContext);
+  const entries = context?.browsers.filter(entry => entry.sessionId === sessionId) ?? [];
+  if (!context || entries.length === 0) return null;
+  return <aside className="agent-preview-dock" aria-label="Session previews">
+    {entries.map(entry => <span className="agent-preview-dock-entry" key={entry.key}>
+      <button type="button" data-preview-key={entry.key} aria-label={`Resume preview: ${entry.target}`} title={`Resume preview: ${entry.target}`}
+        onClick={() => context.resume(entry.key)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>
+        <span>{new URL(entry.target).host}</span>
+      </button>
+      <button type="button" aria-label={`Close preview: ${entry.target}`} title="Close preview" onClick={() => context.close(entry.key)}>×</button>
+    </span>)}
+  </aside>;
 }
 
 export function usePreviewController(): PreviewContextValue | undefined { return useContext(Context); }

@@ -782,6 +782,7 @@ textarea {
 .lab-context-hidden .lab-main-stage { grid-column: 1; }
 .lab-context-hidden .lab-inspector-rail { grid-column: 2; }
 .lab-rail-heading > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-rail-heading > .lab-eyebrow { flex-shrink: 0; white-space: nowrap; }
 .lab-view-options { position: fixed; z-index: 30; top: calc(3px + env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left)); }
 .lab-view-options-trigger { display: flex; align-items: center; justify-content: center; gap: 6px; width: 68px; min-height: 32px; padding: 0 6px; border-color: transparent; border-radius: 6px; color: var(--obs-text-secondary); background: var(--obs-surface); font-size: 12px; }
 .lab-view-options-trigger:active:not(:disabled) { transform: none; }
@@ -966,7 +967,7 @@ textarea {
 .gateway-account-actions button { min-height: 32px; padding: 0 8px; font-size: 12px; }
 @media (min-width: 1181px) {
   .gateway-account-actions ~ .gateway-private > .lab-shell .lab-app-bar { padding-left: max(240px, calc(env(safe-area-inset-left) + 232px)); }
-  .gateway-account-actions ~ .gateway-private > .lab-header-hidden:not(.lab-context-hidden) .lab-context-rail > .lab-rail-heading,
+  .gateway-account-actions ~ .gateway-private > .lab-header-hidden:not(.lab-context-hidden) .lab-context-rail > .lab-rail-heading { min-height: 80px; padding: calc(48px + env(safe-area-inset-top)) 16px 12px; }
   .gateway-account-actions ~ .gateway-private > .lab-header-hidden.lab-context-hidden .lab-workbench-heading { padding-left: 240px; }
 }
 @media (max-width: 1180px) {

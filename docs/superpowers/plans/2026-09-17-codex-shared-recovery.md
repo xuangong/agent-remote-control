@@ -56,3 +56,14 @@
 - [ ] Guard send, steer, cancel, approval, setting/planning, execute-command and native creation at Host boundaries. Key on authenticated owner/Host plus provider/native identity; different transport sessions can bind the same native target. Keep native create's proposed identity durable. Validate stale approvals before dispatch; same public approval identity cannot be reused for a later socket generation.
 - [ ] Expose unknown/conflict/persistence failure as explicit command errors and preserve unknown status in client UX. Never automatically retry an uncertain operation or label it definitively failed. Reconciliation uses available reliable native IDs only; lacking evidence, remain unknown.
 - [ ] Exercise journal via real session/uplink transport, including operation acknowledgement loss and Host recreation. Run affected suites, build/typecheck and compatibility:update/check; update documentation, commit and report.
+
+### Task 4: Bounded daemon diagnostic logs
+
+**Files:** new packages/agent-host/src/diagnostic-log.ts and tests; cli.ts, launchd.ts if required for descriptor ownership; corresponding CLI/launchd tests and current Host runbook.
+
+**Interfaces:** The local daemon owns automatic diagnostic cleanup independent of operation-journal compaction. Preserve current safe diagnostic content and agent-host.log location.
+
+- [ ] Add behavior tests with small byte thresholds for rotation while a writer remains open, archive count limits, startup over-limit cleanup, cleanup errors and shutdown timer cancellation.
+- [ ] Implement a default 5 MiB log threshold and three archives. Account for inherited stdout/stderr descriptors in both launchd and manually detached daemon modes: renaming a file alone does not redirect an open descriptor. Enforce bounded retained output during runtime and startup, without unbounded buffering or recursive error logging.
+- [ ] Integrate clean shutdown, restrictive permissions and existing CLI diagnostic sanitization. Do not delete operation records as part of diagnostic rotation or change user autostart preferences.
+- [ ] Run focused diagnostic/CLI/launchd tests with runner and outer deadlines, build/typecheck Host and document actual retention/overshoot bounds. Commit and report.

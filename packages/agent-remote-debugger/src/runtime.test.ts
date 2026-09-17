@@ -376,7 +376,7 @@ describe('createDebuggerRuntime', () => {
     const record = createProtocolTraceRecord('agent-one', {
       direction: 'outbound', channel: 'websocket', message: {
         protocolVersion: '1.4.0', type: 'interaction_response',
-        payload: { agentId: 'agent-one', requestId: 'secret', response: { kind: 'question', answers: [{ questionId: 'token', selectedValues: [], customText: 'trace-private-token' }] } },
+        payload: { agentId: 'agent-one', requestId: 'secret', submissionId: 'submit-secret', operationId: '00000000-0000-4000-8000-000000000001', response: { kind: 'question', answers: [{ questionId: 'token', selectedValues: [], customText: 'trace-private-token' }] } },
       },
     });
     expect(JSON.stringify(record)).not.toContain('trace-private-token');

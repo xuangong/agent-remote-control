@@ -36,7 +36,7 @@ it('discovers a recorded session and deduplicates concurrent attachment', async 
 
 it('creates once for a request identity and immediately adds the session to discovery', async () => {
   const { get, post } = await start();
-  const body = { providerId: 'recorded', requestId: 'new-session', cwd: '/tmp/remote-workspace' };
+  const body = { providerId: 'recorded', operationId: '00000000-0000-4000-8000-000000000001', cwd: '/tmp/remote-workspace' };
   const results = await Promise.all([post('create', body), post('create', body)]);
   const [one, two] = await Promise.all(results.map((result) => result.json()));
   expect(one.agentId).toBeTypeOf('string');
@@ -50,7 +50,7 @@ it('creates once for a request identity and immediately adds the session to disc
 
 it('rejects cross-origin mutations and unknown sessions', async () => {
   const { get, post } = await start();
-  expect((await post('create', { providerId: 'recorded', requestId: 'blocked' }, 'https://other.example')).status).toBe(403);
+  expect((await post('create', { providerId: 'recorded', operationId: '00000000-0000-4000-8000-000000000002' }, 'https://other.example')).status).toBe(403);
   expect((await post('attach', { providerId: 'recorded', nativeSessionId: 'missing' })).status).toBe(404);
   expect((await get('catalog?providerId=missing')).status).toBe(404);
   expect((await get('catalog?providerId=recorded&limit=0')).status).toBe(400);

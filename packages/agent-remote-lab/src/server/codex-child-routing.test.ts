@@ -90,7 +90,7 @@ it('routes an unopened child approval through directory attachment and the real 
       await expect.poll(() => status, { timeout: 3_000 }).toBe('ready');
       return { client, replica };
     };
-    const parent = await post('create', { providerId: 'codex', requestId: 'create-parent', workspaceId: '/workspace' });
+    const parent = await post('create', { providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000001', workspaceId: '/workspace' });
     expect(parent.nativeSessionId).toBe('native-parent');
     const parentView = await connect(parent.agentId);
     native.emit({ method: 'item/agentMessage/delta', params: { threadId: 'native-parent', turnId: 'parent-turn', itemId: 'parent-reply', delta: 'Parent reply' } });

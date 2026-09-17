@@ -165,7 +165,7 @@ it('uses modern create request identity for concurrent retries and rejects confi
   const f = await setup();
   const { hosts } = await (await f.get('/v1/remote/hosts')).json();
   const base = `/v1/remote/hosts/${hosts[0].id}`;
-  const body = { providerId: 'dsh', requestId: 'create-once', workspaceId: 'workspace' };
+  const body = { providerId: 'dsh', operationId: '00000000-0000-4000-8000-000000000001', workspaceId: 'workspace' };
   const responses = await Promise.all([f.post(base + '/create', body), f.post(base + '/create', body)]);
   expect(responses.map(({ status }) => status)).toEqual([200, 200]);
   const [first, retry] = await Promise.all(responses.map((response) => response.json()));
@@ -174,7 +174,7 @@ it('uses modern create request identity for concurrent retries and rejects confi
   expect(f.native.creations).toEqual([{ sessionId: first.nativeSessionId, workspaceId: 'workspace' }]);
   expect((await f.post(base + '/create', { ...body, workspaceId: 'different' })).status).toBe(409);
   expect((await f.post(base + '/create', { providerId: 'dsh' })).status).toBe(400);
-  expect((await f.post(base + '/create', { ...body, requestId: 'override', reasoningEffort: 'high' })).status).toBe(400);
+  expect((await f.post(base + '/create', { ...body, operationId: '00000000-0000-4000-8000-000000000002', reasoningEffort: 'high' })).status).toBe(400);
   expect(f.native.creations).toHaveLength(1);
   const catalog = await (await f.get(base + '/catalog?providerId=dsh')).json();
   expect(catalog.items).toContainEqual(expect.objectContaining({ nativeSessionId: first.nativeSessionId, providerId: 'dsh' }));

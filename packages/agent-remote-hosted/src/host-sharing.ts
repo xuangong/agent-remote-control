@@ -36,22 +36,29 @@ export class HostSharing {
     if (!grant) throw new SharingError(404, 'share_not_found', 'Host share is unavailable.');
     grant.revoked = true; this.changed();
   }
-  reserve(hostId: string, subject: string, providerId: string, requestId: string, fingerprint: string) {
+  reserve(hostId: string, subject: string, providerId: string, operationId: string, fingerprint: string) {
     if (!this.allowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
-    const key = JSON.stringify([hostId, subject, providerId, requestId]);
+    const key = JSON.stringify([hostId, subject, providerId, operationId]);
     const previous = this.reservations.get(key);
     if (previous) {
-      if (previous.fingerprint !== fingerprint) throw new SharingError(409, 'request_conflict', 'This creation request has different settings.');
+      if (previous.fingerprint !== fingerprint) throw new SharingError(409, 'operation_conflict', 'This creation operation has different settings.');
       return { ...previous, fresh: false };
     }
     const quota = this.quota(hostId, subject);
     if (quota.used >= quota.limit) throw new SharingError(409, 'session_quota_exceeded', 'Session creation quota reached. Continue an existing session or ask the Host owner to increase your limit.');
     if (this.reservations.size >= 10000) throw new SharingError(429, 'quota_ledger_full', 'The session creation ledger is full.');
-    const value: Reservation = { key, hostId, subject, fingerprint, nativeRequestId: `shared:${createHash('sha256').update(key).digest('hex')}` };
+    const value: Reservation = { key, hostId, subject, fingerprint, nativeRequestId: scopedOperationId(key) };
     this.reservations.set(key, value);
     this.changed();
     return { ...value, fresh: true };
   }
   complete(key: string, agentId: string) { const entry = this.reservations.get(key); if (entry) { entry.agentId = agentId; this.changed(); } }
   release(key: string) { this.reservations.delete(key); this.changed(); }
+}
+
+function scopedOperationId(key: string): string {
+  const hex = createHash('sha256').update(key).digest('hex').slice(0, 32).split('');
+  hex[12] = '5';
+  hex[16] = '8';
+  return `${hex.slice(0, 8).join('')}-${hex.slice(8, 12).join('')}-${hex.slice(12, 16).join('')}-${hex.slice(16, 20).join('')}-${hex.slice(20).join('')}`;
 }

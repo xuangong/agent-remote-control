@@ -303,7 +303,7 @@ describe('DSH Remote Host plugin', () => {
   it('preserves modern create identity across retries, native replacement and re-pairing', async () => {
     const native = remoteNativeHost();
     const first = await startRemoteHost(native);
-    const body = JSON.stringify({ providerId: 'dsh', requestId: 'create-once', workspaceId: 'workspace-one' });
+    const body = JSON.stringify({ providerId: 'dsh', operationId: '00000000-0000-4000-8000-000000000001', workspaceId: 'workspace-one' });
     const created = await (await first.request('/remote/create', 'first-binding', body)).json();
     expect(native.createCalls).toHaveLength(1);
     const old = native.context.agents.get(created.nativeSessionId)!;
@@ -316,7 +316,7 @@ describe('DSH Remote Host plugin', () => {
     const repeated = await (await second.request('/remote/create', 'second-binding', body)).json();
     expect(repeated.nativeSessionId).toBe(created.nativeSessionId);
     expect(native.createCalls.every((call) => call.sessionId === created.nativeSessionId)).toBe(true);
-    expect((await second.request('/remote/create', 'conflicting', JSON.stringify({ providerId: 'dsh', requestId: 'create-once', workspaceId: 'another' }))).status).toBe(409);
+    expect((await second.request('/remote/create', 'conflicting', JSON.stringify({ providerId: 'dsh', operationId: '00000000-0000-4000-8000-000000000001', workspaceId: 'another' }))).status).toBe(409);
   });
 
   it('creates an opaque native session through DSH Web before borrowing it and preserves binding conflicts', async () => {

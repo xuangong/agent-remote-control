@@ -8,6 +8,7 @@ import {
 
 import type { AgentRemoteRelay } from '../relay.js';
 import { createRemoteHostPluginHost, type RemoteHostPluginHostOptions } from './remote-host-plugin.js';
+import type { SessionWireOperationExecutor } from '../session-wire.js';
 import { createUplinkWriter } from './uplink-writer.js';
 
 export interface RemoteHostUplinkDiagnostic {
@@ -47,6 +48,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly url: string;
   readonly resolveSession: RemoteHostPluginHostOptions['resolveSession'];
   readonly control: RemoteHostPluginHostOptions['control'];
+  readonly operationExecutor?: (scope: string) => SessionWireOperationExecutor;
   readonly registrationTimeoutMs?: number;
   readonly writeTimeoutMs?: number;
   readonly maxQueuedMessages?: number;
@@ -120,6 +122,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     let cloudHeartbeat: RemoteHostHeartbeat | undefined;
     let lastHeartbeatAt: number | undefined;
     let retirement: DiagnosticDetails | undefined;
+    let operationScope: string | undefined;
     let unsubscribePreviews: (() => void) | undefined;
     function details(): DiagnosticDetails {
       return { connectionId, registered,
@@ -131,7 +134,13 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       maxMessages: maxQueuedMessages, maxBytes: maxQueuedBytes, writeTimeoutMs: writeTimeout, onFailure: error => retire({ reason: 'write_failure', errorCode: safeErrorCode(error) }),
     });
     const host = createRemoteHostPluginHost(options.relay, {
-      resolveSession: options.resolveSession, control: options.control, send: (json) => writer.send(json), onFailure: () => retire({ reason: 'host_failure' }),
+      resolveSession: options.resolveSession,
+      control: request => options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
+      ...(options.operationExecutor ? { executeOperation: (agent, operation, work) => {
+        if (!operationScope) throw new Error('Remote Host operation scope is unavailable before registration.');
+        return options.operationExecutor!(operationScope)(agent, operation, work);
+      } } : {}),
+      send: (json) => writer.send(json), onFailure: () => retire({ reason: 'host_failure' }),
     });
     function retire(cause: DisconnectCause): void {
       if (retired) return;
@@ -217,6 +226,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         clearTimeout(registrationDeadline);
         registered = true;
         registeredHostId = decoded.value.hostId;
+        operationScope = JSON.stringify([new URL(options.url).origin, registeredHostId, options.installationId]);
         cloudHeartbeat = decoded.value.heartbeat;
         resetCloudDeadline();
         options.onStateChange?.('registered');

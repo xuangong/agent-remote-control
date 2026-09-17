@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { AgentAlreadyExistsError, AgentNotFoundError, RelayClosedError, createAgentRemoteRelay } from './relay.js';
 import { InMemoryResourceStore } from './resources/resource-store.js';
 
+let operationSequence = 0;
+const operationId = () => `00000000-0000-4000-8000-${String(++operationSequence).padStart(12, '0')}`;
+
 describe('AgentRemoteRelay manager ownership', () => {
   it('creates and resumes Agents through registered Providers', async () => {
     const calls: unknown[] = [];
@@ -17,7 +20,7 @@ describe('AgentRemoteRelay manager ownership', () => {
     const created = await relay.createAgent({
       protocolVersion: '1.4.0', type: 'create_agent',
       payload: {
-        requestId: 'create-1', agentId: 'agent-created', providerId: 'codex',
+        requestId: 'create-1', operationId: operationId(), agentId: 'agent-created', providerId: 'codex',
         config: { sessionId: 'session-1', cwd: '/workspace' },
       },
     });
@@ -206,7 +209,7 @@ describe('AgentRemoteRelay manager ownership', () => {
     const request = {
       protocolVersion: '1.4.0' as const, type: 'create_agent' as const,
       payload: {
-        requestId: 'create-1', agentId: 'agent-1', providerId: 'codex', config: { sessionId: 'session-1' },
+        requestId: 'create-1', operationId: operationId(), agentId: 'agent-1', providerId: 'codex', config: { sessionId: 'session-1' },
       },
     };
     await relay.createAgent(request);
@@ -229,7 +232,7 @@ describe('AgentRemoteRelay manager ownership', () => {
     await relay.createAgent({
       protocolVersion: '1.4.0', type: 'create_agent',
       payload: {
-        requestId: 'create-resource', agentId: 'agent-resource', providerId: 'codex',
+        requestId: 'create-resource', operationId: operationId(), agentId: 'agent-resource', providerId: 'codex',
         config: { sessionId: 'session-resource' },
       },
     });
@@ -261,7 +264,7 @@ describe('AgentRemoteRelay manager ownership', () => {
           ? relay.createAgent({
               protocolVersion: '1.4.0', type: 'create_agent',
               payload: {
-                requestId: 'create-failed', agentId, providerId: 'codex',
+                requestId: 'create-failed', operationId: operationId(), agentId, providerId: 'codex',
                 config: { sessionId: 'session-failed' },
               },
             })
@@ -285,7 +288,7 @@ describe('AgentRemoteRelay manager ownership', () => {
 function createRequest(agentId: string, sessionId: string) {
   return {
     protocolVersion: '1.4.0' as const, type: 'create_agent' as const,
-    payload: { requestId: `create-${agentId}`, agentId, providerId: 'codex', config: { sessionId } },
+    payload: { requestId: `create-${agentId}`, operationId: operationId(), agentId, providerId: 'codex', config: { sessionId } },
   };
 }
 

@@ -57,6 +57,7 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 - `AgentSnapshot` contains current Agent state and pending interactions, not Timeline entries (`packages/agent-remote-protocol/src/snapshot.ts:47-72`).
 - Timeline recovery uses `timeline_page` with an epoch and cursors; a stale or forward cursor is represented explicitly rather than inferred from Snapshot (`packages/agent-remote-protocol/src/history.ts:13-48`, `packages/agent-remote-relay/src/timeline-projector.ts:50-88`).
 - Interaction requests and responses have closed, kind-specific structures (`packages/agent-remote-protocol/src/interactions.ts:22-134`).
+- Every mutating public request carries a UUID `operationId` that identifies user intent independently of the transport `requestId`. Interaction responses retain the native interaction `requestId` and use a separate `submissionId` for the current response envelope (`packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-protocol/src/commands.ts`, `packages/agent-remote-protocol/src/interactions.ts`, `packages/agent-remote-protocol/src/operations.ts`).
 - Plan rejection may carry feedback; approval responses cannot carry rejection feedback, and completed interaction rows retain the typed request and response for Timeline recovery (`packages/agent-remote-protocol/src/interactions.ts:87-109`, `packages/agent-remote-protocol/src/timeline.ts:54`).
 - Public resource bindings expose a visible locator, resource ID, and lifecycle state; Provider read identities are absent from the schema (`packages/agent-remote-protocol/src/resources.ts:22-30`).
 - Available resource metadata and byte responses can carry `imageDimensions` with positive integer `width` and `height`. Local resource resolution returns optional `state` metadata without content bytes, allowing an authenticated client to reserve image space before requesting the payload (`packages/agent-remote-protocol/src/resources.ts`).
@@ -100,7 +101,7 @@ Sensitive question answers and form fields travel to the Provider only in the re
 
 ## Session settings
 
-The unshipped protocol `1.4.0` includes optional `sessionSettings` capability, typed selection descriptors in `runtimeInfo.settings`, and `set_session_setting { requestId, agentId, settingId, value }`. Choice IDs are opaque Provider values, not native RPC method names. The existing `command_acknowledged`, runtime stream and Agent Snapshot carry completion and confirmed state. The independent uplink envelope versions stay unchanged. All public protocol participants must upgrade together because negotiation and object schemas are strict (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-protocol/src/messages.ts`).
+The unshipped protocol `1.4.0` includes optional `sessionSettings` capability, typed selection descriptors in `runtimeInfo.settings`, and `set_session_setting { requestId, operationId, agentId, settingId, value }`. Choice IDs are opaque Provider values, not native RPC method names. The existing `command_acknowledged`, runtime stream and Agent Snapshot carry completion and confirmed state. The independent uplink envelope versions stay unchanged. All public protocol participants must upgrade together because negotiation and object schemas are strict (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-protocol/src/messages.ts`).
 
 ## Provider commands
 
@@ -109,7 +110,7 @@ The same unshipped `1.4.0` contract adds optional `commands` capability and Prov
 | Request | Matching reply | Payload |
 | --- | --- | --- |
 | `list_commands` | `command_list` | Request: `requestId`, `agentId`. Reply: the same IDs and `commands`. |
-| `execute_command` | `command_result` | Request: `requestId`, `agentId`, `commandId`, `args`. Reply: the same IDs and `result`. |
+| `execute_command` | `command_result` | Request: `requestId`, `operationId`, `agentId`, `commandId`, `args`. Reply: `requestId`, `agentId`, and `result`. |
 
 Each pair has one correlated reply and no additional `command_acknowledged`. Native failures use the existing error response. `result` contains optional `text`; an empty result can mean a native menu was opened and does not assert completion of its remaining interactions. Existing `question` and `form` requests, interaction responses, and resolved events carry subsequent selections. No public message type is added per menu level. Session-setting toolbar writes still use their existing acknowledgement and confirmed runtime state. Exact version negotiation and independent uplink envelope versions remain unchanged (`packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-relay/src/session-wire.ts`).
 

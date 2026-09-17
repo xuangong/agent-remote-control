@@ -52,13 +52,13 @@ it('routes Provider creation to each selected DSH Host and clears settings when 
   const workspace = f.container.querySelector<HTMLSelectElement>('#session-workspace')!;
   await act(async () => { workspace.value = 'desk-workspace'; workspace.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => f.create().click());
-  expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/desk/create', body: { providerId: 'dsh', requestId: expect.any(String), workspaceId: 'desk-workspace' } });
+  expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/desk/create', body: { providerId: 'dsh', operationId: expect.any(String), workspaceId: 'desk-workspace' } });
   await f.selectHost('Laptop DSH');
   await act(async () => f.create().click());
-  expect(f.requests[1]).toEqual({ path: '/v1/remote/hosts/laptop/create', body: { providerId: 'dsh', requestId: expect.any(String) } });
+  expect(f.requests[1]).toEqual({ path: '/v1/remote/hosts/laptop/create', body: { providerId: 'dsh', operationId: expect.any(String) } });
   await f.selectHost('Recorded');
   await act(async () => f.create().click());
-  expect(f.requests[2]).toEqual({ path: '/v1/remote/create', body: { providerId: 'recorded', requestId: expect.any(String) } });
+  expect(f.requests[2]).toEqual({ path: '/v1/remote/create', body: { providerId: 'recorded', operationId: expect.any(String) } });
 });
 
 it('renders every Provider on a Host and preserves Codex creation options', async () => {
@@ -76,7 +76,7 @@ it('renders every Provider on a Host and preserves Codex creation options', asyn
   await set('#session-effort', 'high');
   await act(async () => f.create().click());
   expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/desk/create', body: {
-    providerId: 'codex', requestId: expect.any(String), cwd: '/tmp/codex-project', model: 'gpt-5.1-codex', reasoningEffort: 'high',
+    providerId: 'codex', operationId: expect.any(String), cwd: '/tmp/codex-project', model: 'gpt-5.1-codex', reasoningEffort: 'high',
   } });
 });
 
@@ -87,7 +87,7 @@ it('uses an advertised Provider when selecting a multi-provider Host directly', 
   await act(async () => { connectedHost.value = 'studio'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(f.provider().selectedOptions[0]?.textContent).toBe('Codex CLI · Studio Host · Online');
   await act(async () => f.create().click());
-  expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/studio/create', body: { providerId: 'codex', requestId: expect.any(String) } });
+  expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/studio/create', body: { providerId: 'codex', operationId: expect.any(String) } });
 
   await act(async () => { connectedHost.value = 'desk'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => { connectedHost.value = 'studio'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });

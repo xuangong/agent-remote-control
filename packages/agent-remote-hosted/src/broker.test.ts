@@ -2,6 +2,8 @@ import { afterEach, expect, it } from 'vitest';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
 
 const close: Array<() => void | Promise<void>> = [];
+const operationOne = '00000000-0000-4000-8000-000000000001';
+const operationTwo = '00000000-0000-4000-8000-000000000002';
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); });
 
 function transportPair() {
@@ -73,11 +75,11 @@ it('pairs a portable Host and preserves its catalog and native creation request'
     items: [{ providerId: 'codex', nativeSessionId: 'catalog-session' }], revision: 'revision-1',
   });
   expect(await (await broker.handleRequest(request(`/v1/remote/hosts/${host.hostId}/create`, {
-    providerId: 'codex', requestId: 'portable-create', cwd: '/work/project', model: 'gpt-6', reasoningEffort: 'high', planning: true,
+    providerId: 'codex', operationId: operationOne, cwd: '/work/project', model: 'gpt-6', reasoningEffort: 'high', planning: true,
   })))!.json()).toEqual({ agentId: 'native-agent-7', nativeSessionId: 'native-session-9' });
   expect(calls).toEqual([
     { method: 'GET', path: '/remote/catalog?providerId=codex&limit=2' },
-    { method: 'POST', path: '/remote/create', body: '{"providerId":"codex","requestId":"portable-create","cwd":"/work/project","model":"gpt-6","reasoningEffort":"high","planning":true}' },
+    { method: 'POST', path: '/remote/create', body: `{"providerId":"codex","operationId":"${operationOne}","cwd":"/work/project","model":"gpt-6","reasoningEffort":"high","planning":true}` },
   ]);
 }, 10_000);
 
@@ -166,7 +168,7 @@ it('keeps the persisted shared native request identity byte compatible', () => {
   const sharing = new HostSharing(undefined, () => {});
   sharing.set('host', 'bob', 'Bob', 1);
   expect(sharing.reserve('host', 'bob', 'codex', 'request-1', 'fingerprint').nativeRequestId).toBe(
-    'shared:8346efd12290a4f47c75c7ca87fe63103fd34bc003df16e1f3fd685393cabfe8',
+    '8346efd1-2290-54f4-8c75-c7ca87fe6310',
   );
 }, 10_000);
 
@@ -220,7 +222,7 @@ it('waits for a durable quota reservation before native creation and releases th
   native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'rpc_request') { calls.push(message); received.resolve(); } });
   held = deferred<void>();
   const result = broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
-    method: 'POST', body: JSON.stringify({ providerId: 'codex', requestId: 'first' }),
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId: operationOne }),
   }), { principalSubject: () => 'bob' });
   await entered.promise;
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -243,7 +245,7 @@ it('fails closed when a quota commit fails without creating a native session', a
   native.onMessage(data => { if (JSON.parse(data).type === 'rpc_request') calls += 1; });
   fail = true;
   const result = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
-    method: 'POST', body: JSON.stringify({ providerId: 'codex', requestId: 'first' }),
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId: operationOne }),
   }), { principalSubject: () => 'bob' });
   expect(result?.status).toBe(503);
   expect(calls).toBe(0);
@@ -331,7 +333,7 @@ it('does not restore a creation ledger entry after a concurrent device revocatio
   const post = (action: string, body: unknown) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/' + action, {
     method: 'POST', body: JSON.stringify(body),
   }), { principalSubject: () => 'alice' });
-  const creating = post('create', { providerId: 'codex', requestId: 'new' }); await entered.promise;
+  const creating = post('create', { providerId: 'codex', operationId: operationOne }); await entered.promise;
   const revoking = post('revoke', {});
   await new Promise(resolve => setTimeout(resolve, 20)); held.resolve();
   expect((await revoking)?.status).toBe(200); await creating;
@@ -387,11 +389,11 @@ it.each(['create', 'attach'])('reserves the last binding slot before concurrent 
   const { broker, native } = await restoredFixture({ initialState, ownerSubject: 'alice', onStateChange(state) { saved = structuredClone(state); } });
   const calls: Array<{ requestId: string }> = []; const entered = deferred<void>();
   native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'rpc_request') { calls.push(message); entered.resolve(); } });
-  const request = (id: string) => broker.handleRequest(new Request(`https://relay.example/v1/remote/hosts/host/${action}`, {
-    method: 'POST', body: JSON.stringify({ providerId: 'codex', requestId: id, nativeSessionId: `native-${id}` }),
+  const request = (id: string, operationId: string) => broker.handleRequest(new Request(`https://relay.example/v1/remote/hosts/host/${action}`, {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', ...(action === 'create' ? { operationId } : {}), nativeSessionId: `native-${id}` }),
   }), { principalSubject: () => 'alice' });
-  const first = request('first'); await entered.promise;
-  const second = request('second');
+  const first = request('first', operationOne); await entered.promise;
+  const second = request('second', operationTwo);
   await new Promise(resolve => setTimeout(resolve, 20));
   const admitted = calls.length;
   for (const [index, call] of calls.entries()) native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: call.requestId,
@@ -415,14 +417,14 @@ it('releases an in-flight binding slot after a native rejection so the denied re
   const { broker, native } = await restoredFixture({ initialState });
   const entered = deferred<void>(); const calls: Array<{ requestId: string }> = [];
   native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'rpc_request') { calls.push(message); entered.resolve(); } });
-  const request = (id: string) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
-    method: 'POST', body: JSON.stringify({ providerId: 'codex', requestId: id }),
+  const request = (operationId: string) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId }),
   }));
-  const first = request('first'); await entered.promise;
-  const rejected = await request('second'); expect(rejected?.status).toBe(429);
+  const first = request(operationOne); await entered.promise;
+  const rejected = await request(operationTwo); expect(rejected?.status).toBe(429);
   native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: calls[0]!.requestId, status: 400, body: '{"code":"invalid_request"}' }));
   expect((await first)?.status).toBe(400);
-  const retry = request('second');
+  const retry = request(operationTwo);
   await new Promise(resolve => setTimeout(resolve, 20));
   expect(calls).toHaveLength(2);
   native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: calls[1]!.requestId, status: 200,

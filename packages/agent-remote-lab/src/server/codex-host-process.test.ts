@@ -26,7 +26,7 @@ it('keeps a native Codex session usable when an independent Host pairs to a rest
   try {
     const initial = await pollState(controlUrl, fixture, () => output);
     const created = await post(`${backendUrl}/v1/remote/hosts/${initial.hostId}/create`, {
-      providerId: 'codex', requestId: 'persistent-session', workspaceId: initial.workspace,
+      providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000001', workspaceId: initial.workspace,
     });
     const first = await connect(backendUrl, origin, created.agentId, clients);
     expect((await first.client.sendMessage('Message before backend restart')).type).toBe('command_acknowledged');
@@ -35,7 +35,7 @@ it('keeps a native Codex session usable when an independent Host pairs to a rest
     const restarted = await post(`${controlUrl}/restart`, {});
     expect(restarted.hostId).not.toBe(initial.hostId);
     const recoveredCreation = await post(`${backendUrl}/v1/remote/hosts/${restarted.hostId}/create`, {
-      providerId: 'codex', requestId: 'persistent-session', workspaceId: initial.workspace,
+      providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000001', workspaceId: initial.workspace,
     });
     expect(recoveredCreation).toEqual(created);
     const attached = await post(`${backendUrl}/v1/remote/hosts/${restarted.hostId}/attach`, {

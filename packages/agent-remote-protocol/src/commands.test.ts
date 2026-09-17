@@ -4,7 +4,7 @@ import { PROTOCOL_VERSION } from './version.js';
 
 describe('native command wire', () => {
   it('accepts directory and invocation messages without accepting native RPC envelopes', () => {
-    const message = { protocolVersion: PROTOCOL_VERSION, type: 'execute_command', payload: { requestId: 'r', agentId: 'a', commandId: 'native:model', args: '' } };
+    const message = { protocolVersion: PROTOCOL_VERSION, type: 'execute_command', payload: { requestId: 'r', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'a', commandId: 'native:model', args: '' } };
     expect(decodeClientMessage(JSON.stringify(message)).status).toBe('ok');
     expect(decodeClientMessage(JSON.stringify({ ...message, payload: { ...message.payload, method: 'native/rpc' } })).status).toBe('rejected');
     expect(decodeClientMessage(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'list_commands', payload: { requestId: 'r', agentId: 'a' } })).status).toBe('ok');

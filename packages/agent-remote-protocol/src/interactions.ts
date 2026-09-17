@@ -1,6 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
 
 import { ProtocolVersionSchema } from './version.js';
+import { OperationId } from './operations.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => Type.Object(
@@ -157,6 +158,8 @@ export const InteractionResponseMessage = Strict({
   payload: Strict({
     agentId: NonEmptyString,
     requestId: NonEmptyString,
+    submissionId: NonEmptyString,
+    operationId: OperationId,
     response: AgentInteractionResponse,
   }),
 });

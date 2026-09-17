@@ -26,7 +26,10 @@ it('sends owner stop and rotation requests without credentials and retains fresh
   const server = createServer(async (request, response) => {
     let body = ''; for await (const part of request) body += String(part);
     paths.push(request.url!);
-    expect(request.method).toBe('POST'); expect(body).toBe('{}'); expect(request.headers.authorization).toBeUndefined();
+    expect(request.method).toBe('POST');
+    if (request.url!.endsWith('/rotate')) expect(body).toBe('{}');
+    else expect(JSON.parse(body)).toEqual({ operationId: expect.any(String) });
+    expect(request.headers.authorization).toBeUndefined();
     response.setHeader('content-type', 'application/json');
     if (request.url!.endsWith('/rotate')) { response.statusCode = 403; response.end(JSON.stringify({ code: 'reauthentication_required', loginUrl: 'https://untrusted.example' })); }
     else response.end(JSON.stringify({ results: [{ agentId: 'one', status: 'unsupported' }] }));

@@ -587,7 +587,10 @@ function isInteractionResponse(value: unknown): value is AgentInteractionRespons
   return encodeClientMessage({
     protocolVersion: PROTOCOL_VERSION,
     type: 'interaction_response',
-    payload: { agentId: 'validation-agent', requestId: 'validation-request', response: value as AgentInteractionResponse },
+    payload: {
+      agentId: 'validation-agent', requestId: 'validation-request', submissionId: 'validation-submission',
+      operationId: '00000000-0000-4000-8000-000000000001', response: value as AgentInteractionResponse,
+    },
   }).status === 'ok';
 }
 

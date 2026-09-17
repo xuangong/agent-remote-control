@@ -132,6 +132,9 @@ class FakeTransport implements RemoteAgentTransport {
       });
     }
     if (message.type === 'interaction_response') {
+      this.emit({ protocolVersion, type: 'command_acknowledged', payload: {
+        agentId: 'agent-one', requestId: message.payload.submissionId, command: 'interaction_response',
+      } });
       this.emit({ protocolVersion, type: 'interaction_resolved', payload: { agentId: 'agent-one', requestId: message.payload.requestId, response: message.payload.response } });
     }
     if (message.type === 'resource_request') {

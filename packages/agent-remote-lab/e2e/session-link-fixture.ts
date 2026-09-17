@@ -55,7 +55,7 @@ export async function sessionLinkFixture() {
       if (control.path !== '/remote/create') return { status: 404, body: '{}' };
       const nativeSessionId = randomUUID(); const agentId = randomUUID();
       await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
-        requestId: randomUUID(), agentId, providerId: 'recorded', config: { sessionId: nativeSessionId },
+        requestId: randomUUID(), operationId: body.operationId, agentId, providerId: 'recorded', config: { sessionId: nativeSessionId },
       } });
       natives.set(nativeSessionId, agentId);
       return { status: 200, body: JSON.stringify({ agentId, nativeSessionId }) };

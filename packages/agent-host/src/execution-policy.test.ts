@@ -62,7 +62,7 @@ it('enforces the trusted policy at the Host control boundary', async () => {
     descriptor: { providerId: 'recorded', displayName: 'Recorded' }, async createSession() { throw new Error('Unexpected create'); }, async resumeSession() { throw new Error('Unexpected resume'); },
   } }] });
   try {
-    const response = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'recorded', requestId: 'request', cwd: join(f.allowed, 'escape') }) });
+    const response = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'recorded', operationId: '00000000-0000-4000-8000-000000000001', cwd: join(f.allowed, 'escape') }) });
     expect(response.status).toBe(403); expect(JSON.parse(response.body).code).toBe('local_execution_policy'); expect(f.calls).toEqual([]);
   } finally { await host.close(); }
 });

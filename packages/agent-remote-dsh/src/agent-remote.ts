@@ -176,7 +176,7 @@ async function startRemoteHost(
       pendingProjections.set(bindingId, projection);
       try {
         await relay!.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
-          requestId: randomUUID(), agentId: bindingId, providerId: 'dsh', config: { sessionId: bindingId },
+          requestId: randomUUID(), operationId: randomUUID(), agentId: bindingId, providerId: 'dsh', config: { sessionId: bindingId },
         } });
         projections.set(bindingId, projection);
         nativeBindings.set(nativeSessionId, bindingId);
@@ -213,16 +213,16 @@ async function startRemoteHost(
         }
         if (url.pathname === '/remote/create' && request.method === 'POST') {
           const raw = parseJsonObject(request.body);
-          if (Object.keys(raw).some((key) => !['providerId', 'requestId', 'nativeSessionId', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'cwd'].includes(key))) throw new RemoteHostRequestError(400, 'invalid_request', 'Unexpected create field.');
+          if (Object.keys(raw).some((key) => !['providerId', 'operationId', 'nativeSessionId', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'cwd'].includes(key))) throw new RemoteHostRequestError(400, 'invalid_request', 'Unexpected create field.');
           if (raw.providerId !== undefined && raw.providerId !== 'dsh') throw new RemoteHostRequestError(400, 'invalid_provider', 'Unknown DSH provider.');
           if (['model', 'reasoningEffort', 'planning', 'cwd'].some((key) => raw[key] !== undefined)) throw new RemoteHostRequestError(400, 'unsupported_configuration', 'DSH uses shared native settings and registered workspaces.');
           if (raw.providerId !== undefined) {
-            if (typeof raw.requestId !== 'string' || !raw.requestId) throw new RemoteHostRequestError(400, 'invalid_request', 'Create request identity is required.');
+            if (typeof raw.operationId !== 'string' || !raw.operationId) throw new RemoteHostRequestError(400, 'invalid_request', 'Create request identity is required.');
             const fingerprint = JSON.stringify({ workspaceId: raw.workspaceId ?? null });
-            const previous = creationRegistry.get(raw.requestId);
+            const previous = creationRegistry.get(raw.operationId);
             if (previous && previous.fingerprint !== fingerprint) throw new RemoteHostRequestError(409, 'session_conflict', 'Create request configuration changed.');
-            if (!previous) { if (creationRegistry.size >= 4096) throw new RemoteHostRequestError(429, 'capacity_exceeded', 'DSH create registry is full.'); creationRegistry.set(raw.requestId, { fingerprint, nativeSessionId: randomUUID() }); }
-            raw.nativeSessionId = creationRegistry.get(raw.requestId)!.nativeSessionId;
+            if (!previous) { if (creationRegistry.size >= 4096) throw new RemoteHostRequestError(429, 'capacity_exceeded', 'DSH create registry is full.'); creationRegistry.set(raw.operationId, { fingerprint, nativeSessionId: randomUUID() }); }
+            raw.nativeSessionId = creationRegistry.get(raw.operationId)!.nativeSessionId;
           }
           const payload = createPayload(JSON.stringify({ nativeSessionId: raw.nativeSessionId, ...(raw.workspaceId === undefined ? {} : { workspaceId: raw.workspaceId }) }));
           if (!request.sessionId) throw new RemoteHostRequestError(400, 'invalid_request', 'Remote Session target is required.');

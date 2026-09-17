@@ -80,7 +80,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
         if (parentNativeSessionId === undefined && !await entry.catalog.session(nativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The native session is unavailable.');
         const agentId = randomUUID();
         await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
-          requestId: randomUUID(), agentId, providerId,
+          requestId: randomUUID(), operationId: randomUUID(), agentId, providerId,
           config: { sessionId: agentId, nativeSessionId, ...(parentNativeSessionId === undefined ? {} : { parentNativeSessionId }) } as AgentSessionConfig,
         } });
         return { agentId, nativeSessionId };
@@ -141,7 +141,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           if (url.pathname === '/v1/remote/child/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId'), required(body.parentNativeSessionId, 'parentNativeSessionId')));
           if (url.pathname === '/v1/remote/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId')));
           if (url.pathname === '/v1/remote/create') {
-            const requestId = required(body.requestId, 'requestId');
+            const operationId = required(body.operationId, 'operationId');
             const config: Partial<AgentSessionConfig> & { workspaceId?: string } = {};
             for (const key of ['cwd', 'workspaceId', 'model', 'reasoningEffort'] as const) {
               if (body[key] !== undefined) config[key] = required(body[key], key);
@@ -150,7 +150,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
               if (typeof body.planning !== 'boolean') throw new DirectoryError(400, 'invalid_request', 'planning must be boolean.');
               config.planning = body.planning;
             }
-            const key = JSON.stringify([providerId, requestId]);
+            const key = JSON.stringify([providerId, operationId]);
             const fingerprint = JSON.stringify(config);
             let request = requests.get(key);
             if (request && request.fingerprint !== fingerprint) throw new DirectoryError(409, 'request_conflict', 'This request identity was already used with different settings.');

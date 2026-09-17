@@ -145,7 +145,7 @@ describe('exact protocol version and Snapshot', () => {
 
 describe('strict interactions', () => {
   it('preserves planning controls and authoritative planning state', () => {
-    const request = { protocolVersion: version, type: 'set_planning', payload: { requestId: 'planning-1', agentId: 'agent-7', active: true } };
+    const request = { protocolVersion: version, type: 'set_planning', payload: { requestId: 'planning-1', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'agent-7', active: true } };
     expect(decodeClientMessage(JSON.stringify(request))).toEqual({ status: 'ok', value: request });
     expect(decodeClientMessage(JSON.stringify({ ...request, payload: { ...request.payload, active: 'plan' } })).status).toBe('rejected');
     const planned = { ...snapshot, payload: { ...snapshot.payload,
@@ -343,6 +343,7 @@ describe('resource and session messages', () => {
       type: 'create_agent',
       payload: {
         requestId: 'create-request',
+        operationId: '00000000-0000-4000-8000-000000000002',
         agentId: 'agent-7',
         providerId: 'codex',
         config: {
@@ -586,7 +587,7 @@ describe('resource and session messages', () => {
       protocolVersion: version,
       type: 'interaction_response',
       payload: {
-        agentId: 'agent-7', requestId: 'question-request',
+        agentId: 'agent-7', requestId: 'question-request', submissionId: 'question-submission', operationId: '00000000-0000-4000-8000-000000000003',
         response: { kind: 'question', answers: [{ questionId: 'release-channel', selectedValues: ['beta'] }] },
       },
     } as const;

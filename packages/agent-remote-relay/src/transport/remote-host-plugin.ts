@@ -5,7 +5,7 @@ import {
 } from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
-import { createSessionWire, type SessionWire, type SessionWireAgent } from '../session-wire.js';
+import { createSessionWire, type SessionWire, type SessionWireAgent, type SessionWireOperationExecutor } from '../session-wire.js';
 import { agentRemoteHttpError, agentRemoteHttpFailure, executeAgentRemoteHttpRequest, type AgentRemoteHttpResult } from './http-executor.js';
 
 export interface RemoteHostControlRequest {
@@ -13,6 +13,7 @@ export interface RemoteHostControlRequest {
   readonly path: string;
   readonly sessionId?: string;
   readonly body?: string;
+  readonly operationScope?: string;
 }
 
 export interface RemoteHostPluginHost {
@@ -25,6 +26,7 @@ export interface RemoteHostPluginHostOptions {
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> | AgentRemoteHttpResult;
   send(json: string): void;
   onFailure(error: Error): void;
+  executeOperation?: SessionWireOperationExecutor;
   maxPendingRpcs?: number;
   maxStreams?: number;
   maxPendingPerStream?: number;
@@ -94,7 +96,11 @@ export function createRemoteHostPluginHost(
       if (streams.get(streamId) === stream) {
         emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_message', streamId, message });
       }
-    }, { authorize: () => true, onFailure: () => closeStream(streamId, 1011, 'Remote Session delivery failed.') });
+    }, {
+      authorize: () => true,
+      ...(options.executeOperation ? { executeOperation: options.executeOperation } : {}),
+      onFailure: () => closeStream(streamId, 1011, 'Remote Session delivery failed.'),
+    });
     stream = { wire, receiving: Promise.resolve(), pending: 0, bytes: 0 };
     streams.set(streamId, stream);
     emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_opened', streamId });

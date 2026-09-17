@@ -193,7 +193,8 @@ it('shares one Host with cumulative quotas and revokes only the recipient stream
   expect((await control(f.url, share)).status).toBe(200);
   expect(await (await bob.request('v1/remote/hosts')).json()).toMatchObject({ hosts: [{ id: hostId, access: 'shared', sessionQuota: { limit: 1, used: 0 } }] });
   expect((await control(f.url, { ...share, subject: 'bob', targetSubject: 'eve' })).status).toBe(403);
-  const create = (requestId: string) => bob.request(`v1/remote/hosts/${hostId}/create`, { providerId: 'codex', requestId });
+  const operationIds = { one: '00000000-0000-4000-8000-000000000001', two: '00000000-0000-4000-8000-000000000002', three: '00000000-0000-4000-8000-000000000003' };
+  const create = (id: keyof typeof operationIds) => bob.request(`v1/remote/hosts/${hostId}/create`, { providerId: 'codex', operationId: operationIds[id] });
   const responses = await Promise.all([create('one'), create('two')]);
   expect(responses.map(value => value.status).sort()).toEqual([200, 409]); expect(creates).toBe(1);
   const index = responses.findIndex(value => value.status === 200); const binding = await responses[index]!.json() as { agentId: string; nativeSessionId: string };
@@ -226,7 +227,8 @@ async function sharedFixture() {
   const hostId = JSON.parse((await registered)[0].toString()).hostId as string;
   const setLimit = (limit: number) => control(f.url, { operation: 'share', subject: 'owner', hostId, targetSubject: 'user', targetLabel: 'User', sessionLimit: limit });
   expect((await setLimit(1)).status).toBe(200);
-  const create = (requestId: string, settings = {}) => user.request(`v1/remote/hosts/${hostId}/create`, { providerId: 'codex', requestId, ...settings });
+  const operationIds = { first: '00000000-0000-4000-8000-000000000001', second: '00000000-0000-4000-8000-000000000002' };
+  const create = (id: keyof typeof operationIds, settings = {}) => user.request(`v1/remote/hosts/${hostId}/create`, { providerId: 'codex', operationId: operationIds[id], ...settings });
   return { ...f, owner, user, host, hostId, create, setLimit };
 }
 it.each([{ status: 503, code: 'mutation_outcome_unknown' }, { status: 409, code: 'session_binding_conflict' }])('retains quota and never redispatches ambiguous native creation ($code)', async ({ status, code }) => {
@@ -268,7 +270,7 @@ it('drops buffered user commands when sharing is revoked before the Host acknowl
   expect((await f.create('first')).status).toBe(200);
   const browser = new WebSocket((f.url + f.user.state.basePath + 'v1/sessions/buffered/events').replace('http:', 'ws:'), { headers: { cookie: f.user.cookie, origin: f.url } });
   await once(browser, 'open'); await opening;
-  browser.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message', payload: { agentId: 'buffered', requestId: 'message', text: 'queued command' } }));
+  browser.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message', payload: { agentId: 'buffered', requestId: 'message', operationId: '00000000-0000-4000-8000-000000000003', text: 'queued command' } }));
   const ended = once(browser, 'close');
   expect((await control(f.url, { subject: 'owner', operation: 'revoke-share', hostId: f.hostId, targetSubject: 'user' })).status).toBe(200);
   f.host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId }));

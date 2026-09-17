@@ -147,7 +147,7 @@ describe('Agent Remote HTTP transport', () => {
     const body = encodeCreateAgentRequest({
       protocolVersion: '1.4.0', type: 'create_agent',
       payload: {
-        requestId: 'create-1', agentId: 'agent-http', providerId: 'fake',
+        requestId: 'create-1', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'agent-http', providerId: 'fake',
         config: { sessionId: 'provider-session-http', cwd: '/workspace' },
       },
     });
@@ -458,7 +458,7 @@ describe('Agent Remote WebSocket transport', () => {
 });
 
 describe.each(interactionCases)('Serialized $kind interaction recovery', ({ request, response, invalid, malformed }) => {
-  it('allows one concurrent client claim and keeps the request pending until normalized resolution', async () => {
+  it('acknowledges one accepted client claim and keeps the request pending until normalized resolution', async () => {
     const context = await startInteraction(request);
     const first = await connectInteractionClient(context.url);
     const second = await connectInteractionClient(context.url);
@@ -467,8 +467,6 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
     const accepted = first.client.respondToInteraction(request.requestId, response);
 
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
-    await expect(first.client.respondToInteraction(request.requestId, response))
-      .rejects.toMatchObject({ code: 'duplicate_request_id' });
     await expect(second.client.respondToInteraction(request.requestId, response))
       .rejects.toMatchObject({ code: 'stale_interaction' });
     expect(first.observations.filter((event) => event.direction === 'outbound'
@@ -476,9 +474,9 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
     expect(submit).toHaveBeenCalledExactlyOnceWith(request.requestId, response);
 
     submission.resolve();
+    await expect(accepted).resolves.toMatchObject({ payload: { command: 'interaction_response' } });
     expect((await first.transport.fetchSnapshot('agent-interaction')).payload.pendingInteractions).toEqual([request]);
     context.resolve(response);
-    await expect(accepted).resolves.toMatchObject({ payload: { requestId: request.requestId, response } });
     await vi.waitFor(() => expectCompleted(second.replica, request, response));
     expectCompleted(first.replica, request, response);
     await expect(second.client.respondToInteraction(request.requestId, response))
@@ -493,16 +491,16 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
     await expect(connected.client.respondToInteraction('unknown-request', response))
       .rejects.toMatchObject({ code: 'stale_interaction', requestId: 'unknown-request' });
     await expect(connected.client.respondToInteraction(request.requestId, invalid))
-      .rejects.toMatchObject({ code: 'invalid_interaction_response', requestId: request.requestId });
+      .rejects.toMatchObject({ code: 'invalid_interaction_response' });
     const mismatched: AgentInteractionResponse = request.kind === 'question'
       ? { kind: 'plan_approval', action: 'reject' }
       : { kind: 'question', answers: [] };
     await expect(connected.client.respondToInteraction(request.requestId, mismatched))
-      .rejects.toMatchObject({ code: 'invalid_interaction_response', requestId: request.requestId });
+      .rejects.toMatchObject({ code: 'invalid_interaction_response' });
 
     connected.socket().send(JSON.stringify({
       protocolVersion: '1.4.0', type: 'interaction_response',
-      payload: { agentId: 'agent-interaction', requestId: request.requestId, response: malformed },
+      payload: { agentId: 'agent-interaction', requestId: request.requestId, submissionId: 'malformed-submission', operationId: '00000000-0000-4000-8000-000000000002', response: malformed },
     }));
     await vi.waitFor(() => expect(connected.observations).toContainEqual(expect.objectContaining({
       direction: 'inbound', channel: 'websocket',
@@ -518,7 +516,7 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
     await vi.waitFor(() => expect(submit).toHaveBeenCalledExactlyOnceWith(request.requestId, response));
     context.resolve(response);
     await accepted;
-    expectCompleted(connected.replica, request, response);
+    await vi.waitFor(() => expectCompleted(connected.replica, request, response));
   });
 
   it('releases the claim after a definite Provider rejection so another client can retry', async () => {
@@ -529,7 +527,7 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
       .mockRejectedValueOnce(new Error('Submission rejected before acceptance.'));
 
     await expect(first.client.respondToInteraction(request.requestId, response))
-      .rejects.toMatchObject({ code: 'command_failed', requestId: request.requestId });
+      .rejects.toMatchObject({ code: 'command_failed' });
     expect(first.replica.getState().pendingInteractions).toEqual([request]);
     expect(first.replica.getState().timeline.entries).toEqual([]);
     const retried = second.client.respondToInteraction(request.requestId, response);
@@ -638,9 +636,9 @@ describe('Serialized sensitive interaction recovery', () => {
     const connected = await connectInteractionClient(context.url);
     const accepted = connected.client.respondToInteraction(request.requestId, response);
     await vi.waitFor(() => expect(context.session.interactionResponses).toEqual([{ requestId: request.requestId, response }]));
+    await expect(accepted).resolves.toMatchObject({ payload: { command: 'interaction_response' } });
     context.resolve(response);
-    await expect(accepted).resolves.toMatchObject({ payload: { response: redacted } });
-    expectCompleted(connected.replica, request, redacted);
+    await vi.waitFor(() => expectCompleted(connected.replica, request, redacted));
     const history = await connected.transport.fetchTimeline('agent-interaction', 'tail');
     expect(JSON.stringify(history)).not.toContain('transport-private-token');
     const incoming = connected.observations.filter(({ direction }) => direction === 'inbound');
@@ -722,7 +720,7 @@ function createRequest(agentId: string, sessionId: string) {
   return {
     protocolVersion: '1.4.0' as const,
     type: 'create_agent' as const,
-    payload: { requestId: `create-${agentId}`, agentId, providerId: 'fake', config: { sessionId } },
+    payload: { requestId: `create-${agentId}`, operationId: '00000000-0000-4000-8000-000000000003', agentId, providerId: 'fake', config: { sessionId } },
   };
 }
 

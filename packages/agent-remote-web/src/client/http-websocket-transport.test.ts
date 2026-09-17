@@ -287,11 +287,11 @@ describe('HttpWebSocketTransport', () => {
     const observations: RemoteProtocolObservation[] = [];
     transport.onProtocolMessage((observation) => observations.push(observation));
     const connection = transport.connect('agent', { onOpen() {}, onMessage() {}, onDisconnect() {} });
-    connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'interaction_response', payload: { agentId: 'agent', requestId: 'secret', response: { kind: 'question', answers: [{ questionId: 'token', selectedValues: [], customText: 'do-not-log' }] } } });
+    connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'interaction_response', payload: { agentId: 'agent', requestId: 'secret', submissionId: 'submit-secret', operationId: '00000000-0000-4000-8000-000000000001', response: { kind: 'question', answers: [{ questionId: 'token', selectedValues: [], customText: 'do-not-log' }] } } });
     expect(socket.sent[0]).toContain('do-not-log');
     expect(JSON.stringify(observations)).not.toContain('do-not-log');
     expect(observations[0]).toHaveProperty('redacted', true);
-    connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'interaction_response', payload: { agentId: 'agent', requestId: 'form', response: { kind: 'form', action: 'submit', values: { token: 'do-not-log' } } } });
+    connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'interaction_response', payload: { agentId: 'agent', requestId: 'form', submissionId: 'submit-form', operationId: '00000000-0000-4000-8000-000000000002', response: { kind: 'form', action: 'submit', values: { token: 'do-not-log' } } } });
     expect(socket.sent[1]).toContain('do-not-log');
     expect(JSON.stringify(observations)).not.toContain('do-not-log');
   });

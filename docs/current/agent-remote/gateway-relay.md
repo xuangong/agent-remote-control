@@ -163,15 +163,15 @@ owner opens the child first. Child attachment checks the parent's reported nativ
 children before dispatching it to the provider.
 
 The Relay persists a quota reservation before forwarding a creation request.
-Concurrent requests cannot overspend the final unit; retries with the same request
-ID and settings reuse the result. User request IDs are namespaced before forwarding
-to the Host. Known pre-creation rejection releases a reservation. An uncertain
+Concurrent requests cannot overspend the final unit; retries with the same operation
+ID and settings reuse the result. User operation IDs are scoped into UUIDs before
+forwarding to the Host. Known pre-creation rejection releases a reservation. An uncertain
 native or transport outcome retains its reservation, including after Relay
 restart, and returns `creation_outcome_unknown` on retry instead of creating a
 second session. Used allowance therefore includes unresolved reservations. There
 is currently no automatic orphan reconciliation or reservation-release UI; the
 owner can increase the total after investigating. A known completed binding can be
-recovered from the persisted creation journal without another native creation.
+recovered from the persisted creation ledger without another native creation.
 
 Revoking a share blocks subsequent HTTP and stream traffic and closes only that
 recipient's streams, discarding buffered commands. It does not undo a native

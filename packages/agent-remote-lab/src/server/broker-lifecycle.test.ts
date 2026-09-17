@@ -121,7 +121,7 @@ it('rejects obsolete clients for new invitations and forwards explicit stop outc
   obsolete.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'old', name: 'Old', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   expect((await closed)[0]).toBe(1008);
   const host = await f.connect(invitation);
-  expect((await f.request(`remote/hosts/${host.hostId}/stop`, {})).status).toBe(200);
+  expect((await f.request(`remote/hosts/${host.hostId}/stop`, { operationId: '00000000-0000-4000-8000-000000000001' })).status).toBe(200);
   expect(host.calls).toContain('/remote/stop');
   expect(host.ws.readyState).toBe(WebSocket.OPEN);
   expect((await f.request(`remote/hosts/${host.hostId}/rotate`, { credential: 'browser-supplied' })).status).toBe(400);
@@ -167,7 +167,7 @@ it('keeps enrollment offline until credential acknowledgment while an existing H
   const before = await (await f.request('remote/hosts')).json(); const hostId = before.hosts[0].id;
   expect(before.hosts[0].online).toBe(false);
   expect((await f.request(`remote/hosts/${hostId}/workspaces?providerId=codex`)).status).toBe(503);
-  expect((await f.request(`remote/hosts/${hostId}/stop`, {})).status).toBe(503);
+  expect((await f.request(`remote/hosts/${hostId}/stop`, { operationId: '00000000-0000-4000-8000-000000000002' })).status).toBe(503);
   const acknowledged = once(socket, 'message'); socket.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
   expect(JSON.parse((await acknowledged)[0].toString())).toMatchObject({ type: 'registered', hostId });
   expect((await (await f.request('remote/hosts')).json()).hosts[0].online).toBe(true);
@@ -178,5 +178,5 @@ it('keeps enrollment offline until credential acknowledgment while an existing H
   expect((await f.request(`remote/hosts/${hostId}/rotate`, {})).status).toBe(200);
   expect(JSON.parse((await rotation)[0].toString()).type).toBe('credential_issued');
   expect((await (await f.request('remote/hosts')).json()).hosts[0].online).toBe(true);
-  expect((await f.request(`remote/hosts/${hostId}/stop`, {})).status).toBe(200);
+  expect((await f.request(`remote/hosts/${hostId}/stop`, { operationId: '00000000-0000-4000-8000-000000000003' })).status).toBe(200);
 }, 10000);

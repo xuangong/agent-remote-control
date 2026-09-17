@@ -1,11 +1,14 @@
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
-import { HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
+import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { createControllerPreviews } from './previews.js';
+import { createOperationCache, OperationCacheError, type OperationCacheOptions } from './operation-cache.js';
+import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
 import { AgentSessionInUseError } from '@agent-remote-controller/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
-  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary } from '@agent-remote-controller/agent-remote-relay';
+  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
+  type SessionWireAgent, type SessionWireOperationExecutor } from '@agent-remote-controller/agent-remote-relay';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
@@ -19,10 +22,17 @@ export interface AgentHostDirectory {
   close(): Promise<void> | void;
 }
 export interface AgentHostProviderRegistration { adapter: AgentProviderAdapter; directory: AgentHostDirectory }
-export interface AgentHostRuntimeOptions { registrations: readonly AgentHostProviderRegistration[]; shutdownTimeoutMs?: number; cancelTimeoutMs?: number; executionPolicy?: HostExecutionPolicy }
+export interface AgentHostRuntimeOptions {
+  registrations: readonly AgentHostProviderRegistration[];
+  shutdownTimeoutMs?: number;
+  cancelTimeoutMs?: number;
+  executionPolicy?: HostExecutionPolicy;
+  operationCache?: OperationCacheOptions;
+}
 export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
+  executeOperation(scope: string): SessionWireOperationExecutor;
   resolveSession(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;
   close(): Promise<void>;
 }
@@ -63,6 +73,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return pending;
       } : undefined,
       resolveSession: runtime.resolveSession, control: request => request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
+      operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
         registered: info => previews.registered({ ...info, url: config.url }) } : undefined,
       onDiagnostic: options.onDiagnostic ? diagnostic => options.onDiagnostic!({ ...diagnostic, uplinkGeneration: current }) : undefined,
@@ -93,8 +104,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   };
 }
 
-interface Binding { agentId: string; nativeSessionId: string; parentNativeSessionId?: string }
-interface Creation { fingerprint: string; operation: Promise<AgentRemoteHttpResult> }
+interface Binding { agentId: string; providerId: string; nativeSessionId: string; parentNativeSessionId?: string }
 interface Projection { agentId: string; parentNativeSessionId?: string; operation: Promise<Binding> }
 
 export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentHostRuntime {
@@ -119,11 +129,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     resumeSession: adapter.resumeSession.bind(adapter),
   }));
   const relay = createAgentRemoteRelay({ providers: relayAdapters });
+  const operationCache = createOperationCache(options.operationCache);
   const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list })]));
   const bindingsByNative = new Map<string, Binding>();
   const bindingsByAgent = new Map<string, Binding>();
-  const creations = new Map<string, Creation>();
-  const creationAgents = new Map<string, string>();
   const projections = new Map<string, Projection>();
   const projectionAgents = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
@@ -141,6 +150,27 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const value = registrations.get(providerId);
     if (!value) throw new HostRequestError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
     return value;
+  }
+  function operationScope(request: RemoteHostControlRequest): string {
+    return request.operationScope ?? 'local';
+  }
+  function bindingFor(agent: SessionWireAgent): Binding {
+    for (const [agentId, binding] of bindingsByAgent) {
+      if (relay.requireAgent(agentId) === agent) return binding;
+    }
+    throw new OperationCacheError('invalid_operation_target', 'The native session binding is unavailable.');
+  }
+  function executeOperation(scope: string): SessionWireOperationExecutor {
+    return (agent, operation, work) => {
+      const binding = bindingFor(agent);
+      return operationCache.execute({
+        operationId: operation.operationId,
+        scope,
+        kind: operation.kind,
+        target: JSON.stringify([binding.providerId, binding.nativeSessionId]),
+        parameters: operation.parameters,
+      }, { ...work, maximumResultBytes: operation.maximumResultBytes });
+    };
   }
   async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string): Promise<Binding> {
     const key = JSON.stringify([providerId, nativeSessionId]);
@@ -170,7 +200,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       prepared.set(proposedAgentId, session);
       const response = await relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: {
-        requestId: `host:${proposedAgentId}`, agentId: proposedAgentId, providerId, config: { sessionId: proposedAgentId },
+        requestId: `host:${proposedAgentId}`, operationId: randomUUID(), agentId: proposedAgentId, providerId, config: { sessionId: proposedAgentId },
       } }).catch(async (error: unknown) => {
         if (prepared.get(proposedAgentId) === session) {
           prepared.delete(proposedAgentId);
@@ -179,7 +209,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         throw error;
       });
       if (response.payload.sessionId !== nativeSessionId) throw new Error('Provider returned a different native session identity.');
-      const binding = { agentId: proposedAgentId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+      const binding = { agentId: proposedAgentId, providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
       bindingsByNative.set(key, binding); bindingsByAgent.set(proposedAgentId, binding);
       return binding;
     })();
@@ -190,33 +220,39 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   }
   async function create(request: RemoteHostControlRequest, payload: Record<string, unknown>): Promise<AgentRemoteHttpResult> {
     const providerId = string(payload.providerId, 'providerId');
-    const requestId = string(payload.requestId, 'requestId');
+    const operationId = string(payload.operationId, 'operationId');
     const proposedAgentId = request.sessionId;
     if (!proposedAgentId) throw new HostRequestError(400, 'invalid_request', 'A proposed Agent identity is required.');
-    const fingerprint = JSON.stringify([payload.cwd ?? null, payload.workspaceId ?? null, payload.model ?? null,
-      payload.reasoningEffort ?? null, payload.planning ?? null]);
-    const key = JSON.stringify([providerId, requestId]);
-    const prior = creations.get(key);
-    if (prior) {
-      if (prior.fingerprint !== fingerprint) throw new HostRequestError(409, 'request_conflict', 'The creation request identity is reserved for different settings.');
-      return prior.operation;
-    }
-    const priorAgentRequest = creationAgents.get(proposedAgentId);
-    if (priorAgentRequest && priorAgentRequest !== key) throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already reserved.');
-    creationAgents.set(proposedAgentId, key);
-    const operation = tracked((async () => {
-      const directory = registration(providerId).directory;
-      const nativeSessionId = await directory.create({
-        ...(typeof payload.cwd === 'string' ? { cwd: payload.cwd } : {}),
-        ...(typeof payload.workspaceId === 'string' ? { workspaceId: payload.workspaceId } : {}),
-        ...(typeof payload.model === 'string' ? { model: payload.model } : {}),
-        ...(typeof payload.reasoningEffort === 'string' ? { reasoningEffort: payload.reasoningEffort } : {}),
-        ...(typeof payload.planning === 'boolean' ? { planning: payload.planning } : {}),
-      });
-      return json(200, await project(providerId, proposedAgentId, nativeSessionId));
-    })());
-    creations.set(key, { fingerprint, operation });
-    return operation;
+    const settings = {
+      ...(typeof payload.cwd === 'string' ? { cwd: payload.cwd } : {}),
+      ...(typeof payload.workspaceId === 'string' ? { workspaceId: payload.workspaceId } : {}),
+      ...(typeof payload.model === 'string' ? { model: payload.model } : {}),
+      ...(typeof payload.reasoningEffort === 'string' ? { reasoningEffort: payload.reasoningEffort } : {}),
+      ...(typeof payload.planning === 'boolean' ? { planning: payload.planning } : {}),
+    };
+    const nativeSessionId = await operationCache.execute({
+      operationId,
+      scope: operationScope(request),
+      kind: 'create_agent',
+      target: providerId,
+      parameters: settings,
+    }, {
+      validate: async () => {
+        const directory = registration(providerId).directory;
+        if (options.executionPolicy) {
+          const selected = payload.workspaceId === undefined ? undefined
+            : (await directory.workspaces()).find(workspace => workspace.id === payload.workspaceId);
+          if (payload.workspaceId !== undefined && !selected) throw new HostExecutionPolicyError('Unknown local Host workspace.');
+          await allowedWorkspace(options.executionPolicy, typeof payload.cwd === 'string' ? payload.cwd : selected?.path ?? options.executionPolicy.defaultWorkspace);
+        }
+        if (projectionAgents.has(proposedAgentId) || bindingsByAgent.has(proposedAgentId)) {
+          throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already reserved.');
+        }
+      },
+      dispatch: () => registration(providerId).directory.create(settings),
+      maximumResultBytes: 1024,
+    });
+    return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId))));
   }
   async function control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> {
     try {
@@ -247,20 +283,21 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           return json(201, await createWorkspaceFolder(payload.parentPath, payload.name, options.executionPolicy));
         }
         if (url.pathname === '/remote/stop') {
-          if (Object.keys(payload).length || request.sessionId) throw new HostRequestError(400, 'invalid_request', 'Stop requires an empty body.');
-          const results = await Promise.all([...bindingsByAgent.keys()].map(async agentId => {
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            try {
-              await Promise.race([relay.requireAgent(agentId).cancel(), new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(() => reject(new Error('Cancellation deadline exceeded.')), cancelTimeoutMs);
-              })]);
-              return { agentId, status: 'cancelled' as const };
-            } catch (error) {
-              return error instanceof UnsupportedAgentCapabilityError
-                ? { agentId, status: 'unsupported' as const, message: 'The native session does not support cancellation.' }
-                : { agentId, status: 'failed' as const, message: 'Native cancellation did not complete.' };
-            } finally { clearTimeout(timer); }
-          }));
+          if (Object.keys(payload).some(key => key !== 'operationId') || request.sessionId) {
+            throw new HostRequestError(400, 'invalid_request', 'Stop requires only an operation identity.');
+          }
+          const operationId = string(payload.operationId, 'operationId');
+          const targets = [...bindingsByAgent.keys()];
+          const results = await operationCache.execute({
+            operationId,
+            scope: operationScope(request),
+            kind: 'stop_host_sessions',
+            target: 'host',
+            parameters: null,
+          }, {
+            dispatch: () => Promise.all(targets.map(cancelAgent)),
+            maximumResultBytes: 256 * 1024,
+          });
           return json(200, { results });
         }
         if (url.pathname === '/remote/create') return await create(request, payload);
@@ -269,7 +306,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           const providerId = string(payload.providerId, 'providerId');
           const nativeSessionId = string(payload.nativeSessionId, 'nativeSessionId');
           const parent = url.pathname === '/remote/child/attach' ? string(payload.parentNativeSessionId, 'parentNativeSessionId') : undefined;
-          return json(200, await tracked(project(providerId, request.sessionId, nativeSessionId, parent)));
+          return json(200, publicBinding(await tracked(project(providerId, request.sessionId, nativeSessionId, parent))));
         }
       }
       throw new HostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
@@ -277,22 +314,46 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (error instanceof AgentSessionInUseError) return json(409, { error: error.message, code: 'session_in_use' });
       if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
       if (error instanceof WorkspaceFolderError) return json(error.status, { error: error.message, code: error.code });
+      if (error instanceof OperationCacheError) return json(operationErrorStatus(error.code), { error: error.message, code: error.code });
       if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });
       if (request.method === 'GET') return json(503, { error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' });
       return json(503, { error: 'Remote Host operation outcome is unknown.', code: 'mutation_outcome_unknown' });
     }
   }
-  return { relay, control, resolveSession(agentId) { try { return relay.requireAgent(agentId); } catch { return undefined; } },
+  async function cancelAgent(agentId: string) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([relay.requireAgent(agentId).cancel(), new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Cancellation deadline exceeded.')), cancelTimeoutMs);
+      })]);
+      return { agentId, status: 'cancelled' as const };
+    } catch (error) {
+      return error instanceof UnsupportedAgentCapabilityError
+        ? { agentId, status: 'unsupported' as const, message: 'The native session does not support cancellation.' }
+        : { agentId, status: 'failed' as const, message: 'Native cancellation did not complete.' };
+    } finally { clearTimeout(timer); }
+  }
+  return { relay, control, executeOperation, resolveSession(agentId) { try { return relay.requireAgent(agentId); } catch { return undefined; } },
     close(): Promise<void> { return closePromise ??= (async () => {
       closed = true;
       for (const catalog of catalogs.values()) catalog.dispose();
-      const cleanup = Promise.allSettled([relay.close(), ...options.registrations.map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
+      const cleanup = Promise.allSettled([relay.close(), operationCache.close(), ...options.registrations.map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
       await bounded(cleanup, shutdownTimeoutMs);
     })(); } };
 }
 
 class HostRequestError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
+function publicBinding(binding: Binding): Omit<Binding, 'providerId'> {
+  const { providerId: _providerId, ...value } = binding;
+  return value;
+}
+function operationErrorStatus(code: string): number {
+  if (code === 'operation_conflict') return 409;
+  if (code === 'operation_capacity_exceeded') return 429;
+  if (code === 'operation_outcome_unknown' || code === 'operation_cache_closed' || code === 'operation_clock_invalid') return 503;
+  return 400;
+}
 function string(value: unknown, field: string): string { if (typeof value !== 'string' || !value) throw new HostRequestError(400, 'invalid_request', `${field} is required.`); return value; }
 function body(value: string | undefined): Record<string, unknown> { try { const parsed: unknown = JSON.parse(value ?? ''); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>; } catch {} throw new HostRequestError(400, 'invalid_request', 'Remote Host body is invalid.'); }
 function json(status: number, value: unknown): AgentRemoteHttpResult { return { status, body: JSON.stringify(value) }; }

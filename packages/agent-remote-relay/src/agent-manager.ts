@@ -307,6 +307,17 @@ export class AgentManager {
   }
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
+    this.validateInteractionResponse(requestId, response);
+    this.claimedInteractionIds.add(requestId);
+    try {
+      await this.session.respondToInteraction(requestId, response);
+    } catch (error) {
+      this.claimedInteractionIds.delete(requestId);
+      throw error;
+    }
+  }
+
+  validateInteractionResponse(requestId: string, response: AgentInteractionResponse): void {
     const pending = this.state.payload.pendingInteractions.find((request) => request.requestId === requestId);
     if (!pending || this.claimedInteractionIds.has(requestId)) {
       throw new InteractionResponseError('stale_interaction', 'Interaction request is no longer pending.');
@@ -318,13 +329,6 @@ export class AgentManager {
         'invalid_interaction_response',
         'Interaction response does not satisfy the pending request.',
       );
-    }
-    this.claimedInteractionIds.add(requestId);
-    try {
-      await this.session.respondToInteraction(requestId, response);
-    } catch (error) {
-      this.claimedInteractionIds.delete(requestId);
-      throw error;
     }
   }
 

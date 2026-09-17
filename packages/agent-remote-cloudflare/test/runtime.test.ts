@@ -62,7 +62,11 @@ it('keeps shared Host catalogs private and commits concurrent quota and unknown 
   const share = (sessionLimit: number) => f.control({ subject: 'alice', operation: 'share', hostId, targetSubject: 'bob', targetLabel: 'Bob', sessionLimit })();
   expect((await share(1)).status).toBe(200);
   expect((await f.json(bob.basePath + `v1/remote/hosts/${hostId}/attach`, bob.cookie, { providerId: 'codex', nativeSessionId: 'alice-private' })).status).toBe(403);
-  const create = (requestId: string, cwd?: string) => f.json(bob.basePath + `v1/remote/hosts/${hostId}/create`, bob.cookie, { providerId: 'codex', requestId, ...(cwd ? { cwd } : {}) });
+  const operationIds = {
+    first: '00000000-0000-4000-8000-000000000001', second: '00000000-0000-4000-8000-000000000002',
+    unknown: '00000000-0000-4000-8000-000000000003', third: '00000000-0000-4000-8000-000000000004',
+  } as const;
+  const create = (identity: keyof typeof operationIds, cwd?: string) => f.json(bob.basePath + `v1/remote/hosts/${hostId}/create`, bob.cookie, { providerId: 'codex', operationId: operationIds[identity], ...(cwd ? { cwd } : {}) });
   const results = await Promise.all([create('first'), create('second')]);
   expect(results.map(response => response.status).sort()).toEqual([200, 409]); expect(creations).toBe(1);
   const firstId = results[0]!.status === 200 ? 'first' : 'second';

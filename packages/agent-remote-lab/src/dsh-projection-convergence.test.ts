@@ -204,6 +204,7 @@ async function createResourceManager(
     type: 'create_agent',
     payload: {
       requestId: `create-${sessionId}`,
+      operationId: '00000000-0000-4000-8000-000000000001',
       agentId: `agent-${sessionId}`,
       providerId: 'dsh',
       config: { sessionId },
@@ -233,7 +234,7 @@ describe('DSH projection convergence', () => {
     await relay.createAgent({
       protocolVersion: '1.4.0', type: 'create_agent',
       payload: {
-        requestId: 'create-dsh', agentId: 'agent-dsh', providerId: 'delta-provider',
+        requestId: 'create-dsh', operationId: '00000000-0000-4000-8000-000000000002', agentId: 'agent-dsh', providerId: 'delta-provider',
         config: { sessionId: 'delta-session' },
       },
     });
@@ -275,7 +276,7 @@ describe('DSH projection convergence', () => {
     await relay.createAgent({
       protocolVersion: '1.4.0', type: 'create_agent',
       payload: {
-        requestId: 'create-pagination', agentId: 'agent-pagination', providerId: 'delta-provider',
+        requestId: 'create-pagination', operationId: '00000000-0000-4000-8000-000000000003', agentId: 'agent-pagination', providerId: 'delta-provider',
         config: { sessionId: 'pagination-session' },
       },
     });
@@ -330,7 +331,7 @@ describe('DSH projection convergence', () => {
     await relay.createAgent({
       protocolVersion: '1.4.0', type: 'create_agent',
       payload: {
-        requestId: 'create-message-pages', agentId: 'agent-message-pages', providerId: 'delta-provider',
+        requestId: 'create-message-pages', operationId: '00000000-0000-4000-8000-000000000004', agentId: 'agent-message-pages', providerId: 'delta-provider',
         config: { sessionId: 'message-pages-session' },
       },
     });
@@ -408,7 +409,7 @@ describe('DSH projection convergence', () => {
     await relay.createAgent({
       protocolVersion: '1.4.0', type: 'create_agent',
       payload: {
-        requestId: 'create-source', agentId: 'agent-source', providerId: 'delta-provider',
+        requestId: 'create-source', operationId: '00000000-0000-4000-8000-000000000005', agentId: 'agent-source', providerId: 'delta-provider',
         config: { sessionId: 'source-session' },
       },
     });

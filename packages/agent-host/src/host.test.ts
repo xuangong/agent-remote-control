@@ -12,6 +12,12 @@ import { createScriptedAppServer } from '../../agent-provider-codex/src/test-uti
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
   interactions: { question: false, planApproval: false, toolApproval: false } };
 
+function operationId(label: string): string {
+  let suffix = 0;
+  for (const codePoint of label) suffix = (suffix * 31 + codePoint.codePointAt(0)!) >>> 0;
+  return `00000000-0000-4000-8000-${suffix.toString(16).padStart(12, '0')}`;
+}
+
 class Session implements AgentSession {
   readonly capabilities = capabilities;
   disposed = false;
@@ -136,7 +142,7 @@ describe('Agent Host runtime', () => {
     } finally { await host.close(); await broker.close(); }
   });
 
-  it('advertises Codex, Claude and Copilot over real WebSockets and preserves provider-scoped identities across re-pair', async () => {
+  it('advertises Codex, Claude and Copilot over real WebSockets and isolates operation identity across re-pair scopes', async () => {
     const first = await uplinkBroker('first'); const second = await uplinkBroker('second');
     const copilot = fixture('copilot');
     copilot.directory.list = async () => [summary('copilot', 'shared-native')];
@@ -157,7 +163,7 @@ describe('Agent Host runtime', () => {
         expect(JSON.parse(catalog.body).items).toEqual([summary(providerId, 'shared-native')]);
         const attached = await first.rpc('POST', '/remote/attach', `${providerId}-relay`, { providerId, nativeSessionId: 'shared-native' });
         expect(JSON.parse(attached.body)).toEqual({ agentId: `${providerId}-relay`, nativeSessionId: 'shared-native' });
-        const created = await first.rpc('POST', '/remote/create', `${providerId}-created`, { providerId, requestId: 'same-request' });
+        const created = await first.rpc('POST', '/remote/create', `${providerId}-created`, { providerId, operationId: operationId(`${providerId}:same-request`) });
         expect(JSON.parse(created.body)).toEqual({ agentId: `${providerId}-created`, nativeSessionId: `${providerId}-1` });
       }
       expect((await first.rpc('POST', '/remote/attach', 'codex-relay', { providerId: 'claude', nativeSessionId: 'another' })).status).toBe(409);
@@ -168,9 +174,9 @@ describe('Agent Host runtime', () => {
         const providerId = provider.adapter.descriptor.providerId;
         const attached = await second.rpc('POST', '/remote/attach', `${providerId}-new-proposal`, { providerId, nativeSessionId: 'shared-native' });
         expect(JSON.parse(attached.body).agentId).toBe(`${providerId}-relay`);
-        const recovered = await second.rpc('POST', '/remote/create', `${providerId}-new-created`, { providerId, requestId: 'same-request' });
-        expect(JSON.parse(recovered.body).agentId).toBe(`${providerId}-created`);
-        expect(provider.createCount()).toBe(1);
+        const recovered = await second.rpc('POST', '/remote/create', `${providerId}-new-created`, { providerId, operationId: operationId(`${providerId}:same-request`) });
+        expect(JSON.parse(recovered.body).agentId).toBe(`${providerId}-new-created`);
+        expect(provider.createCount()).toBe(2);
         expect(provider.sessions.get('shared-native')!.observeCount).toBe(1);
         expect(provider.sessions.get('shared-native')!.disposed).toBe(false);
       }
@@ -198,7 +204,7 @@ describe('Agent Host runtime', () => {
       async resumeSession() { throw new Error('unexpected resume'); }, async openChildSession() { throw new Error('unexpected child'); } }, []);
     const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory }], shutdownTimeoutMs: 20 });
     const creating = host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay',
-      body: JSON.stringify({ providerId: 'codex', requestId: 'late' }) });
+      body: JSON.stringify({ providerId: 'codex', operationId: operationId('late') }) });
     await infoEntered;
     await host.close();
     releaseInfo();
@@ -269,7 +275,7 @@ describe('Agent Host runtime', () => {
     codex.directory.create = () => new Promise<string>(() => undefined);
     codex.directory.close = () => new Promise<void>(() => undefined);
     const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], shutdownTimeoutMs: 30 });
-    void host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', requestId: 'blocked' }) });
+    void host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', operationId: operationId('blocked') }) });
     const started = Date.now();
     await host.close();
     expect(Date.now() - started).toBeLessThan(250);
@@ -281,7 +287,7 @@ describe('Agent Host runtime', () => {
       uplink: { url: first.url, remoteKey: 'first-key' } });
     try {
       await host.ready;
-      const created = await first.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' });
+      const created = await first.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', operationId: operationId('re-pair-create') });
       expect(JSON.parse(created.body)).toEqual({ agentId: 'relay', nativeSessionId: 'codex-1' });
       await host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
       const attached = await second.rpc('POST', '/remote/attach', 'relay', { providerId: 'codex', nativeSessionId: 'codex-1' });
@@ -296,7 +302,7 @@ describe('Agent Host runtime', () => {
       uplink: { url: broker.url, remoteKey: 'key' } });
     try {
       await host.ready;
-      const created = await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' });
+      const created = await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', operationId: operationId('heartbeat-create') });
       expect(JSON.parse(created.body)).toEqual({ agentId: 'relay', nativeSessionId: 'codex-1' });
       const session = codex.sessions.get('codex-1')!;
       await expect.poll(broker.heartbeatAcknowledgements, { timeout: 2000 }).toBeGreaterThan(0);
@@ -306,7 +312,7 @@ describe('Agent Host runtime', () => {
       expect(silentSocket.readyState).toBe(3);
       expect(session.disposed).toBe(false);
       const attached = await broker.rpc('POST', '/remote/attach', 'relay', { providerId: 'codex', nativeSessionId: 'codex-1' });
-      const recovered = await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' });
+      const recovered = await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', operationId: operationId('heartbeat-create') });
       expect(attached).toEqual(created);
       expect(recovered).toEqual(created);
       expect(codex.sessions.get('codex-1')).toBe(session);
@@ -315,19 +321,19 @@ describe('Agent Host runtime', () => {
       expect(session.disposed).toBe(false);
     } finally { await host.close(); await broker.close(); }
   });
-  it('recovers a completed creation across real uplink replacement despite a new proposed Agent identity', async () => {
+  it('isolates a completed creation across a real uplink replacement with a different operation scope', async () => {
     const first = await uplinkBroker('host-first'); const second = await uplinkBroker('host-second');
     const codex = fixture('codex');
     const host = createAgentHost({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], installationId: 'installation', name: 'Host',
       uplink: { url: first.url, remoteKey: 'first-key' } });
     try {
       await host.ready;
-      const created = await first.rpc('POST', '/remote/create', 'broker-before', { providerId: 'codex', requestId: 'stable-request', cwd: '/work' });
+      const created = await first.rpc('POST', '/remote/create', 'broker-before', { providerId: 'codex', operationId: operationId('stable-create'), cwd: '/work' });
       await host.replaceUplink({ url: second.url, remoteKey: 'second-key' });
-      const recovered = await second.rpc('POST', '/remote/create', 'broker-after', { providerId: 'codex', requestId: 'stable-request', cwd: '/work' });
-      expect(recovered).toEqual(created);
-      expect(JSON.parse(recovered.body)).toEqual({ agentId: 'broker-before', nativeSessionId: 'codex-1' });
-      expect(codex.createCount()).toBe(1);
+      const recovered = await second.rpc('POST', '/remote/create', 'broker-after', { providerId: 'codex', operationId: operationId('stable-create'), cwd: '/work' });
+      expect(recovered).not.toEqual(created);
+      expect(JSON.parse(recovered.body)).toEqual({ agentId: 'broker-after', nativeSessionId: 'codex-2' });
+      expect(codex.createCount()).toBe(2);
     } finally { await host.close(); await first.close(); await second.close(); }
   });
 
@@ -358,7 +364,7 @@ describe('Agent Host runtime', () => {
     const codex = fixture('codex');
     const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }] });
     try {
-      const body = JSON.stringify({ providerId: 'codex', requestId: 'request-1', cwd: '/work' });
+      const body = JSON.stringify({ providerId: 'codex', operationId: operationId('request-1'), cwd: '/work' });
       const first = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay-1', body });
       const second = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay-1', body });
       expect(JSON.parse(first.body)).toEqual({ agentId: 'relay-1', nativeSessionId: 'codex-1' });
@@ -367,17 +373,54 @@ describe('Agent Host runtime', () => {
     } finally { await host.close(); }
   });
 
+  it('reuses a native creation after projection fails without dispatching create again', async () => {
+    const codex = fixture('codex');
+    const open = codex.directory.open;
+    let attempts = 0;
+    codex.directory.open = async id => {
+      if (++attempts === 1) throw new Error('projection unavailable');
+      return open(id);
+    };
+    const host = createAgentHostRuntime({ registrations: [codex] });
+    const request = { method: 'POST' as const, path: '/remote/create', sessionId: 'relay',
+      body: JSON.stringify({ providerId: 'codex', operationId: operationId('projection-retry') }) };
+    try {
+      expect((await host.control(request)).status).toBe(503);
+      expect(await host.control(request)).toEqual({ status: 200,
+        body: JSON.stringify({ agentId: 'relay', nativeSessionId: 'codex-1' }) });
+      expect(codex.createCount()).toBe(1);
+      expect(attempts).toBe(2);
+    } finally { await host.close(); }
+  });
+
+  it('isolates operation identities by scope and rejects new mutations when retention capacity is full', async () => {
+    const codex = fixture('codex');
+    const host = createAgentHostRuntime({ registrations: [codex], operationCache: { maxEntries: 2 } });
+    const operation = operationId('scoped-create');
+    try {
+      const first = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'one', operationScope: 'scope-a',
+        body: JSON.stringify({ providerId: 'codex', operationId: operation }) });
+      expect(first.status).toBe(200);
+      expect((await host.control({ method: 'POST', path: '/remote/create', sessionId: 'other', operationScope: 'scope-b',
+        body: JSON.stringify({ providerId: 'codex', operationId: operation }) })).status).toBe(200);
+      const full = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'two', operationScope: 'scope-a',
+        body: JSON.stringify({ providerId: 'codex', operationId: operationId('second-create') }) });
+      expect(full.status).toBe(429);
+      expect(codex.createCount()).toBe(2);
+    } finally { await host.close(); }
+  });
+
   it('isolates providers and rejects request identity reuse with different settings', async () => {
     const codex = fixture('codex'); const dsh = fixture('dsh');
     const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }, { adapter: dsh.adapter, directory: dsh.directory }] });
     try {
       const request = (providerId: string, cwd: string) => host.control({ method: 'POST', path: '/remote/create', sessionId: `${providerId}-relay`,
-        body: JSON.stringify({ providerId, requestId: 'same', cwd }) });
+        body: JSON.stringify({ providerId, operationId: operationId(`${providerId}:same`), cwd }) });
       expect((await request('codex', '/one')).status).toBe(200);
       expect((await request('dsh', '/two')).status).toBe(200);
       expect((await request('codex', '/different')).status).toBe(409);
       expect((await host.control({ method: 'POST', path: '/remote/create', sessionId: 'codex-relay',
-        body: JSON.stringify({ providerId: 'codex', requestId: 'another', cwd: '/one' }) })).status).toBe(409);
+        body: JSON.stringify({ providerId: 'codex', operationId: operationId('another'), cwd: '/one' }) })).status).toBe(409);
       expect(codex.createCount()).toBe(1); expect(dsh.createCount()).toBe(1);
     } finally { await host.close(); }
   });
@@ -398,7 +441,7 @@ describe('Agent Host runtime', () => {
   it('disposes sessions only when the Host explicitly closes', async () => {
     const codex = fixture('codex');
     const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }] });
-    await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', requestId: 'r' }) });
+    await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', operationId: operationId('dispose') }) });
     const session = codex.sessions.get('codex-1')!;
     expect(session.disposed).toBe(false);
     await host.close(); await host.close();
@@ -416,7 +459,7 @@ describe('Agent Host runtime', () => {
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       await host.ready;
-      expect((await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', requestId: 'create' })).status).toBe(200);
+      expect((await broker.rpc('POST', '/remote/create', 'relay', { providerId: 'codex', operationId: operationId('credential-create') })).status).toBe(200);
       const session = codex.sessions.get('codex-1')!;
       broker.issueCredential('rotated-key'); await started;
       const closed = host.close();
@@ -435,7 +478,7 @@ describe('Agent Host runtime', () => {
     try {
       await once(child, 'spawn');
       expect(child.exitCode).toBeNull(); expect(child.signalCode).toBeNull();
-      await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', requestId: 'create' }) });
+      await host.control({ method: 'POST', path: '/remote/create', sessionId: 'relay', body: JSON.stringify({ providerId: 'codex', operationId: operationId('subprocess-create') }) });
       const session = codex.sessions.get('codex-1')!, dispose = session.dispose.bind(session);
       session.dispose = async () => { await transport.dispose(); await dispose(); };
       await host.close();
@@ -518,7 +561,7 @@ it('stops projected native sessions and reports unsupported and failed cancellat
   const originalOpen = registration.directory.open;
   registration.directory.open = async id => {
     const session = await originalOpen(id);
-    if (id === 'ok' || id === 'failed') {
+    if (id === 'ok' || id === 'failed' || id === 'later') {
       Object.assign(session, { capabilities: { ...capabilities, cancel: true }, cancel: async () => {
         if (id === 'failed') throw new Error('native error contains secret'); cancelled++;
       } });
@@ -528,14 +571,18 @@ it('stops projected native sessions and reports unsupported and failed cancellat
   const host = createAgentHostRuntime({ registrations: [registration] });
   try {
     for (const id of ['ok', 'unsupported', 'failed']) await host.control({ method: 'POST', path: '/remote/attach', sessionId: id, body: JSON.stringify({ providerId: 'recorded', nativeSessionId: id }) });
-    const response = await host.control({ method: 'POST', path: '/remote/stop', body: '{}' });
+    const response = await host.control({ method: 'POST', path: '/remote/stop', body: JSON.stringify({ operationId: operationId('stop-all') }) });
     expect(response.status).toBe(200);
     expect(JSON.parse(response.body)).toEqual({ results: [
       { agentId: 'ok', status: 'cancelled' }, { agentId: 'unsupported', status: 'unsupported', message: 'The native session does not support cancellation.' },
       { agentId: 'failed', status: 'failed', message: 'Native cancellation did not complete.' },
     ] });
     expect(cancelled).toBe(1); expect(response.body).not.toContain('secret');
-    expect((await host.control({ method: 'POST', path: '/remote/stop', body: '{"unexpected":true}' })).status).toBe(400);
+    await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'later', body: JSON.stringify({ providerId: 'recorded', nativeSessionId: 'later' }) });
+    const repeated = await host.control({ method: 'POST', path: '/remote/stop', body: JSON.stringify({ operationId: operationId('stop-all') }) });
+    expect(repeated).toEqual(response);
+    expect(cancelled).toBe(1);
+    expect((await host.control({ method: 'POST', path: '/remote/stop', body: JSON.stringify({ operationId: operationId('invalid-stop'), unexpected: true }) })).status).toBe(400);
   } finally { await host.close(); }
 });
 
@@ -547,7 +594,7 @@ it('returns a failed cancellation result by the local deadline when a native can
   const host = createAgentHostRuntime({ registrations: [registration], cancelTimeoutMs: 15 });
   try {
     await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'hung', body: JSON.stringify({ providerId: 'recorded', nativeSessionId: 'hung' }) });
-    expect(JSON.parse((await host.control({ method: 'POST', path: '/remote/stop', body: '{}' })).body)).toEqual({ results: [
+    expect(JSON.parse((await host.control({ method: 'POST', path: '/remote/stop', body: JSON.stringify({ operationId: operationId('hung-stop') }) })).body)).toEqual({ results: [
       { agentId: 'hung', status: 'failed', message: 'Native cancellation did not complete.' },
     ] });
   } finally { await host.close(); }
@@ -581,7 +628,7 @@ it('delivers the owner stop operation over the real Host uplink transport', asyn
   try {
     await host.ready;
     await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'recorded', nativeSessionId: 'native' });
-    const result = await broker.rpc('POST', '/remote/stop', undefined, {});
+    const result = await broker.rpc('POST', '/remote/stop', undefined, { operationId: operationId('uplink-stop') });
     expect(result.status).toBe(200);
     expect(JSON.parse(result.body)).toEqual({ results: [{ agentId: 'agent', status: 'unsupported', message: 'The native session does not support cancellation.' }] });
   } finally { await host.close(); await broker.close(); }

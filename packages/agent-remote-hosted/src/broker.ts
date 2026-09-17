@@ -392,7 +392,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const nativeSessionId = attaching ? required(body.nativeSessionId, 'nativeSessionId') : randomUUID();
     const parentNativeSessionId = action === 'child/attach' ? required(body.parentNativeSessionId, 'parentNativeSessionId') : undefined;
     if (parentNativeSessionId) creatorSubject ??= nativeBindings.get(JSON.stringify([host.id, providerId, parentNativeSessionId]))?.creatorSubject;
-    const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.requestId, 'requestId') : nativeSessionId]);
+    const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.operationId, 'operationId') : nativeSessionId]);
     const operation = () => {
       if (bindings.size + pendingBindingSlots.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.', true);
       const slot = Symbol(); pendingBindingSlots.add(slot);
@@ -402,7 +402,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         const request = host.legacyDsh
           ? { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) }
           : action === 'create'
-            ? { providerId, requestId: required(body.requestId, 'requestId'),
+            ? { providerId, operationId: required(body.operationId, 'operationId'),
                 ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) }
             : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
         const result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
@@ -499,9 +499,9 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     if (!host.providers.some(provider => provider.providerId === providerId)) throw new SharingError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
     if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
-    const requestId = required(body.requestId, 'requestId');
+    const operationId = required(body.operationId, 'operationId');
     const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) });
-    const reservation = await changeSharing(draft => draft.reserve(host.id, subject!, providerId, requestId, fingerprint));
+    const reservation = await changeSharing(draft => draft.reserve(host.id, subject!, providerId, operationId, fingerprint));
     if (!reservation.fresh) {
       const completedId = reservation.agentId ?? completedCreations.get(JSON.stringify([host.id, providerId, reservation.nativeRequestId]))?.agentId;
       const binding = completedId && bindings.get(completedId);
@@ -514,7 +514,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       throw new SharingError(409, 'creation_outcome_unknown', 'A previous creation is unresolved. Its quota reservation is retained; ask the Host owner to reconcile it.');
     }
     requireAccess(host.id, subject);
-    const operation = mutate(host, action, { ...body, requestId: reservation.nativeRequestId }, subject).then(async binding => {
+    const operation = mutate(host, action, { ...body, operationId: reservation.nativeRequestId }, subject).then(async binding => {
       await changeSharing(draft => draft.complete(reservation.key, binding.agentId)); return binding;
     }).catch(async error => {
       // Transport and persistence failures may occur after native creation succeeded.
@@ -621,14 +621,15 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (management && request.method === 'POST') {
       requireOwner(subject);
       const body = await readBody(request);
-      if (Object.keys(body).length) throw new BrokerError(400, 'invalid_request', 'No parameters are accepted.');
       const host = requireHost(management[1]!);
       if (management[2] === 'rotate') {
+        if (Object.keys(body).length) throw new BrokerError(400, 'invalid_request', 'No parameters are accepted.');
         if (!options.durable || !host.issueCredential) throw new BrokerError(409, 'host_upgrade_required', 'Update and reconnect Agent Host before rotating its credential.');
         await host.issueCredential();
         return json(200, {ok:true,status:'pending'});
       }
-      const result = await rpc(host, 'POST', '/remote/stop', undefined, '{}');
+      if (Object.keys(body).some(key => key !== 'operationId')) throw new BrokerError(400, 'invalid_request', 'Stop accepts only an operation identity.');
+      const result = await rpc(host, 'POST', '/remote/stop', undefined, JSON.stringify({ operationId: required(body.operationId, 'operationId') }));
       return rawJson(result);
     }
     const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);

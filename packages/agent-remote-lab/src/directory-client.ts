@@ -49,14 +49,15 @@ export class SessionDirectoryClient {
     return this.request('workspace-folders/create', { providerId, parentPath, name }, signal);
   }
   attachChild(providerId: string, parentNativeSessionId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('child/attach', { providerId, parentNativeSessionId, nativeSessionId }); }
-  create(providerId: string, requestId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('create', { providerId, requestId, ...options }); }
+  create(providerId: string, operationId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('create', { providerId, operationId, ...options }); }
 }
 
 export class RemoteHostClient implements HostPairingService {
   invitation?: PairingInvitation;
   constructor(private readonly baseUrl: string) {}
-  private async request<T>(path: string, method = 'GET'): Promise<T> {
-    const response = await fetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: '{}' } : {}) });
+  private async request<T>(path: string, method = 'GET', requestBody?: unknown): Promise<T> {
+    const response = await fetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method,
+      ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
     const body = await response.json();
     if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', response.status === 403 ? body.code : undefined);
     return body as T;
@@ -70,8 +71,8 @@ export class RemoteHostClient implements HostPairingService {
     if (value.ok !== true || !['pending', 'rotated'].includes(value.status ?? '')) throw new Error('The rotation result could not be confirmed. Refresh before trying again.');
     return value as { ok: true; status: 'pending' | 'rotated' };
   }
-  async stop(hostId: string): Promise<{ results: HostStopResult[] }> {
-    const value = await this.request<{ results?: HostStopResult[] }>(`hosts/${encodeURIComponent(hostId)}/stop`, 'POST');
+  async stop(hostId: string, operationId = crypto.randomUUID()): Promise<{ results: HostStopResult[] }> {
+    const value = await this.request<{ results?: HostStopResult[] }>(`hosts/${encodeURIComponent(hostId)}/stop`, 'POST', { operationId });
     if (!Array.isArray(value.results) || !value.results.every(result => result && typeof result.agentId === 'string' && ['cancelled', 'unsupported', 'failed'].includes(result.status) && (result.message === undefined || typeof result.message === 'string'))) throw new Error('The stop results could not be confirmed. Work may still be running.');
     return { results: value.results };
   }

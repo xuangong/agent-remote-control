@@ -24,7 +24,7 @@ async function fixture(options: Record<string, unknown> = {}) {
     async createSession() { return session; }, async resumeSession() { return session; } }], epoch: () => 'epoch-one' });
   closeables.push(() => relay.close());
   await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
-    requestId: 'create', agentId, providerId: 'test', config: { sessionId: 'native-one' },
+    requestId: 'create', operationId: '00000000-0000-4000-8000-000000000001', agentId, providerId: 'test', config: { sessionId: 'native-one' },
   } });
   expect(remote.createAgentRemotePluginHost).toBeTypeOf('function');
   const host = remote.createAgentRemotePluginHost(relay, {
@@ -173,7 +173,7 @@ describe('socket-free plugin uplink host', () => {
     f.receive({ type: 'stream_open', streamId: 'one' });
     f.receive({ type: 'stream_message', streamId: 'one', message: negotiate });
     f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message',
-      payload: { requestId: 'hold', agentId: 'agent-one', text: 'hold' } }) });
+      payload: { requestId: 'hold', operationId: '00000000-0000-4000-8000-000000000002', agentId: 'agent-one', text: 'hold' } }) });
     f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.4.0', type: 'timeline_request',
       payload: { requestId: 'history-after-send', agentId: 'agent-one', direction: 'tail', limit: 10 } }) });
     f.receive({ type: 'stream_open', streamId: 'two' });
@@ -200,7 +200,7 @@ describe('socket-free plugin uplink host', () => {
     f.receive({ type: 'stream_open', streamId: 'one' });
     f.receive({ type: 'stream_message', streamId: 'one', message: negotiate });
     f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message',
-      payload: { requestId: 'old-command', agentId: 'agent-one', text: 'hold' } }) });
+      payload: { requestId: 'old-command', operationId: '00000000-0000-4000-8000-000000000003', agentId: 'agent-one', text: 'hold' } }) });
     await vi.waitFor(() => expect(f.commands).toEqual(['hold']));
     f.receive({ type: 'stream_close', streamId: 'one', code: 1000, reason: 'Reattach' });
     f.receive({ type: 'stream_open', streamId: 'one' });

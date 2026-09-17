@@ -143,10 +143,11 @@ describe('Remote Host broker', () => {
     const f = await setup({ rpcTimeoutMs: 40 }); const pair = await (await f.post('/v1/remote/pairings')).json(); const native = await host(f.url, pair.key);
     const messages: any[] = []; native.socket.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
     const path = `/v1/remote/hosts/${native.id}/create`;
-    expect((await f.post(path, { requestId: 'once', workspaceId: 'workspace' })).status).toBe(504);
-    expect((await f.post(path, { requestId: 'once', workspaceId: 'workspace' })).status).toBe(504);
+    const operationId = '00000000-0000-4000-8000-000000000001';
+    expect((await f.post(path, { operationId, workspaceId: 'workspace' })).status).toBe(504);
+    expect((await f.post(path, { operationId, workspaceId: 'workspace' })).status).toBe(504);
     expect(messages.filter((message) => message.type === 'rpc_request')).toHaveLength(1);
-    expect((await f.post(path, { requestId: 'once', workspaceId: 'different' })).status).toBe(409);
+    expect((await f.post(path, { operationId, workspaceId: 'different' })).status).toBe(409);
   });
   it('forwards provider-scoped discovery and adopts conflict-checked Host identities', async () => {
     const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json(); const native = await providerHost(f.url, pair.key);
@@ -179,16 +180,17 @@ describe('Remote Host broker', () => {
     expect(folderCall.sessionId).toBeUndefined();
     expect(JSON.parse(folderCall.body)).toEqual({ providerId: 'codex', parentPath: '/tmp/project', name: 'New folder' });
     expect((await f.post(base + '/workspace-folders/create', { providerId: 'missing', parentPath: '/tmp/project', name: 'blocked' })).status).toBe(400);
-    const created = await (await f.post(base + '/create', { providerId: 'codex', requestId: 'create-one', cwd: '/tmp/project',
+    const operationId = '00000000-0000-4000-8000-000000000002';
+    const created = await (await f.post(base + '/create', { providerId: 'codex', operationId, cwd: '/tmp/project',
       workspaceId: 'project', model: 'gpt-6', reasoningEffort: 'high', planning: true })).json();
     expect(created).toEqual({ agentId: 'host-agent', nativeSessionId: 'native-created' });
     expect(calls.filter((call) => call.method === 'GET').map((call) => call.path)).toEqual([
       '/remote/catalog?providerId=codex&limit=2', '/remote/workspaces?providerId=codex', '/remote/models?providerId=codex',
       '/remote/workspace-folders?providerId=codex&path=%2Ftmp%2Fproject',
     ]);
-    expect(JSON.parse(calls.find((call) => call.path === '/remote/create').body)).toEqual({ providerId: 'codex', requestId: 'create-one',
+    expect(JSON.parse(calls.find((call) => call.path === '/remote/create').body)).toEqual({ providerId: 'codex', operationId,
       cwd: '/tmp/project', workspaceId: 'project', model: 'gpt-6', reasoningEffort: 'high', planning: true });
-    expect((await f.post(base + '/create', { providerId: 'codex', requestId: 'create-one', cwd: '/different' })).status).toBe(409);
+    expect((await f.post(base + '/create', { providerId: 'codex', operationId, cwd: '/different' })).status).toBe(409);
     const parent = await (await f.post(base + '/attach', { providerId: 'codex', nativeSessionId: 'native-parent' })).json();
     const child = await (await f.post(base + '/child/attach', { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' })).json();
     expect(parent.agentId).toBe('host-parent'); expect(child.agentId).toBe('host-child');
@@ -253,7 +255,10 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
       if (request.path === '/remote/create') sessions.add(body.nativeSessionId);
       if (!sessions.has(body.nativeSessionId)) return { status: 404, body: '{}' };
       let existing = false; try { relay.requireAgent(request.sessionId!); existing = true; } catch {}
-      if (!existing) await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: { requestId: request.sessionId!, agentId: request.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId } } });
+      if (!existing) await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
+        requestId: request.sessionId!, operationId: request.path === '/remote/create' ? '00000000-0000-4000-8000-000000000007' : '00000000-0000-4000-8000-000000000006',
+        agentId: request.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId },
+      } });
       agents.add(request.sessionId!);
       return { status: 200, body: JSON.stringify({ nativeSessionId: body.nativeSessionId }) };
     },
@@ -263,7 +268,7 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
   expect(await (await fetch(f.url + base + '/catalog')).json()).toMatchObject({ items: [{ nativeSessionId: 'cold-session' }] });
   expect(await (await fetch(f.url + base + '/workspaces')).json()).toMatchObject({ workspaces: [{ id: 'workspace' }] });
   const opened = await (await f.post(base + '/attach', { nativeSessionId: 'cold-session' })).json();
-  const created = await (await f.post(base + '/create', { requestId: 'new-native', workspaceId: 'workspace' })).json();
+  const created = await (await f.post(base + '/create', { operationId: '00000000-0000-4000-8000-000000000007', workspaceId: 'workspace' })).json();
   expect(created.nativeSessionId).not.toBe('cold-session');
   expect(await (await f.post(base + '/attach', { nativeSessionId: created.nativeSessionId })).json()).toEqual(created);
   const transport = new HttpWebSocketTransport(f.url, { webSocketFactory: (url) => new WebSocket(url, { headers: { origin: 'http://127.0.0.1:6175' } }) as never });

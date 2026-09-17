@@ -86,7 +86,8 @@ it('shares one per-user stream allowance across different Host owners and releas
       if (data.type === 'stream_open') { send(host.socket, { type: 'stream_opened', streamId: data.streamId }); send(host.socket, { type: 'stream_message', streamId: data.streamId, message: '{"ready":true}' }); }
     });
     expect((await f.control({ subject: index === 0 ? 'alice' : 'charlie', operation: 'share', hostId: host.hostId, targetSubject: 'bob', targetLabel: 'Bob', sessionLimit: 1 })()).status).toBe(200);
-    expect((await f.json(bob.basePath + `v1/remote/hosts/${host.hostId}/create`, bob.cookie, { providerId: 'codex', requestId: `topic-${index}` })).status).toBe(200);
+    const operationId = `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`;
+    expect((await f.json(bob.basePath + `v1/remote/hosts/${host.hostId}/create`, bob.cookie, { providerId: 'codex', operationId })).status).toBe(200);
     paths.push(bob.basePath + `v1/sessions/quota-agent-${index}/events`);
   }
   const sockets = [];

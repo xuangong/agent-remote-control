@@ -22,6 +22,7 @@ export interface SessionWireAgent {
   fetchTimeline(request: TimelinePageRequest): HistoryPage;
   subscribe(listener: AgentManagerListener): () => void;
   sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
+  validateInteractionResponse?(requestId: string, response: AgentInteractionResponse): Promise<void> | void;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
@@ -44,8 +45,25 @@ export type SessionWireFailure =
 
 export interface SessionWireOptions {
   authorize?: (action: 'read_resource' | 'resolve_resource') => boolean | Promise<boolean>;
+  executeOperation?: SessionWireOperationExecutor;
   maxBufferedManagerEvents?: number;
   onFailure?: (failure: SessionWireFailure) => void;
+}
+
+export interface SessionWireOperation {
+  readonly operationId: string;
+  readonly kind: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'interaction_response' | 'execute_command';
+  readonly parameters: unknown;
+  readonly maximumResultBytes: number;
+}
+
+export interface SessionWireOperationWork<T> {
+  readonly validate?: () => Promise<void> | void;
+  readonly dispatch: () => Promise<T>;
+}
+
+export interface SessionWireOperationExecutor {
+  <T>(agent: SessionWireAgent, operation: SessionWireOperation, work: SessionWireOperationWork<T>): Promise<T>;
 }
 
 export function createSessionWire(
@@ -54,6 +72,8 @@ export function createSessionWire(
   options: SessionWireOptions = {},
 ): SessionWire {
   const maxBufferedManagerEvents = options.maxBufferedManagerEvents ?? 1_024;
+  const executeOperation: SessionWireOperationExecutor = options.executeOperation
+    ?? (async (_agent, _operation, work) => { await work.validate?.(); return work.dispatch(); });
   if (!Number.isSafeInteger(maxBufferedManagerEvents) || maxBufferedManagerEvents < 1) {
     throw new RangeError('maxBufferedManagerEvents must be a positive safe integer.');
   }
@@ -145,7 +165,8 @@ export function createSessionWire(
 
   async function handleClientMessage(message: Exclude<ClientMessage, { type: 'negotiate' }>): Promise<void> {
     const boundAgent = requireBoundAgent();
-    const requestId = 'payload' in message && 'requestId' in message.payload ? message.payload.requestId : undefined;
+    const requestId = message.type === 'interaction_response' ? message.payload.submissionId
+      : 'payload' in message && 'requestId' in message.payload ? message.payload.requestId : undefined;
     if ('payload' in message && 'agentId' in message.payload && message.payload.agentId !== boundAgent.agentId) {
       sendMessage(protocolError('agent_identity_mismatch', 'Client message identifies a different Agent.', true, requestId));
       return;
@@ -160,7 +181,10 @@ export function createSessionWire(
         }
         case 'execute_command': {
           if (!boundAgent.executeCommand) throw new UnsupportedSessionCommandError('execute_command');
-          const result = await boundAgent.executeCommand(message.payload.commandId, message.payload.args);
+          const result = await executeOperation(boundAgent, {
+            operationId: message.payload.operationId, kind: 'execute_command',
+            parameters: { commandId: message.payload.commandId, args: message.payload.args }, maximumResultBytes: 256 * 1024,
+          }, { dispatch: () => boundAgent.executeCommand!(message.payload.commandId, message.payload.args) });
           sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'command_result', payload: { requestId: message.payload.requestId, agentId: boundAgent.agentId, result } });
           return;
         }
@@ -174,28 +198,43 @@ export function createSessionWire(
           ));
           return;
         case 'send_message':
-          if (message.payload.delivery === undefined) await boundAgent.sendMessage(message.payload.text);
-          else await boundAgent.sendMessage(message.payload.text, { delivery: message.payload.delivery });
+          await executeOperation(boundAgent, {
+            operationId: message.payload.operationId, kind: 'send_message',
+            parameters: { text: message.payload.text, delivery: message.payload.delivery ?? null }, maximumResultBytes: 1_024,
+          }, { dispatch: async () => {
+            if (message.payload.delivery === undefined) await boundAgent.sendMessage(message.payload.text);
+            else await boundAgent.sendMessage(message.payload.text, { delivery: message.payload.delivery });
+            return { accepted: true };
+          } });
           sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'send_message'));
           return;
         case 'steer':
           if (!boundAgent.steer) throw new UnsupportedSessionCommandError('steer');
-          await boundAgent.steer(message.payload.text);
+          await executeOperation(boundAgent, {
+            operationId: message.payload.operationId, kind: 'steer', parameters: { text: message.payload.text }, maximumResultBytes: 1_024,
+          }, { dispatch: async () => { await boundAgent.steer!(message.payload.text); return { accepted: true }; } });
           sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'steer'));
           return;
         case 'cancel':
           if (!boundAgent.cancel) throw new UnsupportedSessionCommandError('cancel');
-          await boundAgent.cancel();
+          await executeOperation(boundAgent, {
+            operationId: message.payload.operationId, kind: 'cancel', parameters: {}, maximumResultBytes: 1_024,
+          }, { dispatch: async () => { await boundAgent.cancel!(); return { accepted: true }; } });
           sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'cancel'));
           return;
         case 'set_session_setting':
           if (!boundAgent.setSessionSetting) throw new UnsupportedSessionCommandError('set_session_setting');
-          await boundAgent.setSessionSetting(message.payload.settingId, message.payload.value);
+          await executeOperation(boundAgent, {
+            operationId: message.payload.operationId, kind: 'set_session_setting',
+            parameters: { settingId: message.payload.settingId, value: message.payload.value }, maximumResultBytes: 1_024,
+          }, { dispatch: async () => { await boundAgent.setSessionSetting!(message.payload.settingId, message.payload.value); return { accepted: true }; } });
           sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'set_session_setting'));
           return;
         case 'set_planning':
           if (!boundAgent.setPlanning) throw new UnsupportedSessionCommandError('set_planning');
-          await boundAgent.setPlanning(message.payload.active);
+          await executeOperation(boundAgent, {
+            operationId: message.payload.operationId, kind: 'set_planning', parameters: { active: message.payload.active }, maximumResultBytes: 1_024,
+          }, { dispatch: async () => { await boundAgent.setPlanning!(message.payload.active); return { accepted: true }; } });
           sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'set_planning'));
           return;
         case 'timeline_subscription': {
@@ -225,7 +264,19 @@ export function createSessionWire(
           }));
           return;
         case 'interaction_response':
-          await boundAgent.respondToInteraction(message.payload.requestId, message.payload.response);
+          await executeOperation(boundAgent, {
+            operationId: message.payload.operationId, kind: 'interaction_response',
+            parameters: { requestId: message.payload.requestId, response: message.payload.response }, maximumResultBytes: 1_024,
+          }, {
+            validate: boundAgent.validateInteractionResponse
+              ? () => boundAgent.validateInteractionResponse!(message.payload.requestId, message.payload.response)
+              : undefined,
+            dispatch: async () => {
+              await boundAgent.respondToInteraction(message.payload.requestId, message.payload.response);
+              return { accepted: true };
+            },
+          });
+          sendMessage(commandAcknowledgement(message.payload.submissionId, boundAgent.agentId, 'interaction_response'));
           return;
         case 'resource_request':
           if (options.authorize && !await options.authorize('read_resource')) {
@@ -270,6 +321,10 @@ export function createSessionWire(
       }
       if (isInteractionResponseError(error)) {
         sendMessage(protocolError(error.code, error.message, true, requestId));
+        return;
+      }
+      if (isOperationExecutionError(error)) {
+        sendMessage(protocolError(error.code, error.message, error.code === 'operation_capacity_exceeded', requestId));
         return;
       }
       sendMessage(protocolError('command_failed', 'Agent command failed.', true, requestId));
@@ -335,7 +390,7 @@ export function createSessionWire(
 function commandAcknowledgement(
   requestId: string,
   agentId: string,
-  command: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting',
+  command: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'interaction_response',
 ): Extract<ServerMessage, { type: 'command_acknowledged' }> {
   return {
     protocolVersion: PROTOCOL_VERSION,
@@ -492,6 +547,14 @@ function isInteractionResponseError(error: unknown): error is Error & { code: st
   return error instanceof Error
     && 'code' in error
     && (error.code === 'stale_interaction' || error.code === 'invalid_interaction_response');
+}
+
+function isOperationExecutionError(error: unknown): error is Error & { code: string } {
+  return error instanceof Error
+    && 'code' in error
+    && typeof error.code === 'string'
+    && ['invalid_operation_id', 'invalid_operation_intent', 'operation_cache_closed', 'operation_capacity_exceeded',
+      'operation_conflict', 'operation_outcome_unknown', 'operation_rejected', 'operation_result_too_large'].includes(error.code);
 }
 
 class UnsupportedSessionCommandError extends Error {

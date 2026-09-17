@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
-**Goal:** Recover native shared connections automatically while preventing duplicate uncertain mutations.
+**Goal:** Recover native shared connections automatically and suppress duplicate mutations within a bounded live-Host cache.
 
-**Architecture:** Stable provider sessions restore native subscriptions and authoritative history. A durable Host journal guards client mutation dispatch. Additive public state communicates recovery and unknown operation outcomes.
+**Architecture:** Stable provider sessions restore native subscriptions and authoritative history. A bounded in-memory Host cache guards client mutation dispatch. Additive public state communicates recovery and unknown operation outcomes.
 
 **Tech Stack:** TypeScript, Node 22, pnpm workspaces, ws, TypeBox, React, Vitest.
 
@@ -44,26 +44,26 @@
 - [ ] Expand tests to stale callbacks, repeated loss, child identity/read-only state, approval invalidation, permanent errors and final history consistency. Update isolated native integration expectations and run if a compatible executable exists without touching the user's daemon. Tests use per-test deadlines and outer 180/300 second limits.
 - [ ] Update current documentation, build affected packages, run focused regression and commit. Report all tested/untested boundaries.
 
-### Task 3: Durable mutation dispatch and integrated validation
+### Task 3: Bounded mutation deduplication and integrated validation
 
-**Files:** new packages/agent-host/src/operation-journal.ts and tests; host.ts, cli.ts; Relay session-wire.ts/transport option plumbing; protocol mutation schemas; web remote-session-client.ts and workbench message status; corresponding real transport tests and current docs.
+**Files:** new packages/agent-host/src/operation-cache.ts and tests; host.ts; Relay session-wire.ts/transport option plumbing; protocol mutation schemas; web remote-session-client.ts and workbench message status; hosted native create/stop routes and their clients; corresponding real transport tests and current docs.
 
-**Interfaces:** Add a stable operationId distinct from transport requestId/native approval ID to every mutating client command and native create request. Relay forwards it unchanged. Host owns journal persistence under its configured state directory. Use a generic SessionWire operation execution hook supplied by Host to preserve provider-independent boundaries. Standalone non-Host uses may use in-memory execution, but configured production CLI must always enable durable records.
+**Interfaces:** Stable operationId distinct from transport requestId/native approval ID on client mutations and native create/stop requests. Relay forwards it unchanged. A generic SessionWire operation hook supplies Host-owned in-memory deduplication without introducing disk persistence or changing the Node requirement.
 
-- [ ] Trace actual browser -> cloud Relay -> Host -> provider command path and preserve current request correlation. Use globally unique IDs for each new intent and reuse the same ID on retry. Same ID with changed canonical kind/target/parameters is rejected.
-- [ ] Add failing journal tests: concurrent duplicates execute once; same ID different intent conflicts; restart recovers saved results; dispatching restart becomes unknown; persistence failure prevents dispatch; an effect followed by lost reply is never resubmitted.
-- [ ] Implement atomic durable private records with file/data and directory sync as needed, serialized state transitions and exclusive writer ownership. Persist dispatching before invocation. Save successful results for duplicate replies. Conservatively mark ambiguous post-invocation failure unknown. Do not delete unknown records or silently reuse expired IDs; document retention bounds and fail closed when capacity is exhausted. Avoid storing plaintext sensitive arguments where fingerprints suffice.
-- [ ] Guard send, steer, cancel, approval, setting/planning, execute-command and native creation at Host boundaries. Key on authenticated owner/Host plus provider/native identity; different transport sessions can bind the same native target. Keep native create's proposed identity durable. Validate stale approvals before dispatch; same public approval identity cannot be reused for a later socket generation.
-- [ ] Expose unknown/conflict/persistence failure as explicit command errors and preserve unknown status in client UX. Never automatically retry an uncertain operation or label it definitively failed. Reconciliation uses available reliable native IDs only; lacking evidence, remain unknown.
-- [ ] Exercise journal via real session/uplink transport, including operation acknowledgement loss and Host recreation. Run affected suites, build/typecheck and compatibility:update/check; update documentation, commit and report.
+- [ ] Preserve operation IDs across explicit retries; generate new IDs for new intents. Scope canonical kind/target/parameters to the authenticated owner and Host. Concurrent duplicates execute once; conflicts reject; duplicate successes use saved business results with the current request envelope.
+- [ ] Bound cache record count, retained bytes and retention time. Register before dispatch; keep in-flight entries pinned, expire settled entries automatically and fail new mutations closed at capacity. Unknown entries suppress re-dispatch while retained. Host restart clears the cache by design.
+- [ ] Guard send, steer, cancel, approval, settings/planning, execute-command, native creation and Host batch stop. Freeze scope per authenticated uplink. Check duplicate approval before now-absent pending validation and return a submission acknowledgement without inventing interaction_resolved.
+- [ ] Keep native create identity authoritative and preserve operation identity through hosted body filtering and quota reservation. Never include proposedAgentId/requestId in the native creation fingerprint.
+- [ ] Clearly display unknown outcomes without automatic retry or a false definitive failure. Add behavior tests for concurrent duplicate, conflict, retention, capacity, unknown result, cache reset and real session/uplink lost acknowledgements. Update browser fixture assertions as needed.
+- [ ] Remove only this task's abandoned SQLite draft files, retain unrelated user material, update current docs/spec/compatibility, build/typecheck affected packages, run covering tests with deadlines, commit and report. Do not change diagnostic rotation in this task.
 
 ### Task 4: Bounded daemon diagnostic logs
 
 **Files:** new packages/agent-host/src/diagnostic-log.ts and tests; cli.ts, launchd.ts if required for descriptor ownership; corresponding CLI/launchd tests and current Host runbook.
 
-**Interfaces:** The local daemon owns automatic diagnostic cleanup independent of operation-journal compaction. Preserve current safe diagnostic content and agent-host.log location.
+**Interfaces:** The local daemon owns automatic diagnostic cleanup independent of operation-cache cleanup. Preserve current safe diagnostic content and agent-host.log location.
 
 - [ ] Add behavior tests with small byte thresholds for rotation while a writer remains open, archive count limits, startup over-limit cleanup, cleanup errors and shutdown timer cancellation.
 - [ ] Implement a default 5 MiB log threshold and three archives. Account for inherited stdout/stderr descriptors in both launchd and manually detached daemon modes: renaming a file alone does not redirect an open descriptor. Enforce bounded retained output during runtime and startup, without unbounded buffering or recursive error logging.
-- [ ] Integrate clean shutdown, restrictive permissions and existing CLI diagnostic sanitization. Do not delete operation records as part of diagnostic rotation or change user autostart preferences.
+- [ ] Integrate clean shutdown, restrictive permissions and existing CLI diagnostic sanitization. Do not change operation-cache state as part of diagnostic rotation or change user autostart preferences.
 - [ ] Run focused diagnostic/CLI/launchd tests with runner and outer deadlines, build/typecheck Host and document actual retention/overshoot bounds. Commit and report.

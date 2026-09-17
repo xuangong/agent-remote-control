@@ -102,7 +102,7 @@ describe('RemoteSessionClient', () => {
     try {
       const pending = delivery === undefined ? client.sendMessage(text) : client.sendMessage(text, { delivery });
       expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.4.0', type: 'send_message', payload: {
-        requestId: 'message-delivery', agentId: 'agent-one', text, ...(delivery === undefined ? {} : { delivery }),
+        requestId: 'message-delivery', operationId: expect.any(String), agentId: 'agent-one', text, ...(delivery === undefined ? {} : { delivery }),
       } });
       const response = { protocolVersion: '1.4.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-one', command: 'send_message' } } as const;
       transport.emit(response);
@@ -167,7 +167,7 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     const pending = client.setPlanning(true);
-    expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.4.0', type: 'set_planning', payload: { requestId: 'planning-one', agentId: 'agent-one', active: true } });
+    expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.4.0', type: 'set_planning', payload: { requestId: 'planning-one', operationId: expect.any(String), agentId: 'agent-one', active: true } });
     const acknowledgement = { protocolVersion: '1.4.0', type: 'command_acknowledged', payload: { requestId: 'planning-one', agentId: 'agent-one', command: 'set_planning' } } as const;
     transport.emit(acknowledgement);
     await expect(pending).resolves.toEqual(acknowledgement);
@@ -782,7 +782,7 @@ describe('RemoteSessionClient', () => {
     });
   });
 
-  it('applies the interaction resolution before resolving its operation', async () => {
+  it('applies the interaction resolution independently and resolves submission from its acknowledgement', async () => {
     const transport = new FakeTransport();
     const replica = new AgentReplica();
     const client = new RemoteSessionClient('agent-one', transport, replica);
@@ -806,12 +806,16 @@ describe('RemoteSessionClient', () => {
     };
 
     transport.emit(resolution);
-
-    await expect(pending).resolves.toEqual(resolution);
     expect(replica.getState().pendingInteractions).toEqual([]);
+    const submission = transport.sent.at(-1);
+    if (submission?.type !== 'interaction_response') throw new Error('Expected interaction response');
+    const acknowledgement = { protocolVersion: '1.4.0' as const, type: 'command_acknowledged' as const,
+      payload: { agentId: 'agent-one', requestId: submission.payload.submissionId, command: 'interaction_response' as const } };
+    transport.emit(acknowledgement);
+    await expect(pending).resolves.toEqual(acknowledgement);
   });
 
-  it('invalidates an interaction locally and rejects an in-flight stale response', async () => {
+  it('invalidates an interaction locally while keeping submission correlation independent', async () => {
     const transport = new FakeTransport();
     const replica = new AgentReplica();
     const client = new RemoteSessionClient('agent-one', transport, replica);
@@ -835,9 +839,14 @@ describe('RemoteSessionClient', () => {
       },
     });
 
-    await expect(pending).rejects.toMatchObject({ code: 'interaction_invalidated', requestId: 'interaction-one' });
     expect(replica.getState().pendingInteractions).toEqual([]);
     expect(replica.getState().timeline).toBe(timeline);
+    const submission = transport.sent.at(-1);
+    if (submission?.type !== 'interaction_response') throw new Error('Expected interaction response');
+    const acknowledgement = { protocolVersion: '1.4.0' as const, type: 'command_acknowledged' as const,
+      payload: { agentId: 'agent-one', requestId: submission.payload.submissionId, command: 'interaction_response' as const } };
+    transport.emit(acknowledgement);
+    await expect(pending).resolves.toEqual(acknowledgement);
   });
 
   it('rejects stale interaction submissions before a delayed resolution can acknowledge them', async () => {
@@ -932,6 +941,8 @@ describe('RemoteSessionClient', () => {
         response: { kind: 'plan_approval', action: 'approve' },
       },
     });
+    transport.emit({ protocolVersion: '1.4.0', type: 'command_acknowledged',
+      payload: { agentId: 'agent-one', requestId: 'shared-id', command: 'interaction_response' } });
     await interaction;
     expect(commandSettled).toBe(false);
 

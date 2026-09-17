@@ -24,7 +24,7 @@ test('shows a pulsing outgoing message immediately and replaces it with the nati
   await expect(page.locator('.agent-message-user')).toContainText('Please check the result.');
 });
 
-test('stops pulsing on timeout, shows red failure for ten seconds, and accepts a later echo', async ({ page }, testInfo) => {
+test('stops pulsing when confirmation is unavailable, keeps the message for ten seconds, and accepts a later echo', async ({ page }, testInfo) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByTestId('prompt-input').fill('A message without confirmation.');
   await page.getByTestId('prompt-submit').click();
@@ -33,16 +33,12 @@ test('stops pulsing on timeout, shows red failure for ten seconds, and accepts a
   await page.getByRole('button', { name: 'Acknowledge send' }).click();
   await page.clock.fastForward(30_000);
   await page.clock.runFor(100);
-  await expect(row).toHaveAttribute('data-delivery-state', 'failed');
-  await expect(row.getByRole('alert')).toContainText('Send failed');
+  await expect(row).toHaveAttribute('data-delivery-state', 'unconfirmed');
+  await expect(row.getByRole('status')).toContainText('Send acknowledged — conversation not confirmed');
+  await expect(row).not.toContainText('Send failed');
   await expect(page.getByText('Message sent.', { exact: true })).toHaveCount(0);
   expect(await row.locator('.agent-message').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
-  const colors = await row.locator('.agent-message-delivery').evaluate(element => {
-    const probe = document.createElement('span'); probe.style.color = 'var(--agent-danger)'; element.append(probe);
-    const expected = getComputedStyle(probe).color; probe.remove(); return { actual: getComputedStyle(element).color, expected };
-  });
-  await expect(row.locator('.agent-message-delivery')).toHaveCSS('color', colors.expected);
-  await page.screenshot({ path: testInfo.outputPath('message-failed.png') });
+  await page.screenshot({ path: testInfo.outputPath('message-unconfirmed.png') });
   await page.clock.fastForward(9_899);
   await expect(row).toHaveCount(1);
   await page.clock.fastForward(1);

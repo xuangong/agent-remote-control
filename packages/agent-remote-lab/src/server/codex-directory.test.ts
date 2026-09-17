@@ -31,7 +31,7 @@ it('creates one native process and attaches it even before Codex persists the th
   const server = createProtocolValidationServer({ providers: [f.provider], directories: [f.directory], labOrigin: 'http://127.0.0.1:6175' });
   closes.push(() => server.close());
   const { url } = await server.http.listen();
-  const create = () => fetch(`${url}/v1/remote/create`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId: 'codex', requestId: 'create-once' }) }).then((r) => r.json());
+  const create = () => fetch(`${url}/v1/remote/create`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000001' }) }).then((r) => r.json());
   const [one, two] = await Promise.all([create(), create()]);
   expect(one).toEqual(two);
   expect(one.nativeSessionId).toBe('created-1');

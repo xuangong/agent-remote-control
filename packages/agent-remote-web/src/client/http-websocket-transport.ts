@@ -46,12 +46,14 @@ export interface HttpWebSocketTransportDependencies {
   readonly WebSocket?: new (url: string) => WebSocketLike;
   readonly webSocketFactory?: (url: string) => WebSocketLike;
   readonly requestId?: () => string;
+  readonly operationId?: () => string;
 }
 
 export class HttpWebSocketTransport implements RemoteAgentTransport {
   private readonly fetchImplementation: typeof fetch;
   private readonly createWebSocket: (url: string) => WebSocketLike;
   private readonly createRequestId: () => string;
+  private readonly createOperationId: () => string;
   private readonly diagnosticListeners = new Set<(diagnostic: RemoteTransportDiagnostic) => void>();
   private readonly protocolListeners = new Set<(observation: RemoteProtocolObservation) => void>();
   private requestCounter = 0;
@@ -65,6 +67,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
       ?? (globalThis.WebSocket as unknown as new (url: string) => WebSocketLike);
     this.createWebSocket = dependencies.webSocketFactory ?? ((url) => new WebSocketImplementation(url));
     this.createRequestId = dependencies.requestId ?? (() => `remote-http-${++this.requestCounter}`);
+    this.createOperationId = dependencies.operationId ?? (() => crypto.randomUUID());
   }
 
   async fetchSnapshot(agentId: string, options?: RemoteRequestOptions) {
@@ -132,7 +135,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     const request: CreateAgentRequest = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'create_agent',
-      payload: { requestId: this.createRequestId(), agentId, providerId, config },
+      payload: { requestId: this.createRequestId(), operationId: this.createOperationId(), agentId, providerId, config },
     };
     return this.fetchSession('v1/sessions', request, options);
   }

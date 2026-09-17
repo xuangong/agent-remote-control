@@ -260,7 +260,7 @@ describe('built bdb against the recorded Relay', () => {
       ], `${JSON.stringify(response)}\n`);
       expect(resolved.exitCode, resolved.stderr).toBe(0);
       expect(parseJson(resolved.stdout)).toMatchObject({
-        type: 'interaction_resolved', payload: { agentId, requestId },
+        type: 'command_acknowledged', payload: { agentId, command: 'interaction_response' },
       });
       const listed = await runBdb(['interaction', 'list', agentId, '--json']);
       expect(listed.exitCode, listed.stderr).toBe(0);

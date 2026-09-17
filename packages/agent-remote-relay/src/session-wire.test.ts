@@ -3,6 +3,8 @@ import { UnsupportedAgentCapabilityError } from './agent-manager.js';
 import { createSessionWire, type SessionWireAgent } from './session-wire.js';
 import { describe, expect, it, vi } from 'vitest';
 
+const OPERATION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
 describe('session wire negotiation', () => {
   it('requires explicit resolve authorization before creating a local resource binding', async () => {
     const { agent } = fakeAgent();
@@ -51,7 +53,7 @@ describe('session wire negotiation', () => {
     await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'list_commands', payload: { agentId: 'agent-1', requestId: 'list' } }));
     expect(output).toEqual([{ protocolVersion: '1.4.0', type: 'command_list', payload: { agentId: 'agent-1', requestId: 'list', commands } }]);
     output.length = 0;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'execute_command', payload: { agentId: 'agent-1', requestId: 'run', commandId: 'native:custom', args: ' a  b\n' } }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'execute_command', payload: { agentId: 'agent-1', requestId: 'run', operationId: OPERATION_ID, commandId: 'native:custom', args: ' a  b\n' } }));
     expect(agent.executeCommand).toHaveBeenCalledWith('native:custom', ' a  b\n');
     expect(output).toEqual([{ protocolVersion: '1.4.0', type: 'command_result', payload: { agentId: 'agent-1', requestId: 'run', result: { text: 'Native result' } } }]);
     wire.close();
@@ -65,7 +67,7 @@ describe('session wire negotiation', () => {
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
     await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
     output.length = 0;
-    const submitted = wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'set_planning', payload: { requestId: 'planning-1', agentId: 'agent-1', active: true } }));
+    const submitted = wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'set_planning', payload: { requestId: 'planning-1', operationId: OPERATION_ID, agentId: 'agent-1', active: true } }));
     await Promise.resolve();
     expect(selected).toEqual([true]);
     expect(output).toEqual([]);
@@ -73,6 +75,56 @@ describe('session wire negotiation', () => {
     await submitted;
     expect(output).toEqual([{ protocolVersion: '1.4.0', type: 'command_acknowledged', payload: { requestId: 'planning-1', agentId: 'agent-1', command: 'set_planning' } }]);
     wire.close();
+  });
+
+  it('rewraps a retained business result with each transport request identity', async () => {
+    const { agent } = fakeAgent();
+    agent.executeCommand = vi.fn(async () => ({ text: 'retained' }));
+    const retained = new Map<string, unknown>();
+    const output: Array<Record<string, unknown>> = [];
+    const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)), {
+      executeOperation: async (_agent, operation, work) => {
+        if (retained.has(operation.operationId)) return retained.get(operation.operationId) as never;
+        const result = await work.dispatch();
+        retained.set(operation.operationId, result);
+        return result;
+      },
+    });
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    output.length = 0;
+
+    for (const requestId of ['first-request', 'retry-request']) {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'execute_command', payload: {
+        requestId, operationId: OPERATION_ID, agentId: 'agent-1', commandId: 'review', args: '--short',
+      } }));
+    }
+
+    expect(agent.executeCommand).toHaveBeenCalledOnce();
+    expect(output.map((message) => message.payload)).toEqual([
+      { requestId: 'first-request', agentId: 'agent-1', result: { text: 'retained' } },
+      { requestId: 'retry-request', agentId: 'agent-1', result: { text: 'retained' } },
+    ]);
+  });
+
+  it('acknowledges an interaction submission independently of the runtime resolved event', async () => {
+    const { agent } = fakeAgent();
+    const validateInteractionResponse = vi.fn();
+    agent.validateInteractionResponse = validateInteractionResponse;
+    agent.respondToInteraction = vi.fn(async () => undefined);
+    const output: Array<Record<string, unknown>> = [];
+    const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    output.length = 0;
+
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'interaction_response', payload: {
+      agentId: 'agent-1', requestId: 'native-approval', submissionId: 'submission-one', operationId: OPERATION_ID,
+      response: { kind: 'plan_approval', action: 'approve' },
+    } }));
+
+    expect(validateInteractionResponse).toHaveBeenCalledOnce();
+    expect(output).toEqual([{ protocolVersion: '1.4.0', type: 'command_acknowledged', payload: {
+      requestId: 'submission-one', agentId: 'agent-1', command: 'interaction_response',
+    } }]);
   });
 
   it('does not resolve or subscribe to the Agent until exact negotiation succeeds', async () => {
@@ -209,7 +261,7 @@ describe('session wire Timeline and manager-event projection', () => {
     emit({ type: 'agent_state', agentId: 'agent-1', snapshot: agent.snapshot() });
     await wire.receive(JSON.stringify({
       protocolVersion: '1.4.0', type: 'send_message',
-      payload: { requestId: 'message-after-failure', agentId: 'agent-1', text: 'Continue.' },
+      payload: { requestId: 'message-after-failure', operationId: OPERATION_ID, agentId: 'agent-1', text: 'Continue.' },
     }));
 
     expect(failures).toEqual([{
@@ -328,7 +380,7 @@ describe('session wire Timeline and manager-event projection', () => {
 
     await wire.receive(JSON.stringify({
       protocolVersion: '1.4.0', type: 'send_message',
-      payload: { requestId: 'message-1', agentId: 'agent-1', text: 'Continue.' },
+      payload: { requestId: 'message-1', operationId: OPERATION_ID, agentId: 'agent-1', text: 'Continue.' },
     }));
 
     expect(output).toEqual([{
@@ -348,7 +400,7 @@ describe('session wire Timeline and manager-event projection', () => {
       output.length = 0;
       const text = '  Keep this\nexact text  ';
       await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message', payload: {
-        requestId: 'message-delivery', agentId: 'agent-1', text, ...(delivery === undefined ? {} : { delivery }),
+        requestId: 'message-delivery', operationId: OPERATION_ID, agentId: 'agent-1', text, ...(delivery === undefined ? {} : { delivery }),
       } }));
       expect(calls).toEqual([delivery === undefined ? [text] : [text, { delivery }]]);
       expect(output).toEqual([{ protocolVersion: '1.4.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-1', command: 'send_message' } }]);
@@ -367,7 +419,7 @@ describe('session wire Timeline and manager-event projection', () => {
 
     await wire.receive(JSON.stringify({
       protocolVersion: '1.4.0', type: 'send_message',
-      payload: { requestId: 'message-unsupported', agentId: 'agent-1', text: 'Continue.' },
+      payload: { requestId: 'message-unsupported', operationId: OPERATION_ID, agentId: 'agent-1', text: 'Continue.' },
     }));
 
     expect(output).toEqual([{

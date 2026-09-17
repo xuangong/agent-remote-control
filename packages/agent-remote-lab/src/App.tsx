@@ -138,7 +138,7 @@ export function App({
   const [forkInputStatus, setForkInputStatus] = useState<{ agentId: string; pending: boolean; error?: string }>();
   const [sessionOptions, setSessionOptions] = useState<CreateSessionOptions>({});
   const [directoryRevision, setDirectoryRevision] = useState(0);
-  const creationReservation = useRef<{ requestId: string; options: CreateSessionOptions; providerId: string }>();
+  const creationReservation = useRef<{ operationId: string; options: CreateSessionOptions; providerId: string }>();
   const [creationLocked, setCreationLocked] = useState(false);
   const replicas = useRef(new Map<string, AgentReplica>());
   const [uncertainMutation, setUncertainMutation] = useState(false);
@@ -491,10 +491,10 @@ export function App({
     const agentId = createAgentId();
     try {
       if (directory) {
-        const reservation = creationReservation.current ?? { requestId: agentId, providerId, options: { ...sessionOptions, ...(createPlanning && providerId !== 'dsh' ? { planning: true } : {}) } };
+        const reservation = creationReservation.current ?? { operationId: crypto.randomUUID(), providerId, options: { ...sessionOptions, ...(createPlanning && providerId !== 'dsh' ? { planning: true } : {}) } };
         creationReservation.current = reservation;
         setCreationLocked(true);
-        const response = await directory.create(reservation.providerId, reservation.requestId, reservation.options);
+        const response = await directory.create(reservation.providerId, reservation.operationId, reservation.options);
         rememberSession({ agentId: response.agentId, nativeSessionId: response.nativeSessionId ?? response.agentId, providerId: reservation.providerId, title: 'New session', hostId: selectedHost.id });
         attach(response.agentId);
         creationReservation.current = undefined;
@@ -507,7 +507,7 @@ export function App({
       setProviderName(providerConnectionName(selectedHost.id, providerId));
       setSessionPanel('list');
     } catch (error) {
-      const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'request_conflict'].includes(error.code ?? '');
+      const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'operation_conflict'].includes(error.code ?? '');
       if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
       setFailure(`${message(error, 'Agent could not be created.')}${directory && !invalid ? ' Retry keeps the same session reservation and settings.' : ''}`);
     } finally {

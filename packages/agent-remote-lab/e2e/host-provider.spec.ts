@@ -28,7 +28,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
       creations.push(body);
       const nativeSessionId = `native-${creations.length}`;
       await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
-        requestId: control.sessionId!, agentId: control.sessionId!, providerId: 'recorded', config: { sessionId: nativeSessionId, cwd: '/native/project' },
+        requestId: control.sessionId!, operationId: body.operationId, agentId: control.sessionId!, providerId: 'recorded', config: { sessionId: nativeSessionId, cwd: '/native/project' },
       } });
       agents.add(control.sessionId!);
       return { status: 200, body: JSON.stringify({ agentId: control.sessionId, nativeSessionId }) };
@@ -71,7 +71,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     await expect(page.getByTestId('connection-summary')).toContainText(`${selected.name} · Browser DSH ${testInfo.project.name}`);
     await expect(page.getByTestId('connection-summary')).not.toContainText('Online');
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
-    expect(creations).toEqual([{ providerId: selected.id, requestId: expect.any(String), workspaceId: 'native-project' }]);
+    expect(creations).toEqual([{ providerId: selected.id, operationId: expect.any(String), workspaceId: 'native-project' }]);
     await page.getByTestId('prompt-input').fill('Hello from the Provider selector.');
     await page.getByTestId('prompt-input').press('Enter');
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Hello from the Provider selector.' })).toBeVisible();
@@ -81,7 +81,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     await expect(side.locator('.agent-message-user').last()).toContainText('Continue from the paired Host context.');
     await expect(side.locator('.lab-fork-reference summary')).toBeVisible();
     expect(creations).toHaveLength(2);
-    expect(creations[1]).toMatchObject({ providerId: selected.id, requestId: expect.any(String), cwd: '/native/project' });
+    expect(creations[1]).toMatchObject({ providerId: selected.id, operationId: expect.any(String), cwd: '/native/project' });
     await side.getByRole('button', { name: 'Close side conversation' }).click();
     await uplink.close();
     if (compact) await toggleViewPanel(page, 'Sidebar');

@@ -35,6 +35,7 @@ export interface RemoteSessionClientOptions {
   readonly reconnectMaxDelayMs?: number;
   readonly scheduleReconnect?: (delayMs: number, reconnect: () => void) => () => void;
   readonly requestId?: () => string;
+  readonly operationId?: () => string;
 }
 
 type RemoteOperationResult = CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
@@ -53,6 +54,7 @@ export class RemoteSessionClient {
   private readonly reconnectMaxDelayMs: number;
   private readonly scheduleReconnectTask: (delayMs: number, reconnect: () => void) => () => void;
   private readonly createRequestId: () => string;
+  private readonly createOperationId: () => string;
   private readonly statusListeners = new Set<(status: RemoteSessionStatus) => void>();
   private readonly pendingOperations = new Map<string, Map<string, PendingOperation>>();
   private connection: RemoteConnection | undefined;
@@ -78,6 +80,7 @@ export class RemoteSessionClient {
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 5_000;
     this.scheduleReconnectTask = options.scheduleReconnect ?? scheduleReconnect;
     this.createRequestId = options.requestId ?? (() => `remote-web-${++this.requestCounter}`);
+    this.createOperationId = options.operationId ?? (() => crypto.randomUUID());
   }
 
   start(): void {
@@ -150,19 +153,20 @@ export class RemoteSessionClient {
     return promise;
   }
 
-  sendMessage(text: string, options?: AgentMessageOptions): Promise<CommandAcknowledgementMessage> {
+  sendMessage(text: string, options?: AgentMessageOptions & { operationId?: string }): Promise<CommandAcknowledgementMessage> {
     const outgoingId = this.replica.beginMessage(this.agentId, text, options?.delivery);
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'send_message',
-      payload: { requestId: this.createRequestId(), agentId: this.agentId, text, ...(options?.delivery === undefined ? {} : { delivery: options.delivery }) },
+      payload: { requestId: this.createRequestId(), operationId: options?.operationId ?? this.createOperationId(), agentId: this.agentId, text,
+        ...(options?.delivery === undefined ? {} : { delivery: options.delivery }) },
     } as const;
     const operation = this.sendOperation(message, 'command_acknowledged:send_message', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'send_message'
     ));
     void operation.then(() => this.replica.updateMessage(outgoingId, 'awaiting_echo'), error => {
       const uncertain = error instanceof RemoteOperationError && [
-        'operation_timeout', 'connection_disconnected', 'operation_stopped', 'operation_send_failed', 'command_failed',
+        'operation_timeout', 'connection_disconnected', 'operation_stopped', 'operation_send_failed', 'command_failed', 'operation_outcome_unknown',
       ].includes(error.code);
       this.replica.updateMessage(outgoingId, uncertain ? 'unconfirmed' : 'failed',
         uncertain ? 'Delivery is not confirmed. Check the conversation before sending again.'
@@ -171,52 +175,52 @@ export class RemoteSessionClient {
     return operation;
   }
 
-  steer(text: string): Promise<CommandAcknowledgementMessage> {
+  steer(text: string, operationId = this.createOperationId()): Promise<CommandAcknowledgementMessage> {
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'steer',
-      payload: { requestId: this.createRequestId(), agentId: this.agentId, text },
+      payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, text },
     } as const;
     return this.sendOperation(message, 'command_acknowledged:steer', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'steer'
     ));
   }
 
-  cancel(): Promise<CommandAcknowledgementMessage> {
+  cancel(operationId = this.createOperationId()): Promise<CommandAcknowledgementMessage> {
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'cancel',
-      payload: { requestId: this.createRequestId(), agentId: this.agentId },
+      payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId },
     } as const;
     return this.sendOperation(message, 'command_acknowledged:cancel', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'cancel'
     ));
   }
 
-  setSessionSetting(settingId: string, value: string): Promise<CommandAcknowledgementMessage> {
+  setSessionSetting(settingId: string, value: string, operationId = this.createOperationId()): Promise<CommandAcknowledgementMessage> {
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'set_session_setting',
-      payload: { requestId: this.createRequestId(), agentId: this.agentId, settingId, value },
+      payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, settingId, value },
     } as const;
     return this.sendOperation(message, 'command_acknowledged:set_session_setting', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'set_session_setting'
     ));
   }
 
-  setPlanning(active: boolean): Promise<CommandAcknowledgementMessage> {
+  setPlanning(active: boolean, operationId = this.createOperationId()): Promise<CommandAcknowledgementMessage> {
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'set_planning',
-      payload: { requestId: this.createRequestId(), agentId: this.agentId, active },
+      payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, active },
     } as const;
     return this.sendOperation(message, 'command_acknowledged:set_planning', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'set_planning'
     ));
   }
 
-  respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<InteractionResolvedMessage> {
-    if (!this.replica.getState().pendingInteractions.some((request) => request.requestId === requestId)) {
+  respondToInteraction(requestId: string, response: AgentInteractionResponse, operationId?: string): Promise<CommandAcknowledgementMessage> {
+    if (!operationId && !this.replica.getState().pendingInteractions.some((request) => request.requestId === requestId)) {
       return this.observeRejection(Promise.reject(new RemoteOperationError(
         'stale_interaction', 'This interaction is no longer pending.', false, requestId,
       )));
@@ -224,11 +228,11 @@ export class RemoteSessionClient {
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'interaction_response',
-      payload: { agentId: this.agentId, requestId, response },
+      payload: { agentId: this.agentId, requestId, submissionId: this.createRequestId(), operationId: operationId ?? this.createOperationId(), response },
     } as const;
-    return this.sendOperation(message, 'interaction_resolved', (result): result is InteractionResolvedMessage => (
-      result.type === 'interaction_resolved'
-    ));
+    return this.sendOperation(message, 'command_acknowledged:interaction_response', (result): result is CommandAcknowledgementMessage => (
+      result.type === 'command_acknowledged' && result.payload.command === 'interaction_response'
+    ), this.operationTimeoutMs, message.payload.submissionId);
   }
 
   requestResource(resourceId: string): Promise<ResourceResponse> {
@@ -262,9 +266,9 @@ export class RemoteSessionClient {
     return response.payload.commands;
   }
 
-  async executeCommand(commandId: string, args: string): Promise<AgentCommandResult> {
+  async executeCommand(commandId: string, args: string, operationId = this.createOperationId()): Promise<AgentCommandResult> {
     // Native commands may wait for user interactions; connection teardown still rejects pending work.
-    const response = await this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'execute_command', payload: { requestId: this.createRequestId(), agentId: this.agentId, commandId, args } }, 'command_result', (message): message is CommandResultResponse => message.type === 'command_result' && message.payload.agentId === this.agentId, null);
+    const response = await this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'execute_command', payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, commandId, args } }, 'command_result', (message): message is CommandResultResponse => message.type === 'command_result' && message.payload.agentId === this.agentId, null);
     return response.payload.result;
   }
 
@@ -448,8 +452,9 @@ export class RemoteSessionClient {
     operationType: string,
     matches: (response: RemoteServerMessage) => response is T,
     timeoutMs: number | null = this.operationTimeoutMs,
+    correlationId = message.payload.requestId,
   ): Promise<T> {
-    const { requestId } = message.payload;
+    const requestId = correlationId;
     const operations = this.pendingOperations.get(requestId) ?? new Map<string, PendingOperation>();
     if (operations.has(operationType)) {
       return this.observeRejection(Promise.reject(new RemoteOperationError(

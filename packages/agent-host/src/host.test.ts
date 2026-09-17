@@ -1,4 +1,4 @@
-import type { AgentCapabilities, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';
@@ -19,28 +19,55 @@ function operationId(label: string): string {
 }
 
 class Session implements AgentSession {
-  readonly capabilities = capabilities;
+  readonly capabilities: AgentCapabilities;
   disposed = false;
   observeCount = 0;
-  private release!: () => void;
-  private readonly closed = new Promise<void>((resolve) => { this.release = resolve; });
-  constructor(readonly providerId: string, readonly nativeSessionId: string) {}
-  async *observe(): AsyncIterable<ProviderStreamItem> { this.observeCount += 1; yield { type: 'history_boundary' }; await this.closed; }
+  readonly sentMessages: string[] = [];
+  readonly interactionResponses: Array<{ requestId: string; response: AgentInteractionResponse }> = [];
+  private readonly queued: ProviderStreamItem[];
+  private waiter: ((item: ProviderStreamItem | undefined) => void) | undefined;
+  constructor(readonly providerId: string, readonly nativeSessionId: string, initial: ProviderStreamItem[] = [{ type: 'history_boundary' }], sessionCapabilities = capabilities) {
+    this.queued = [...initial];
+    this.capabilities = sessionCapabilities;
+  }
+  async *observe(): AsyncIterable<ProviderStreamItem> {
+    this.observeCount += 1;
+    while (true) {
+      const item = this.queued.shift() ?? await new Promise<ProviderStreamItem | undefined>((resolve) => {
+        if (this.disposed) resolve(undefined);
+        else this.waiter = resolve;
+      });
+      if (!item) return;
+      yield item;
+    }
+  }
   async runtimeInfo(): Promise<AgentRuntimeInfo> { return { providerId: this.providerId, sessionId: this.nativeSessionId, status: 'idle',
     persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } }; }
-  async sendMessage(): Promise<void> {}
-  async respondToInteraction(): Promise<void> {}
-  async dispose(): Promise<void> { this.disposed = true; this.release(); }
+  async sendMessage(text: string): Promise<void> { this.sentMessages.push(text); }
+  async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
+    this.interactionResponses.push({ requestId, response });
+  }
+  emit(item: ProviderStreamItem): void {
+    const waiter = this.waiter;
+    if (waiter) { this.waiter = undefined; waiter(item); }
+    else this.queued.push(item);
+  }
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    const waiter = this.waiter;
+    this.waiter = undefined;
+    waiter?.(undefined);
+  }
 }
 
-function fixture(providerId: string) {
+function fixture(providerId: string, createSession: (nativeSessionId: string) => Session = id => new Session(providerId, id)) {
   const sessions = new Map<string, Session>();
   let creates = 0;
   const adapter: AgentProviderAdapter = { descriptor: { providerId, displayName: providerId.toUpperCase() },
     async createSession() { throw new Error('Host must supply directory sessions.'); },
     async resumeSession() { throw new Error('Host must supply directory sessions.'); } };
   const directory: AgentHostDirectory = { providerId, list: async () => [], workspaces: async () => [],
-    async create() { const id = `${providerId}-${++creates}`; const session = new Session(providerId, id); sessions.set(id, session); return id; },
+    async create() { const id = `${providerId}-${++creates}`; const session = createSession(id); sessions.set(id, session); return id; },
     async open(id) { const session = sessions.get(id) ?? new Session(providerId, id); sessions.set(id, session); return session; },
     async close() { await Promise.all([...sessions.values()].map((session) => session.dispose())); } };
   return { adapter, directory, sessions, createCount: () => creates };
@@ -321,6 +348,101 @@ describe('Agent Host runtime', () => {
       expect(session.disposed).toBe(false);
     } finally { await host.close(); await broker.close(); }
   });
+
+  it('replays lost acknowledgements through the production cache across credential and uplink replacement', async () => {
+    const broker = await uplinkBroker('host');
+    const approval = { kind: 'plan_approval' as const, requestId: 'approval-one', plan: 'Check the evidence.', allowedActions: ['approve' as const] };
+    let session: Session | undefined;
+    const codex = fixture('codex', nativeSessionId => {
+      session = new Session('codex', nativeSessionId, [
+        { type: 'observation', sourceKey: 'approval', occurredAt: 1, delivery: 'history',
+          event: { type: 'interaction_requested', provider: 'codex', request: approval } },
+        { type: 'history_boundary' },
+      ], { ...capabilities, interactions: { ...capabilities.interactions, planApproval: true } });
+      const respond = session.respondToInteraction.bind(session);
+      session.respondToInteraction = async (requestId, response) => {
+        await respond(requestId, response);
+        session!.emit({ type: 'observation', sourceKey: 'approval-resolved', occurredAt: 2, delivery: 'live',
+          event: { type: 'interaction_resolved', provider: 'codex', requestId, response } });
+      };
+      return session;
+    });
+    const savedCredentials: string[] = [];
+    const host = createAgentHost({ registrations: [codex], installationId: 'installation', name: 'Host', operationCache: { maxEntries: 3 },
+      uplink: { url: broker.url, remoteKey: 'initial-key', async onCredential(credential) { savedCredentials.push(credential); } } });
+    try {
+      await host.ready;
+      expect((await broker.rpc('POST', '/remote/create', 'agent', {
+        providerId: 'codex', operationId: operationId('integrated-create'),
+      })).status).toBe(200);
+      broker.openStream('lost', 'agent');
+      await expect.poll(() => broker.streamOpened('lost')).toBe(true);
+      broker.sendStream('lost', { protocolVersion: '1.4.0', type: 'negotiate' });
+      await expect.poll(() => broker.streamMessage('lost', 'agent_snapshot')).toBeDefined();
+
+      broker.sendStream('lost', { protocolVersion: '1.4.0', type: 'send_message', payload: {
+        requestId: 'send-lost', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
+      } });
+      broker.sendStream('lost', { protocolVersion: '1.4.0', type: 'interaction_response', payload: {
+        agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-lost',
+        operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
+      } });
+      await expect.poll(() => session?.sentMessages.length).toBe(1);
+      await expect.poll(() => session?.interactionResponses.length).toBe(1);
+      await expect.poll(() => broker.streamMessage('lost', 'interaction_resolved', approval.requestId)).toBeDefined();
+
+      const fullCacheRead = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.4.0', 'agent');
+      expect(fullCacheRead.status).toBe(200);
+      expect(JSON.parse(fullCacheRead.body).payload.pendingInteractions).toEqual([]);
+      broker.issueCredential('rotated-key');
+      await expect.poll(() => savedCredentials).toEqual(['rotated-key']);
+
+      await host.replaceUplink({ url: broker.url, remoteKey: 'rotated-key', async onCredential(credential) { savedCredentials.push(credential); } });
+      broker.openStream('retry', 'agent');
+      await expect.poll(() => broker.streamOpened('retry')).toBe(true);
+      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'negotiate' });
+      await expect.poll(() => broker.streamMessage('retry', 'agent_snapshot')).toBeDefined();
+      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'send_message', payload: {
+        requestId: 'send-retry', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
+      } });
+      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'interaction_response', payload: {
+        agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-retry',
+        operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
+      } });
+      await expect.poll(() => broker.streamMessage('retry', 'command_acknowledged', 'send-retry')).toBeDefined();
+      await expect.poll(() => broker.streamMessage('retry', 'command_acknowledged', 'approval-retry')).toBeDefined();
+      expect(session?.sentMessages).toEqual(['Run once.']);
+      expect(session?.interactionResponses).toHaveLength(1);
+
+      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'send_message', payload: {
+        requestId: 'capacity', operationId: operationId('capacity-send'), agentId: 'agent', text: 'Do not dispatch.',
+      } });
+      await expect.poll(() => broker.streamMessage('retry', 'protocol_error', 'capacity')).toMatchObject({
+        payload: { code: 'operation_capacity_exceeded' },
+      });
+      expect(session?.sentMessages).toEqual(['Run once.']);
+    } finally { await host.close(); await broker.close(); }
+  });
+
+  it('starts a new operation-cache lifetime when the Host is recreated', async () => {
+    const broker = await uplinkBroker('host');
+    const codex = fixture('codex');
+    const request = { providerId: 'codex', operationId: operationId('host-recreation') };
+    const first = createAgentHost({ registrations: [codex], installationId: 'installation', name: 'Host',
+      uplink: { url: broker.url, remoteKey: 'key' } });
+    let second: ReturnType<typeof createAgentHost> | undefined;
+    try {
+      await first.ready;
+      expect(JSON.parse((await broker.rpc('POST', '/remote/create', 'before', request)).body).nativeSessionId).toBe('codex-1');
+      await first.close();
+      second = createAgentHost({ registrations: [codex], installationId: 'installation', name: 'Host',
+        uplink: { url: broker.url, remoteKey: 'key' } });
+      await second.ready;
+      expect(JSON.parse((await broker.rpc('POST', '/remote/create', 'after', request)).body).nativeSessionId).toBe('codex-2');
+      expect(codex.createCount()).toBe(2);
+    } finally { await second?.close(); await first.close(); await broker.close(); }
+  });
+
   it('isolates a completed creation across a real uplink replacement with a different operation scope', async () => {
     const first = await uplinkBroker('host-first'); const second = await uplinkBroker('host-second');
     const codex = fixture('codex');
@@ -499,6 +621,7 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
   let socket: WebSocket | undefined;
   let providers: unknown;
   let pausedSocket: WebSocket | undefined;
+  const received: Array<Record<string, unknown>> = [];
   let registrationCount = 0, heartbeatAcknowledgementCount = 0;
   let resolveConnected!: () => void;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
@@ -508,7 +631,8 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
     let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
     connection.on('close', () => clearInterval(heartbeatTimer));
     connection.on('message', (data) => {
-      const message = JSON.parse(data.toString()) as { type: string; providers?: unknown };
+      const message = JSON.parse(data.toString()) as Record<string, unknown> & { type: string; providers?: unknown };
+      received.push(message);
       if (message.type === 'register') { providers = message.providers; registrationCount += 1; }
       if (message.type === 'heartbeat_ack') heartbeatAcknowledgementCount += 1;
       if (message.type === 'register' && autoRegister) {
@@ -532,6 +656,26 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
     pauseHeartbeat() { if (!socket) throw new Error('Broker has no Host connection.'); pausedSocket = socket; return socket; },
     issueCredential(credential: string) { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_issued', credential })); },
     register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat })); },
+    openStream(streamId: string, sessionId: string) {
+      socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_open', streamId, sessionId }));
+    },
+    sendStream(streamId: string, message: object) {
+      socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId, message: JSON.stringify(message) }));
+    },
+    streamOpened(streamId: string) {
+      return received.some(message => message.type === 'stream_opened' && message.streamId === streamId);
+    },
+    streamMessage(streamId: string, type: string, requestId?: string): Record<string, unknown> | undefined {
+      for (const frame of received) {
+        if (frame.type !== 'stream_message' || frame.streamId !== streamId || typeof frame.message !== 'string') continue;
+        const message = JSON.parse(frame.message) as Record<string, unknown>;
+        if (message.type !== type) continue;
+        const payload = message.payload;
+        if (requestId === undefined || (payload && typeof payload === 'object' && 'requestId' in payload
+          && (payload as { requestId?: unknown }).requestId === requestId)) return message;
+      }
+      return undefined;
+    },
     rpc(method: 'GET' | 'POST', path: string, sessionId?: string, body?: unknown): Promise<{ status: number; body: string }> {
       const requestId = `rpc-${++sequence}`;
       return new Promise((resolve, reject) => {

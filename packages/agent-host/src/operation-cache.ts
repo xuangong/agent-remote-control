@@ -113,9 +113,15 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       throw new OperationCacheError('operation_capacity_exceeded', 'The Host operation cache is full. Wait for retained operations to expire before trying a new mutation.');
     }
 
-    const pending = runOperation(key, fingerprint, reservedBytes, resultReservation, work);
+    let resolvePending!: (value: T | PromiseLike<T>) => void;
+    let rejectPending!: (reason?: unknown) => void;
+    const pending = new Promise<T>((resolve, reject) => {
+      resolvePending = resolve;
+      rejectPending = reject;
+    });
     entries.set(key, { state: 'in_flight', fingerprint, bytes: reservedBytes, promise: pending });
     retainedBytes += reservedBytes;
+    void runOperation(key, fingerprint, reservedBytes, resultReservation, work).then(resolvePending, rejectPending);
     return pending;
   }
 

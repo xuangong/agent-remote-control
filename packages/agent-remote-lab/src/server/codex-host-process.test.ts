@@ -37,7 +37,8 @@ it('keeps a native Codex session usable when an independent Host pairs to a rest
     const recoveredCreation = await post(`${backendUrl}/v1/remote/hosts/${restarted.hostId}/create`, {
       providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000001', workspaceId: initial.workspace,
     });
-    expect(recoveredCreation).toEqual(created);
+    expect(recoveredCreation).not.toEqual(created);
+    expect(recoveredCreation.nativeSessionId).not.toBe(created.nativeSessionId);
     const attached = await post(`${backendUrl}/v1/remote/hosts/${restarted.hostId}/attach`, {
       providerId: 'codex', nativeSessionId: created.nativeSessionId,
     });

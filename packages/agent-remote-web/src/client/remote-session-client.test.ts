@@ -849,6 +849,32 @@ describe('RemoteSessionClient', () => {
     await expect(pending).resolves.toEqual(acknowledgement);
   });
 
+  it('does not reject an unrelated transport operation whose ID matches an invalidated interaction', async () => {
+    const transport = new FakeTransport();
+    const client = connectedClient(transport, { requestId: () => 'native-approval' });
+    const command = client.sendMessage('Continue independently.');
+    let settled = false;
+    void command.then(() => { settled = true; }, () => { settled = true; });
+    transport.emit({
+      protocolVersion: '1.4.0', type: 'interaction_requested',
+      payload: { agentId: 'agent-one', request: {
+        kind: 'plan_approval', requestId: 'native-approval', plan: 'Check.', allowedActions: ['approve'],
+      } },
+    });
+
+    transport.emit({
+      protocolVersion: '1.4.0', type: 'interaction_invalidated',
+      payload: { agentId: 'agent-one', requestId: 'native-approval', reason: 'connection_replaced' },
+    });
+    await transport.settle();
+    expect(settled).toBe(false);
+
+    const acknowledgement = { protocolVersion: '1.4.0' as const, type: 'command_acknowledged' as const,
+      payload: { requestId: 'native-approval', agentId: 'agent-one', command: 'send_message' as const } };
+    transport.emit(acknowledgement);
+    await expect(command).resolves.toEqual(acknowledgement);
+  });
+
   it('rejects stale interaction submissions before a delayed resolution can acknowledge them', async () => {
     const transport = new FakeTransport();
     const client = connectedClient(transport);

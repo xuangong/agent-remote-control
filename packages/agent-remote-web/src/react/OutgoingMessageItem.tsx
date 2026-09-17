@@ -4,7 +4,7 @@ import { UserMessageItem } from './items/MessageItem.js';
 export function OutgoingMessageItem({ message }: { readonly message: OutgoingMessage }) {
   const settled = message.status === 'failed' || message.status === 'unconfirmed';
   const label = message.status === 'failed' ? 'Send failed — not confirmed'
-    : message.status === 'unconfirmed' ? 'Send acknowledged — conversation not confirmed'
+    : message.status === 'unconfirmed' ? 'Delivery not confirmed'
     : message.status === 'sending' ? 'Sending…'
     : message.delivery === 'next_turn' ? 'Queued — waiting for conversation…' : 'Sent — waiting for conversation…';
   return <div className="agent-timeline-entry agent-outgoing-message" data-entry-key={message.id}

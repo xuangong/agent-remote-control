@@ -28,6 +28,9 @@ function acknowledge() {
     requestId: submitted.payload.requestId, agentId: snapshot.payload.id, command: 'send_message',
   } });
 }
+function disconnect() {
+  listener.onDisconnect();
+}
 function echo() {
   if (submitted) listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_stream', payload: {
     agentId: snapshot.payload.id, epoch: 'delivery', seq: replica.getState().timeline.nextSeq, timestamp: new Date().toISOString(),
@@ -37,7 +40,7 @@ function echo() {
 function View() {
   const state = useAgentReplica(replica);
   return <div style={{ height: '100dvh', display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)' }}>
-    <nav aria-label="Delivery controls"><button onClick={acknowledge}>Acknowledge send</button><button onClick={echo}>Deliver message</button></nav>
+    <nav aria-label="Delivery controls"><button onClick={acknowledge}>Acknowledge send</button><button onClick={disconnect}>Disconnect before acknowledgement</button><button onClick={echo}>Deliver message</button></nav>
     <LabWorkbench state={state} sessionStatus="ready" actions={{ sendMessage: async (text, options) => { await client.sendMessage(text, options); } }} />
   </div>;
 }

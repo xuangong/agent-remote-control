@@ -43,6 +43,21 @@ describe('operation cache', () => {
     await cache.close();
   });
 
+  it('expires a synchronous validation rejection and admits fresh work', async () => {
+    let now = 1_000;
+    const cache = createOperationCache({ maxEntries: 1, ttlMs: 10, now: () => now, cleanupIntervalMs: 10_000 });
+    await expect(cache.execute(descriptor(), {
+      validate: () => { throw Object.assign(new Error('The interaction is stale.'), { code: 'stale_interaction' }); },
+      dispatch: async () => ({ accepted: false }),
+    })).rejects.toMatchObject({ code: 'stale_interaction' });
+
+    now += 11;
+    await expect(cache.execute(descriptor('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'), {
+      dispatch: async () => ({ accepted: true }),
+    })).resolves.toEqual({ accepted: true });
+    await cache.close();
+  });
+
   it('retains unknown outcomes without dispatching a duplicate', async () => {
     const cache = createOperationCache();
     let executions = 0;

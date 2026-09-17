@@ -51,6 +51,17 @@ export const AgentPlanningState = Strict({
 });
 export type AgentPlanningState = Static<typeof AgentPlanningState>;
 
+export const AgentRuntimeConnection = Strict({
+  state: Type.Union([
+    Type.Literal('connected'), Type.Literal('reconnecting'),
+    Type.Literal('restoring'), Type.Literal('unavailable'),
+  ]),
+  reason: Type.Optional(NonEmptyString),
+  attempt: Type.Optional(Type.Integer({ minimum: 0 })),
+  nextRetryAt: Type.Optional(Type.Number({ minimum: 0 })),
+});
+export type AgentRuntimeConnection = Static<typeof AgentRuntimeConnection>;
+
 export const AgentChildSession = Strict({
   nativeSessionId: NonEmptyString,
   title: Type.String(),
@@ -72,6 +83,7 @@ export const AgentRuntimeInfo = Strict({
   model: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   mode: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   planning: Type.Optional(AgentPlanningState),
+  connection: Type.Optional(AgentRuntimeConnection),
   settings: Type.Optional(Type.Array(AgentSessionSetting)),
   childSessions: Type.Optional(Type.Array(AgentChildSession)),
   persistence: Type.Optional(AgentPersistenceHandle),

@@ -399,8 +399,23 @@ function managerEventToServerMessage(
           response: structuredClone(managerEvent.response),
         },
       };
+    case 'interaction_invalidated':
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'interaction_invalidated',
+        payload: {
+          agentId: managerEvent.agentId,
+          requestId: managerEvent.requestId,
+          reason: managerEvent.reason,
+          ...(managerEvent.turnId === undefined ? {} : { turnId: managerEvent.turnId }),
+        },
+      };
     case 'agent_stream':
-      if (managerEvent.event.type === 'interaction_requested' || managerEvent.event.type === 'interaction_resolved') {
+      if (
+        managerEvent.event.type === 'interaction_requested'
+        || managerEvent.event.type === 'interaction_resolved'
+        || managerEvent.event.type === 'interaction_invalidated'
+      ) {
         return undefined;
       }
       if (managerEvent.event.type === 'timeline') {
@@ -443,7 +458,7 @@ function publicTimelineEvent(
 }
 
 function publicStateEvent(event: Exclude<AgentStreamEvent, {
-  type: 'timeline' | 'interaction_requested' | 'interaction_resolved';
+  type: 'timeline' | 'interaction_requested' | 'interaction_resolved' | 'interaction_invalidated';
 }>) {
   const { provider, ...payload } = event;
   return { ...structuredClone(payload), providerId: provider };

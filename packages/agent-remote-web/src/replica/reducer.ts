@@ -5,6 +5,7 @@ import type {
   AgentUpdateMessage,
   HistoryPage,
   InteractionRequestedMessage,
+  InteractionInvalidatedMessage,
   InteractionResolvedMessage,
   ProjectedTimelineEntry,
   ResourceResponse,
@@ -102,6 +103,10 @@ export function applyInteractionResolved(state: AgentReplicaState, requestId: st
   };
 }
 
+export function applyInteractionInvalidated(state: AgentReplicaState, requestId: string): AgentReplicaState {
+  return applyInteractionResolved(state, requestId);
+}
+
 export function applyResourceResponse(state: AgentReplicaState, response: ResourceResponse): AgentReplicaState {
   return {
     ...state,
@@ -191,6 +196,13 @@ export function applyInteractionResolvedMessage(
   message: InteractionResolvedMessage,
 ): AgentReplicaState {
   return applyInteractionResolved(state, message.payload.requestId);
+}
+
+export function applyInteractionInvalidatedMessage(
+  state: AgentReplicaState,
+  message: InteractionInvalidatedMessage,
+): AgentReplicaState {
+  return applyInteractionInvalidated(state, message.payload.requestId);
 }
 
 export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage): TimelineReduction {

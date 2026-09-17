@@ -179,3 +179,15 @@ export const InteractionResolvedMessage = Strict({
   }),
 });
 export type InteractionResolvedMessage = Static<typeof InteractionResolvedMessage>;
+
+export const InteractionInvalidatedMessage = Strict({
+  protocolVersion: ProtocolVersionSchema,
+  type: Type.Literal('interaction_invalidated'),
+  payload: Strict({
+    agentId: NonEmptyString,
+    requestId: NonEmptyString,
+    reason: NonEmptyString,
+    turnId: Type.Optional(NonEmptyString),
+  }),
+});
+export type InteractionInvalidatedMessage = Static<typeof InteractionInvalidatedMessage>;

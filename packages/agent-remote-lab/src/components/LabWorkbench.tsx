@@ -51,6 +51,15 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
   const agentFailure = state?.agent?.status === 'failed'
     ? state.agent.lastError?.trim() || 'The Agent did not provide a failure reason.'
     : undefined;
+  const runtimeConnection = state?.agent?.runtimeInfo.connection;
+  const runtimeMutationDisabled = runtimeConnection !== undefined && runtimeConnection.state !== 'connected';
+  const runtimeNotice = runtimeConnection?.state === 'reconnecting'
+    ? 'Native runtime is reconnecting. Changes are temporarily unavailable.'
+    : runtimeConnection?.state === 'restoring'
+      ? 'Native runtime is restoring this session. Changes are temporarily unavailable.'
+      : runtimeConnection?.state === 'unavailable'
+        ? 'Native runtime is unavailable. Changes are unavailable.'
+        : undefined;
   const activityLabel = agentFailure ? 'Agent failed'
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
@@ -58,6 +67,9 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
     : sessionStatus === 'catching_up' ? 'Synchronizing'
     : sessionStatus === 'idle' ? 'Disconnected'
     : !state?.agent ? 'Connecting'
+    : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
+    : runtimeConnection?.state === 'restoring' ? 'Restoring'
+    : runtimeConnection?.state === 'unavailable' ? 'Unavailable'
     : state.agent.status === 'closed' ? 'Closed'
     : state.agent.status === 'starting' ? 'Starting'
     : state.pendingInteractions.length > 0 || state.agent.status === 'waiting' ? 'Waiting for response'
@@ -80,6 +92,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
             {agentFailure ? <p className="lab-control-note" role="alert">Agent failed: {agentFailure}</p>
               : connectionFailure ? <p className="lab-control-note" role="alert">Agent connection failed: {connectionFailure.message}</p>
               : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">Timeline synchronization is reconnecting.</p> : null}
+            {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
             <AgentTimeline
               state={state}
               onInspectEntry={onInspectEntry}
@@ -92,6 +105,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
               resolveSessionLink={resolveSessionLink}
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
+              interactionDisabled={runtimeMutationDisabled}
               onResourceRequest={actions.requestResource}
               onResourceResolve={actions.resolveResource}
               questionDrafts={questionDrafts}
@@ -129,7 +143,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
           sessionKey={state?.agent?.id}
           draft={messageDraft}
           onDraftChange={onMessageDraftChange}
-          disabled={sessionStatus !== 'ready'}
+          disabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
           onSendMessage={actions.sendMessage}
           onCancel={actions.cancel}
           onSetSessionSetting={actions.setSessionSetting}

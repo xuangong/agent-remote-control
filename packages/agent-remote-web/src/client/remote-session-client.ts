@@ -312,6 +312,15 @@ export class RemoteSessionClient {
         this.replica.applyInteractionResolved(message);
         this.resolvePendingOperation(message.payload.requestId, message);
         return;
+      case 'interaction_invalidated':
+        this.replica.applyInteractionInvalidated(message);
+        this.rejectPendingOperationsForRequestId(message.payload.requestId, new RemoteOperationError(
+          'interaction_invalidated',
+          'This interaction is no longer available.',
+          false,
+          message.payload.requestId,
+        ));
+        return;
       case 'resource_response':
         this.replica.applyResource(message);
         this.resolvePendingOperation(message.payload.requestId, message);

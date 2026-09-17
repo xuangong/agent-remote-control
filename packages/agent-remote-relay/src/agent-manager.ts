@@ -553,6 +553,14 @@ export class AgentManager {
         requestId: event.requestId,
         response: structuredClone(event.response),
       });
+    } else if (event.type === 'interaction_invalidated') {
+      this.emit({
+        type: 'interaction_invalidated',
+        agentId: this.agentId,
+        requestId: event.requestId,
+        reason: event.reason,
+        ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+      });
     }
   }
 
@@ -603,19 +611,28 @@ export class AgentManager {
         break;
       }
       case 'interaction_resolved': {
-        this.claimedInteractionIds.delete(event.requestId);
-        const index = state.pendingInteractions.findIndex(({ requestId }) => requestId === event.requestId);
-        if (index !== -1) state.pendingInteractions.splice(index, 1);
-        if (state.pendingInteractions.length === 0) {
-          if (state.status === 'waiting') {
-            state.status = this.statusBeforeInteraction ?? (state.activeTurn ? 'running' : 'idle');
-          }
-          this.statusBeforeInteraction = undefined;
-        }
+        this.clearPendingInteraction(event.requestId);
+        break;
+      }
+      case 'interaction_invalidated': {
+        this.clearPendingInteraction(event.requestId);
         break;
       }
     }
     this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot() });
+  }
+
+  private clearPendingInteraction(requestId: string): void {
+    const state = this.state.payload;
+    this.claimedInteractionIds.delete(requestId);
+    const index = state.pendingInteractions.findIndex((request) => request.requestId === requestId);
+    if (index !== -1) state.pendingInteractions.splice(index, 1);
+    if (state.pendingInteractions.length === 0) {
+      if (state.status === 'waiting') {
+        state.status = this.statusBeforeInteraction ?? (state.activeTurn ? 'running' : 'idle');
+      }
+      this.statusBeforeInteraction = undefined;
+    }
   }
 
   private isDuplicate(observation: ProviderObservation): boolean {

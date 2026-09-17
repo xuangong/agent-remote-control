@@ -206,6 +206,7 @@
   padding: 12px;
   background: var(--agent-canvas);
 }
+.agent-interaction-lock { min-width: 0; margin: 0; padding: 0; border: 0; }
 .agent-interaction {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

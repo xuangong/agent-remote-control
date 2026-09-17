@@ -15,9 +15,11 @@ export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: Ag
   const inFlight = useRef(false);
   const agent = state.agent;
   const planning = agent?.runtimeInfo.planning;
+  const connection = agent?.runtimeInfo.connection;
+  const runtimeConnected = connection === undefined || connection.state === 'connected';
   const supported = agent?.capabilities.planning === true;
   const pending = submitting || target !== undefined || planning?.requested !== undefined;
-  const canChange = supported && planning !== undefined && sessionStatus === 'ready'
+  const canChange = supported && planning !== undefined && sessionStatus === 'ready' && runtimeConnected
     && agent?.status === 'idle' && !agent.activeTurn && state.pendingInteractions.length === 0
     && !pending && onSetPlanning !== undefined;
 
@@ -50,6 +52,7 @@ export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: Ag
     </div>
     <p className="agent-composer-note" role="status">{!supported ? 'Planning is not supported by this session.'
       : !planning ? 'Waiting for Provider planning state.'
+      : !runtimeConnected ? 'Planning changes are unavailable while the native runtime reconnects.'
       : pending ? 'Waiting for Provider confirmation.'
       : !canChange ? 'Planning can change only while connected and idle, with no pending interactions.'
       : 'Provider confirmed. Changes apply to the next message.'}</p>

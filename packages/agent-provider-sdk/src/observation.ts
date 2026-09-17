@@ -48,6 +48,13 @@ export interface AgentPlanningState {
   requested?: boolean;
 }
 
+export interface AgentRuntimeConnection {
+  state: 'connected' | 'reconnecting' | 'restoring' | 'unavailable';
+  reason?: string;
+  attempt?: number;
+  nextRetryAt?: number;
+}
+
 /** A direct native child, with stable creation provenance when the runtime provides it. */
 export interface AgentChildSession {
   nativeSessionId: string;
@@ -69,6 +76,7 @@ export interface AgentRuntimeInfo {
   model?: string | null;
   mode?: string | null;
   planning?: AgentPlanningState;
+  connection?: AgentRuntimeConnection;
   settings?: import('./session-settings.js').AgentSessionSetting[];
   childSessions?: AgentChildSession[];
   persistence?: import('./provider.js').AgentPersistenceHandle;
@@ -84,7 +92,8 @@ export type AgentStreamEvent =
   | { type: 'usage_updated'; provider: string; usage: AgentUsage; turnId?: string }
   | { type: 'runtime_updated'; provider: string; runtimeInfo: AgentRuntimeInfo }
   | { type: 'interaction_requested'; provider: string; request: AgentInteractionRequest; turnId?: string }
-  | { type: 'interaction_resolved'; provider: string; requestId: string; response: AgentInteractionResponse; turnId?: string };
+  | { type: 'interaction_resolved'; provider: string; requestId: string; response: AgentInteractionResponse; turnId?: string }
+  | { type: 'interaction_invalidated'; provider: string; requestId: string; reason: string; turnId?: string };
 
 export interface ProviderResourceReference {
   locator: string;

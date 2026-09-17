@@ -858,6 +858,41 @@ describe('AgentManager Timeline and Snapshot', () => {
 });
 
 describe('AgentManager interactions', () => {
+  it('invalidates a pending request without fabricating a completed interaction', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({
+      type: 'observation', sourceKey: 'question-request', occurredAt: 1, delivery: 'history',
+      event: { type: 'interaction_requested', provider: 'codex', turnId: 'turn-1', request: questionRequest },
+    });
+    stream.push({ type: 'history_boundary' });
+    const manager = await AgentManager.attach({
+      agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' },
+      session: sessionFor(stream), epoch: 'epoch-1',
+    });
+    await manager.ready;
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event));
+
+    stream.push({
+      type: 'observation', sourceKey: 'question-invalidated', occurredAt: 2, delivery: 'live',
+      event: {
+        type: 'interaction_invalidated', provider: 'codex', turnId: 'turn-1',
+        requestId: questionRequest.requestId, reason: 'connection_replaced',
+      },
+    });
+    await nextEventLoopTurn();
+
+    expect(manager.snapshot().payload.pendingInteractions).toEqual([]);
+    expect(manager.snapshot().payload.status).toBe('idle');
+    expect(manager.fetchTimeline({ requestId: 'reload', agentId: 'agent-1', direction: 'tail', limit: 10 }).payload.entries).toEqual([]);
+    expect(events.map(({ type }) => type)).toEqual(['agent_state', 'agent_stream', 'interaction_invalidated']);
+    expect(events.at(-1)).toEqual({
+      type: 'interaction_invalidated', agentId: 'agent-1', requestId: 'question-1',
+      reason: 'connection_replaced', turnId: 'turn-1',
+    });
+    await manager.close();
+  });
+
   it('stores a completed interaction once across history and live overlap', async () => {
     const stream = new ManualProviderStream();
     const requested: ProviderStreamItem = {

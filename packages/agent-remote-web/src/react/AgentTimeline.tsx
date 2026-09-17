@@ -32,6 +32,7 @@ export interface AgentTimelineProps {
   readonly historyError?: string;
   readonly onLoadOlder?: () => void | Promise<void>;
   readonly onInteractionResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
+  readonly interactionDisabled?: boolean;
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void>;
   readonly onResourceResolve?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
   readonly questionDrafts?: Readonly<Record<string, QuestionDraft>>;
@@ -50,6 +51,7 @@ export function AgentTimeline({
   historyError,
   onOpenChildSession,
   onInteractionResponse,
+  interactionDisabled = false,
   onResourceRequest,
   onResourceResolve,
   questionDrafts,
@@ -128,13 +130,16 @@ export function AgentTimeline({
     <AgentChildSessionList childrenFor={childrenFor} key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
 
     {state.pendingInteractions.length > 0 ? <aside className="agent-interactions" aria-label="Pending interactions">
-      {state.pendingInteractions.map((request) => <InteractionPanel
+      {state.pendingInteractions.map((request) => <fieldset
+        className="agent-interaction-lock"
+        disabled={interactionDisabled}
         key={JSON.stringify([state.agent?.id, request.requestId])}
-        request={request}
-        onResponse={onInteractionResponse}
-        questionDraft={questionDrafts?.[request.requestId]}
-        onQuestionDraftChange={onQuestionDraftChange ? (draft) => onQuestionDraftChange(request.requestId, draft) : undefined}
-      />)}
+      ><InteractionPanel
+          request={request}
+          onResponse={onInteractionResponse}
+          questionDraft={questionDrafts?.[request.requestId]}
+          onQuestionDraftChange={onQuestionDraftChange ? (draft) => onQuestionDraftChange(request.requestId, draft) : undefined}
+        /></fieldset>)}
     </aside> : null}
   </section>;
 }

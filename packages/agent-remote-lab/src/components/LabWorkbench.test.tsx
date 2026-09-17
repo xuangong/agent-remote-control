@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
@@ -25,6 +25,57 @@ describe('LabWorkbench', () => {
     const state = { ...replicaState, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'plan-1', plan: 'Review this plan.', allowedActions: ['approve' as const] }] };
     const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{}} />);
     expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Waiting for response');
+  });
+
+  it('keeps recovery state mounted while disabling native mutations', async () => {
+    const state = {
+      ...replicaState,
+      pendingInteractions: [{
+        kind: 'plan_approval' as const, requestId: 'plan-1', plan: 'Review this plan.',
+        allowedActions: ['approve' as const, 'reject' as const],
+      }],
+      agent: {
+        ...replicaState.agent!,
+        status: 'running' as const,
+        activeTurn: { turnId: 'turn-1', startedAt: '2026-09-17T00:00:00.000Z' },
+        capabilities: {
+          ...replicaState.agent!.capabilities,
+          cancel: true, steer: true, commands: true, planning: true, sessionSettings: true,
+        },
+        runtimeInfo: {
+          ...replicaState.agent!.runtimeInfo,
+          connection: { state: 'reconnecting' as const, reason: 'transport_closed', attempt: 2 },
+          planning: { active: false },
+          settings: [{
+            id: 'model', category: 'model' as const, label: 'Model', value: 'current', mutable: true,
+            scope: 'session' as const, options: [{ value: 'current', label: 'Current' }, { value: 'next', label: 'Next' }],
+          }],
+        },
+      },
+    };
+    const container = await render(<LabWorkbench
+      state={state}
+      sessionStatus="ready"
+      messageDraft="Keep my recovery draft"
+      actions={{
+        sendMessage: vi.fn(), cancel: vi.fn(), setPlanning: vi.fn(),
+        setSessionSetting: vi.fn(), listCommands: vi.fn(), executeCommand: vi.fn(),
+        respondToInteraction: vi.fn(),
+      }}
+    />);
+
+    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Reconnecting');
+    expect(container.textContent).toContain('Native runtime is reconnecting. Changes are temporarily unavailable.');
+    expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({
+      disabled: true, value: 'Keep my recovery draft',
+    });
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-action="approve"]')?.matches(':disabled')).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!.click());
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="session-setting-model"]')?.disabled).toBe(true);
   });
 
   it('focuses the empty state on opening a Provider instead of showing an unavailable composer', async () => {

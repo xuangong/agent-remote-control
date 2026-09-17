@@ -811,6 +811,35 @@ describe('RemoteSessionClient', () => {
     expect(replica.getState().pendingInteractions).toEqual([]);
   });
 
+  it('invalidates an interaction locally and rejects an in-flight stale response', async () => {
+    const transport = new FakeTransport();
+    const replica = new AgentReplica();
+    const client = new RemoteSessionClient('agent-one', transport, replica);
+    client.start();
+    transport.open();
+    transport.emit({
+      protocolVersion: '1.4.0', type: 'interaction_requested',
+      payload: {
+        agentId: 'agent-one',
+        request: { kind: 'plan_approval', requestId: 'interaction-one', plan: 'Check the evidence.', allowedActions: ['approve'] },
+      },
+    });
+    const timeline = replica.getState().timeline;
+    const pending = client.respondToInteraction('interaction-one', { kind: 'plan_approval', action: 'approve' });
+
+    transport.emit({
+      protocolVersion: '1.4.0', type: 'interaction_invalidated',
+      payload: {
+        agentId: 'agent-one', requestId: 'interaction-one',
+        reason: 'connection_replaced', turnId: 'turn-one',
+      },
+    });
+
+    await expect(pending).rejects.toMatchObject({ code: 'interaction_invalidated', requestId: 'interaction-one' });
+    expect(replica.getState().pendingInteractions).toEqual([]);
+    expect(replica.getState().timeline).toBe(timeline);
+  });
+
   it('rejects stale interaction submissions before a delayed resolution can acknowledge them', async () => {
     const transport = new FakeTransport();
     const client = connectedClient(transport);

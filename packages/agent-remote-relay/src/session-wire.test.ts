@@ -390,7 +390,11 @@ describe('session wire Timeline and manager-event projection', () => {
       kind: 'plan_approval' as const, requestId: 'plan-1', plan: '## Plan',
       allowedActions: ['approve' as const, 'reject' as const],
     };
-    emit({ type: 'agent_state', agentId: 'agent-1', snapshot: agent.snapshot() });
+    const reconnecting = agent.snapshot();
+    reconnecting.payload.runtimeInfo.connection = {
+      state: 'reconnecting', reason: 'transport_closed', attempt: 2, nextRetryAt: 1_797_530_400_000,
+    };
+    emit({ type: 'agent_state', agentId: 'agent-1', snapshot: reconnecting });
     emit({
       type: 'agent_stream', agentId: 'agent-1', timestamp: '2026-09-02T00:00:03.000Z',
       event: { type: 'interaction_requested', provider: 'codex', request },
@@ -400,10 +404,19 @@ describe('session wire Timeline and manager-event projection', () => {
       type: 'interaction_resolved', agentId: 'agent-1', requestId: 'plan-1',
       response: { kind: 'plan_approval', action: 'approve' },
     });
+    emit({
+      type: 'interaction_invalidated', agentId: 'agent-1', requestId: 'plan-2',
+      reason: 'connection_replaced', turnId: 'turn-1',
+    });
 
     expect(output.map(({ type }) => type)).toEqual([
-      'agent_update', 'interaction_requested', 'interaction_resolved',
+      'agent_update', 'interaction_requested', 'interaction_resolved', 'interaction_invalidated',
     ]);
+    expect(output[0]).toMatchObject({ payload: { runtimeInfo: { connection: { state: 'reconnecting', attempt: 2 } } } });
+    expect(output.at(-1)).toEqual({
+      protocolVersion: '1.4.0', type: 'interaction_invalidated',
+      payload: { agentId: 'agent-1', requestId: 'plan-2', reason: 'connection_replaced', turnId: 'turn-1' },
+    });
     expect(output.every((message) => !('snapshot' in message) && !('event' in message))).toBe(true);
   });
 });

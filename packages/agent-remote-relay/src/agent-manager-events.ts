@@ -36,4 +36,11 @@ export type AgentManagerEvent =
       agentId: string;
       requestId: string;
       response: AgentInteractionResponse;
+    }
+  | {
+      type: 'interaction_invalidated';
+      agentId: string;
+      requestId: string;
+      reason: string;
+      turnId?: string;
     };

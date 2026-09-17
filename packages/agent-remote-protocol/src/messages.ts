@@ -3,6 +3,7 @@ import { type Static, Type } from '@sinclair/typebox';
 import { AgentStreamMessage } from './envelope.js';
 import { HistoryPage, TimelineRequest } from './history.js';
 import {
+  InteractionInvalidatedMessage,
   InteractionRequestedMessage,
   InteractionResolvedMessage,
   InteractionResponseMessage,
@@ -231,6 +232,7 @@ export const ServerMessage = Type.Union([
   AgentStreamMessage,
   InteractionRequestedMessage,
   InteractionResolvedMessage,
+  InteractionInvalidatedMessage,
   ResourceResponse,
   ResourceResolveResponse,
   ResourceUpdate,

@@ -12,6 +12,7 @@ import {
   applyAgentSnapshot,
   applyHistoryPage,
   applyInteractionRequested,
+  applyInteractionInvalidated,
   applyInteractionResolved,
   applyResourceUpdate,
   applyTimelineResourceBindingReplacement,
@@ -304,6 +305,17 @@ describe('agent replica reducer', () => {
       interactionBaseline: resolveBaseline,
     });
     expect(state.pendingInteractions).toEqual([]);
+  });
+
+  it('invalidates a pending interaction without changing the timeline', () => {
+    let state = applyAgentSnapshot(createReplicaState(), snapshot('waiting', [question]));
+    const timeline = state.timeline;
+
+    state = applyInteractionInvalidated(state, question.requestId);
+
+    expect(state.pendingInteractions).toEqual([]);
+    expect(state.timeline).toBe(timeline);
+    expect(state.interactionChanges[question.requestId]).not.toHaveProperty('request');
   });
 
   it('coalesces incremental tool and todo lifecycle events like projected history', () => {

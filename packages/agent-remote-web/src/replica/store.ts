@@ -4,6 +4,7 @@ import type {
   AgentUpdateMessage,
   HistoryPage,
   InteractionRequestedMessage,
+  InteractionInvalidatedMessage,
   InteractionResolvedMessage,
   ResourceResponse,
   ResourceUpdate,
@@ -14,6 +15,7 @@ import {
   applyAgentSnapshot,
   applyHistoryPage,
   applyInteractionRequestedMessage,
+  applyInteractionInvalidatedMessage,
   applyInteractionResolvedMessage,
   applyResourceResponse,
   applyResourceUpdate,
@@ -75,6 +77,10 @@ export class AgentReplica {
 
   applyInteractionResolved(message: InteractionResolvedMessage): void {
     this.replace(applyInteractionResolvedMessage(this.state, message));
+  }
+
+  applyInteractionInvalidated(message: InteractionInvalidatedMessage): void {
+    this.replace(applyInteractionInvalidatedMessage(this.state, message));
   }
 
   applyResource(message: ResourceResponse | ResourceUpdate): void {

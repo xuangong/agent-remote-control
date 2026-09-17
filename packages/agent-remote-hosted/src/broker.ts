@@ -410,7 +410,10 @@ export function createHostBroker(options: HostBrokerOptions) {
         if (result.status >= 300) {
           let detail: Record<string, unknown> = {};
           try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
-          throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.', result.status < 500 && ['invalid_request', 'invalid_provider', 'unsupported_configuration'].includes(String(detail.code)));
+          throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.', result.status < 500 && [
+            'invalid_request', 'invalid_provider', 'unsupported_configuration', 'invalid_operation_id',
+            'operation_capacity_exceeded', 'operation_result_too_large', 'operation_rejected',
+          ].includes(String(detail.code)));
         }
         let returned: Record<string, unknown> = {};
         try { returned = JSON.parse(result.body); } catch {
@@ -461,7 +464,13 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (creations.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local creation ledger is full.', true);
       existing = { fingerprint, result: operation() }; creations.set(key, existing);
     }
-    const binding = await existing.result;
+    let binding: Binding;
+    try { binding = await existing.result; }
+    catch (error) {
+      // Only proven pre-dispatch rejections permit this intent to reach the Host again.
+      if (error instanceof BrokerError && error.creationRejected && creations.get(key) === existing) creations.delete(key);
+      throw error;
+    }
     await commit(draft => {
       if (hosts.get(host.id) !== host || bindings.get(binding.agentId) !== binding) throw new BrokerError(404, 'session_unavailable', 'The session binding was revoked.');
       const value = { fingerprint, agentId: binding.agentId };
@@ -519,7 +528,6 @@ export function createHostBroker(options: HostBrokerOptions) {
     }).catch(async error => {
       // Transport and persistence failures may occur after native creation succeeded.
       if (error instanceof BrokerError && error.creationRejected) {
-        creations.delete(JSON.stringify([host.id, providerId, reservation.nativeRequestId]));
         await changeSharing(draft => draft.release(reservation.key));
       }
       throw error;

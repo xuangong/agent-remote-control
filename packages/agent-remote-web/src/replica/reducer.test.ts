@@ -30,6 +30,25 @@ const capabilities = {
   interactions: { question: true, planApproval: true, toolApproval: true },
 };
 
+it.each([undefined, null, 'old-turn', 'actual-turn'])('reconciles authoritative runtime turn %s in live delivery and snapshot replay', activeTurnId => {
+  const original = snapshot('running');
+  original.payload.activeTurn = { turnId: 'old-turn', startedAt: '2026-09-10T00:00:00.000Z' };
+  const message: AgentStreamMessage = {
+    protocolVersion: '1.4.0', type: 'agent_stream', payload: {
+      agentId: 'agent-one', timestamp: '2026-09-10T01:00:00.000Z', event: {
+        type: 'runtime_updated', providerId: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'root', status: activeTurnId ? 'running' : 'idle' },
+        ...(activeTurnId === undefined ? {} : { activeTurnId }),
+      },
+    },
+  };
+  const expected = activeTurnId === null ? null : activeTurnId === 'actual-turn'
+    ? { turnId: activeTurnId, startedAt: message.payload.timestamp } : original.payload.activeTurn;
+  const live = reduceTimelineEvent(applyAgentSnapshot(createReplicaState(), original), message).state;
+  expect(live.agent?.activeTurn).toEqual(expected);
+  const reloaded = applyAgentSnapshot(createReplicaState(), { ...original, payload: live.agent! });
+  expect(reduceTimelineEvent(reloaded, message).state.agent?.activeTurn).toEqual(expected);
+});
+
 it('retains the source turn start through live delivery and repeated snapshot handoff', () => {
   const initial = applyAgentSnapshot(createReplicaState(), snapshot());
   const started: AgentStreamMessage = {

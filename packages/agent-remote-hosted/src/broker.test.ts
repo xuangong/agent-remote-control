@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
+import { createOperationCache, OperationCacheError } from '../../agent-host/dist/operation-cache.js';
 
 const close: Array<() => void | Promise<void>> = [];
 const operationOne = '00000000-0000-4000-8000-000000000001';
@@ -104,6 +105,108 @@ async function restoredFixture(options: Partial<import('./broker.js').HostBroker
   expect(await registered).toBe('host');
   return { broker, native: pair.native };
 }
+
+it.each([
+  { subject: 'alice', rejection: 'operation_capacity_exceeded' },
+  { subject: 'bob', rejection: 'operation_capacity_exceeded' },
+  { subject: 'alice', rejection: 'operation_result_too_large' },
+  { subject: 'bob', rejection: 'operation_result_too_large' },
+])('allows $subject to retry creation after Host cache admission $rejection', async ({ subject, rejection }) => {
+  let now = 0;
+  let maximumResultBytes = rejection === 'operation_result_too_large' ? 1024 : 128;
+  const cache = createOperationCache({ maxEntries: 1, ttlMs: 10, maxResultBytes: 256, now: () => now });
+  close.push(() => cache.close());
+  if (rejection === 'operation_capacity_exceeded') {
+    await cache.execute({ operationId: operationTwo, scope: 'host', kind: 'send', target: 'unrelated', parameters: {} },
+      { dispatch: async () => undefined });
+  }
+  let saved: RemoteHostBrokerState | undefined;
+  const { broker, native } = await restoredFixture({ ownerSubject: 'alice', onStateChange: state => { saved = structuredClone(state); } });
+  await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1);
+  const calls: string[] = [];
+  let nativeCreates = 0;
+  native.onMessage(async data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    const request = JSON.parse(message.body);
+    calls.push(request.operationId);
+    let status = 200;
+    let body: unknown;
+    try {
+      body = await cache.execute({ operationId: request.operationId, scope: 'host', kind: 'create', target: 'codex', parameters: {} }, {
+        maximumResultBytes,
+        dispatch: async () => { nativeCreates += 1; return { agentId: 'created-agent', nativeSessionId: 'created-native' }; },
+      });
+    } catch (error) {
+      if (!(error instanceof OperationCacheError)) throw error;
+      status = error.code === 'operation_capacity_exceeded' ? 429 : 400;
+      body = { code: error.code, error: error.message };
+    }
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status, body: JSON.stringify(body) }));
+  });
+  const create = () => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId: operationOne }),
+  }), { principalSubject: () => subject });
+  const rejected = await create();
+  expect(await rejected!.json()).toMatchObject({ code: rejection });
+  expect(nativeCreates).toBe(0);
+  expect(await broker.manageShares('alice', 'host', 'shares')).toMatchObject({ shares: [{ subject: 'bob', used: 0 }] });
+  expect(saved?.sharing?.reservations).toEqual([]);
+  now = 11;
+  maximumResultBytes = 128;
+  expect((await create())?.status).toBe(200);
+  expect(calls).toHaveLength(2);
+  expect(calls[0]).toBe(calls[1]);
+  expect(nativeCreates).toBe(1);
+  expect((await create())?.status).toBe(200);
+  expect(calls).toHaveLength(2);
+  expect(await broker.manageShares('alice', 'host', 'shares')).toMatchObject({ shares: [{ subject: 'bob', used: subject === 'bob' ? 1 : 0 }] });
+}, 10_000);
+
+it.each(['operation_outcome_unknown', 'operation_conflict', 'operation_cache_closed', 'operation_clock_invalid', 'invalid_operation_intent'])(
+  'retains an unresolved creation reservation on %s', async code => {
+    const { broker, native } = await restoredFixture({ ownerSubject: 'alice' });
+    await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1);
+    let now = 0;
+    const cache = createOperationCache({ now: () => now });
+    close.push(() => cache.close());
+    let calls = 0;
+    let nativeCreates = 0;
+    native.onMessage(async data => {
+      const message = JSON.parse(data);
+      if (message.type !== 'rpc_request') return;
+      calls += 1;
+      const descriptor = { operationId: JSON.parse(message.body).operationId as string, scope: 'host', kind: 'create', target: 'codex', parameters: {} };
+      if (code !== 'operation_outcome_unknown') {
+        await cache.execute(descriptor, { dispatch: async () => { nativeCreates += 1; return { agentId: 'earlier-effect' }; } });
+      }
+      if (code === 'operation_cache_closed') await cache.close();
+      if (code === 'operation_clock_invalid') now = -1;
+      let actualCode: string | undefined;
+      try {
+        await cache.execute({ ...descriptor, parameters: code === 'operation_conflict' ? { changed: true }
+          : code === 'invalid_operation_intent' ? { invalid: undefined } : {} }, {
+          dispatch: async () => { nativeCreates += 1; throw new Error('Acknowledgement lost after native creation'); },
+        });
+      } catch (error) {
+        if (!(error instanceof OperationCacheError)) throw error;
+        actualCode = error.code;
+      }
+      native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId,
+        status: code === 'operation_conflict' ? 409 : code === 'invalid_operation_intent' ? 400 : 503,
+        body: JSON.stringify({ code: actualCode, error: 'Retain the uncertain intent' }) }));
+    });
+    const create = (operationId: string) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+      method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId }),
+    }), { principalSubject: () => 'bob' });
+    expect(await (await create(operationOne))!.json()).toMatchObject({ code });
+    expect(await (await create(operationOne))!.json()).toMatchObject({ code: 'creation_outcome_unknown' });
+    expect(await (await create(operationTwo))!.json()).toMatchObject({ code: 'session_quota_exceeded' });
+    expect(calls).toBe(1);
+    expect(nativeCreates).toBe(1);
+    expect(await broker.manageShares('alice', 'host', 'shares')).toMatchObject({ shares: [{ subject: 'bob', used: 1 }] });
+  }, 10_000,
+);
 
 it.each([204, 205, 304])('preserves a native RPC HTTP status %s that cannot carry a Web Response body', async status => {
   const { broker, native } = await restoredFixture();

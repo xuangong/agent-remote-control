@@ -316,6 +316,9 @@ function applyNonTimelineEvent(state: AgentReplicaState, message: AgentStreamMes
           ...state.agent,
           status: event.runtimeInfo.status,
           runtimeInfo: clone(event.runtimeInfo),
+          ...(event.activeTurnId === undefined ? {} : { activeTurn: event.activeTurnId === null ? null
+            : state.agent.activeTurn?.turnId === event.activeTurnId ? state.agent.activeTurn
+              : { turnId: event.activeTurnId, startedAt: message.payload.timestamp } }),
           ...(event.runtimeInfo.cwd === undefined ? {} : { cwd: event.runtimeInfo.cwd }),
           ...(event.runtimeInfo.model === undefined ? {} : { model: event.runtimeInfo.model }),
         },

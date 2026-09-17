@@ -90,7 +90,8 @@ export type AgentStreamEvent =
   | { type: 'turn_canceled'; provider: string; reason: string; turnId?: string }
   | { type: 'timeline'; provider: string; item: AgentTimelineItem; turnId?: string }
   | { type: 'usage_updated'; provider: string; usage: AgentUsage; turnId?: string }
-  | { type: 'runtime_updated'; provider: string; runtimeInfo: AgentRuntimeInfo }
+  /** activeTurnId is authoritative when present; null clears it without implying how the turn ended. */
+  | { type: 'runtime_updated'; provider: string; runtimeInfo: AgentRuntimeInfo; activeTurnId?: string | null }
   | { type: 'interaction_requested'; provider: string; request: AgentInteractionRequest; turnId?: string }
   | { type: 'interaction_resolved'; provider: string; requestId: string; response: AgentInteractionResponse; turnId?: string }
   | { type: 'interaction_invalidated'; provider: string; requestId: string; reason: string; turnId?: string };

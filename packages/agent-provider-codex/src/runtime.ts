@@ -221,9 +221,18 @@ export class CodexSessionRuntime {
     for (const [threadId, session] of this.sessions) {
       const snapshot = snapshots.get(threadId);
       if (!snapshot) continue;
-      session.restoreSnapshot(snapshot.value, buffered.filter(item => item.sequence > snapshot.sequence && notificationThreadId(item.params) === threadId));
+      // Thread history cannot replace pending request state, even when a later read advances the timeline cutoff.
+      session.restoreSnapshot(snapshot.value, buffered.filter(item => notificationThreadId(item.params) === threadId
+        && (item.method === 'serverRequest/resolved' || item.sequence > snapshot.sequence)));
     }
-    this.inspectHistory(rootId, snapshots.get(rootId)?.value);
+    for (const item of buffered) {
+      const threadId = notificationThreadId(item.params);
+      if (!threadId || !snapshots.has(threadId)) this.routeNotification(item.method, item.params);
+      else if (isRecord(item.params) && (item.method === 'item/started' || item.method === 'item/completed')) {
+        this.inspectItem(threadId, readString(item.params.turnId), item.params.item);
+      }
+    }
+    for (const [threadId, snapshot] of snapshots) this.inspectHistory(threadId, snapshot.value);
   }
 
   private setConnection(connection: AgentRuntimeConnection): void {

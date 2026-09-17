@@ -34,7 +34,8 @@ export const PublicAgentNonTimelineEvent = Type.Union([
   }),
   Strict({ type: Type.Literal('turn_canceled'), ...ProviderEvent, ...TurnId, reason: Type.String() }),
   Strict({ type: Type.Literal('usage_updated'), ...ProviderEvent, ...TurnId, usage: AgentUsage }),
-  Strict({ type: Type.Literal('runtime_updated'), ...ProviderEvent, runtimeInfo: AgentRuntimeInfo }),
+  Strict({ type: Type.Literal('runtime_updated'), ...ProviderEvent, runtimeInfo: AgentRuntimeInfo,
+    activeTurnId: Type.Optional(Type.Union([NonEmptyString, Type.Null()])) }),
 ]);
 export type PublicAgentNonTimelineEvent = Static<typeof PublicAgentNonTimelineEvent>;
 

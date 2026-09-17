@@ -10,6 +10,9 @@ import { WebSocket, WebSocketServer } from 'ws';
 
 import { CodexAppServerProvider } from './provider.js';
 import { normalizeRecoverySettings } from './shared-recovery.js';
+import { AgentManager } from '../../agent-remote-relay/dist/agent-manager.js';
+import { createSessionWire } from '../../agent-remote-relay/dist/session-wire.js';
+import { decodeServerMessage } from '../../agent-remote-protocol/dist/index.js';
 
 interface NativeThread {
   id: string;
@@ -17,6 +20,7 @@ interface NativeThread {
   canAcceptDirectInput: boolean;
   turns: Array<Record<string, unknown>>;
   parentThreadId?: string;
+  approvalPolicy?: string;
 }
 
 interface RpcRequestContext {
@@ -50,6 +54,7 @@ class UnixAppServer {
   readonly sockets = new Set<WebSocket>();
   thread: NativeThread = { id: 'root', status: { type: 'idle' }, canAcceptDirectInput: true, turns: [] };
   model = 'mock-model';
+  supportsPlanning = false;
   readonly children = new Map<string, NativeThread>();
   threadReadError: { code: number; message: string } | undefined;
   requestHook: ((context: RpcRequestContext) => RpcOverride | undefined | Promise<RpcOverride | undefined>) | undefined;
@@ -138,6 +143,10 @@ class UnixAppServer {
     else if (message.method === 'model/list') result = { data: [] };
     else if (message.method === 'configRequirements/read') result = { requirements: {} };
     else if (message.method === 'collaborationMode/list') {
+      if (this.supportsPlanning) {
+        socket.send(JSON.stringify({ id: message.id, result: { data: [{ mode: 'plan' }, { mode: 'default' }] } }));
+        return;
+      }
       socket.send(JSON.stringify({ id: message.id, error: { code: -32601, message: 'not supported' } }));
       return;
     } else if (message.method === 'thread/start') {
@@ -161,17 +170,21 @@ class UnixAppServer {
 const roots: string[] = [];
 const sessions: AgentSession[] = [];
 const servers: UnixAppServer[] = [];
+const managerCleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  await Promise.allSettled(managerCleanups.splice(0).map(close => close()));
   await Promise.allSettled(sessions.splice(0).map(session => session.dispose()));
   await Promise.allSettled(servers.splice(0).map(server => server.stop()));
   await Promise.allSettled(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function harness(settings: NonNullable<ConstructorParameters<typeof CodexAppServerProvider>[0]>['sharedRecovery'] = {}) {
+async function harness(settings: NonNullable<ConstructorParameters<typeof CodexAppServerProvider>[0]>['sharedRecovery'] = {}, observe = true) {
   const root = await mkdtemp(join(tmpdir(), 'arc-shared-recovery-'));
   roots.push(root);
   const server = new UnixAppServer(join(root, 'codex.sock'));
+  server.supportsPlanning = !observe;
+  if (!observe) server.thread.approvalPolicy = 'on-request';
   servers.push(server);
   await server.start();
   const provider = new CodexAppServerProvider({
@@ -180,8 +193,9 @@ async function harness(settings: NonNullable<ConstructorParameters<typeof CodexA
   });
   const session = await provider.createSession({ sessionId: 'remote', cwd: '/workspace' });
   sessions.push(session);
-  const iterator = session.observe()[Symbol.asyncIterator]();
-  await expect(iterator.next()).resolves.toEqual({ value: { type: 'history_boundary' }, done: false });
+  let consumer: AsyncIterator<ProviderStreamItem> | undefined;
+  const iterator: AsyncIterator<ProviderStreamItem> = { next: () => (consumer ??= session.observe()[Symbol.asyncIterator]()).next() };
+  if (observe) await expect(iterator.next()).resolves.toEqual({ value: { type: 'history_boundary' }, done: false });
   return { server, provider, session, iterator };
 }
 
@@ -224,6 +238,140 @@ async function drainAvailable(iterator: AsyncIterator<ProviderStreamItem>, quiet
 }
 
 describe('shared Codex recovery', () => {
+  it.each(['resume', 'repeated read'])('removes a resolved interaction before the authoritative cutoff during %s', async interval => {
+    const { server, session, iterator } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 });
+    const entered = deferred();
+    const release = deferred();
+    let reads = 0;
+    server.requestHook = async ({ connection, method, params }) => {
+      if (connection !== 2) return undefined;
+      if (method === 'thread/read' && params.threadId === 'root') reads += 1;
+      if ((interval === 'resume' && method === 'thread/resume')
+        || (interval === 'repeated read' && method === 'thread/read' && reads === 1)) {
+        entered.resolve(undefined);
+        await release.promise;
+      }
+      return undefined;
+    };
+    server.disconnectClients();
+    await entered.promise;
+    server.requestInteraction('resolved-before-cutoff', 'root', 2);
+    const requested = await nextEvent(iterator, 'interaction_requested');
+    if (requested.event.type !== 'interaction_requested') throw new Error('Expected interaction');
+    const requestId = requested.event.request.requestId;
+    server.resolveInteraction('resolved-before-cutoff', 'root', 2);
+    if (interval === 'repeated read') {
+      server.thread.turns = [{ id: 'turn', items: [{ id: 'answer', type: 'agentMessage', text: 'A' }] }];
+      server.notify('item/agentMessage/delta', { threadId: 'root', turnId: 'turn', itemId: 'answer', delta: 'A' }, 2);
+    }
+    release.resolve(undefined);
+    await nextItem(iterator, 'timeline_replacement');
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+    const remaining = await drainAvailable(iterator);
+    expect(remaining.flatMap(item => item.type === 'observation'
+      && (item.event.type === 'interaction_invalidated' || item.event.type === 'interaction_resolved') ? [item.event.requestId] : []))
+      .toContain(requestId);
+    await expect(session.respondToInteraction!(requestId, { kind: 'question', answers: [] })).rejects.toThrow('No pending');
+    expect(server.nativeResponses.find(response => response.id === 'resolved-before-cutoff')).toBeUndefined();
+    if (interval === 'repeated read') expect(reads).toBe(2);
+  });
+
+  it('discovers spawn provenance and unknown children while a loaded child snapshot is held', async () => {
+    const { server, provider, session, iterator } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 });
+    for (const id of ['old-child', 'spawned-child', 'unknown-child']) server.children.set(id, {
+      id, parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: id === 'spawned-child', turns: [],
+    });
+    server.notify('item/completed', { threadId: 'root', turnId: 'old-turn', item: {
+      id: 'old-spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['old-child'], status: 'completed',
+    } });
+    await expect.poll(async () => (await session.runtimeInfo()).childSessions?.some(child => child.nativeSessionId === 'old-child')).toBe(true);
+    const oldChild = await provider.openChildSession('root', 'old-child');
+    sessions.push(oldChild);
+    const entered = deferred();
+    const release = deferred();
+    server.requestHook = async ({ connection, method, params }) => {
+      if (connection === 2 && method === 'thread/read' && params.threadId === 'old-child' && params.includeTurns) {
+        entered.resolve(undefined);
+        await release.promise;
+      }
+      return undefined;
+    };
+    server.disconnectClients();
+    await entered.promise;
+    server.notify('item/completed', { threadId: 'root', turnId: 'spawn-turn', item: {
+      id: 'late-spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['spawned-child'],
+      prompt: 'Inspect the result', status: 'completed',
+    } }, 2);
+    for (const threadId of ['spawned-child', 'unknown-child']) {
+      server.notify('thread/status/changed', { threadId, status: { type: 'idle' } }, 2);
+    }
+    release.resolve(undefined);
+    await nextItem(iterator, 'timeline_replacement');
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+    await expect.poll(async () => (await session.runtimeInfo()).childSessions?.some(child => child.nativeSessionId === 'spawned-child')).toBe(true);
+    await expect.poll(async () => (await session.runtimeInfo()).childSessions?.some(child => child.nativeSessionId === 'unknown-child')).toBe(true);
+    expect((await session.runtimeInfo()).childSessions).toContainEqual(expect.objectContaining({
+      nativeSessionId: 'spawned-child', parentTurnId: 'spawn-turn', parentCallId: 'late-spawn', description: 'Inspect the result',
+    }));
+    for (const id of ['spawned-child', 'unknown-child']) {
+      const child = await provider.openChildSession('root', id);
+      sessions.push(child);
+      expect(child.capabilities.sendMessage).toBe(id === 'spawned-child');
+    }
+    expect(await provider.openChildSession('root', 'old-child')).toBe(oldChild);
+  });
+
+  it.each([null, 'surviving-turn', 'old-turn'])('reconciles the manager active turn from native recovery to %s', async activeTurnId => {
+    const { server, session } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 }, false);
+    const manager = await AgentManager.attach({ agentId: 'remote', provider: { providerId: 'codex', displayName: 'Codex' },
+      session, epoch: 'initial' });
+    const wireOutput: string[] = [];
+    const wire = createSessionWire(manager, json => wireOutput.push(json));
+    managerCleanups.push(async () => { wire.close(); await manager.close(); });
+    await manager.ready;
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    const events: string[] = [];
+    const connections: string[] = [];
+    manager.subscribe(message => {
+      if (message.type !== 'agent_stream') return;
+      events.push(message.event.type);
+      if (message.event.type === 'runtime_updated' && message.event.runtimeInfo.connection) connections.push(message.event.runtimeInfo.connection.state);
+    });
+    server.notify('turn/started', { threadId: 'root', turn: { id: 'old-turn' } });
+    await expect.poll(() => manager.snapshot().payload.activeTurn?.turnId).toBe('old-turn');
+    const previousTurn = manager.snapshot().payload.activeTurn;
+    server.thread.status = { type: activeTurnId ? 'active' : 'idle' };
+    server.thread.turns = activeTurnId ? [{ id: activeTurnId, status: 'inProgress', items: [] }] : [];
+    server.disconnectClients();
+    await expect.poll(() => connections).toContain('reconnecting');
+    await expect.poll(() => connections).toContain('connected');
+    expect(manager.snapshot().payload.activeTurn?.turnId ?? null).toBe(activeTurnId);
+    if (activeTurnId === 'old-turn') expect(manager.snapshot().payload.activeTurn).toEqual(previousTurn);
+    const decoded = wireOutput.map(json => decodeServerMessage(json));
+    expect(decoded.every(message => message.status === 'ok')).toBe(true);
+    expect(decoded).toContainEqual(expect.objectContaining({ status: 'ok', value: expect.objectContaining({
+      type: 'agent_stream', payload: expect.objectContaining({ event: expect.objectContaining({ type: 'runtime_updated', activeTurnId }) }),
+    }) }));
+    expect(decoded).toContainEqual(expect.objectContaining({ status: 'ok', value: expect.objectContaining({
+      type: 'agent_update', payload: expect.objectContaining({ activeTurn: activeTurnId === null ? null : expect.objectContaining({ turnId: activeTurnId }) }),
+    }) }));
+    expect(events.filter(type => ['turn_completed', 'turn_canceled', 'turn_failed'].includes(type))).toEqual([]);
+    if (activeTurnId === null) {
+      await expect(manager.setPlanning(true)).resolves.toBeUndefined();
+      expect((await session.runtimeInfo()).planning?.active).toBe(true);
+      server.requestHook = ({ method, params }) => {
+        if (method === 'thread/settings/update') server.notify('thread/settings/updated', { threadId: 'root', threadSettings: params });
+        return undefined;
+      };
+      await expect(manager.setSessionSetting('approval', 'untrusted')).resolves.toBeUndefined();
+      expect((await session.runtimeInfo()).settings?.find(setting => setting.id === 'approval')?.value).toBe('untrusted');
+    } else {
+      await expect(manager.setPlanning(true)).rejects.toThrow(/idle/i);
+      await manager.cancel();
+      expect(server.requests.at(-1)).toEqual({ method: 'turn/interrupt', params: { threadId: 'root', turnId: activeTurnId } });
+    }
+  });
+
   it('keeps transient recovery unbounded unless a caller sets an attempt limit', () => {
     expect(normalizeRecoverySettings().maximumAttempts).toBeUndefined();
     expect(normalizeRecoverySettings({ maximumAttempts: 3 }).maximumAttempts).toBe(3);

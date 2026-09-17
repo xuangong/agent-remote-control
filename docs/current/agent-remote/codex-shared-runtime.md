@@ -104,6 +104,10 @@ buffered across the snapshot handoff. The original observer remains open and no
 second `history_boundary` is emitted. Loaded child session objects retain their
 identity and native direct-input eligibility.
 
+The timeline cutoff applies only to timeline reconciliation. Generation-scoped `serverRequest/resolved` controls remain effective even when received during `thread/resume` or before a repeated snapshot read. Buffered spawn items retain native parent-turn and call identities, and notifications for unknown children enter normal discovery after the handoff. Snapshot histories are inspected for descendants of every restored session, including loaded children.
+
+After replaying the post-snapshot notifications, the adapter publishes the actual active turn through `runtime_updated.activeTurnId`: a native ID identifies the surviving turn and `null` clears an obsolete one. This state correction does not invent a successful completion or user cancellation. The Relay and browser therefore agree on idle controls and the actual interrupt target after recovery.
+
 ## Verification
 
 `shared-runtime.local.test.ts` runs independent provider clients against one real

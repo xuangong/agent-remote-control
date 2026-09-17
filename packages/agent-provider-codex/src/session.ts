@@ -806,6 +806,7 @@ export class CodexAppServerSession implements AgentSession {
     const history = projectCodexThreadHistory(snapshot, this.threadId, { images: this.images, cwd: this.config.cwd });
     const items = collectCodexThreadHistoryItems(snapshot, this.threadId);
     this.finishBootstrap(history, items, undefined, true);
+    this.emitRuntimeUpdate(this.activeTurnId ?? null);
   }
 
   private handleNotification(method: string, params: unknown): void {
@@ -966,7 +967,7 @@ export class CodexAppServerSession implements AgentSession {
     }
   }
 
-  private emitRuntimeUpdate(): void {
+  private emitRuntimeUpdate(activeTurnId?: string | null): void {
     if (!this.threadId) return;
     this.runtime.sessionChanged(this.threadId);
     this.emit({
@@ -977,6 +978,7 @@ export class CodexAppServerSession implements AgentSession {
       delivery: 'live',
       event: {
         type: 'runtime_updated', provider: PROVIDER_ID, runtimeInfo: this.currentRuntimeInfo(),
+        ...(activeTurnId === undefined ? {} : { activeTurnId }),
       },
     });
   }

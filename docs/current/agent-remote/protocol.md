@@ -121,6 +121,10 @@ The unshipped `1.4.0` send contract accepts optional `delivery: "immediate" | "n
 Command documentation reuses `ResourceBinding` and `resource_request` / `resource_response`; the command directory does not inline Markdown or native metadata. An unrequested documentation binding is pending. The Relay resolves Provider-owned locators to session-bound resource IDs and materializes documentation on demand. Skill tags and the open detail panel are local client state and introduce no wire operation.
 
 
+## Active turn reconciliation
+
+The unshipped `1.4.0` `runtime_updated` event accepts optional `activeTurnId: string | null` as authoritative turn reconciliation. Omission leaves the previous active turn unchanged; `null` clears it; a different nonempty ID replaces it using the event timestamp as its first observed start. Repeating the same ID preserves its known start timestamp. This field belongs to the event rather than `runtimeInfo` and does not assert completion, failure, or cancellation. Snapshot `activeTurn` remains the resulting public state. Strict-schema participants must update together (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/envelope.ts`, `packages/agent-remote-relay/src/agent-manager.ts`).
+
 ## Native child relationships
 
 The unshipped `1.4.0` contract includes optional `runtimeInfo.childSessions`, a direct-child relationship summary carried by the existing runtime event and Snapshot. Each entry identifies a native child with title, optional role/task description, stable creation or first-discovery time, native status, and observation mode. Optional `parentTurnId` and `parentCallId` preserve creation provenance; subsequent send/wait activity does not change it. Missing provenance is not inferred from adjacent assistant text. The SDK and public strict schema share this shape (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).

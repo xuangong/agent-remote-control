@@ -35,6 +35,8 @@ flowchart LR
 
 The adapter may carry provider-private resource read identities inside `ProviderObservation`, but its public event is always `AgentStreamEvent` (`packages/agent-provider-sdk/src/observation.ts:53-84`).
 
+An adapter can reconcile the current native turn with optional `activeTurnId` on an ordinary `runtime_updated` observation. The adapter alone decides that authority: a native ID replaces the observed turn, `null` explicitly clears it, and an omitted field changes no turn identity. Codex shared recovery emits this after snapshot and buffered-event reconciliation. `timeline_replacement` remains timeline-only, and other providers keep their existing turn semantics (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-provider-codex/src/session.ts`).
+
 ## Key Flows
 
 ```mermaid

@@ -600,6 +600,10 @@ export class AgentManager {
         state.capabilities = structuredClone(this.session.capabilities);
         state.runtimeInfo = structuredClone(event.runtimeInfo);
         state.status = event.runtimeInfo.status;
+        if (event.activeTurnId === null) state.activeTurn = null;
+        else if (event.activeTurnId !== undefined && event.activeTurnId !== state.activeTurn?.turnId) {
+          state.activeTurn = { turnId: event.activeTurnId, startedAt: timestamp };
+        }
         if (event.runtimeInfo.cwd !== undefined) state.cwd = event.runtimeInfo.cwd;
         if (event.runtimeInfo.model !== undefined) state.model = event.runtimeInfo.model;
         if (event.runtimeInfo.persistence !== undefined) state.persistence = structuredClone(event.runtimeInfo.persistence);

@@ -39,6 +39,16 @@ import {
 
 const version = '1.4.0';
 
+it.each([null, 'native-active-turn'])('round trips authoritative active turn %s on runtime updates', activeTurnId => {
+  const message = { protocolVersion: version, type: 'agent_stream', payload: {
+    agentId: 'agent-7', timestamp: '2026-09-18T00:00:00.000Z', event: {
+      type: 'runtime_updated', providerId: 'codex', activeTurnId,
+      runtimeInfo: { providerId: 'codex', sessionId: 'thread-7', status: activeTurnId ? 'running' : 'idle' },
+    },
+  } };
+  expect(decodeAgentStreamMessage(JSON.stringify(message))).toEqual({ status: 'ok', value: message });
+});
+
 const questionRequest = {
   kind: 'question',
   requestId: 'question-request',

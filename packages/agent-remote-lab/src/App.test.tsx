@@ -12,6 +12,62 @@ import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 describe('App', () => {
+  it('does not restore an old inspect request after leaving and returning to a session', async () => {
+    window.history.replaceState(null, '', '/?agent=agent-1');
+    let creations = 0;
+    const transport = labTransport({
+      createAgent: async () => sessionResponse(++creations === 1 ? 'agent-2' : 'agent-1'),
+      fetchTimeline: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
+        requestId: 'history', agentId, epoch: 'epoch-1', direction: 'tail', reset: false, staleCursor: false, gap: false,
+        window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'epoch-1', seq: 1 }, endCursor: { epoch: 'epoch-1', seq: 1 },
+        hasOlder: false, hasNewer: false, error: null, entries: [{ providerId: 'recorded', timestamp: '2026-09-17T00:00:00Z',
+          seqStart: 1, seqEnd: 1, sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
+          item: { type: 'assistant_message', text: agentId, messageId: 'reply' },
+        }],
+      } }),
+      connect: (agentId, listener) => {
+        queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...replicaState.agent!, id: agentId } }));
+        return { close: () => {}, send: message => {
+          if (message.type === 'timeline_subscription') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION,
+            type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] },
+          }));
+        } };
+      },
+    });
+    const container = await render(<App transport={transport} />);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Inspect event #1 in Trace"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('.lab-trace-close')!.click());
+    for (let index = 0; index < 2; index += 1) {
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-create"]')!.click());
+    }
+    expect(creations).toBe(2);
+    await act(async () => tab(container, 'Trace').click());
+    expect(container.querySelector('[data-trace-entry-key]')?.textContent).toContain('agent-1');
+    expect(container.querySelector('[data-trace-entry-key][aria-current="true"]')).toBeNull();
+  });
+
+  it('links a conversation entry to its trace and returns without remounting the conversation', async () => {
+    const state = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
+      providerId: 'recorded', seqStart: 2, seqEnd: 4, timestamp: '2026-09-17T00:00:00Z',
+      sourceSeqRanges: [{ startSeq: 2, endSeq: 4 }], collapsed: [], resources: [],
+      item: { type: 'assistant_message' as const, messageId: 'reply', text: 'Inspect this response.' },
+    }] } };
+    const container = await render(<App initialState={state} initialSessionStatus="ready" actions={{}} />);
+    const conversation = container.querySelector('[data-entry-key]');
+    const inspect = conversation?.querySelector<HTMLButtonElement>('[aria-label="Inspect event #2 in Trace"]');
+    expect(inspect).not.toBeNull();
+    expect(inspect).toBeDefined();
+    await act(async () => inspect!.click());
+    expect(tab(container, 'Trace').getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('[aria-label="Trace entry details"]')?.textContent).toContain('Inspect this response.');
+    const back = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Show in Conversation');
+    expect(back).toBeDefined();
+    await act(async () => back!.click());
+    expect(tab(container, 'Workbench').getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('[data-entry-key]')).toBe(conversation);
+    expect(conversation?.getAttribute('data-inspected')).toBe('true');
+  });
+
   it('switches conversation previews from View and restores the browser preference', async () => {
     const key = 'agent-remote:timeline-display';
     window.localStorage.removeItem(key);

@@ -618,3 +618,9 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-preview-divider:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: -2px; }
   .agent-preview-resize-shield { display: block; position: absolute; inset: 0; z-index: 3; cursor: col-resize; user-select: none; }
 }
+.agent-timeline-entry:has(> .agent-inspect-entry) { position: relative; }
+.agent-inspect-entry { position: absolute; top: 2px; right: 2px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--agent-rule); border-radius: 5px; background: var(--agent-panel-raised); color: var(--agent-muted); cursor: pointer; opacity: 0; }
+.agent-timeline-entry:hover > .agent-inspect-entry, .agent-timeline-entry:focus-within > .agent-inspect-entry { opacity: 1; }
+.agent-timeline-entry[data-inspected] { outline: 2px solid var(--agent-signal); outline-offset: 3px; border-radius: 4px; }
+.agent-inspect-entry:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 2px; }
+@media (hover: none) { .agent-inspect-entry { opacity: .7; } }

@@ -21,6 +21,8 @@ export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
   readonly state: AgentReplicaState;
+  readonly onInspectEntry?: (entryKey: string) => void;
+  readonly inspectedEntryKey?: string;
   readonly childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[];
   readonly resolveSessionLink?: SessionLinkResolver;
   readonly registry?: RendererRegistry;
@@ -53,6 +55,8 @@ export function AgentTimeline({
   questionDrafts,
   onQuestionDraftChange,
   previewController,
+  onInspectEntry,
+  inspectedEntryKey,
 }: AgentTimelineProps) {
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
@@ -105,7 +109,10 @@ export function AgentTimeline({
     <div className="agent-timeline-entries" aria-live="polite">
       {renderModel.length === 0 && outgoing.length === 0
         ? <p className="agent-timeline-empty">No timeline activity.</p>
-        : renderModel.map(({ entry, key, messageGroup }) => <div className="agent-timeline-entry" key={key} data-entry-key={key}>
+        : renderModel.map(({ entry, key, messageGroup }) => <div className="agent-timeline-entry" key={key} data-entry-key={key} data-inspected={inspectedEntryKey === key || undefined} tabIndex={onInspectEntry ? -1 : undefined}>
+            {onInspectEntry ? <button className="agent-inspect-entry" type="button" aria-label={`Inspect event #${entry.seqStart} in Trace`} title="Inspect in Trace" onClick={() => onInspectEntry(key)}>
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 4h5m-5 6h5m-5 6h5M5 4v12m6-6h6m-3-3 3 3-3 3" /></svg>
+            </button> : null}
             <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
               resources={state.resources} resourceBindings={entry.resources}
               resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch])}

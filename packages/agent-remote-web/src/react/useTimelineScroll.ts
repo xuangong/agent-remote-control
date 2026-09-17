@@ -182,6 +182,22 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     updatePosition();
   }
 
+  function revealEntry(key: string): boolean {
+    const viewport = viewportRef.current;
+    const entry = Array.from(contentRef.current?.querySelectorAll<HTMLElement>('[data-entry-key]') ?? []).find(node => node.dataset.entryKey === key);
+    if (!viewport || !entry || !isVisible.current) return false;
+    pauseFollowing();
+    historyIntent.current = false;
+    const bounds = entry.getBoundingClientRect();
+    viewport.scrollTop += bounds.top - viewport.getBoundingClientRect().top - Math.max(0, (viewport.clientHeight - (bounds.bottom - bounds.top)) / 2);
+    lastScrollTop.current = viewport.scrollTop;
+    expectedScroll.current = viewport.scrollTop;
+    captureAnchor();
+    updateLatest(viewport);
+    entry.focus({ preventScroll: true });
+    return true;
+  }
+
   function loadOlder(action: () => void | Promise<void>): Promise<void> {
     if (loading.current && loading.current.identity === currentIdentity.current) return loading.current.promise;
     const requestIdentity = currentIdentity.current ?? identity;
@@ -235,7 +251,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   }
 
   return {
-    viewportRef, contentRef, onScroll, showLatest, scrollToLatest, loadOlder,
+    viewportRef, contentRef, onScroll, showLatest, scrollToLatest, revealEntry, loadOlder,
     historyLoading: historyState?.identity === identity && historyState.pending,
     historyError: historyState?.identity === identity ? historyState.error : undefined,
     onWheel, onPointerDown, onKeyDown, onFocus,

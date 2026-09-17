@@ -67,10 +67,10 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
 
   await page.getByRole('tab', { name: 'Trace' }).click();
   const trace = page.getByTestId('trace-view');
-  await expect(trace.getByRole('heading', { name: 'Normalized Timeline trace' })).toBeVisible();
-  await expect(trace.getByText(/normalized Timeline received by the Web client/)).toBeVisible();
+  await expect(trace.getByRole('heading', { name: 'Execution events' })).toBeVisible();
+  await expect(trace.getByText(/normalized Timeline received by this client/)).toBeVisible();
   await expect(trace.getByText(/Provider-native and raw wire frames are not retained/)).toBeVisible();
-  await expect(trace.locator('.lab-trace-list > li')).toHaveCount(6);
+  await expect(trace.locator('[data-trace-entry-key]')).toHaveCount(6);
   await page.getByRole('tab', { name: 'Workbench' }).click();
 
   const inspector = await openInspector(page, testInfo);
@@ -92,7 +92,7 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
 
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
-  await expect(page.getByText('Recorded history 1')).toBeVisible();
+  await expect(page.getByTestId('timeline').getByText('Recorded history 1')).toBeVisible();
 
   const availableResource = resourceRow(page, 'artifacts/lab-proof.txt');
   await expect(availableResource).toContainText('Available');
@@ -105,7 +105,7 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await (await openContextForFixture(page, testInfo)).getByTestId('playback-advance').click();
   await expect(page.getByText('Recorded observation advanced.')).toBeVisible();
   if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
-  await expect(page.getByText('Live recorded output.')).toBeVisible();
+  await expect(page.getByTestId('timeline').getByText('Live recorded output.')).toBeVisible();
   await expect(page.locator('article.agent-tool').filter({ hasText: 'read' }).filter({ hasText: 'Completed' })).toBeVisible();
   await expect(page.locator('article.agent-todo').filter({ hasText: 'Report result' })).toBeVisible();
 
@@ -116,13 +116,13 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await expect(page.getByRole('button', { name: 'Allow for session' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Allow once' }).click();
   await page.getByRole('button', { name: 'Deny' }).click();
-  await expect(page.getByText('All recorded interactions resolved.')).toBeVisible();
+  await expect(page.getByTestId('timeline').getByText('All recorded interactions resolved.')).toBeVisible();
 
   await (await openContextForFixture(page, testInfo)).getByTestId('playback-rehydrate').click();
   await expect(page.getByText('Recorded Timeline rehydrated.')).toBeVisible();
   if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
-  await expect(page.getByText('Authoritative rehydrated Timeline.')).toBeVisible();
-  await expect(page.getByText('Recorded history 1')).toHaveCount(0);
+  await expect(page.getByTestId('timeline').getByText('Authoritative rehydrated Timeline.')).toBeVisible();
+  await expect(page.getByTestId('timeline').getByText('Recorded history 1')).toHaveCount(0);
   await expect(resourceRow(page, 'artifacts/lab-proof.txt')).toContainText('Available');
 
   await (await openContextForFixture(page, testInfo)).getByTestId('playback-stop-reader').click();

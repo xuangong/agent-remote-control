@@ -174,6 +174,8 @@ export function App({
   const [transitioning, setTransitioning] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(requested.error);
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
+  const [traceNavigation, setTraceNavigation] = useState<{ scope: string; key: string; requestId: number; view: 'workbench' | 'trace' }>();
+  const traceRequestCounter = useRef(0);
   const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !initialState);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const sidebar = useSidebarWidth(inspectorOpen);
@@ -654,6 +656,17 @@ export function App({
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
   const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
 
+  const traceScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
+  const traceRequest = traceNavigation?.scope === traceScope ? traceNavigation : undefined;
+  useEffect(() => {
+    setTraceNavigation(previous => previous?.scope === traceScope ? previous : undefined);
+  }, [traceScope]);
+  function inspectTimelineEntry(key: string, view: 'workbench' | 'trace') {
+    setTraceNavigation({ scope: traceScope, key, view, requestId: ++traceRequestCounter.current });
+    if (view === 'workbench') setSideFocus(stackRoot ? sessionKey(stackRoot) : undefined);
+    setActiveView(view);
+  }
+
   function resolveSessionLink(nativeSessionId: string) {
     if (!currentSession || !directory || hostOffline || transitioning) return undefined;
     const target = sessionEntries.find(item => item.nativeSessionId === nativeSessionId && item.providerId === currentSession.providerId && (item.hostId ?? 'local') === (currentSession.hostId ?? 'local'));
@@ -688,6 +701,7 @@ export function App({
   }
   useEffect(() => {
     if (stackRange.end === 0 && sideFocus && activeView === 'workbench') {
+      if (workbenchPanelRef.current?.querySelector('[data-inspected="true"]:focus')) return;
       workbenchPanelRef.current?.querySelector<HTMLTextAreaElement>('.lab-primary-conversation textarea')?.focus({ preventScroll: true });
     }
   }, [sideFocus, stackRange.end, activeView]);
@@ -932,6 +946,8 @@ export function App({
         <CollapsedConversations sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <div className="lab-primary-conversation" hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
         <LabWorkbench
+          onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
+          revealEntry={traceRequest?.view === 'workbench' ? traceRequest : undefined}
           state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : {}} visible={activeView === 'workbench' && primaryExpanded}
           consoleCommands={directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
           onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
@@ -979,7 +995,11 @@ export function App({
         aria-labelledby="lab-trace-tab"
         hidden={activeView !== 'trace'}
       >
-        <TraceView state={state} />
+        <TraceView key={traceScope} state={state} visible={activeView === 'trace'}
+          sessionTitle={activeOpened?.title} sessionStatus={hostOffline ? 'disconnected' : status}
+          revealEntry={traceRequest?.view === 'trace' ? traceRequest : undefined}
+          onShowConversation={key => inspectTimelineEntry(key, 'workbench')}
+          resolveSessionLink={resolveSessionLink} onLoadOlder={!hostOffline ? conversationActions.loadOlder : undefined} />
       </section>
     </PreviewWorkspace>
     <SupportingRail

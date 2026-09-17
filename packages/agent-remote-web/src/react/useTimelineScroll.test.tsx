@@ -9,8 +9,9 @@ const followingPositions = new Map<string, { following: boolean; scrollTop?: num
 let root: Root;
 let container: HTMLDivElement;
 
-function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, continuityIdentity, history, firstIndex = 0, onRender }: { history?: Parameters<typeof useTimelineScroll>[4]; firstIndex?: number; identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
+function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, continuityIdentity, history, firstIndex = 0, onRender, controls }: { controls?: (scroll: ReturnType<typeof useTimelineScroll>) => void; history?: Parameters<typeof useTimelineScroll>[4]; firstIndex?: number; identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
   const scroll = useTimelineScroll(identity, true, positions, continuityIdentity ? { identity: continuityIdentity, positions: followingPositions } : undefined, history);
+  controls?.(scroll);
   onRender?.(scroll.showLatest);
   return <div onWheel={scroll.onWheel} onScroll={scroll.onScroll} ref={(element) => {
     (scroll.viewportRef as MutableRefObject<HTMLDivElement | null>).current = element;
@@ -52,6 +53,17 @@ function readEarlier() {
 }
 
 describe('useTimelineScroll reading memory', () => {
+  it('reveals an inspected entry and keeps it anchored when more activity arrives', () => {
+    let controls!: ReturnType<typeof useTimelineScroll>;
+    act(() => root.render(<Surface controls={value => { controls = value; }} />));
+    expect(viewport().scrollTop).toBe(900);
+    act(() => { expect(controls.revealEntry('epoch-one:3')).toBe(true); });
+    expect(viewport().scrollTop).toBe(300);
+    act(() => root.render(<Surface entryCount={12} />));
+    expect(viewport().scrollTop).toBe(300);
+    expect(positions.get('epoch-one')?.following).toBe(false);
+  });
+
   it('keeps the latest button hidden when scrolling within the bottom threshold', () => {
     const onRender = vi.fn();
     act(() => root.render(<Surface onRender={onRender} />));

@@ -1,0 +1,65 @@
+.lab-trace-layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); width: 100%; height: 100%; min-width: 0; min-height: 0; overflow-wrap: anywhere; container-type: inline-size; }
+.lab-trace-layout > .lab-workbench-heading { flex-wrap: wrap; }
+.lab-trace-layout > .lab-workbench-heading > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--obs-mono); color: var(--obs-text-secondary); }
+.lab-trace-controls { padding: 12px 16px; border-bottom: 1px solid var(--obs-border); max-height: min(40dvh, 320px); overflow: auto; }
+.lab-trace-notice { margin: 0 0 12px; color: var(--obs-text-secondary); font-size: 12px; line-height: 1.5; }
+.lab-trace-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.lab-trace-filters input { flex: 1 1 180px; min-width: 0; width: 100%; padding: 8px 10px; border: 1px solid var(--obs-control-border); border-radius: 6px; background: var(--obs-surface); color: var(--obs-text); }
+.lab-trace-filters select { width: auto; max-width: 100%; padding: 6px 8px; font-size: 12px; }
+.lab-trace-filters > span { font: 11px var(--obs-mono); color: var(--obs-text-secondary); white-space: nowrap; }
+.lab-trace-browser { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.lab-trace-list { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; list-style: none; margin: 0; padding: 0 0 20px; scrollbar-gutter: stable; }
+.lab-trace-turn { display: flex; gap: 10px; padding: 10px 16px; color: var(--obs-text-secondary); background: var(--obs-canvas); border-bottom: 1px solid var(--obs-border); font-size: 11px; }
+.lab-trace-turn code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-trace-row > button { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: start; gap: 6px 10px; width: 100%; padding: 12px 16px; text-align: left; border: 0; border-bottom: 1px solid var(--obs-border); border-radius: 0; }
+.lab-trace-row > button[aria-current="true"] { background: var(--obs-surface-selected); box-shadow: inset 3px 0 var(--obs-action); }
+.lab-trace-sequence { font: 11px var(--obs-mono); color: var(--obs-action); padding-top: 3px; }
+.lab-trace-event { display: grid; gap: 4px; min-width: 0; }
+.lab-trace-event strong { font-size: 13px; overflow-wrap: anywhere; }
+.lab-trace-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.5; color: var(--obs-text-secondary); overflow-wrap: anywhere; }
+.lab-trace-meta { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 10px var(--obs-mono); color: var(--obs-text-secondary); }
+.lab-trace-status { font: 10px var(--obs-mono); color: var(--obs-text-secondary); }
+.lab-trace-status[data-status="running"], .lab-trace-status[data-status="loading"] { color: var(--obs-warning); }
+.lab-trace-status[data-status="failed"], .lab-trace-error { color: var(--obs-danger); }
+.lab-trace-status[data-status="completed"] { color: var(--obs-success-text); }
+.lab-trace-history, .lab-trace-empty { padding: 16px; font-size: 12px; color: var(--obs-text-secondary); }
+.lab-trace-detail { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 20px 32px; border-left: 1px solid var(--obs-border); background: var(--obs-surface); scrollbar-gutter: stable; }
+.lab-trace-detail:focus { outline: none; }
+.lab-trace-detail-empty { padding-top: 36px; color: var(--obs-text-secondary); font-size: 13px; line-height: 1.6; }
+.lab-trace-detail-title { margin: 20px 0 12px; }
+.lab-trace-detail-title h3 { margin: 5px 0; font-size: 18px; overflow-wrap: anywhere; }
+.lab-trace-close { min-height: 32px; padding: 4px 8px; font-size: 12px; }
+.lab-trace-conversation-link { width: 100%; margin-bottom: 16px; color: var(--obs-action); }
+.lab-trace-entry-meta { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.lab-trace-entry-meta dd { font-size: 11px; }
+.lab-trace-detail-section { padding-block: 16px; border-top: 1px solid var(--obs-border); }
+.lab-trace-detail-section h4, .lab-trace-detail-section summary { margin: 0 0 10px; font-size: 12px; font-weight: 650; }
+.lab-trace-detail-section summary { cursor: pointer; }
+.lab-trace-detail-section pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50dvh; overflow: auto; padding: 10px; border-radius: 5px; background: var(--obs-canvas); font: 11px/1.65 var(--obs-mono); }
+.lab-trace-detail-section p, .lab-trace-detail-section .agent-tool-detail { font-size: 12px; line-height: 1.6; }
+.lab-trace-detail-note { color: var(--obs-text-secondary); font-size: 11px; line-height: 1.6; }
+.lab-trace-waits { margin-bottom: 12px; padding: 10px 12px; border-left: 3px solid var(--obs-warning); background: var(--obs-warning-soft); font-size: 12px; }
+.lab-trace-waits summary { cursor: pointer; font-weight: 650; }
+.lab-trace-waits summary > span { margin-left: 6px; font: 11px var(--obs-mono); }
+.lab-trace-waits ul { list-style: none; padding: 0; margin: 8px 0 0; max-height: 140px; overflow: auto; }
+.lab-trace-waits li { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding-block: 6px; }
+.lab-trace-waits li > div { min-width: 0; display: flex; flex-wrap: wrap; gap: 5px 8px; }
+.lab-trace-waits li > div > strong { max-width: 100%; overflow-wrap: anywhere; }
+.lab-trace-waits li > button { flex: 0 0 auto; min-height: 28px; padding: 3px 6px; font-size: 11px; }
+.lab-trace-session-links { display: flex; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.lab-trace-session-links a, .lab-trace-session-links > span { overflow-wrap: anywhere; color: var(--obs-action); font-family: var(--obs-mono); }
+.lab-trace-session-links > span { color: var(--obs-text-secondary); }
+.lab-trace-session-links p { flex-basis: 100%; margin: 0; color: var(--obs-danger); }
+.lab-shell .agent-inspect-entry { min-height: 26px; min-width: 26px; }
+@container (max-width: 720px) {
+  .lab-trace-browser { grid-template-columns: minmax(0, 1fr); }
+  .lab-trace-browser:not([data-has-selection]) .lab-trace-detail { display: none; }
+  .lab-trace-browser[data-has-selection] .lab-trace-list { display: none; }
+  .lab-trace-detail { border-left: 0; padding: 12px 16px 24px; }
+  .lab-trace-controls { padding: 10px 12px; }
+  .lab-trace-row > button { padding: 12px; }
+  .lab-trace-filters { gap: 6px; }
+  .lab-trace-filters > input { flex-basis: 100%; }
+  .lab-trace-filters > select { flex: 1; }
+  .lab-trace-waits li { flex-wrap: wrap; }
+}

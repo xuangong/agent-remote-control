@@ -54,6 +54,7 @@ import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';
 import { SupportingRail } from './components/SupportingRail.js';
+import { SidebarResize, useSidebarWidth } from './components/SidebarResize.js';
 import { TraceView } from './components/TraceView.js';
 import { HostPreviewList } from './components/HostPreviewList.js';
 
@@ -175,17 +176,20 @@ export function App({
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !initialState);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const sidebar = useSidebarWidth(inspectorOpen);
   const [headerHidden, setHeaderHidden] = useState(true);
   const [desktopContextVisible, setDesktopContextVisible] = useState(true);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
 
   useEffect(() => { saveDrafts(baseUrl, messageDrafts); }, [baseUrl, messageDrafts]);
   useEffect(() => {
-    if (!compactLayout || !contextOpen) return;
+    if (compactLayout && !contextOpen) return;
     const panel = shellRef.current?.querySelector<HTMLElement>('#lab-context');
     if (!panel) return;
-    panel.scrollTop = 0;
-    panel.querySelector<HTMLElement>(sessionPanel === 'new' ? '#provider-select' : '.lab-rail-close')?.focus({ preventScroll: true });
+    const scrollContainer = compactLayout ? panel : panel.querySelector<HTMLElement>('.lab-sidebar-content');
+    if (scrollContainer) scrollContainer.scrollTop = 0;
+    if (sessionPanel === 'new') panel.querySelector<HTMLElement>('#provider-select')?.focus({ preventScroll: true });
+    else if (compactLayout) panel.querySelector<HTMLElement>('.lab-rail-close')?.focus({ preventScroll: true });
   }, [compactLayout, contextOpen, sessionPanel]);
 
   useEffect(() => {
@@ -499,6 +503,7 @@ export function App({
         attach(response.payload.agentId);
       }
       setProviderName(providerConnectionName(selectedHost.id, providerId));
+      setSessionPanel('list');
     } catch (error) {
       const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'request_conflict'].includes(error.code ?? '');
       if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
@@ -784,7 +789,7 @@ export function App({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
-  return <PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       {stackPath.length > 1 ? <select aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
@@ -857,25 +862,32 @@ export function App({
       onClose={() => setContextOpen(false)}
     >
       <div className="lab-rail-heading">
-        <p className="lab-eyebrow">Context</p>
-        <span title={baseUrl}>Connected runtime · {new URL(baseUrl, window.location.origin).host}</span>
+        <p className="lab-eyebrow" title={baseUrl}>Workspace</p>
       </div>
+      {!compactLayout ? <nav className="lab-sidebar-tabs" aria-label="Sidebar sections">
+        <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
+        <button type="button" aria-pressed={sessionPanel === 'new'} onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button>
+        <button type="button" aria-label="Sidebar settings" title="Settings" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel('settings')}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none" /><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none" /></svg>
+        </button>
+      </nav> : null}
+      <div className="lab-sidebar-content">
       {compactLayout ? <div className="lab-session-panel-actions">
         {sessionPanel !== 'list' ? <button type="button" onClick={() => setSessionPanel('list')}>All sessions</button> : <strong>Your sessions</strong>}
         <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel((value) => value === 'settings' ? 'list' : 'settings')}>Settings</button>
       </div> : null}
-      {compactLayout && sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
+      {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         {accountAction}
         <MobileDisplaySettings />
         <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
       </section> : null}
-      {directory ? <HostPairing managementVisible={!compactLayout || sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} onNewSession={compactLayout ? undefined : () => { const element = document.getElementById('provider-select'); element?.scrollIntoView({ block: 'start' }); element?.focus(); }} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
-      {previewHost?.access !== 'shared' && previewHost ? <HostPreviewList showInactive={compactLayout} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
-      <div className="lab-directory-panel" hidden={compactLayout && sessionPanel !== 'list'}>
-      {compactLayout && providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
-      {directory ? <SessionDirectory searchable={compactLayout} directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
+      {directory ? <HostPairing managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {sessionPanel === 'list' && previewHost?.access !== 'shared' && previewHost ? <HostPreviewList showInactive={compactLayout} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
+      <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
+      {providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
+      {directory ? <SessionDirectory searchable directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       </div>
-      <div hidden={compactLayout && sessionPanel !== 'new'}>
+      <div hidden={sessionPanel !== 'new'}>
       <ProviderSessionControls
         providers={providerChoices}
         selectedProviderId={selectedProviderChoice?.selectionId ?? ''}
@@ -893,7 +905,7 @@ export function App({
         onResumeSession={activeRemoteSession || activeOpened?.parentAgentId || activeOpened?.parentNativeSessionId ? undefined : () => void resumeAgent()}
       >{directory ? <SessionConfiguration directory={directory} providerId={providerId} canBrowse={remoteHosts.find(host => host.id === selectedHost.id)?.access !== 'shared'} value={sessionOptions} disabled={transitioning || creationLocked || !!creationUnavailableReason} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
       </div>
-      <div hidden={compactLayout && sessionPanel !== 'settings'}>
+      <div hidden={sessionPanel !== 'settings'}>
       {clientActions.advanceFixture || clientActions.rehydrateFixture || clientActions.stopReader ? <RecordedPlaybackControls
         onAdvance={clientActions.advanceFixture}
         onRehydrate={clientActions.rehydrateFixture}
@@ -902,7 +914,9 @@ export function App({
       </div>
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       {compactLayout && sessionPanel === 'list' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}>New session</button></footer> : null}
+      </div>
     </SupportingRail>
+    {!compactLayout && contextVisible ? <SidebarResize width={sidebar.width} maximum={sidebar.maximum} onChange={sidebar.setWidth} /> : null}
     <PreviewWorkspace className="lab-main-stage" {...backgroundInert}>
       <section
         ref={workbenchPanelRef}

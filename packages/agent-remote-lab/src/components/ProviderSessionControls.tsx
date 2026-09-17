@@ -28,7 +28,7 @@ export function ProviderSessionControls({ providers, selectedProviderId, catalog
   const canCreate = providers.some((provider) => (provider.selectionId ?? provider.providerId) === selectedProviderId) && !creating && !unavailableReason;
   const canResume = persistence !== undefined && onResumeSession !== undefined && !creating;
   return <section className="lab-panel lab-provider-controls" aria-label="Provider and session controls">
-    <p className="lab-eyebrow">Session intake</p>
+    <p className="lab-eyebrow">New session</p>
     <label htmlFor="provider-select">Provider</label>
     <select id="provider-select" data-testid="provider-select" value={selectedProviderId} onChange={(event) => onSelectedProviderChange(event.target.value)} disabled={providers.length === 0 || creating || configurationLocked}>
       {!selectedProviderId && providers.length > 0 ? <option value="" disabled>Select a Provider</option> : null}

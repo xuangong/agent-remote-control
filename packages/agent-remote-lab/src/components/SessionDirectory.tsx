@@ -117,7 +117,7 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
     </section> : null}
     <section className="lab-session-directory" aria-label="Discover sessions">
       <div className="lab-directory-heading"><h2>Discover sessions</h2><button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div>
-      <p className="lab-control-note">Roots by activity · Subagents by creation</p>
+      <p className="agent-visually-hidden">Roots by activity · Subagents by creation</p>
       {updates && !expired ? <button type="button" className="lab-directory-updates" onClick={() => void load()} disabled={loading}>Updates available · Refresh</button> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       {loading ? <p className="lab-control-note" role="status">Loading sessions…</p> : null}

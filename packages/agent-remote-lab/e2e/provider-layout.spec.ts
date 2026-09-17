@@ -70,11 +70,11 @@ for (const width of [320, 390, 844]) {
         await expect(drawer.getByRole('region', { name: 'Discover sessions' }).locator('.lab-session-row')).toHaveCount(12);
         await expectContained(drawer);
         failCatalog = true;
-        await drawer.getByRole('button', { name: 'Refresh', exact: true }).click();
+        await drawer.getByRole('region', { name: 'Discover sessions' }).getByRole('button', { name: 'Refresh', exact: true }).click();
         await expect(drawer.getByRole('alert')).toContainText('Discovery failed');
         await expectContained(drawer);
         failCatalog = false;
-        await drawer.getByRole('button', { name: 'Refresh', exact: true }).click();
+        await drawer.getByRole('region', { name: 'Discover sessions' }).getByRole('button', { name: 'Refresh', exact: true }).click();
         await expect(drawer.getByRole('alert')).toHaveCount(0);
         await drawer.getByRole('button', { name: 'New session', exact: true }).click();
         await expect(drawer.getByLabel('Workspace', { exact: true }).locator('option[value="project"]')).toHaveCount(1);

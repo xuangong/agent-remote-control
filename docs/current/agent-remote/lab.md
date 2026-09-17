@@ -199,6 +199,12 @@ A permanent `& Source` tag with a fork badge identifies the source native sessio
 Creation inherits session-scoped mutable settings through existing Provider controls. DSH Hosts resolve the source working directory to a registered workspace and retain native global defaults. Codex Hosts preserve the source working directory, model, planning state, and mutable session settings. Fork settings are initialized before the first input; later explicit changes belong to the new session.
 
 
+## Session sidebar
+
+The desktop sidebar separates Sessions, New session, and Settings. Sessions is the default panel, with Host and Provider selection, search over loaded sessions, and two-line session titles. Creation settings and Host management occupy their own panels while form drafts remain mounted. The heading and panel navigation stay visible above one scrolling content area; changing panels resets that area to its beginning.
+
+Above 1180 px, the sidebar starts at 320 px and exposes a draggable divider. Width is bounded between 260 and 560 px, with a lower maximum when needed to reserve 480 px for the main stage and 320 px for an open Replica Inspector. The preferred width persists in localStorage and is restored when temporary viewport constraints disappear. Arrow keys adjust by 10 px, Shift adjusts by 40 px, Home and End select the current limits, and Enter or double-click restores the default. Unavailable browser storage does not prevent resizing. Compact layouts retain the full-screen drawer without a width divider (`packages/agent-remote-lab/src/components/SidebarResize.tsx`, `packages/agent-remote-lab/src/App.tsx`, `packages/agent-remote-lab/src/app.css`).
+
 ## Mobile session shell
 
 Compact layouts expose Sessions directly. The full-screen session panel starts with the Host selector and a search over loaded sessions. Matching descendants keep ancestor context and expand during search. Browse provider changes the catalog without exposing creation settings. New session opens Provider/workspace/model configuration; Settings contains Host pairing, revocation, account sign-out, and recorded playback controls. Session selection closes the panel and resumes the conversation.

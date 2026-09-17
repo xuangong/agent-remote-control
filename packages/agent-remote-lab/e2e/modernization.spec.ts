@@ -231,8 +231,9 @@ test('renders default control boundaries with three-to-one contrast', async ({ p
   test.skip(testInfo.project.name !== 'chromium-desktop');
   const browserErrors = collectBrowserErrors(page);
   await openRecordedSession(page);
-  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
   await page.getByTestId('playback-advance').click();
+  await showNewSession(page);
 
   const controls = {
     button: page.getByRole('button', { name: 'Load resource', exact: true }),

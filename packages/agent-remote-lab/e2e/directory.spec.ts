@@ -62,7 +62,7 @@ test('creates a temporary pairing key through the workbench', async ({ page }, t
   await page.goto('/');
   const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
   await expect(context.getByRole('region', { name: 'Remote Hosts' })).toBeVisible();
-  if (testInfo.project.name === 'chromium-mobile') await context.getByRole('button', { name: 'Settings', exact: true }).click();
+  await context.getByRole('button', { name: testInfo.project.name === 'chromium-mobile' ? 'Settings' : 'Sidebar settings', exact: true }).click();
   await context.getByRole('button', { name: 'Pair Agent Host' }).click();
   const responsePromise = page.waitForResponse((response) => response.url().endsWith('/v1/remote/pairings') && response.request().method() === 'POST');
   await context.getByRole('button', { name: 'Generate pairing key' }).click();

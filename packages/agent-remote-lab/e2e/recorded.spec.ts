@@ -46,7 +46,7 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await expect(page.locator('.lab-app-bar')).toBeHidden();
   await showNewSession(page);
   const context = contextRail(page, testInfo);
-  await expect(context.getByText('Session intake')).toBeVisible();
+  await expect(context.locator('.lab-provider-controls .lab-eyebrow')).toHaveText('New session');
   await expect(context.getByTestId('provider-select')).toBeVisible();
   await expect(context.getByRole('button', { name: 'Open session' })).toBeVisible();
   await showNewSession(page);
@@ -157,7 +157,7 @@ async function openContextForFixture(page: Page, testInfo: TestInfo): Promise<Lo
   if (isCompact(testInfo)) {
     await toggleViewPanel(page, 'Sidebar');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  }
+  } else await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
   return contextRail(page, testInfo);
 }
 

@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createAgentHost, type AgentHost, type AgentHostUplinkDiagnostic } from './host.js';
 import { createHostRegistrations } from './registrations.js';
 import { createHostExecutionPolicy } from './execution-policy.js';
+import { boundedDiagnosticLine, createDiagnosticLog, type DiagnosticLog } from './diagnostic-log.js';
 import { resolveHostConnection, saveIssuedCredential, saveRegisteredConnection, type HostConnection } from './connection-config.js';
 import { autostartEnabled, clearLaunchdConnection, createLaunchdAutostart, prepareLaunchdConnection, resolveLaunchdConnection } from './launchd.js';
 
@@ -45,11 +46,25 @@ function help(): void {
 }
 
 async function serve(daemon: boolean): Promise<void> {
+  await privateDirectory();
+  const diagnosticLog = daemon ? createDiagnosticLog({ path: daemonLogFile }) : undefined;
+  try {
+    await serveConfigured(daemon, diagnosticLog);
+  } catch (error) {
+    diagnosticLog?.dispose();
+    throw error;
+  }
+}
+
+async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | undefined): Promise<void> {
+  const writeDiagnostic = (line: string, secrets: Iterable<string> = []) => {
+    if (diagnosticLog) diagnosticLog.write(line, secrets);
+    else process.stderr.write(daemonDiagnosticLine(line, secrets));
+  };
   const managed = daemon && process.env.AGENT_HOST_LAUNCHD === '1';
   const launch = managed ? await resolveLaunchdConnection(stateDir, process.env) : undefined;
   const configuration = launch?.connection ?? await resolveHostConnection(stateDir, process.env);
   const { serverUrl, remoteKey, environment } = configuration;
-  await privateDirectory();
   if (daemon) {
     const existing = await readState();
     if (existing && existing.pid !== process.pid && processAlive(existing.pid))
@@ -61,12 +76,12 @@ async function serve(daemon: boolean): Promise<void> {
   const executionPolicy = await createHostExecutionPolicy(environment);
   if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   const registrations = await createHostRegistrations(environment,
-    (line) => process.stderr.write(daemonDiagnosticLine(line, diagnosticSecrets)));
+    (line) => writeDiagnostic(line, diagnosticSecrets));
   const host = createAgentHost({ registrations, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     preview: { stateDirectory: stateDir, ttlMs: Number(environment.AGENT_HOST_PREVIEW_TTL_MS ?? 3_600_000),
       protectedPorts: (environment.AGENT_HOST_PREVIEW_PROTECTED_PORTS ?? '').split(',').filter(Boolean).map(Number),
-      diagnostic: event => { process.stderr.write(JSON.stringify({ event, time: new Date().toISOString() }) + '\n'); } },
-    onDiagnostic: diagnostic => { process.stderr.write(uplinkDiagnosticLine(diagnostic)); },
+      diagnostic: event => { writeDiagnostic(JSON.stringify({ event, time: new Date().toISOString() }), diagnosticSecrets); } },
+    onDiagnostic: diagnostic => { writeDiagnostic(uplinkDiagnosticLine(diagnostic), diagnosticSecrets); },
     executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey, onCredential: credential => {
       diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);
     } }, shutdownTimeoutMs: shutdownTimeout() });
@@ -78,7 +93,7 @@ async function serve(daemon: boolean): Promise<void> {
     return;
   }
   void saveRegisteredConnection(stateDir, configuration, host.ready).then(() => clearLaunchdConnection(stateDir, launch?.pendingId)).catch(error => {
-    process.stderr.write(daemonDiagnosticLine(error instanceof Error ? error.message : 'Could not save registered Host connection.', diagnosticSecrets));
+    writeDiagnostic(error instanceof Error ? error.message : 'Could not save registered Host connection.', diagnosticSecrets);
   });
   const scope = createHash('sha256').update(stateDir).digest('hex').slice(0, 16);
   const socket = join(tmpdir(), `agent-host-${scope}-${process.pid}.sock`);
@@ -94,7 +109,12 @@ async function serve(daemon: boolean): Promise<void> {
   await atomicJson(stateFile, { pid: process.pid, token, socket, startedAt: new Date().toISOString(), ...(managed ? { supervisor: 'launchd' } : {}) });
   const shutdown = async () => {
     management.close();
-    try { await within(host.close(), shutdownTimeout()); } finally { await rm(socket, { force: true }); await removeOwnedDaemonState(stateFile, { pid: process.pid, token }); }
+    try { await within(host.close(), shutdownTimeout()); }
+    finally {
+      diagnosticLog?.dispose();
+      await rm(socket, { force: true });
+      await removeOwnedDaemonState(stateFile, { pid: process.pid, token });
+    }
   };
   process.once('SIGTERM', () => void shutdown().finally(() => process.exit()));
   process.once('SIGINT', () => void shutdown().finally(() => process.exit()));
@@ -273,10 +293,8 @@ export async function within(operation: Promise<unknown>, timeoutMs: number): Pr
   try { await Promise.race([operation, new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); timer.unref?.(); })]); }
   finally { clearTimeout(timer); }
 }
-export function daemonDiagnosticLine(line: string, secrets: Iterable<string>): string {
-  let sanitized = line.replace(/[\r\n]+/g, ' ');
-  for (const secret of secrets) if (secret) sanitized = sanitized.split(secret).join('[redacted]');
-  return `${sanitized}\n`;
+export function daemonDiagnosticLine(line: string, secrets: Iterable<string>, maxBytes?: number): string {
+  return boundedDiagnosticLine(line, secrets, maxBytes);
 }
 export function uplinkDiagnosticLine(diagnostic: AgentHostUplinkDiagnostic): string {
   const { event, uplinkGeneration, connectionId, registered, reason, peerReason, closeCode, httpStatus, errorCode, retryAttempt,

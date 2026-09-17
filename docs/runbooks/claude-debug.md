@@ -79,7 +79,7 @@ pnpm bdb timeline AGENT_ID --tail 20 --json
 pnpm bdb protocol trace AGENT_ID --jsonl --until idle --timeout 15000
 ```
 
-For custom ports, pass the matching `--relay` and `--origin` flags. The daemon log is `agent-host.log` under `AGENT_HOST_STATE_DIR`, or `~/.agent-remote-control/agent-host` by default. Pairing and management credentials are redacted from native diagnostic lines.
+For custom ports, pass the matching `--relay` and `--origin` flags. The daemon log is `agent-host.log` under `AGENT_HOST_STATE_DIR`, or `~/.agent-remote-control/agent-host` by default. The active log and three numbered archives retain at most 5 MiB each after successful cleanup. Owned lines are redacted before their 64 KiB limit, allowing at most one bounded line of overshoot until the next owned write or one-second pass. Inherited output has no finite instantaneous overshoot bound; cleanup retains only the latest 5 MiB from an oversized active file.
 
 If startup rejects the executable, run its `--version` command and set `AGENT_HOST_CLAUDE` explicitly. If authentication, model access, or catalog discovery fails, inspect the selected native profile and environment. The workbench does not substitute credentials or silently switch profiles. A pending permission request belongs to the live Query; restarting the Host does not revive the original native permission callback.
 

@@ -1,6 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { acquireStartupLock, authenticateSavedDaemon, daemonDiagnosticLine, removeOwnedDaemonState, uplinkDiagnosticLine, withDaemonLifecycleLock, within } from './cli.js';
 
@@ -79,5 +81,38 @@ describe('Agent Host daemon lifecycle', () => {
   it('removes pairing and management credentials from retained native diagnostics', () => {
     expect(daemonDiagnosticLine('native failed key-pair token-local', ['key-pair', 'token-local']))
       .toBe('native failed [redacted] [redacted]\n');
+  });
+
+  it('redacts a complete credential before applying the diagnostic line byte limit', () => {
+    const secret = 'credential-that-crosses-the-limit';
+    const line = daemonDiagnosticLine(`prefix:${secret}:${'tail'.repeat(12)}`, [secret], 24);
+    expect(Buffer.byteLength(line)).toBeLessThanOrEqual(24);
+    expect(line).toContain('[redacted]');
+    expect(line).not.toContain('credential');
+    expect(line.endsWith('\n')).toBe(true);
+  });
+
+  it('bounds the daemon log before reporting an initialization failure', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agent-host-startup-log-'));
+    temporary.push(root);
+    const path = join(root, 'agent-host.log');
+    const maxBytes = 5 * 1024 * 1024;
+    await writeFile(path, Buffer.alloc(maxBytes + 128, 'x'), { mode: 0o600 });
+    const writer = await open(path, 'a', 0o600);
+    try {
+      const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), '_serve'], {
+        env: { HOME: root, PATH: process.env.PATH, AGENT_HOST_STATE_DIR: root },
+        stdio: ['ignore', writer.fd, writer.fd],
+      });
+      const code = await new Promise<number | null>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', resolve);
+      });
+      expect(code).toBe(1);
+      expect((await stat(path)).size).toBeLessThan(maxBytes);
+      expect((await stat(`${path}.1`)).size).toBe(maxBytes);
+    } finally {
+      await writer.close();
+    }
   });
 });

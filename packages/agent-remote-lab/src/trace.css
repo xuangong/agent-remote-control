@@ -51,6 +51,9 @@
 .lab-trace-session-links > span { color: var(--obs-text-secondary); }
 .lab-trace-session-links p { flex-basis: 100%; margin: 0; color: var(--obs-danger); }
 .lab-shell .agent-inspect-entry { min-height: 26px; min-width: 26px; }
+@media (max-width: 1180px) {
+  .lab-shell .agent-inspect-entry { display: none; }
+}
 @container (max-width: 720px) {
   .lab-trace-browser { grid-template-columns: minmax(0, 1fr); }
   .lab-trace-browser:not([data-has-selection]) .lab-trace-detail { display: none; }

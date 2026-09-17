@@ -14,7 +14,17 @@ test('inspects a live tool and returns to a stable conversation anchor', async (
   await page.mouse.wheel(0, -3000);
   await entry.scrollIntoViewIfNeeded();
   await entry.hover();
-  await entry.getByRole('button', { name: 'Inspect event #12 in Trace' }).click();
+  const inspectButton = entry.getByRole('button', { name: 'Inspect event #12 in Trace', includeHidden: true });
+  if (page.viewportSize()!.width <= 1180) {
+    await expect(inspectButton).toBeHidden();
+    await expect(viewport.getByRole('button', { name: /Inspect event .* in Trace/ })).toHaveCount(0);
+    if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
+    await page.getByRole('tab', { name: 'Trace', exact: true }).click();
+    await page.locator('[data-trace-entry-key="epoch-1:recorded:12:test-call"]').click();
+  } else {
+    await expect(inspectButton).toBeVisible();
+    await inspectButton.click();
+  }
   const details = page.getByRole('region', { name: 'Trace entry details' });
   await expect(details).toBeVisible();
   await expect(details).toContainText('pnpm test --testTimeout=10000');

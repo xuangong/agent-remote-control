@@ -94,7 +94,7 @@
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts"
       ],
-      "digest": "sha256:fb66ecf098b934ab5af459240e676ba07e53afee7f17384b4a02d99929047400"
+      "digest": "sha256:1a18f4535eb0028a160b9587e85aef7b063cb06a49263879b9aad7b7d4adf13c"
     }
   },
   "providers": [

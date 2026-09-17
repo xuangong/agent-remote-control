@@ -31,6 +31,18 @@ export interface TimelineReplicaState {
   readonly pendingLive: readonly TimelineStreamMessage[];
 }
 
+/** Local delivery feedback, separate from the authoritative timeline and its cursor. */
+export interface OutgoingMessage {
+  readonly id: string;
+  readonly agentId: string;
+  readonly text: string;
+  readonly delivery?: 'immediate' | 'next_turn';
+  readonly status: 'sending' | 'awaiting_echo' | 'unconfirmed' | 'failed';
+  readonly error?: string;
+  readonly epoch: string | null;
+  readonly afterSeq: number;
+}
+
 export interface AgentReplicaState {
   readonly agent: AgentSnapshotPayload | null;
   readonly timeline: TimelineReplicaState;
@@ -40,6 +52,7 @@ export interface AgentReplicaState {
   readonly resources: Readonly<Record<string, ResourceResponse['payload']['state'] | ResourceState>>;
   readonly diagnostics: readonly ReplicaDiagnostic[];
   readonly retiredEpochs: readonly string[];
+  readonly outgoingMessages?: readonly OutgoingMessage[];
 }
 
 export type TimelineReduction =

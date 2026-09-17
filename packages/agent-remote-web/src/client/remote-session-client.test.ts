@@ -1072,3 +1072,151 @@ it.each([{ gap: true }, { error: 'History is unavailable' }, { epoch: 'obsolete-
   expect(replica.getState().timeline).toMatchObject({ epoch: 'epoch-one', initialized: true, hasOlder: true });
   expect(replica.getState().timeline.entries).toEqual([entry(10, 10, 'Keep reading')]);
 });
+
+function outgoingFixture(options: ConstructorParameters<typeof RemoteSessionClient>[3] = {}) {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  replica.applySnapshot(snapshot());
+  replica.applyHistory(page('tail', []));
+  const client = new RemoteSessionClient('agent-one', transport, replica, options);
+  client.start(); transport.open();
+  const acknowledge = (requestId: string) => transport.emit({ protocolVersion: '1.4.0', type: 'command_acknowledged',
+    payload: { requestId, agentId: 'agent-one', command: 'send_message' } });
+  const echo = (seq: number, text: string) => {
+    const message = live(seq, text);
+    message.payload.event = { type: 'timeline', providerId: 'provider-neutral', item: { type: 'user_message', text }, resources: [] };
+    transport.emit(message);
+  };
+  return { transport, replica, client, acknowledge, echo };
+}
+
+it('shows local sends immediately and keeps them until a new user echo, independently of acknowledgement', async () => {
+  const f = outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    f.echo(1, 'Repeat');
+    const send = f.client.sendMessage('Repeat');
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ text: 'Repeat', status: 'sending' }]);
+    expect(f.replica.getState().timeline.entries).toHaveLength(1);
+    f.acknowledge('send-one'); await send;
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
+    f.transport.emit(live(2, 'Repeat'));
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+    f.echo(3, 'Repeat');
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.replica.getState().timeline.nextSeq).toBe(4);
+  } finally { f.client.stop(); }
+});
+
+it('consumes identical user echoes once, including replay and echo-before-acknowledgement races', async () => {
+  const f = outgoingFixture();
+  try {
+    const one = f.client.sendMessage('Same input');
+    const first = (f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>).payload.requestId;
+    const two = f.client.sendMessage('Same input');
+    const second = (f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>).payload.requestId;
+    f.echo(1, 'Same input');
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+    f.echo(1, 'Same input');
+    f.acknowledge(first); await one;
+    f.acknowledge(second); await two;
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+    f.echo(2, 'Same input');
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.replica.getState().timeline.entries).toHaveLength(2);
+  } finally { f.client.stop(); }
+});
+
+it.each([false, true])('times out acknowledged messages and removes failures after ten seconds (late echo: %s)', async (lateEcho) => {
+  vi.useFakeTimers();
+  const f = outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const send = f.client.sendMessage('Slow echo');
+    f.acknowledge('send-one'); await send;
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('awaiting_echo');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.replica.getState().outgoingMessages?.[0]).toMatchObject({ status: 'unconfirmed' });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+    if (lateEcho) f.echo(1, 'Slow echo');
+    else await vi.advanceTimersByTimeAsync(1);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    f.echo(1, 'Slow echo');
+    expect(f.replica.getState().timeline.entries).toHaveLength(1);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('does not restart the confirmation window on a late acknowledgement', async () => {
+  vi.useFakeTimers();
+  const f = outgoingFixture({ requestId: () => 'send-one', operationTimeoutMs: 60_000 });
+  try {
+    const send = f.client.sendMessage('Delayed response');
+    await vi.advanceTimersByTimeAsync(32_000);
+    f.acknowledge('send-one'); await send;
+    expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed');
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('retains disconnected input for late history recovery without resending it', async () => {
+  vi.useFakeTimers();
+  const f = outgoingFixture({ scheduleReconnect: () => () => undefined });
+  try {
+    const send = f.client.sendMessage('Lost acknowledgement');
+    f.transport.disconnect();
+    await expect(send).rejects.toMatchObject({ code: 'connection_disconnected' });
+    expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed');
+    const confirmed = { ...entry(1, 1, ''), item: { type: 'user_message' as const, text: 'Lost acknowledgement' } };
+    f.replica.applyHistory(page('after', [confirmed]));
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(f.replica.getState().timeline.entries).toEqual([confirmed]);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('reconciles a late echo after a generic command failure', async () => {
+  const f = outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const send = f.client.sendMessage('Possibly accepted');
+    f.transport.emit({ protocolVersion: '1.4.0', type: 'protocol_error', payload: {
+      requestId: 'send-one', code: 'command_failed', message: 'Provider request timed out.', recoverable: true,
+    } });
+    await expect(send).rejects.toThrow('Provider request timed out.');
+    expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed');
+    f.echo(1, 'Possibly accepted');
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.replica.getState().timeline.entries).toHaveLength(1);
+  } finally { f.client.stop(); }
+});
+
+it('shows definite rejections for ten seconds and never adds them to the timeline', async () => {
+  vi.useFakeTimers();
+  const f = outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const send = f.client.sendMessage('Rejected input');
+    f.transport.emit({ protocolVersion: '1.4.0', type: 'protocol_error', payload: {
+      requestId: 'send-one', code: 'unsupported_operation', message: 'This session is read-only.', recoverable: false,
+    } });
+    await expect(send).rejects.toThrow('This session is read-only.');
+    expect(f.replica.getState().outgoingMessages?.[0]).toMatchObject({ status: 'failed', error: 'This session is read-only.' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.replica.getState().timeline.entries).toEqual([]);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('does not confirm input using identical text from a replacement epoch', async () => {
+  vi.useFakeTimers();
+  const f = outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const send = f.client.sendMessage('Same words');
+    f.acknowledge('send-one'); await send;
+    f.replica.replaceTimeline('replacement');
+    f.replica.applyHistory(page('tail', [{ ...entry(1, 1, ''), item: { type: 'user_message', text: 'Same words' } }], { epoch: 'replacement' }));
+    expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});

@@ -84,6 +84,18 @@
 .agent-item-header > div { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; gap: 10px; }
 
 .agent-message-user { background: var(--agent-surface-selected); }
+.agent-outgoing-message { background: var(--agent-surface-selected); }
+.agent-outgoing-message[data-delivery-state="pending"] > .agent-message { animation: agent-message-pending 1.8s ease-in-out infinite; }
+.agent-message-delivery { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0 18px 12px; color: var(--agent-muted); font-size: 12px; }
+.agent-delivery-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.agent-delivery-error { flex-basis: 100%; }
+.agent-outgoing-message[data-delivery-state="failed"] { box-shadow: inset 2px 0 var(--agent-danger); background: color-mix(in srgb, var(--agent-danger) 7%, var(--agent-panel)); }
+.agent-outgoing-message[data-delivery-state="failed"] > .agent-message { background: transparent; }
+.agent-outgoing-message[data-delivery-state="failed"] .agent-message-delivery { color: var(--agent-danger); }
+@keyframes agent-message-pending { 0%, 100% { opacity: .85; } 50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-outgoing-message[data-delivery-state="pending"] > .agent-message { animation: none; }
+}
 .agent-message .agent-item-kicker { letter-spacing: 0; text-transform: none; }
 .agent-message-group-first { padding-bottom: 4px; border-bottom-left-radius: 3px; border-bottom-right-radius: 3px; }
 .agent-message-group-middle { padding-block: 4px; border-radius: 3px; }

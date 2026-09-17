@@ -429,6 +429,9 @@ textarea {
 .lab-timeline-scroll .agent-message { width: fit-content; max-width: min(78%, 760px); margin-block: 5px; padding: 7px 10px; border: 1px solid var(--obs-border); border-radius: var(--obs-radius-md); background: var(--obs-canvas); }
 .lab-timeline-scroll .agent-message-assistant { width: 100%; max-width: 100%; padding: 6px 2px; border: 0; background: transparent; }
 .lab-timeline-scroll .agent-message-user { margin-left: auto; border-color: var(--obs-border); border-bottom-right-radius: 5px; background: var(--agent-surface-selected); }
+.lab-timeline-scroll .agent-outgoing-message[data-delivery-state] { background: transparent; box-shadow: none; }
+.lab-timeline-scroll .agent-message-delivery { justify-content: flex-end; text-align: right; padding: 0 2px 4px; line-height: 1.4; }
+.lab-timeline-scroll .agent-outgoing-message[data-delivery-state="failed"] > .agent-message-user { border-color: var(--agent-danger); background: var(--agent-surface-danger); }
 .lab-timeline-scroll .agent-message-group-first { margin-bottom: 1px; padding-bottom: 4px; border-bottom-left-radius: 5px; border-bottom-right-radius: 5px; }
 .lab-timeline-scroll .agent-message-group-middle { margin-block: 1px; padding-block: 4px; border-radius: 5px; }
 .lab-timeline-scroll .agent-message-group-last { margin-top: 1px; padding-top: 4px; border-top-left-radius: 5px; border-top-right-radius: 5px; }

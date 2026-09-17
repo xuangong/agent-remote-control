@@ -118,7 +118,7 @@ test('sends immediate input to a working native turn, restores elapsed time and 
   await page.getByTestId('prompt-input').fill('Use a smaller example in this turn.');
   await page.getByTestId('prompt-input').press('Enter');
   await expect(page.getByTestId('prompt-input')).toHaveValue('');
-  await expect(page.getByText('Message sent.', { exact: true })).toBeVisible();
+  await expect(page.locator('.agent-message-user').filter({ hasText: 'Use a smaller example in this turn.' })).toBeVisible();
   await expect(page.getByTestId('agent-activity-label')).toHaveText('Working');
   await expect.poll(async () => Number((await elapsed.getAttribute('datetime'))?.match(/\d+/)?.[0])).toBeGreaterThanOrEqual(before);
   await page.getByTestId('prompt-input').fill('Keep this unsent draft.');

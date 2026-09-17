@@ -34,7 +34,7 @@ test('delivers immediate input within the native turn, queues a new turn, and in
   await input.fill('REMOTE_QUEUED');
   await queue.click();
   await expect(input).toHaveValue('');
-  await expect(page.getByText('Message queued by Provider.', { exact: true })).toBeVisible();
+  await expect(page.locator('.agent-message-user').filter({ hasText: 'REMOTE_QUEUED' })).toBeVisible();
   const assistant = page.getByRole('article', { name: 'Assistant message' });
   await expect(assistant.filter({ hasText: 'IMMEDIATE_STEP_CONSUMED' })).toBeVisible({ timeout: 30_000 });
   await expect(assistant.filter({ hasText: 'QUEUED_TURN_CONSUMED' })).toBeVisible({ timeout: 30_000 });

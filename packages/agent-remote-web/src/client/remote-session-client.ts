@@ -151,14 +151,24 @@ export class RemoteSessionClient {
   }
 
   sendMessage(text: string, options?: AgentMessageOptions): Promise<CommandAcknowledgementMessage> {
+    const outgoingId = this.replica.beginMessage(this.agentId, text, options?.delivery);
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'send_message',
       payload: { requestId: this.createRequestId(), agentId: this.agentId, text, ...(options?.delivery === undefined ? {} : { delivery: options.delivery }) },
     } as const;
-    return this.sendOperation(message, 'command_acknowledged:send_message', (response): response is CommandAcknowledgementMessage => (
+    const operation = this.sendOperation(message, 'command_acknowledged:send_message', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'send_message'
     ));
+    void operation.then(() => this.replica.updateMessage(outgoingId, 'awaiting_echo'), error => {
+      const uncertain = error instanceof RemoteOperationError && [
+        'operation_timeout', 'connection_disconnected', 'operation_stopped', 'operation_send_failed', 'command_failed',
+      ].includes(error.code);
+      this.replica.updateMessage(outgoingId, uncertain ? 'unconfirmed' : 'failed',
+        uncertain ? 'Delivery is not confirmed. Check the conversation before sending again.'
+          : error instanceof Error ? error.message : 'The message could not be sent.');
+    });
+    return operation;
   }
 
   steer(text: string): Promise<CommandAcknowledgementMessage> {

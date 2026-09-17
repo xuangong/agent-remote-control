@@ -15,6 +15,7 @@ import { TimelineItemRenderer } from './TimelineItemRenderer.js';
 import { createTimelineRenderModel } from './timeline-render-model.js';
 import { PreviewActions, type PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
+import { OutgoingMessageItem } from './OutgoingMessageItem.js';
 
 export type AgentTimelineState = AgentReplicaState;
 
@@ -56,6 +57,7 @@ export function AgentTimeline({
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
   const renderModel = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries);
+  const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
   const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);
   if (discovered.current.identity !== identity) discovered.current = { identity, order: new Map() };
@@ -101,7 +103,7 @@ export function AgentTimeline({
     /> : null}
 
     <div className="agent-timeline-entries" aria-live="polite">
-      {renderModel.length === 0
+      {renderModel.length === 0 && outgoing.length === 0
         ? <p className="agent-timeline-empty">No timeline activity.</p>
         : renderModel.map(({ entry, key, messageGroup }) => <div className="agent-timeline-entry" key={key} data-entry-key={key}>
             <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
@@ -113,6 +115,7 @@ export function AgentTimeline({
             <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
             <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
           </div>)}
+      {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} />)}
     </div>
 
     <AgentChildSessionList childrenFor={childrenFor} key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />

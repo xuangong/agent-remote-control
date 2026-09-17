@@ -39,7 +39,7 @@ interface Draft {
   commandsOpen?: boolean;
   commandsDismissed?: boolean;
   commandIndex?: number;
-  feedback?: { kind: 'success' | 'error'; message: string };
+  feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
 export function AgentComposer({ state, sessionControls, sessionKey, disabled = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand }: AgentComposerProps) {
@@ -207,7 +207,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       if (kind === 'queue') await action(submitted.trim(), { delivery: 'next_turn' });
       else await action(submitted.trim());
       if (currentDraft.text === submitted) setText('');
-      currentDraft.feedback = { kind: 'success', message: kind === 'send' ? 'Message sent.' : 'Message queued by Provider.' };
+      currentDraft.feedback = { kind: 'success', message: kind === 'send' ? 'Message sent.' : 'Message queued by Provider.', delivery: true };
       if (currentAgent.current === agentId) focusRequested.current = agentId;
     } catch (error) {
       currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Agent command failed.' };
@@ -306,7 +306,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} disabled={!ready || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !text.trim() || (!isCommand && (capabilities?.sendMessage !== true || !onSendMessage)))} onClick={() => void run('send')}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
     </div>
     {!ready ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
-    {feedback ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
+    {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}
       onResolveResource={onResolveResource} resourceScopeKey={JSON.stringify([agentId, state.timeline.epoch, currentDraft.inspectedSkill.id])}

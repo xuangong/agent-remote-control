@@ -16,7 +16,8 @@ export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: Ag
   const agent = state.agent;
   const planning = agent?.runtimeInfo.planning;
   const connection = agent?.runtimeInfo.connection;
-  const runtimeConnected = connection === undefined || connection.state === 'connected';
+  const recoveryMessage = planningRecoveryMessage(connection?.state);
+  const runtimeConnected = recoveryMessage === undefined;
   const supported = agent?.capabilities.planning === true;
   const pending = submitting || target !== undefined || planning?.requested !== undefined;
   const canChange = supported && planning !== undefined && sessionStatus === 'ready' && runtimeConnected
@@ -52,10 +53,16 @@ export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: Ag
     </div>
     <p className="agent-composer-note" role="status">{!supported ? 'Planning is not supported by this session.'
       : !planning ? 'Waiting for Provider planning state.'
-      : !runtimeConnected ? 'Planning changes are unavailable while the native runtime reconnects.'
-      : pending ? 'Waiting for Provider confirmation.'
+      : recoveryMessage ?? (pending ? 'Waiting for Provider confirmation.'
       : !canChange ? 'Planning can change only while connected and idle, with no pending interactions.'
-      : 'Provider confirmed. Changes apply to the next message.'}</p>
+      : 'Provider confirmed. Changes apply to the next message.')}</p>
     {failure ? <p className="agent-composer-note" role="alert">{failure}</p> : null}
   </section>;
+}
+
+function planningRecoveryMessage(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string | undefined {
+  if (state === 'reconnecting') return 'Planning changes are unavailable while the native runtime reconnects.';
+  if (state === 'restoring') return 'Planning changes are unavailable while the native runtime restores this session.';
+  if (state === 'unavailable') return 'Planning changes are unavailable because the native runtime is unavailable.';
+  return undefined;
 }

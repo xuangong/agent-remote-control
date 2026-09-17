@@ -40,6 +40,27 @@ describe('PlanningControl', () => {
     expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);
   });
 
+  it.each([
+    ['reconnecting', 'Planning changes are unavailable while the native runtime reconnects.'],
+    ['restoring', 'Planning changes are unavailable while the native runtime restores this session.'],
+    ['unavailable', 'Planning changes are unavailable because the native runtime is unavailable.'],
+  ] as const)('describes %s native recovery without changing planning state', async (connectionState, message) => {
+    const state = {
+      ...ready,
+      agent: {
+        ...ready.agent,
+        runtimeInfo: {
+          ...ready.agent.runtimeInfo,
+          connection: { state: connectionState, reason: 'transport_closed' },
+        },
+      },
+    };
+    const container = await render(<PlanningControl state={state} sessionStatus="ready" onSetPlanning={vi.fn()} />);
+
+    expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(message);
+  });
+
   it('shows unsupported capability and keeps failed commands retryable without changing the mode', async () => {
     const unsupported = await render(<PlanningControl state={replicaState} sessionStatus="ready" onSetPlanning={async () => undefined} />);
     expect(unsupported.textContent).toContain('Planning is not supported');

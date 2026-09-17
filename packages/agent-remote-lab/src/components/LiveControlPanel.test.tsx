@@ -107,6 +107,30 @@ describe('LiveControlPanel', () => {
     expect(container.textContent).toContain('Open or attach to an Agent first.');
   });
 
+  it.each([
+    ['reconnecting', 'Native runtime is reconnecting. Your draft is preserved.', 'Reconnecting'],
+    ['restoring', 'Native runtime is restoring this session. Your draft is preserved.', 'Restoring'],
+    ['unavailable', 'Native runtime is unavailable. Your draft is preserved.', 'Native runtime unavailable'],
+  ] as const)('preserves attached-session copy while the native runtime is %s', async (connectionState, message, activity) => {
+    const state = {
+      ...replicaState,
+      agent: {
+        ...replicaState.agent!,
+        runtimeInfo: {
+          ...replicaState.agent!.runtimeInfo,
+          connection: { state: connectionState, reason: 'transport_closed' },
+        },
+      },
+    };
+    const container = await render(<LiveControlPanel state={state} draft="Keep my recovery draft" />);
+    const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+
+    expect(input).toMatchObject({ disabled: true, value: 'Keep my recovery draft', placeholder: message });
+    expect(container.textContent).toContain(message);
+    expect(container.textContent).not.toContain('Open or attach to an Agent first.');
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(activity);
+  });
+
   it('waits for the send acknowledgement before reporting success', async () => {
     const acknowledgement = deferred<void>();
     const container = await render(<LiveControlPanel state={replicaState} onSendMessage={() => acknowledgement.promise} />);

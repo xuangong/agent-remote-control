@@ -16,7 +16,13 @@ export function AgentActivityStatus({ state, disabled, commandPending = false, i
   const active = Boolean(agent?.activeTurn) && !terminal;
   const working = !terminal && (active || agent?.status === 'running');
   const waiting = !terminal && (state.pendingInteractions.length > 0 || agent?.status === 'waiting');
+  const runtimeConnection = agent?.runtimeInfo.connection;
+  const runtimeUnavailable = runtimeConnection !== undefined && runtimeConnection.state !== 'connected';
+  const unavailable = disabled || runtimeUnavailable;
   const label = disabled ? 'Connection unavailable'
+    : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
+    : runtimeConnection?.state === 'restoring' ? 'Restoring'
+    : runtimeConnection?.state === 'unavailable' ? 'Native runtime unavailable'
     : agent?.status === 'failed' ? 'Agent failed'
     : agent?.status === 'closed' ? 'Closed'
     : waiting ? 'Waiting for response'
@@ -25,7 +31,7 @@ export function AgentActivityStatus({ state, disabled, commandPending = false, i
     : agent?.status === 'starting' ? 'Starting' : 'Ready';
   const timestamp = agent?.activeTurn?.startedAt;
   const startedAt = typeof timestamp === 'string' ? Date.parse(timestamp) : NaN;
-  const timed = active && !disabled && Number.isFinite(startedAt);
+  const timed = active && !unavailable && Number.isFinite(startedAt);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     setNow(Date.now());
@@ -34,12 +40,12 @@ export function AgentActivityStatus({ state, disabled, commandPending = false, i
     return () => clearInterval(interval);
   }, [agent?.id, agent?.activeTurn?.turnId, startedAt, timed]);
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
-  return <div className="agent-activity" data-active={disabled || terminal || working || waiting || commandPending || agent?.status === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
+  return <div className="agent-activity" data-active={unavailable || terminal || working || waiting || commandPending || agent?.status === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
     <div className="agent-activity-summary">
-      <span className={`agent-presence agent-state-${disabled ? 'offline' : terminal ? agent?.status : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
+      <span className={`agent-presence agent-state-${unavailable ? 'offline' : terminal ? agent?.status : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
       <span data-testid="agent-activity-label" aria-live="polite">{label}</span>
       {timed ? <time className="agent-activity-elapsed" data-testid="turn-elapsed" aria-label="Turn elapsed time" aria-live="off" dateTime={`PT${seconds}S`}>{formatElapsed(seconds)}</time>
-        : working && !disabled ? <span className="agent-activity-elapsed">Start time unavailable</span> : null}
+        : working && !unavailable ? <span className="agent-activity-elapsed">Start time unavailable</span> : null}
     </div>
     <button type="button" data-testid="cancel-submit" disabled={interruptDisabled}
       title={agent?.capabilities.cancel ? 'Interrupt the current native operation' : 'Interrupt is unavailable for this Provider.'}

@@ -27,7 +27,26 @@ describe('LabWorkbench', () => {
     expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Waiting for response');
   });
 
-  it('keeps recovery state mounted while disabling native mutations', async () => {
+  it.each([
+    {
+      connectionState: 'reconnecting' as const,
+      heading: 'Reconnecting',
+      notice: 'Native runtime is reconnecting. Changes are temporarily unavailable.',
+      composerNotice: 'Native runtime is reconnecting. Your draft is preserved.',
+    },
+    {
+      connectionState: 'restoring' as const,
+      heading: 'Restoring',
+      notice: 'Native runtime is restoring this session. Changes are temporarily unavailable.',
+      composerNotice: 'Native runtime is restoring this session. Your draft is preserved.',
+    },
+    {
+      connectionState: 'unavailable' as const,
+      heading: 'Unavailable',
+      notice: 'Native runtime is unavailable. Changes are unavailable.',
+      composerNotice: 'Native runtime is unavailable. Your draft is preserved.',
+    },
+  ])('keeps $connectionState recovery state mounted while disabling native mutations', async ({ connectionState, heading, notice, composerNotice }) => {
     const state = {
       ...replicaState,
       pendingInteractions: [{
@@ -44,7 +63,7 @@ describe('LabWorkbench', () => {
         },
         runtimeInfo: {
           ...replicaState.agent!.runtimeInfo,
-          connection: { state: 'reconnecting' as const, reason: 'transport_closed', attempt: 2 },
+          connection: { state: connectionState, reason: 'transport_closed', attempt: 2 },
           planning: { active: false },
           settings: [{
             id: 'model', category: 'model' as const, label: 'Model', value: 'current', mutable: true,
@@ -64,8 +83,10 @@ describe('LabWorkbench', () => {
       }}
     />);
 
-    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Reconnecting');
-    expect(container.textContent).toContain('Native runtime is reconnecting. Changes are temporarily unavailable.');
+    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe(heading);
+    expect(container.textContent).toContain(notice);
+    expect(container.textContent).toContain(composerNotice);
+    expect(container.textContent).not.toContain('Open or attach to an Agent first.');
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
     expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({
       disabled: true, value: 'Keep my recovery draft',

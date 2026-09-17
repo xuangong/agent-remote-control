@@ -34,9 +34,12 @@ export function AgentSessionSettings({ state, children, disabled, view, busy, on
   }, [view, onView]);
   const agent = state.agent!;
   const settings = agent.runtimeInfo.settings ?? [];
+  const runtimeConnection = agent.runtimeInfo.connection;
+  const runtimeConnected = runtimeConnection === undefined || runtimeConnection.state === 'connected';
+  const runtimeUnavailable = settingsRecoveryMessage(runtimeConnection?.state);
   const [failure, setFailure] = useState<string>();
   const inFlight = useRef(false);
-  const canChange = !disabled && !busy && agent.status === 'idle' && !agent.activeTurn
+  const canChange = !disabled && runtimeConnected && !busy && agent.status === 'idle' && !agent.activeTurn
     && state.pendingInteractions.length === 0 && agent.capabilities.sessionSettings === true && onSelect !== undefined;
 
   async function change(setting: AgentSessionSetting, value: string): Promise<void> {
@@ -69,7 +72,7 @@ export function AgentSessionSettings({ state, children, disabled, view, busy, on
       <div hidden={view !== 'status'}>{children}</div>
       {view === 'status' ? <dl className="agent-session-facts">
           <dt>Provider</dt><dd>{agent.providerId}</dd><dt>Session</dt><dd>{agent.runtimeInfo.sessionId ?? 'Unavailable'}</dd>
-          <dt>Connection</dt><dd>{disabled ? 'Unavailable' : 'Connected'}</dd><dt>Runtime</dt><dd>{agent.status}{disabled ? ' (last known)' : ''}</dd>
+          <dt>Connection</dt><dd>{disabled ? 'Unavailable' : connectionLabel(runtimeConnection?.state)}</dd><dt>Runtime</dt><dd>{agent.status}{disabled || !runtimeConnected ? ' (last known)' : ''}</dd>
           <dt>Directory</dt><dd>{agent.runtimeInfo.cwd ?? 'Unavailable'}</dd>
           {settings.map((setting) => <div key={setting.id}><dt>{setting.label}</dt><dd>{selectedLabel(setting)}</dd></div>)}
         </dl>
@@ -85,12 +88,26 @@ export function AgentSessionSettings({ state, children, disabled, view, busy, on
             {setting.options.find(({ value }) => value === setting.value)?.description ? <span className="agent-composer-note">{setting.options.find(({ value }) => value === setting.value)?.description}</span> : null}
             {setting.scope === 'session_and_default' ? <span className="agent-setting-scope">Also changes the default for future sessions.</span> : null}
           </label>)}
-          {settings.some(({ category }) => category === view) ? <p className="agent-composer-note" role="status">{busy ? 'Waiting for Provider confirmation.' : disabled ? 'Disconnected. Values are last known; reconnect to change settings.' : !canChange ? 'Settings can change only while idle with no pending interactions.' : 'Changes apply to subsequent turns.'}</p>
+          {settings.some(({ category }) => category === view) ? <p className="agent-composer-note" role="status">{busy ? 'Waiting for Provider confirmation.' : runtimeUnavailable ?? (disabled ? 'Disconnected. Values are last known; reconnect to change settings.' : !canChange ? 'Settings can change only while idle with no pending interactions.' : 'Changes apply to subsequent turns.')}</p>
             : <p className="agent-composer-note">This Provider does not expose these session settings.</p>}
         </>}
       {failure ? <p role="alert" className="agent-composer-note">{failure}</p> : null}
     </section>
   </div>;
+}
+
+function connectionLabel(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string {
+  if (state === 'reconnecting') return 'Reconnecting';
+  if (state === 'restoring') return 'Restoring';
+  if (state === 'unavailable') return 'Unavailable';
+  return 'Connected';
+}
+
+function settingsRecoveryMessage(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string | undefined {
+  if (state === 'reconnecting') return 'Native runtime is reconnecting. Values are last known; changes are temporarily unavailable.';
+  if (state === 'restoring') return 'Native runtime is restoring this session. Values are last known; changes are temporarily unavailable.';
+  if (state === 'unavailable') return 'Native runtime is unavailable. Values are last known; changes are unavailable.';
+  return undefined;
 }
 
 function selectedLabel(setting: AgentSessionSetting): string {

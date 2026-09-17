@@ -65,7 +65,9 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
   const busy = Boolean(pending || currentDraft.settingPending || currentDraft.interruptPending);
   const isCommand = text.trimStart().startsWith('/');
   const capabilities = state?.agent?.capabilities;
-  const ready = Boolean(state?.agent) && !disabled;
+  const runtimeConnection = state?.agent?.runtimeInfo.connection;
+  const runtimeUnavailable = runtimeConnectionMessage(runtimeConnection?.state);
+  const ready = Boolean(state?.agent) && !disabled && runtimeUnavailable === undefined;
   const readOnly = capabilities?.sendMessage === false;
   const nativeCommandsEnabled = !readOnly && capabilities?.commands === true;
   const readOnlyHint = 'This session is read-only. Direct input is disabled.';
@@ -282,7 +284,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
       disabled={!ready || readOnly || busy}
-      placeholder={readOnly ? readOnlyHint : ready ? 'Message the Agent…' : 'Open or attach to an Agent first.'}
+      placeholder={readOnly ? readOnlyHint : runtimeUnavailable ?? (ready ? 'Message the Agent…' : 'Open or attach to an Agent first.')}
       aria-describedby={`${controlId}-hint`}
       aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
@@ -305,11 +307,19 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
         onInterrupt={() => void run('cancel')} /> : null}
       <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} disabled={!ready || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !text.trim() || (!isCommand && (capabilities?.sendMessage !== true || !onSendMessage)))} onClick={() => void run('send')}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
     </div>
-    {!ready ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
+    {runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
+      : !ready ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
     {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}
       onResolveResource={onResolveResource} resourceScopeKey={JSON.stringify([agentId, state.timeline.epoch, currentDraft.inspectedSkill.id])}
       onClose={() => { currentDraft.inspectedSkill = undefined; refresh((value) => value + 1); }} /> : null}
   </section>;
+}
+
+function runtimeConnectionMessage(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string | undefined {
+  if (state === 'reconnecting') return 'Native runtime is reconnecting. Your draft is preserved.';
+  if (state === 'restoring') return 'Native runtime is restoring this session. Your draft is preserved.';
+  if (state === 'unavailable') return 'Native runtime is unavailable. Your draft is preserved.';
+  return undefined;
 }

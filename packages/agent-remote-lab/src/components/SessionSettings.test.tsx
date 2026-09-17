@@ -89,4 +89,29 @@ describe('chat session settings', () => {
       expect(select.disabled).toBe(true);
     }
   });
+
+  it.each([
+    ['reconnecting', 'Native runtime is reconnecting. Values are last known; changes are temporarily unavailable.'],
+    ['restoring', 'Native runtime is restoring this session. Values are last known; changes are temporarily unavailable.'],
+    ['unavailable', 'Native runtime is unavailable. Values are last known; changes are unavailable.'],
+  ] as const)('describes %s native recovery while preserving confirmed settings', async (connectionState, message) => {
+    const recovering = {
+      ...state,
+      agent: {
+        ...state.agent,
+        runtimeInfo: {
+          ...state.agent.runtimeInfo,
+          connection: { state: connectionState, reason: 'transport_closed' },
+        },
+      },
+    };
+    const container = await render(<LiveControlPanel state={recovering} onSetSessionSetting={vi.fn()} />);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!.click());
+
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="session-setting-model"]')).toMatchObject({
+      disabled: true,
+      value: 'a',
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(message);
+  });
 });

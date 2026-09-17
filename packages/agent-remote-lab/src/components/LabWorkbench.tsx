@@ -143,7 +143,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
           sessionKey={state?.agent?.id}
           draft={messageDraft}
           onDraftChange={onMessageDraftChange}
-          disabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
+          disabled={sessionStatus !== 'ready'}
           onSendMessage={actions.sendMessage}
           onCancel={actions.cancel}
           onSetSessionSetting={actions.setSessionSetting}

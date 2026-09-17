@@ -1,4 +1,4 @@
-import { browseWorkspaceFolders, WorkspaceFolderError } from '@agent-remote-controller/agent-remote-controller';
+import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@agent-remote-controller/agent-remote-controller';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@agent-remote-controller/dsh';
@@ -137,6 +137,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           const body = await readBody(request);
           const providerId = required(body.providerId, 'providerId');
           const { source } = requireEntry(providerId);
+          if (url.pathname === '/v1/remote/workspace-folders/create') return send(response, 201, await createWorkspaceFolder(body.parentPath, body.name));
           if (url.pathname === '/v1/remote/child/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId'), required(body.parentNativeSessionId, 'parentNativeSessionId')));
           if (url.pathname === '/v1/remote/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId')));
           if (url.pathname === '/v1/remote/create') {

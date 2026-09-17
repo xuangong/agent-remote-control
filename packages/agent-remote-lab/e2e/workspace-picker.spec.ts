@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 let root: string;
@@ -50,5 +50,49 @@ test('retains the previous choice on cancel and recovers from an invalid path', 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'New session', exact: true })).toBeVisible();
+  await expect(page.getByTestId('selected-folder')).toHaveText(root);
+});
+
+test('creates a folder, enters it, and selects it as the workspace', async ({ page }, info) => {
+  if (info.project.name === 'chromium-mobile') await page.setViewportSize({ width: 320, height: 640 });
+  await page.getByRole('button', { name: 'Browse…' }).click();
+  const modal = page.getByRole('dialog', { name: 'Choose a workspace folder' });
+  await modal.getByRole('button', { name: 'New folder', exact: true }).click();
+  const name = modal.getByLabel('New folder name');
+  await expect(name).toBeFocused();
+  await name.fill('My project');
+  await modal.getByRole('button', { name: 'Create folder', exact: true }).click();
+  await expect(modal.getByRole('alert')).toContainText('already exists');
+  await expect(name).toHaveValue('My project');
+  expect(await modal.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: info.outputPath('new-folder-form.png') });
+  const created = `New workspace ${info.project.name}`;
+  await name.fill(created);
+  await name.press('Enter');
+  await expect(modal.getByLabel('Folder path')).toHaveValue(join(root, created));
+  expect((await stat(join(root, created))).isDirectory()).toBe(true);
+  await expect(modal.getByRole('status')).toContainText('Folder created');
+  await page.screenshot({ path: info.outputPath('created-workspace.png') });
+  await modal.getByRole('button', { name: 'Select folder' }).click();
+  await expect(page.getByTestId('selected-folder')).toHaveText(join(root, created));
+});
+
+test('bounds an unconfirmed creation and lets the user refresh or cancel', async ({ page }) => {
+  await page.clock.install();
+  await page.route('**/workspace-folders/create', () => {});
+  await page.getByRole('button', { name: 'Browse…' }).click();
+  const modal = page.getByRole('dialog', { name: 'Choose a workspace folder' });
+  await modal.getByRole('button', { name: 'New folder', exact: true }).click();
+  await modal.getByLabel('New folder name').fill('Unconfirmed');
+  await modal.getByRole('button', { name: 'Create folder', exact: true }).click();
+  await expect(modal.getByRole('button', { name: 'Creating…', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeVisible();
+  await page.clock.fastForward(15_001);
+  await expect(modal.getByRole('alert')).toContainText('folder may already exist');
+  await expect(modal.getByLabel('New folder name')).toHaveValue('Unconfirmed');
+  await modal.getByRole('button', { name: 'Refresh folders' }).click();
+  await expect(modal.getByRole('button', { name: 'My project' })).toBeVisible();
+  await modal.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByTestId('selected-folder')).toHaveText(root);
 });

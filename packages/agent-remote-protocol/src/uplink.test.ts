@@ -73,6 +73,17 @@ describe('Agent Remote uplink codecs', () => {
     ]) expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(invalid)).status).toBe('rejected');
   });
 
+  it('accepts folder creation as a target-free mutation with a body', () => {
+    const request = { uplinkVersion: 2, type: 'rpc_request', requestId: 'mkdir', method: 'POST',
+      path: '/remote/workspace-folders/create', body: JSON.stringify({ providerId: 'codex', parentPath: '/workspace', name: 'project' }) } as const;
+    expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(request))).toEqual({ status: 'ok', value: request });
+    expect(protocol.encodeRemoteHostUplinkMessage(request)).toEqual({ status: 'ok', json: JSON.stringify(request) });
+    for (const invalid of [{ ...request, method: 'GET' }, { ...request, body: undefined },
+      { ...request, sessionId: 'session' }, { ...request, path: '/remote/workspace-folders/create/extra' }]) {
+      expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(invalid)).status).toBe('rejected');
+    }
+  });
+
   it('accepts exact catalog metadata only as a target-free read', () => {
     const request = {
       uplinkVersion: 2,

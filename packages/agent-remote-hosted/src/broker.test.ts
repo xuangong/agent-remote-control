@@ -437,4 +437,9 @@ it('does not expose Controller folder browsing to a shared session user', async 
   const result = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/workspace-folders?providerId=codex'), { principalSubject: () => 'bob' });
   expect(result?.status).toBe(403);
   expect(await result!.json()).toMatchObject({ code: 'owner_required' });
+  const create = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/workspace-folders/create', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', parentPath: '/workspace', name: 'project' }),
+  }), { principalSubject: () => 'bob' });
+  expect(create?.status).toBe(403);
+  expect(await create!.json()).toMatchObject({ code: 'owner_required' });
 });

@@ -155,7 +155,9 @@ describe('Remote Host broker', () => {
       const request = JSON.parse(raw.toString()); calls.push(request);
       if (request.type !== 'rpc_request') return;
       const requestBody = request.body ? JSON.parse(request.body) : undefined;
-      const responseBody = request.path === '/remote/create'
+      const responseBody = request.path === '/remote/workspace-folders/create'
+        ? { path: `${requestBody.parentPath}/${requestBody.name}` }
+        : request.path === '/remote/create'
         ? { agentId: 'host-agent', nativeSessionId: 'native-created' }
         : request.path.endsWith('/attach')
           ? { agentId: requestBody.nativeSessionId === 'native-child' ? 'host-child'
@@ -170,6 +172,13 @@ describe('Remote Host broker', () => {
     await fetch(f.url + base + '/workspaces?providerId=codex');
     await fetch(f.url + base + '/models?providerId=codex');
     expect((await fetch(f.url + base + '/workspace-folders?providerId=codex&path=%2Ftmp%2Fproject')).status).toBe(200);
+    const folder = await f.post(base + '/workspace-folders/create', { providerId: 'codex', parentPath: '/tmp/project', name: 'New folder' });
+    expect(folder.status).toBe(200);
+    expect(await folder.json()).toEqual({ path: '/tmp/project/New folder' });
+    const folderCall = calls.find(call => call.path === '/remote/workspace-folders/create');
+    expect(folderCall.sessionId).toBeUndefined();
+    expect(JSON.parse(folderCall.body)).toEqual({ providerId: 'codex', parentPath: '/tmp/project', name: 'New folder' });
+    expect((await f.post(base + '/workspace-folders/create', { providerId: 'missing', parentPath: '/tmp/project', name: 'blocked' })).status).toBe(400);
     const created = await (await f.post(base + '/create', { providerId: 'codex', requestId: 'create-one', cwd: '/tmp/project',
       workspaceId: 'project', model: 'gpt-6', reasoningEffort: 'high', planning: true })).json();
     expect(created).toEqual({ agentId: 'host-agent', nativeSessionId: 'native-created' });

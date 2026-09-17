@@ -588,8 +588,10 @@ it('delivers the owner stop operation over the real Host uplink transport', asyn
 });
 
 it('routes workspace browsing over the uplink without disrupting heartbeats', async () => {
-  const { realpath } = await import('node:fs/promises');
-  const root = await realpath(process.cwd());
+  const { realpath, mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-folder-uplink-')));
   const broker = await uplinkBroker('host', true, { intervalMs: 1000, timeoutMs: 500 });
   const runtime = createAgentHost({ registrations: [fixture('codex')], installationId: 'folders', name: 'Host',
     uplink: { url: broker.url, remoteKey: 'key' },
@@ -601,8 +603,13 @@ it('routes workspace browsing over the uplink without disrupting heartbeats', as
     expect(JSON.parse(result.body)).toMatchObject({ path: root, parentPath: null });
     const forbidden = await broker.rpc('GET', '/remote/workspace-folders?providerId=codex&path=%2F');
     expect(forbidden.status).toBe(403);
+    const created = await broker.rpc('POST', '/remote/workspace-folders/create', undefined, { providerId: 'codex', parentPath: root, name: 'New project' });
+    expect(created.status).toBe(201);
+    expect(JSON.parse(created.body)).toEqual({ path: join(root, 'New project') });
+    expect((await broker.rpc('POST', '/remote/workspace-folders/create', undefined, { providerId: 'codex', parentPath: root, name: 'New project' })).status).toBe(409);
+    expect((await broker.rpc('POST', '/remote/workspace-folders/create', undefined, { providerId: 'codex', parentPath: '/', name: 'blocked' })).status).toBe(403);
     await expect.poll(() => broker.heartbeatAcknowledgements(), { timeout: 3000 }).toBeGreaterThan(0);
     expect(broker.registrations()).toBe(1);
     expect(runtime.state).toBe('registered');
-  } finally { await runtime.close(); await broker.close(); }
+  } finally { await runtime.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
 });

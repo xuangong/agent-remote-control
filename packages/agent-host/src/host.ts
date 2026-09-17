@@ -1,4 +1,4 @@
-import { browseWorkspaceFolders, WorkspaceFolderError } from './workspace-folders.js';
+import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
 import { HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { createControllerPreviews } from './previews.js';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
@@ -241,6 +241,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       if (request.method === 'POST') {
         const payload = body(request.body);
+        if (url.pathname === '/remote/workspace-folders/create') {
+          registration(string(payload.providerId, 'providerId'));
+          if (request.sessionId) throw new HostRequestError(400, 'invalid_request', 'Folder creation does not target a session.');
+          return json(201, await createWorkspaceFolder(payload.parentPath, payload.name, options.executionPolicy));
+        }
         if (url.pathname === '/remote/stop') {
           if (Object.keys(payload).length || request.sessionId) throw new HostRequestError(400, 'invalid_request', 'Stop requires an empty body.');
           const results = await Promise.all([...bindingsByAgent.keys()].map(async agentId => {

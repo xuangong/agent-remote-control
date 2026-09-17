@@ -655,11 +655,11 @@ export function createHostBroker(options: HostBrokerOptions) {
       });
       return json(200, { ok: true });
     }
-    const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|workspace-folders|models|child\/attach|attach|create)$/.exec(url.pathname);
+    const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|workspace-folders(?:\/create)?|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {
       requireAccess(directory[1]!, subject);
       const action = directory[2]!;
-      if (action === 'workspace-folders') requireOwner(subject);
+      if (action.startsWith('workspace-folders')) requireOwner(subject);
       const host = requireHost(directory[1]!);
       if (action === 'models' && request.method === 'GET' && host.legacyDsh) return json(200, { models: [] });
       if (['catalog', 'catalog/revision', 'workspaces', 'workspace-folders', 'models'].includes(action) && request.method === 'GET') {
@@ -672,6 +672,16 @@ export function createHostBroker(options: HostBrokerOptions) {
         }
         const result = await rpc(host, 'GET', `/remote/${action}${query.size ? '?' + query : ''}`);
         requireAccess(host.id, subject);
+        return rawJson(result);
+      }
+      if (action === 'workspace-folders/create' && request.method === 'POST') {
+        const payload = await readBody(request);
+        const providerId = required(payload.providerId, 'providerId');
+        if (host.legacyDsh || !host.providers.some(provider => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
+        const result = await rpc(host, 'POST', '/remote/workspace-folders/create', undefined, JSON.stringify({
+          providerId, parentPath: required(payload.parentPath, 'parentPath'), name: required(payload.name, 'name'),
+        }));
+        requireAccess(host.id, subject); requireOwner(subject);
         return rawJson(result);
       }
       if (['attach', 'child/attach', 'create'].includes(action) && request.method === 'POST') { const binding = await userMutation(host, action, await readBody(request), subject);

@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from 'node:fs/promises';
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, relative, sep } from 'node:path';
 import { allowedWorkspace, HostExecutionPolicyError, type HostExecutionPolicy } from './execution-policy.js';
 
@@ -11,6 +11,30 @@ export interface WorkspaceFolderPage {
 }
 export class WorkspaceFolderError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+}
+
+export async function createWorkspaceFolder(parentPath: unknown, name: unknown, policy?: HostExecutionPolicy): Promise<{ path: string }> {
+  if (typeof parentPath !== 'string' || !isAbsolute(parentPath) || parentPath.length > 4096
+    || typeof name !== 'string' || !name.trim() || name !== name.trim() || name === '.' || name === '..'
+    || /[/\\\u0000-\u001f\u007f]/.test(name) || Buffer.byteLength(name, 'utf8') > 255) {
+    throw new WorkspaceFolderError(400, 'invalid_folder_request', 'Choose an absolute parent folder and a single folder name without slashes or surrounding spaces.');
+  }
+  try {
+    const parent = policy ? await allowedWorkspace(policy, parentPath) : await realpath(parentPath);
+    if (!(await stat(parent)).isDirectory()) throw new WorkspaceFolderError(403, 'folder_unavailable', 'The parent folder is unavailable.');
+    const path = join(parent, name);
+    // A non-recursive mkdir never reuses an existing file, directory, or symbolic link.
+    await mkdir(path);
+    return { path };
+  } catch (error) {
+    if (error instanceof HostExecutionPolicyError || error instanceof WorkspaceFolderError) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') throw new WorkspaceFolderError(409, 'folder_exists', 'A file or folder with this name already exists. Choose another name.');
+    if (['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ENOTDIR'].includes(code ?? '')) {
+      throw new WorkspaceFolderError(403, 'folder_unavailable', 'Cannot create a folder here. Check the parent path and local write permissions.');
+    }
+    throw new WorkspaceFolderError(503, 'folder_creation_failed', 'The folder could not be created. Check local disk space and refresh before retrying.');
+  }
 }
 
 /** Lists directory names only; selection still goes through session creation policy. */

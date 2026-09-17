@@ -1098,6 +1098,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-folder-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .lab-folder-dialog h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .lab-folder-dialog p { margin: 0; color: var(--obs-text-secondary); }
+.lab-folder-navigation { display: flex; flex-direction: column; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.lab-folder-actions { display: flex; justify-content: flex-end; }
+.lab-folder-create { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--obs-border); border-radius: var(--obs-radius-sm); background: var(--obs-canvas); }
+.lab-folder-create > label { display: grid; gap: 6px; min-width: 0; font-size: 13px; }
+.lab-folder-create input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); color: var(--obs-text); background: var(--obs-surface); font: inherit; }
+.lab-folder-create > div { display: flex; justify-content: flex-end; gap: 8px; }
+.lab-folder-create p { overflow-wrap: anywhere; font-size: 13px; }
+.lab-folder-create [role="alert"] { color: var(--obs-danger); }
 .lab-folder-location { display: flex; gap: 6px; }
 .lab-folder-location label, .lab-folder-filters > label:first-child { flex: 1; min-width: 0; }
 .lab-folder-location input, .lab-folder-filters input[type="search"] { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); color: var(--obs-text); background: var(--obs-surface); font: inherit; }

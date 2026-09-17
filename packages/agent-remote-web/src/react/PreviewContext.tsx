@@ -87,7 +87,7 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
   }, [refresh, scope.version]);
 
-  const renewalErrors = usePreviewRenewal(client, hostId, canManage, currentBrowsers, currentState.registrations, refresh);
+  const renewalIssues = usePreviewRenewal(client, hostId, canManage, currentBrowsers, currentState.registrations, refresh);
 
   const value = useMemo<PreviewContextValue>(() => ({
     registrations: currentState.registrations, canManage, loading: currentState.loading, error: currentState.error, refresh,
@@ -96,7 +96,12 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
       await refresh();
       return registration;
     },
-    unregister: async (id: string) => { await client.unregister(hostId, id); await refresh(); },
+    unregister: async (id: string) => {
+      await client.unregister(hostId, id);
+      if (scopeRef.current === scope) updateBrowsers(current => current.map(entry => entry.id === id && entry.version === scope.version
+        ? { ...entry, error: 'This preview has been unregistered.' } : entry));
+      await refresh();
+    },
     open: async (id: string, target: string, agentId?: string) => {
       if (scopeRef.current !== scope) return '';
       const sessionId = agentId ?? currentState.registrations.find(entry => entry.id === id)?.sources[0]?.sessionId ?? '';
@@ -134,10 +139,12 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
     {children}
     {currentBrowsers.map(browser => {
       const selected = currentState.registrations.find(item => item.id === browser.id);
+      const renewal = renewalIssues[browser.id];
       const unavailable = selected?.pendingUnregister || selected?.status === 'unregistered' ? 'This preview has been unregistered.'
-        : !selected && !currentState.loading ? 'This preview registration is no longer available. Close and open it again.' : undefined;
-      const notice = selected?.status === 'expired' ? 'Renewing preview registration…'
-        : selected?.availability !== 'online' ? 'Controller offline. The preview will reconnect automatically.' : renewalErrors[browser.id];
+        : renewal?.terminal ? renewal.message
+        : !selected && !currentState.loading && !canManage ? 'This preview registration is no longer available. Close and open it again.' : undefined;
+      const notice = renewal?.message ?? (!selected || selected.status === 'expired' ? 'Renewing preview registration…'
+        : selected.availability !== 'online' ? 'Controller offline. The preview will reconnect automatically.' : undefined);
       return <PreviewBrowser container={container} key={browser.key} browserKey={browser.key} visible={activeKey === browser.key}
         url={browser.url} target={browser.target} notice={notice} error={unavailable ?? browser.error} returnFocus={browser.returnFocus}
         onMinimize={minimizeBrowser} onClose={() => closeBrowser(browser.key)} />;

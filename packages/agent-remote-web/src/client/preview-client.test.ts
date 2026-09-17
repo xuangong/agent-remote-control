@@ -22,6 +22,11 @@ describe('HttpPreviewClient', () => {
     const client = new HttpPreviewClient('/u/account/', vi.fn(async () => Response.json({ error: 'Preview tunnel is disabled.' }, { status: 503 })) as typeof fetch);
     await expect(client.snapshot('host-one')).rejects.toThrow('Preview tunnel is disabled.');
   });
+
+  it('preserves a terminal renewal rejection status for retained previews', async () => {
+    const client = new HttpPreviewClient('https://control.test/', vi.fn(async () => Response.json({ error: 'Unregistered' }, { status: 409 })) as typeof fetch);
+    await expect(client.renew('host', 'preview', 'http://localhost:5173')).rejects.toMatchObject({ status: 409, message: 'Unregistered' });
+  });
 });
 
 function registration() {

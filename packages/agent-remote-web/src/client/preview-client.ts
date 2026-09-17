@@ -20,6 +20,10 @@ export interface PreviewRegistrationRequest {
   readonly pathMode?: PreviewPathMode;
 }
 
+export class PreviewRequestError extends Error {
+  constructor(readonly status: number, message: string) { super(message); this.name = 'PreviewRequestError'; }
+}
+
 export class HttpPreviewClient {
   constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
 
@@ -85,7 +89,7 @@ export class HttpPreviewClient {
       credentials: 'same-origin', cache: 'no-store', ...init,
     });
     const value = await response.json().catch(() => undefined) as { error?: string } | undefined;
-    if (!response.ok) throw new Error(value?.error || `Preview request failed (${response.status}). Check that preview tunneling is enabled for this Host.`);
+    if (!response.ok) throw new PreviewRequestError(response.status, value?.error || `Preview request failed (${response.status}). Check that preview tunneling is enabled for this Host.`);
     if (!value) throw new Error('The preview service returned an invalid response. Retry after checking the Controller connection.');
     return value as T;
   }

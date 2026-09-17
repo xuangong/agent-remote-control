@@ -64,6 +64,8 @@ it.each([false, true])('preserves HTTP ranges, conditional responses, separate c
 
 it('renews through owner authentication and preserves the mapped URL and tunnel while refusing removal revival', async () => {
   const f = await previewFixture({ ttlMs: 1000 });
+  const list = async () => (await (await f.alice.request(`v1/remote/hosts/${f.hostId}/previews`)).json()).registrations;
+  expect(await list()).toEqual([expect.objectContaining({ id: f.registration.id, status: 'active' })]);
   const cookie = await f.enter('/bytes');
   const route = `v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/renew`;
   expect((await f.bob.request(route, {})).status).toBe(404);
@@ -79,13 +81,14 @@ it('renews through owner authentication and preserves the mapped URL and tunnel 
   expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(200);
   await vi.waitFor(async () => {
     const snapshot = await (await f.alice.request(`v1/remote/hosts/${f.hostId}/previews`)).json();
-    expect(snapshot.registrations[0].status).toBe('expired');
+    expect(snapshot.registrations).toEqual([]);
   }, { timeout: 3000 });
   const recovered = await f.alice.request(route, {});
   expect(recovered.status).toBe(200);
   expect((await recovered.json()).registration).toMatchObject({ id: f.registration.id, status: 'active' });
   await vi.waitFor(async () => expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(200), { timeout: 1000 });
   await f.alice.request(`v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/unregister`, {});
+  await vi.waitFor(async () => expect(await list()).toEqual([]), { timeout: 1000 });
   expect((await f.alice.request(route, {})).status).toBe(409);
   expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(401);
 }, 20000);

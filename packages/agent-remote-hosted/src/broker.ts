@@ -583,7 +583,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     const previewHost = /^\/v1\/remote\/hosts\/([^/]+)\/previews(?:\/([A-Za-z0-9_-]+)\/(unregister|renew))?$/.exec(url.pathname);
     if (previewHost) {
       requireOwner(subject); requireAccess(previewHost[1]!, subject);
-      if (!previewHost[2] && request.method === 'GET') return json(200, previews.list(previewHost[1]!));
+      if (!previewHost[2] && request.method === 'GET') {
+        const snapshot = previews.list(previewHost[1]!);
+        return json(200, { ...snapshot, registrations: snapshot.registrations.filter(value => value.status === 'active') });
+      }
       if (previewHost[2] && request.method === 'POST') {
         await readBody(request);
         if (previewHost[3] === 'renew') {

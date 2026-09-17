@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import type { HttpPreviewClient, PreviewRegistration } from '../client/preview-client.js';
+import { PreviewRequestError, type HttpPreviewClient, type PreviewRegistration } from '../client/preview-client.js';
+
+interface RenewalIssue { message: string; terminal: boolean }
 
 interface RetainedPreview { key: string; id: string; target: string; url?: string; error?: string }
 
@@ -8,23 +10,25 @@ export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, can
   const retained = new Map<string, RetainedPreview>();
   if (canManage) for (const entry of entries) {
     const registration = registrations.find(value => value.id === entry.id);
-    if (entry.url && !entry.error && registration && registration.status !== 'unregistered' && !registration.pendingUnregister && !retained.has(entry.id)) retained.set(entry.id, entry);
+    if (entry.url && !entry.error && registration?.status !== 'unregistered' && !registration?.pendingUnregister && !retained.has(entry.id)) retained.set(entry.id, entry);
   }
   const current = useRef(retained);
   current.current = retained;
   const reconcile = useRef<() => void>(() => {});
-  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  const [errors, setErrors] = useState<Record<string, RenewalIssue | undefined>>({});
 
   useEffect(() => {
     let disposed = false;
     const due = new Map<string, number>();
     const pending = new Map<string, AbortController>();
+    const terminal = new Set<string>();
     setErrors({});
     const tick = () => {
       for (const [id, request] of pending) if (!current.current.has(id)) { request.abort(); pending.delete(id); }
       for (const id of due.keys()) if (!current.current.has(id)) due.delete(id);
+      for (const id of terminal) if (!current.current.has(id)) terminal.delete(id);
       for (const [id, entry] of current.current) {
-        if (pending.has(id) || (due.get(id) ?? 0) > Date.now()) continue;
+        if (terminal.has(id) || pending.has(id) || (due.get(id) ?? 0) > Date.now()) continue;
         const request = new AbortController();
         pending.set(id, request);
         const deadline = window.setTimeout(() => request.abort(), 20_000);
@@ -34,10 +38,16 @@ export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, can
           due.set(id, Date.now() + Math.max(1000, Math.min(300_000, (registration.expiresAt - Date.now()) / 3)));
           setErrors(previous => ({ ...previous, [id]: undefined }));
           void refresh();
-        }).catch(() => {
+        }).catch(cause => {
           if (!applicable()) return;
-          due.set(id, Date.now() + 5000);
-          setErrors(previous => ({ ...previous, [id]: 'Preview renewal is waiting for the connection. Retrying automatically…' }));
+          const removed = cause instanceof PreviewRequestError && cause.status === 409;
+          if (removed) terminal.add(id);
+          else due.set(id, Date.now() + 5000);
+          setErrors(previous => ({ ...previous, [id]: {
+            terminal: removed,
+            message: removed ? 'This preview registration is no longer available or has been unregistered. Close and open it again.'
+              : 'Preview renewal is waiting for the connection. Retrying automatically…',
+          } }));
         }).finally(() => {
           window.clearTimeout(deadline);
           if (pending.get(id) === request) pending.delete(id);

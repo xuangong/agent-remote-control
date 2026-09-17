@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
 
-export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, showInactive = false }: {
-  readonly showInactive?: boolean;
+export function HostPreviewList({ controller: supplied, onOpenSource, onOpen }: {
   readonly onOpen?: () => void;
   readonly controller?: PreviewContextValue;
   readonly onOpenSource?: (sessionId: string, itemId: string) => void;
@@ -12,7 +11,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, sh
   const [busy, setBusy] = useState<string>();
   const [failure, setFailure] = useState<string>();
   if (!controller) return null;
-  const registrations = controller.registrations.filter(item => showInactive || item.status === 'active');
+  const registrations = controller.registrations.filter(item => item.status === 'active');
 
   async function unregister(id: string): Promise<void> {
     setBusy(id); setFailure(undefined);
@@ -35,7 +34,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, sh
   return <section className="lab-host-previews" aria-label="Host previews">
     <div className="lab-directory-heading"><h2>Previews</h2><button type="button" disabled={controller.loading} onClick={() => void controller.refresh()}>Refresh</button></div>
     {controller.error ? <p className="lab-control-note" role="alert">{controller.error} Check that preview tunneling is enabled and the Controller is connected.</p> : null}
-    {!controller.loading && registrations.length === 0 ? <p className="lab-control-note">{showInactive ? 'No previews are registered for this Host.' : 'No active previews for this Host.'}</p> : null}
+    {!controller.loading && registrations.length === 0 ? <p className="lab-control-note">No active previews for this Host.</p> : null}
     <ul>
       {registrations.map(registration => <li key={registration.id}>
         <div><code>{registration.target}</code><span>{lifecycle(registration.status)}</span>

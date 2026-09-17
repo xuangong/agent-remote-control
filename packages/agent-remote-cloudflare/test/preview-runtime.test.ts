@@ -210,3 +210,28 @@ it('persists preview snapshots and pending unregister intent across Durable Obje
     { url: saved.target + '/bytes' });
   expect(reopened.status).toBe(503);
 }, 20_000);
+
+
+it('returns only active previews from mixed Controller history, including after durable recovery', async () => {
+  const setup = await previewFixture();
+  const active = setup.registration;
+  send(setup.host.socket, { type: 'preview_snapshot', snapshot: {
+    epoch: 'workers-controller', revision: active.revision + 1,
+    registrations: [active, { ...active, id: 'expired-preview', status: 'expired' },
+      { ...active, id: 'removed-preview', status: 'unregistered' }],
+  } });
+  const path = setup.alice.basePath + `v1/remote/hosts/${setup.host.hostId}/previews`;
+  await vi.waitFor(async () => {
+    const response = await setup.f.json(path, setup.alice.cookie);
+    expect(response.status).toBe(200);
+    const snapshot = await response.json() as any;
+    expect(snapshot.revision).toBe(active.revision + 1);
+    expect(snapshot.registrations).toEqual([expect.objectContaining({ id: active.id, status: 'active' })]);
+  }, { timeout: 5000 });
+  await setup.f.restart();
+  const restored = await setup.f.json(path, setup.alice.cookie);
+  expect((await restored.json() as any).registrations).toEqual([
+    expect.objectContaining({ id: active.id, status: 'active', availability: 'controller_offline' }),
+  ]);
+  expect((await setup.f.json(path + '/removed-preview/renew', setup.alice.cookie, {})).status).toBe(409);
+}, 20_000);

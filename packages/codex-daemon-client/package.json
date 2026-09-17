@@ -28,13 +28,13 @@
     "test": "vitest run --testTimeout=10000 --hookTimeout=15000"
   },
   "dependencies": {
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "@types/node": "24.13.3",
+    "@types/ws": "^8.18.1"
   },
   "devDependencies": {
-    "@types/node": "24.13.3",
     "typescript": "5.9.3",
-    "vitest": "4.1.10",
-    "@types/ws": "^8.18.1"
+    "vitest": "4.1.10"
   },
   "engines": {
     "node": ">=22"

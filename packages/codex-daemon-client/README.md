@@ -1,6 +1,6 @@
 # Codex daemon client
 
-`@agent-remote-controller/codex-daemon-client` is a Node.js ESM client for Codex app-server JSON-RPC. It owns native transport, thread discovery, automatic reconnection and snapshot handoffs. Its only runtime dependency is `ws`; it has no Provider SDK, Remote, Relay, Host or browser dependency. Node.js 22 or newer is required.
+`@agent-remote-controller/codex-daemon-client` is a Node.js ESM client for Codex app-server JSON-RPC. It owns native transport, thread discovery, automatic reconnection and snapshot handoffs. Its only executable runtime dependency is `ws`; `@types/ws` and `@types/node` are delivered as transitive dependencies because the public transport declarations reference WebSocket and Node types. TypeScript consumers can check the public entrypoint with `strict: true` and `skipLibCheck: false` without installing `@types/ws` themselves. It has no Provider SDK, Remote, Relay, Host or browser dependency. Node.js 22 or newer is required.
 
 ## Attach an existing thread
 
@@ -63,3 +63,7 @@ Recovery defaults are a jittered 500 ms initial delay, 30-second maximum delay, 
 `dispose()` cancels recovery, invalidates requests and closes the transport. A delayed connection completing after cancellation is disposed. A shared transport never starts or stops the external daemon. A private transport created with `new CodexAppServerTransport(child)` owns and terminates that child process using the existing graceful shutdown behavior. Do not replace transport handlers after giving a transport to the client. Raw transport APIs remain available for low-level integrations and do not provide client recovery or mutation safety by themselves.
 
 This package is Apache-2.0 licensed; see `LICENSE` and `NOTICE` for derived transport attribution. It can be built and packed locally with `pnpm build` and `pnpm pack`; no workspace package is needed at runtime.
+
+## Check a packed artifact
+
+From the source checkout, `node src/test-utils/check-packed-consumer.mjs /absolute/path/to/package.tgz` installs the archive into a fresh temporary directory outside the workspace. It compiles a separate TypeScript consumer with strict declaration checking, then runs the JavaScript notebook against a temporary Unix server. The fixture supplies normal Node types and TypeScript as development tools but no manual WebSocket type dependency. Installation, compilation and the native fixture each have bounded subprocess deadlines.

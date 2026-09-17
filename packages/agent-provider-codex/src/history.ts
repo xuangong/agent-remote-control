@@ -1,6 +1,8 @@
+import { readThread } from '@agent-remote-controller/codex-daemon-client';
+export { collectCodexThreadHistoryItems } from '@agent-remote-controller/codex-daemon-client';
 import type { ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
 
-import { isRecord, readNumber, readString, type JsonObject } from './native.js';
+import { isRecord, readNumber, readString } from './native.js';
 import { CodexEventProjector, type CodexEventProjectorOptions } from './projector.js';
 
 export function projectCodexThreadHistory(
@@ -29,35 +31,6 @@ export function projectCodexThreadHistory(
     }
   }
   return observations;
-}
-
-export function collectCodexThreadHistoryItems(
-  response: unknown,
-  threadId: string,
-): Map<string, JsonObject> {
-  const thread = readThread(response, threadId);
-  const itemsById = new Map<string, JsonObject>();
-  const turns = Array.isArray(thread.turns) ? thread.turns : [];
-  for (const turn of turns) {
-    if (!isRecord(turn) || !Array.isArray(turn.items)) continue;
-    for (const item of turn.items) {
-      if (!isRecord(item)) continue;
-      const itemId = readString(item.id);
-      if (itemId) itemsById.set(itemId, item);
-    }
-  }
-  return itemsById;
-}
-
-function readThread(response: unknown, threadId: string): JsonObject {
-  if (!isRecord(response) || !isRecord(response.thread)) {
-    throw new Error('Codex thread/read returned no thread');
-  }
-  const returnedThreadId = readString(response.thread.id);
-  if (returnedThreadId !== threadId) {
-    throw new Error(`Codex thread/read returned ${returnedThreadId ?? 'no id'} instead of ${threadId}`);
-  }
-  return response.thread;
 }
 
 function secondsToMilliseconds(value: number | undefined): number | undefined {

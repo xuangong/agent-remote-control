@@ -1,12 +1,12 @@
 {
-  "name": "@agent-remote-controller/agent-provider-codex",
+  "name": "@agent-remote-controller/codex-daemon-client",
   "version": "0.1.0",
   "private": false,
   "publishConfig": {
     "access": "public"
   },
   "type": "module",
-  "description": "Codex app-server provider for Agent Remote Controller.",
+  "description": "Native Codex app-server transport, thread routing, and daemon recovery.",
   "license": "Apache-2.0",
   "exports": {
     ".": {
@@ -19,22 +19,24 @@
     "dist",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "examples"
   ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --testTimeout=10000"
+    "test": "vitest run --testTimeout=10000 --hookTimeout=15000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
-    "ws": "^8.21.0",
-    "@agent-remote-controller/codex-daemon-client": "workspace:*"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
     "typescript": "5.9.3",
     "vitest": "4.1.10",
     "@types/ws": "^8.18.1"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

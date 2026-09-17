@@ -76,11 +76,11 @@ binding as before.
 
 ## Recovery behavior
 
-One recovery loop owns each loaded native root and all of its child sessions.
+The reusable `@agent-remote-controller/codex-daemon-client` package owns one recovery loop for each loaded native root and all of its child sessions. It depends only on `ws` at runtime and accepts the embedding application's native initialization identity. The Provider retains its existing `codex_app_server_daemon` identity and `Agent Remote Control` title. Its `runtime.ts` maps native callbacks to SDK sessions and child descriptors; observation queues, timeline projection, interaction receipts and active-turn publication remain in the Provider. See the [native client API and independent consumer](../../../packages/codex-daemon-client/README.md).
 Transient failures retry indefinitely with jittered exponential backoff from
 500 milliseconds to 30 seconds. Each connection attempt has a 10-second
 deadline, each restoration has a 30-second deadline, and at most four roots
-restore concurrently. An explicit test or embedding configuration may set a
+restore concurrently through a scheduler shared by Provider roots. The native client lets other applications inject their own scheduler scope. An explicit test or embedding configuration may set a
 finite attempt limit. Permission rejection, incompatible native protocol, and a
 missing native thread stop retries and expose the runtime as unavailable.
 
@@ -119,7 +119,9 @@ other client still has a pending question, and stable recovery after the daemon
 disappears and returns at the same socket. The restart case persists a native
 turn before stopping the daemon so it verifies recovery of a real saved rollout.
 
-`shared-recovery.test.ts` uses a real Unix WebSocket transport with a deterministic
+`packages/codex-daemon-client/src/client.test.ts` uses an independent notebook consumer and a real Unix socket to check native snapshot/delta ordering, original-thread recovery, configurable initialization, request cancellation and disposal. The notebook imports no application SDK and also runs against a packed artifact installed outside the workspace. Transport tests live with that package.
+
+`shared-recovery.test.ts` retains Provider and Manager/Wire integration coverage and uses a real Unix WebSocket transport with a deterministic
 app-server fixture. It covers authoritative replacement, unbounded default retry,
 explicit bounded retry, permanent missing-thread classification, interaction
 invalidation, generation-safe identities, repeated loss, child stability, and

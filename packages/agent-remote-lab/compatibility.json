@@ -92,9 +92,16 @@
         "packages/agent-remote-web/scripts",
         "packages/agent-remote-web/src",
         "packages/agent-remote-web/tsconfig.json",
-        "packages/agent-remote-web/vitest.config.ts"
+        "packages/agent-remote-web/vitest.config.ts",
+        "packages/codex-daemon-client/LICENSE",
+        "packages/codex-daemon-client/NOTICE",
+        "packages/codex-daemon-client/README.md",
+        "packages/codex-daemon-client/examples",
+        "packages/codex-daemon-client/package.json",
+        "packages/codex-daemon-client/src",
+        "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:efb4a21903a31e19a8b07d43767ef82a71003b6ccfd2bed8676e5a9222dd4558"
+      "digest": "sha256:7a680fa427004dba740c003fdba0fec454b597cff1f9956e25d397785cd7d3e9"
     }
   },
   "providers": [

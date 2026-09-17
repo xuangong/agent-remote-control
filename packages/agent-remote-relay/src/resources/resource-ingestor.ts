@@ -8,6 +8,7 @@ import {
   type ResourceState,
 } from '@agent-remote-controller/agent-remote-protocol';
 
+import { readImageDimensions } from './image-dimensions.js';
 import { normalizeFileLocator } from './markdown-locators.js';
 import type { ResourceStore, StoredResourceState } from './resource-store.js';
 
@@ -107,6 +108,7 @@ export class ResourceIngestor {
       mediaType: state.mediaType,
       byteLength: state.byteLength,
       sha256: state.sha256,
+      ...(state.imageDimensions ? { imageDimensions: state.imageDimensions } : {}),
     };
   }
 
@@ -170,7 +172,9 @@ export class ResourceIngestor {
           this.options.store.deleteRecord(agentId, resourceId);
           return { resourceId: existing.resourceId, state: existing.state };
         }
+        const imageDimensions = readImageDimensions(result.bytes, detectedMediaType);
         return this.finish(agentId, resourceId, {
+          ...(imageDimensions ? { imageDimensions } : {}),
           status: 'available', mediaType: detectedMediaType, byteLength: result.bytes.byteLength, sha256,
         });
       } catch {
@@ -202,6 +206,7 @@ export class ResourceIngestor {
       byteLength: blob.bytes.byteLength,
       sha256,
       contentBase64: Buffer.from(blob.bytes).toString('base64'),
+      ...(state.imageDimensions ? { imageDimensions: state.imageDimensions } : {}),
     };
   }
 }

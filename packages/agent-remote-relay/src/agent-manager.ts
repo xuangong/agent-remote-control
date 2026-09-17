@@ -366,7 +366,7 @@ export class AgentManager {
     return {
       protocolVersion: PROTOCOL_VERSION,
       type: 'resource_resolve_response',
-      payload: { requestId, agentId: this.agentId, binding },
+      payload: { requestId, agentId: this.agentId, binding, state: this.resourceIngestor.readState(this.agentId, binding.resourceId) },
     };
   }
 

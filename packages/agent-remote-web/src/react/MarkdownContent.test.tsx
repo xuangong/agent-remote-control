@@ -98,6 +98,44 @@ describe('MarkdownContent', () => {
     ]);
   });
 
+  it('reserves image dimensions before bytes arrive and retains the frame after a transfer failure', async () => {
+    const binding = { locator: './slow.png', resourceId: 'slow-image', status: 'available' as const };
+    let reject!: (error: Error) => void;
+    const transfer = new Promise<void>((_, fail) => { reject = fail; });
+    const container = await render(<MarkdownContent markdown="![Slow diagram](./slow.png)" resourceContext={{
+      scopeKey: 'slow-image-session', bindings: [],
+      resources: { 'slow-image': { status: 'available', mediaType: 'image/png', byteLength: 1024, sha256: 'slow', imageDimensions: { width: 800, height: 600 } } },
+      resolveResource: async () => binding, requestResource: () => transfer,
+    }} />);
+    const frame = container.querySelector<HTMLElement>('[data-image-state="loading"]');
+    expect(frame).not.toBeNull();
+    expect(frame!.style.aspectRatio).toBe('800 / 600');
+    expect(container.querySelector('img')).toBeNull();
+    await act(async () => reject(new Error('The Remote Host disconnected.')));
+    expect(container.querySelector('[data-image-state="failed"]')).toBe(frame);
+    expect(frame!.style.aspectRatio).toBe('800 / 600');
+    expect(frame!.getAttribute('aria-busy')).toBe('false');
+    expect(frame!.textContent).toContain('Image unavailable');
+  });
+
+  it('keeps decoded images and their dimensions through success and decoding failure', async () => {
+    const binding = { locator: './decode.png', resourceId: 'decode-image', status: 'available' as const };
+    const container = await render(<MarkdownContent markdown="![Decoded](./decode.png)" resourceContext={{
+      scopeKey: 'decode-image-session', bindings: [binding],
+      resources: { 'decode-image': { status: 'available', mediaType: 'image/png', byteLength: 1, sha256: 'decode', contentBase64: 'AA==', imageDimensions: { width: 640, height: 480 } } },
+      resolveResource: async () => binding, requestResource: async () => {},
+    }} />);
+    const frame = container.querySelector<HTMLElement>('[data-image-state="loading"]');
+    const image = container.querySelector('img')!;
+    expect(image.getAttribute('width')).toBe('640');
+    expect(image.getAttribute('height')).toBe('480');
+    await act(async () => image.dispatchEvent(new Event('load')));
+    expect(container.querySelector('[data-image-state="loaded"]')).toBe(frame);
+    await act(async () => image.dispatchEvent(new Event('error')));
+    expect(container.querySelector('[data-image-state="failed"]')).toBe(frame);
+    expect(frame!.style.aspectRatio).toBe('640 / 480');
+  });
+
   it('loads inline and reference local images through the resource path with document context', async () => {
     const png = 'iVBORw0KGgoAAA==';
     const binding = { locator: './images/result.png', resourceId: 'image-one', status: 'available' as const };

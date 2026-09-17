@@ -115,11 +115,16 @@ export function applyResourceResponse(state: AgentReplicaState, response: Resour
 export function applyResourceUpdate(state: AgentReplicaState, update: ResourceUpdate): AgentReplicaState {
   const resourceId = update.payload.resourceId;
   const status = update.payload.state.status;
+  const previous = state.resources[resourceId];
+  const metadata = update.payload.state;
+  const resource = metadata.status === 'available' && previous?.status === 'available'
+    && previous.sha256 === metadata.sha256 && 'contentBase64' in previous
+    ? { ...metadata, contentBase64: previous.contentBase64 } : metadata;
   return {
     ...state,
     resources: {
       ...state.resources,
-      [resourceId]: clone(update.payload.state),
+      [resourceId]: clone(resource),
     },
     timeline: mapTimelineResources(state.timeline, (resources) => updateResourceStatus(resources, resourceId, status)),
   };

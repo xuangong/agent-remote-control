@@ -34,7 +34,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     const resourceStore = new InMemoryResourceStore();
     stream.push({ type: 'history_boundary' });
     await mkdir(join(workspace, 'docs', 'images'), { recursive: true });
-    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64');
     await writeFile(join(workspace, 'docs', 'images', 'result.png'), png);
     await writeFile(join(outside, 'secret.png'), png);
     const manager = await AgentManager.attach({
@@ -48,6 +48,8 @@ describe('AgentManager Timeline and Snapshot', () => {
       await manager.ready;
       const resolved = await manager.resolveResource('resolve-one', './images/result.png', join(workspace, 'docs', 'report.md'));
       expect(resolved.payload.binding).toMatchObject({ locator: './images/result.png', status: 'available' });
+      expect(resolved.payload).toMatchObject({ state: { status: 'available', imageDimensions: { width: 1, height: 1 } } });
+      expect(resolved.payload).not.toHaveProperty('state.contentBase64');
       expect((await manager.readResource('read-one', resolved.payload.binding.resourceId)).payload.state)
         .toMatchObject({ status: 'available', mediaType: 'image/png', contentBase64: Buffer.from(png).toString('base64') });
       const denied = await manager.resolveResource('resolve-two', join(outside, 'secret.png'));

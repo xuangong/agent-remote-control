@@ -14,6 +14,12 @@ const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => T
   { additionalProperties: false },
 );
 
+export const ImageDimensions = Strict({
+  width: Type.Integer({ minimum: 1, maximum: 0xffffffff }),
+  height: Type.Integer({ minimum: 1, maximum: 0xffffffff }),
+});
+export type ImageDimensions = Static<typeof ImageDimensions>;
+
 export const ResourceStatus = Type.Union([
   Type.Literal('pending'),
   Type.Literal('available'),
@@ -55,6 +61,7 @@ export const ResourceState = Type.Union([
     mediaType: NonEmptyString,
     byteLength: NonNegativeInteger,
     sha256: NonEmptyString,
+    imageDimensions: Type.Optional(ImageDimensions),
   }),
   Strict({ status: Type.Literal('failed'), message: NonEmptyString, retryable: Type.Boolean() }),
   Strict({ status: Type.Literal('unavailable'), reason: NonEmptyString }),
@@ -68,6 +75,7 @@ export const ResourceResponseState = Type.Union([
     mediaType: NonEmptyString,
     byteLength: NonNegativeInteger,
     sha256: NonEmptyString,
+    imageDimensions: Type.Optional(ImageDimensions),
     contentBase64: CanonicalBase64,
   }),
   Strict({ status: Type.Literal('failed'), message: NonEmptyString, retryable: Type.Boolean() }),
@@ -94,6 +102,7 @@ export const ResourceResolveResponse = Strict({
     requestId: NonEmptyString,
     agentId: NonEmptyString,
     binding: ResourceBinding,
+    state: Type.Optional(ResourceState),
   }),
 });
 export type ResourceResolveResponse = Static<typeof ResourceResolveResponse>;

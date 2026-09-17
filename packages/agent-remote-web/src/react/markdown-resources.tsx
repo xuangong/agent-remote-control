@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
+import { MarkdownImageFrame } from './MarkdownImageFrame.js';
 import { canPreviewImage } from './ResourceCard.js';
 
 export interface MarkdownResourceContext {
@@ -72,38 +73,32 @@ export function MarkdownResourceImage({
   useEffect(() => {
     let current = true;
     if (!locator || !context) return () => { current = false; };
-    void load(context, locator, sourceLocator).then((resolved) => {
-      if (!current) return;
-      setResult({ key, binding: resolved });
-    }, (error: unknown) => {
-      if (current) setResult({ key, failure: error instanceof Error && error.message ? error.message : 'Image resource is unavailable.' });
+    void load(context, locator, sourceLocator, (resolved) => {
+      if (current) setResult({ key, binding: resolved });
+    }).catch((error: unknown) => {
+      if (current) setResult(previous => ({ key, binding: previous?.key === key ? previous.binding : undefined,
+        failure: error instanceof Error && error.message ? error.message : 'Image resource is unavailable.' }));
     });
     return () => { current = false; };
   }, [context, key, locator, sourceLocator]);
 
   if (!locator || !context) return <span>{alt}</span>;
   const detail = binding ? context.resources[binding.resourceId] : undefined;
-  if (detail?.status === 'available' && 'contentBase64' in detail && canPreviewImage(detail.mediaType)) {
-    return <img
-      className="agent-resource-image"
-      src={`data:${detail.mediaType};base64,${detail.contentBase64}`}
-      alt={alt ?? locator}
-      loading="lazy"
-      decoding="async"
-    />;
-  }
-  if (detail?.status === 'unavailable' || binding?.status === 'unavailable') {
-    const reason = detail?.status === 'unavailable' ? detail.reason : 'Image resource is unavailable.';
-    return <span role="img" aria-label={`${alt ?? locator}: ${reason}`}>{alt ?? locator}</span>;
-  }
-  if (failure) return <span role="img" aria-label={`${alt ?? locator}: ${failure}`}>{alt ?? locator}</span>;
-  return <span role="status">{alt ?? locator}</span>;
+  const src = detail?.status === 'available' && 'contentBase64' in detail && canPreviewImage(detail.mediaType)
+    ? `data:${detail.mediaType};base64,${detail.contentBase64}` : undefined;
+  const reason = failure ?? (detail?.status === 'unavailable' ? detail.reason
+    : detail?.status === 'failed' ? detail.message
+    : binding?.status === 'unavailable' ? 'Image resource is unavailable.'
+    : detail?.status === 'available' && !canPreviewImage(detail.mediaType) ? 'This resource is not a supported image.' : undefined);
+  return <MarkdownImageFrame key={key} src={src} alt={alt ?? locator} failure={reason}
+    dimensions={detail?.status === 'available' ? detail.imageDimensions : undefined} />;
 }
 
 async function load(
   context: MarkdownResourceContext,
   locator: string,
   sourceLocator: string | undefined,
+  onResolved: (binding: ResourceBinding) => void,
 ): Promise<ResourceBinding> {
   const existing = sourceLocator === undefined ? context.bindings.find((binding) => binding.locator === locator) : undefined;
   const resolveKey = JSON.stringify([context.scopeKey, sourceLocator ?? null, locator]);
@@ -116,11 +111,13 @@ async function load(
     cache(resolutions, resolveKey, resolution);
   }
   const binding = await resolution;
+  onResolved(binding);
   if (binding.status === 'unavailable') return binding;
   const detail = context.resources[binding.resourceId];
   if (detail?.status === 'unavailable') return binding;
   if (detail?.status === 'available' && 'contentBase64' in detail) return binding;
-  const requestKey = JSON.stringify([context.scopeKey, binding.resourceId, detail?.status === 'available' ? detail.sha256 : null]);
+  // Metadata can arrive while the same immutable resource is already in flight.
+  const requestKey = JSON.stringify([context.scopeKey, binding.resourceId]);
   let request = requests.get(requestKey);
   if (!request) {
     request = context.requestResource(binding);

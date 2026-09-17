@@ -28,7 +28,8 @@
   "dependencies": {
     "@agent-remote-controller/agent-provider-sdk": "workspace:*",
     "@agent-remote-controller/agent-remote-protocol": "workspace:*",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "image-size": "2.0.2"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

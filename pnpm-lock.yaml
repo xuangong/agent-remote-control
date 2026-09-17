@@ -386,6 +386,9 @@ importers:
       '@agent-remote-controller/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
+      image-size:
+        specifier: 2.0.2
+        version: 2.0.2
       ws:
         specifier: ^8.21.0
         version: 8.21.1
@@ -498,6 +501,11 @@ importers:
 
 
 packages:
+
+  image-size@2.0.2:
+    resolution: {integrity: sha1-hKe0NwTbVzbzZL8NGwKYISmbS9w=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/image-size/-/image-size-2.0.2.tgz}
+    engines: {node: '>=16.x'}
+    hasBin: true
 
   '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.247':
     resolution: {integrity: sha512-vvCMAXy2KmiGHbJuThv+W6a+49qjofMR6S71FM8FTbkAAKg62cYcEyzVMVM3pNpBM5PtkMe8lRCqKnT9NUo6ng==}
@@ -3527,6 +3535,8 @@ packages:
     engines: {node: '>=8'}
 
 snapshots:
+
+  image-size@2.0.2: {}
 
   '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.247':
     optional: true

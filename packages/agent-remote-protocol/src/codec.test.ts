@@ -441,6 +441,18 @@ describe('resource and session messages', () => {
     expect(decodeResourceResponse(JSON.stringify(message)).status).toBe('ok');
   });
 
+  it('accepts image dimensions in metadata and rejects malformed sizes', () => {
+    const state = { status: 'available', mediaType: 'image/png', byteLength: 300, sha256: 'digest', imageDimensions: { width: 800, height: 600 } };
+    const message = { protocolVersion: version, type: 'resource_resolve_response', payload: {
+      requestId: 'dimensions', agentId: 'agent-7', binding: { locator: './plot.png', resourceId: 'plot', status: 'available' }, state,
+    } };
+    expect(decodeServerMessage(JSON.stringify(message))).toEqual({ status: 'ok', value: message });
+    for (const imageDimensions of [{ width: 0, height: 600 }, { width: -1, height: 600 }, { width: 1.5, height: 600 }, { width: 800 }, { width: 2 ** 32, height: 1 }]) {
+      expect(decodeServerMessage(JSON.stringify({ ...message, payload: { ...message.payload, state: { ...state, imageDimensions } } })).status).toBe('rejected');
+    }
+    expect(decodeServerMessage(JSON.stringify({ ...message, payload: { ...message.payload, state: { ...state, contentBase64: 'AAAA' } } })).status).toBe('rejected');
+  });
+
   it('validates resource resolution without accepting filesystem controls', () => {
     const request = {
       protocolVersion: version,

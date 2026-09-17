@@ -317,6 +317,10 @@ export class RemoteSessionClient {
         this.resolvePendingOperation(message.payload.requestId, message);
         return;
       case 'resource_resolve_response':
+        if (message.payload.state) this.replica.applyResource({
+          protocolVersion: PROTOCOL_VERSION, type: 'resource_update',
+          payload: { agentId: message.payload.agentId, resourceId: message.payload.binding.resourceId, state: message.payload.state },
+        });
         this.resolvePendingOperation(message.payload.requestId, message);
         return;
       case 'resource_update':

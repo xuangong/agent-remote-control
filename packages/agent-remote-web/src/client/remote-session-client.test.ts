@@ -708,7 +708,9 @@ describe('RemoteSessionClient', () => {
 
   it('resolves a Markdown locator with its source document before requesting bytes', async () => {
     const transport = new FakeTransport();
-    const client = connectedClient(transport, { requestId: () => 'resource-resolve' });
+    const replica = new AgentReplica();
+    const client = new RemoteSessionClient('agent-one', transport, replica, { requestId: () => 'resource-resolve' });
+    client.start(); transport.open();
     const pending = client.resolveResource('./images/result.png', '/workspace/docs/report.md');
     expect(transport.sent.at(-1)).toEqual({
       protocolVersion: '1.4.0', type: 'resource_resolve_request',
@@ -722,10 +724,19 @@ describe('RemoteSessionClient', () => {
       payload: {
         requestId: 'resource-resolve', agentId: 'agent-one',
         binding: { locator: './images/result.png', resourceId: 'resource-one', status: 'available' as const },
+        state: { status: 'available' as const, mediaType: 'image/png', byteLength: 300, sha256: 'image-digest', imageDimensions: { width: 800, height: 600 } },
       },
     };
     transport.emit(response);
     await expect(pending).resolves.toEqual(response.payload.binding);
+    expect(replica.getState().resources['resource-one']).toMatchObject({ imageDimensions: { width: 800, height: 600 } });
+    expect(replica.getState().resources['resource-one']).not.toHaveProperty('contentBase64');
+    replica.applyResource({ protocolVersion: '1.4.0', type: 'resource_response', payload: {
+      requestId: 'bytes', agentId: 'agent-one', resourceId: 'resource-one',
+      state: { ...response.payload.state, contentBase64: 'AAAA' },
+    } });
+    transport.emit(response);
+    expect(replica.getState().resources['resource-one']).toMatchObject({ contentBase64: 'AAAA', imageDimensions: { width: 800, height: 600 } });
   });
 
   it('resolves a command only after its matching acknowledgement', async () => {

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
+import type { ImageDimensions } from '@agent-remote-controller/agent-remote-protocol';
 
 export type StoredResourceState =
   | { status: 'pending'; retryAfterMs: number }
-  | { status: 'available'; mediaType: string; byteLength: number; sha256: string }
+  | { status: 'available'; mediaType: string; byteLength: number; sha256: string; imageDimensions?: ImageDimensions }
   | { status: 'failed'; message: string; retryable: boolean }
   | { status: 'unavailable'; reason: string };
 

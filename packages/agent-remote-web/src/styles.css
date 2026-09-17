@@ -278,6 +278,20 @@
 .agent-resources .agent-state-label { flex-shrink: 0; }
 .agent-resources .agent-resource-actions { flex-wrap: wrap; }
 .agent-resource-image { display: block; max-width: 100%; width: auto; height: auto; max-height: 70vh; object-fit: contain; border-radius: 4px; }
+.agent-markdown-image { display: block; position: relative; overflow: hidden; border-radius: 4px; }
+.agent-markdown-image-sized > .agent-resource-image { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; }
+.agent-markdown-image > .agent-resource-image { opacity: 0; transition: opacity 140ms ease-out; }
+.agent-markdown-image[data-image-state="loaded"] > .agent-resource-image { opacity: 1; }
+.agent-markdown-image[data-image-state="loading"]::before { content: ""; position: absolute; inset: 0; background: var(--agent-rule); opacity: .22; animation: agent-image-pulse 2.4s ease-in-out infinite; pointer-events: none; }
+.agent-markdown-image[data-image-state="failed"] { background: var(--agent-surface-muted); box-shadow: inset 0 0 0 1px var(--agent-rule); }
+.agent-markdown-image-status { display: block; padding: 4px 8px; color: var(--agent-muted); font-size: 12px; line-height: 1.4; }
+.agent-markdown-image-sized > .agent-markdown-image-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; }
+@keyframes agent-image-pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-markdown-image[data-image-state="loading"]::before { animation: none; }
+  .agent-markdown-image > .agent-resource-image { transition: none; }
+}
+
 .agent-resources li > small { color: var(--agent-muted); }
 .agent-resources button { justify-self: start; min-height: 28px; font-size: 12px; }
 .agent-extension-error { display: block; padding: 0 18px 12px; color: var(--agent-danger); }

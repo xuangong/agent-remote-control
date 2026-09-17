@@ -19,15 +19,44 @@ interface NativeThread {
   parentThreadId?: string;
 }
 
+interface RpcRequestContext {
+  socket: WebSocket;
+  connection: number;
+  method: string;
+  params: Record<string, unknown>;
+}
+
+type RpcOverride = { kind: 'result'; value: unknown } | { kind: 'error'; code: number; message: string };
+
+interface Deferred<T = void> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: Error): void;
+}
+
+function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 class UnixAppServer {
   readonly requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+  readonly nativeResponses: Array<{ id: string; result?: unknown; error?: unknown }> = [];
   readonly sockets = new Set<WebSocket>();
   thread: NativeThread = { id: 'root', status: { type: 'idle' }, canAcceptDirectInput: true, turns: [] };
   model = 'mock-model';
   readonly children = new Map<string, NativeThread>();
   threadReadError: { code: number; message: string } | undefined;
+  requestHook: ((context: RpcRequestContext) => RpcOverride | undefined | Promise<RpcOverride | undefined>) | undefined;
   private server: Server | undefined;
   private websocketServer: WebSocketServer | undefined;
+  private readonly connections = new Map<WebSocket, number>();
+  private nextConnection = 0;
 
   constructor(readonly socketPath: string) {}
 
@@ -36,8 +65,12 @@ class UnixAppServer {
     this.websocketServer = new WebSocketServer({ server: this.server });
     this.websocketServer.on('connection', socket => {
       this.sockets.add(socket);
-      socket.on('close', () => this.sockets.delete(socket));
-      socket.on('message', data => this.handle(socket, JSON.parse(data.toString()) as Record<string, unknown>));
+      this.connections.set(socket, ++this.nextConnection);
+      socket.on('close', () => {
+        this.sockets.delete(socket);
+        this.connections.delete(socket);
+      });
+      socket.on('message', data => void this.handle(socket, JSON.parse(data.toString()) as Record<string, unknown>));
     });
     this.server.listen(this.socketPath);
     await once(this.server, 'listening');
@@ -47,15 +80,23 @@ class UnixAppServer {
     for (const socket of this.sockets) socket.terminate();
   }
 
-  requestInteraction(nativeRequestId = 'native-question'): void {
-    for (const socket of this.sockets) socket.send(JSON.stringify({
+  requestInteraction(nativeRequestId = 'native-question', threadId = 'root', connection?: number): void {
+    for (const socket of this.selectedSockets(connection)) socket.send(JSON.stringify({
       id: nativeRequestId,
       method: 'item/tool/requestUserInput',
       params: {
-        threadId: 'root', turnId: 'turn-question',
+        threadId, turnId: 'turn-question',
         questions: [{ id: 'choice', header: 'Choice', question: 'Choose', options: [{ label: 'One', description: 'One' }] }],
       },
     }));
+  }
+
+  notify(method: string, params: unknown, connection?: number): void {
+    for (const socket of this.selectedSockets(connection)) socket.send(JSON.stringify({ method, params }));
+  }
+
+  resolveInteraction(nativeRequestId: string, threadId = 'root', connection?: number): void {
+    this.notify('serverRequest/resolved', { threadId, requestId: nativeRequestId }, connection);
   }
 
   async stop(): Promise<void> {
@@ -69,12 +110,32 @@ class UnixAppServer {
     this.server = undefined;
   }
 
-  private handle(socket: WebSocket, message: Record<string, unknown>): void {
+  private selectedSockets(connection?: number): WebSocket[] {
+    return [...this.sockets].filter(socket => connection === undefined || this.connections.get(socket) === connection);
+  }
+
+  private async handle(socket: WebSocket, message: Record<string, unknown>): Promise<void> {
+    if (typeof message.id === 'string' && typeof message.method !== 'string') {
+      this.nativeResponses.push({ id: message.id, ...('result' in message ? { result: message.result } : {}),
+        ...('error' in message ? { error: message.error } : {}) });
+      return;
+    }
     if (typeof message.id !== 'number' || typeof message.method !== 'string') return;
     const params = message.params && typeof message.params === 'object' ? message.params as Record<string, unknown> : {};
     this.requests.push({ method: message.method, params });
+    const override = await this.requestHook?.({
+      socket,
+      connection: this.connections.get(socket) ?? 0,
+      method: message.method,
+      params,
+    });
+    if (override?.kind === 'error') {
+      socket.send(JSON.stringify({ id: message.id, error: { code: override.code, message: override.message } }));
+      return;
+    }
     let result: unknown = {};
-    if (message.method === 'model/list') result = { data: [] };
+    if (override?.kind === 'result') result = override.value;
+    else if (message.method === 'model/list') result = { data: [] };
     else if (message.method === 'configRequirements/read') result = { requirements: {} };
     else if (message.method === 'collaborationMode/list') {
       socket.send(JSON.stringify({ id: message.id, error: { code: -32601, message: 'not supported' } }));
@@ -141,6 +202,27 @@ async function nextEvent(iterator: AsyncIterator<ProviderStreamItem>, type: stri
   throw new Error(`Observation did not publish ${type}`);
 }
 
+function replacementAssistantText(item: ProviderStreamItem): string {
+  if (item.type !== 'timeline_replacement') throw new Error('Expected timeline replacement');
+  return item.observations.flatMap(observation => observation.event.type === 'timeline'
+    && observation.event.item.type === 'assistant_message' ? [observation.event.item.text] : []).join('');
+}
+
+async function drainAvailable(iterator: AsyncIterator<ProviderStreamItem>, quietMs = 60): Promise<ProviderStreamItem[]> {
+  const items: ProviderStreamItem[] = [];
+  for (let index = 0; index < 30; index += 1) {
+    const next = iterator.next();
+    const result = await Promise.race([
+      next,
+      new Promise<'quiet'>(resolve => setTimeout(() => resolve('quiet'), quietMs)),
+    ]);
+    if (result === 'quiet') break;
+    if (result.done) break;
+    items.push(result.value);
+  }
+  return items;
+}
+
 describe('shared Codex recovery', () => {
   it('keeps transient recovery unbounded unless a caller sets an attempt limit', () => {
     expect(normalizeRecoverySettings().maximumAttempts).toBeUndefined();
@@ -195,6 +277,207 @@ describe('shared Codex recovery', () => {
     if (fresh.type !== 'observation' || fresh.event.type !== 'interaction_requested') throw new Error('Expected fresh interaction');
     expect(fresh.event.request.requestId).not.toBe(oldRequestId);
     await expect(session.respondToInteraction!(oldRequestId, { kind: 'question', answers: [] })).rejects.toThrow('No pending');
+  });
+
+  it('keeps a post-snapshot delta for an item that already existed before recovery', async () => {
+    const { server, provider, session, iterator } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 });
+    server.notify('item/agentMessage/delta', {
+      threadId: 'root', turnId: 'root-turn', itemId: 'root-answer', delta: 'A',
+    });
+    await expect(nextItem(iterator, 'observation')).resolves.toMatchObject({
+      event: { type: 'timeline', item: { type: 'assistant_message', text: 'A' } },
+    });
+
+    server.children.set('child', {
+      id: 'child', parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: false,
+      turns: [{ id: 'child-turn', items: [{ id: 'child-answer', type: 'agentMessage', text: 'Child' }] }],
+    });
+    server.notify('item/completed', {
+      threadId: 'root', turnId: 'root-turn',
+      item: { id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'], status: 'completed' },
+    });
+    await expect.poll(async () => (await session.runtimeInfo()).childSessions?.map(child => child.nativeSessionId)).toContain('child');
+    const child = await provider.openChildSession('root', 'child');
+    sessions.push(child);
+
+    const childReadEntered = deferred();
+    const releaseChildRead = deferred();
+    server.requestHook = async ({ connection, method, params }) => {
+      if (connection === 2 && method === 'thread/read' && params.threadId === 'child' && params.includeTurns === true) {
+        childReadEntered.resolve(undefined);
+        await releaseChildRead.promise;
+      }
+      return undefined;
+    };
+    server.thread.turns = [{ id: 'root-turn', status: 'inProgress', items: [
+      { id: 'root-answer', type: 'agentMessage', text: 'AB' },
+    ] }];
+    server.disconnectClients();
+    await childReadEntered.promise;
+    server.notify('item/agentMessage/delta', {
+      threadId: 'root', turnId: 'root-turn', itemId: 'root-answer', delta: 'C',
+    }, 2);
+    releaseChildRead.resolve(undefined);
+
+    const replacement = await nextItem(iterator, 'timeline_replacement');
+    expect(replacementAssistantText(replacement)).toBe('ABC');
+  });
+
+  it('cancels an interaction resolved while its restored snapshot is still loading', async () => {
+    const { server, session, iterator } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 });
+    const readEntered = deferred();
+    const releaseRead = deferred();
+    server.requestHook = async ({ connection, method, params }) => {
+      if (connection === 2 && method === 'thread/read' && params.threadId === 'root') {
+        readEntered.resolve(undefined);
+        await releaseRead.promise;
+      }
+      return undefined;
+    };
+
+    server.disconnectClients();
+    await readEntered.promise;
+    server.requestInteraction('resolved-during-restore', 'root', 2);
+    const requested = await nextEvent(iterator, 'interaction_requested');
+    if (requested.event.type !== 'interaction_requested') throw new Error('Expected interaction');
+    const requestId = requested.event.request.requestId;
+    server.resolveInteraction('resolved-during-restore', 'root', 2);
+    releaseRead.resolve(undefined);
+
+    await expect(nextItem(iterator, 'timeline_replacement')).resolves.toMatchObject({ type: 'timeline_replacement' });
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+    await expect(session.respondToInteraction!(requestId, { kind: 'question', answers: [] })).rejects.toThrow('No pending');
+    expect(server.nativeResponses.find(response => response.id === 'resolved-during-restore')).toBeUndefined();
+  });
+
+  it('suppresses a native request resolved before child dispatch completes', async () => {
+    const { server, provider, session } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 });
+    server.children.set('late-child', {
+      id: 'late-child', parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: false, turns: [],
+    });
+    const rootReadEntered = deferred();
+    const releaseRootRead = deferred();
+    const childReadEntered = deferred();
+    const releaseChildRead = deferred();
+    let childReadBlocked = false;
+    server.requestHook = async ({ connection, method, params }) => {
+      if (connection !== 2 || method !== 'thread/read') return undefined;
+      if (params.threadId === 'root') {
+        rootReadEntered.resolve(undefined);
+        await releaseRootRead.promise;
+      } else if (params.threadId === 'late-child' && !childReadBlocked) {
+        childReadBlocked = true;
+        childReadEntered.resolve(undefined);
+        await releaseChildRead.promise;
+      }
+      return undefined;
+    };
+
+    server.disconnectClients();
+    await rootReadEntered.promise;
+    server.requestInteraction('resolved-before-dispatch', 'late-child', 2);
+    await childReadEntered.promise;
+    server.resolveInteraction('resolved-before-dispatch', 'late-child', 2);
+    releaseChildRead.resolve(undefined);
+    await expect.poll(() => server.requests.filter(request => request.method === 'thread/read'
+      && request.params.threadId === 'late-child').length).toBeGreaterThanOrEqual(2);
+    releaseRootRead.resolve(undefined);
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+
+    const child = await provider.openChildSession('root', 'late-child');
+    sessions.push(child);
+    const items = await drainAvailable(child.observe()[Symbol.asyncIterator]());
+    expect(items.filter(item => item.type === 'observation' && item.event.type === 'interaction_requested')).toEqual([]);
+    expect(server.nativeResponses.find(response => response.id === 'resolved-before-dispatch')).toBeUndefined();
+  });
+
+  it('retires interactions created by a restoration attempt that later fails', async () => {
+    const { server, session, iterator } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 });
+    const firstReadEntered = deferred();
+    const failFirstRead = deferred<RpcOverride>();
+    server.requestHook = async ({ connection, method, params }) => {
+      if (connection === 2 && method === 'thread/read' && params.threadId === 'root') {
+        firstReadEntered.resolve(undefined);
+        return await failFirstRead.promise;
+      }
+      return undefined;
+    };
+
+    server.disconnectClients();
+    await firstReadEntered.promise;
+    server.requestInteraction('failed-attempt-question', 'root', 2);
+    const requested = await nextEvent(iterator, 'interaction_requested');
+    if (requested.event.type !== 'interaction_requested') throw new Error('Expected interaction');
+    const requestId = requested.event.request.requestId;
+    failFirstRead.resolve({ kind: 'error', code: -32000, message: 'temporary snapshot failure' });
+
+    await expect(nextItem(iterator, 'timeline_replacement')).resolves.toMatchObject({ type: 'timeline_replacement' });
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+    await expect(session.respondToInteraction!(requestId, { kind: 'question', answers: [] })).rejects.toThrow('No pending');
+    expect(server.nativeResponses.find(response => response.id === 'failed-attempt-question')).toBeUndefined();
+  });
+
+  it('retires a timed-out restoration and ignores its late snapshot result', async () => {
+    const { server, session, iterator } = await harness({
+      initialDelayMs: 10, maximumDelayMs: 10, restorationDeadlineMs: 40,
+    });
+    const firstReadEntered = deferred();
+    const lateRead = deferred<RpcOverride>();
+    server.requestHook = async ({ connection, method, params }) => {
+      if (connection === 2 && method === 'thread/read' && params.threadId === 'root') {
+        firstReadEntered.resolve(undefined);
+        return await lateRead.promise;
+      }
+      return undefined;
+    };
+
+    server.disconnectClients();
+    await firstReadEntered.promise;
+    const replacement = await nextItem(iterator, 'timeline_replacement');
+    expect(replacementAssistantText(replacement)).toBe('');
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+
+    lateRead.resolve({ kind: 'result', value: {
+      thread: { ...server.thread, turns: [{ id: 'stale-turn', items: [{ id: 'stale-answer', type: 'agentMessage', text: 'Stale' }] }] },
+      cwd: '/stale', model: 'stale-model',
+    } });
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect((await session.runtimeInfo()).model).toBe('mock-model');
+    expect(await drainAvailable(iterator, 30)).not.toContainEqual(expect.objectContaining({ type: 'timeline_replacement' }));
+  });
+
+  it('limits concurrent restoration work to four roots process-wide', async () => {
+    const harnesses = await Promise.all(Array.from({ length: 5 }, () => harness({
+      initialDelayMs: 10, maximumDelayMs: 10, restorationDeadlineMs: 500,
+    })));
+    const releases = harnesses.map(() => deferred());
+    let entered = 0;
+    let active = 0;
+    let maximumActive = 0;
+    harnesses.forEach(({ server }, index) => {
+      server.requestHook = async ({ connection, method }) => {
+        if (connection !== 2 || method !== 'initialize') return undefined;
+        entered += 1;
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await releases[index].promise;
+        active -= 1;
+        return undefined;
+      };
+    });
+
+    for (const { server } of harnesses) server.disconnectClients();
+    await expect.poll(() => entered).toBe(4);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(entered).toBe(4);
+    expect(maximumActive).toBe(4);
+
+    releases[0].resolve(undefined);
+    await expect.poll(() => entered).toBe(5);
+    for (const release of releases) release.resolve(undefined);
+    await Promise.all(harnesses.map(({ session }) => expect.poll(async () =>
+      (await session.runtimeInfo()).connection?.state).toBe('connected')));
+    expect(maximumActive).toBe(4);
   });
 
   it('cancels retry work on disposal and never manages the external daemon', async () => {

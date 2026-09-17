@@ -745,22 +745,28 @@ export class CodexAppServerSession implements AgentSession {
       const historyItem = itemId ? historyItems.get(itemId) : undefined;
       if (historyItem && isHistoryCoveredItemNotification(raw.method)) {
         if (raw.method !== 'item/completed') {
-          if (!priorText || !itemId || !isRecord(raw.params) || typeof raw.params.delta !== 'string') continue;
-          if (!coveredCharacters.has(itemId)) {
-            const prior = priorText.get(itemId) ?? '';
-            const current = historyText.get(itemId) ?? '';
-            coveredCharacters.set(itemId, current.startsWith(prior) ? current.length - prior.length : 0);
+          if (replacement) {
+            // Recovery buffers are sequence-filtered to the snapshot handoff, so their deltas remain authoritative.
+            if (raw.method === 'item/started') continue;
+          } else {
+            if (!priorText || !itemId || !isRecord(raw.params) || typeof raw.params.delta !== 'string') continue;
+            if (!coveredCharacters.has(itemId)) {
+              const prior = priorText.get(itemId) ?? '';
+              const current = historyText.get(itemId) ?? '';
+              coveredCharacters.set(itemId, current.startsWith(prior) ? current.length - prior.length : 0);
+            }
+            const covered = coveredCharacters.get(itemId)!;
+            const delta = raw.params.delta;
+            coveredCharacters.set(itemId, Math.max(0, covered - delta.length));
+            if (covered >= delta.length) continue;
+            raw = { ...raw, params: { ...raw.params, delta: delta.slice(covered) } };
           }
-          const covered = coveredCharacters.get(itemId)!;
-          const delta = raw.params.delta;
-          coveredCharacters.set(itemId, Math.max(0, covered - delta.length));
-          if (covered >= delta.length) continue;
-          raw = { ...raw, params: { ...raw.params, delta: delta.slice(covered) } };
         }
         const completedItem = readItem(raw.params);
         if (completedItem && isDeepStrictEqual(completedItem, historyItem)) continue;
       }
       if (this.handleRuntimeNotification(raw.method, raw.params)) continue;
+      if (this.handleServerRequestResolved(raw.method, raw.params)) continue;
       const observation = this.projector.projectNotification(raw.method, raw.params);
       if (observation) this.applyTurnObservation(observation);
       if (observation && !historyKeys.has(observation.sourceKey)) this.preReadyEvents.push(observation);
@@ -780,7 +786,6 @@ export class CodexAppServerSession implements AgentSession {
 
   restoreSnapshot(snapshot: unknown, buffered: CodexRawNotification[]): void {
     if (this.disposed || !this.threadId) return;
-    const priorText = this.projector?.snapshotText();
     this.ready = false;
     this.preReadyEvents.length = 0;
     this.bufferedNotifications.length = 0;
@@ -800,7 +805,7 @@ export class CodexAppServerSession implements AgentSession {
     this.bufferedNotifications.push(...buffered);
     const history = projectCodexThreadHistory(snapshot, this.threadId, { images: this.images, cwd: this.config.cwd });
     const items = collectCodexThreadHistoryItems(snapshot, this.threadId);
-    this.finishBootstrap(history, items, priorText, true);
+    this.finishBootstrap(history, items, undefined, true);
   }
 
   private handleNotification(method: string, params: unknown): void {

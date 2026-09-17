@@ -72,7 +72,7 @@ export class CodexSessionRuntime {
       if (generation === this.generation) this.routeNotification(method, params);
     });
     transport.setTerminationHandler((error) => {
-      if (generation === this.generation) this.handleTermination(error);
+      if (generation === this.generation) this.handleTermination(error, generation);
     });
     for (const method of ['item/tool/requestUserInput', 'tool/requestUserInput', 'item/commandExecution/requestApproval',
       'item/fileChange/requestApproval', 'mcpServer/elicitation/request', 'item/permissions/requestApproval']) {
@@ -107,17 +107,13 @@ export class CodexSessionRuntime {
     throw new Error(`Codex shared runtime is ${this.connection.state}; wait for native recovery before retrying.`);
   }
 
-  private handleTermination(error: Error): void {
+  private handleTermination(error: Error, generation: number): void {
     if (this.closed) return;
     if (!this.recoveryPlan) {
       this.terminate(error);
       return;
     }
-    this.generation += 1;
-    this.discoveries.clear();
-    this.buffered.clear();
-    this.overflowed.clear();
-    for (const session of this.uniqueSessions()) session.beginRecovery('connection_lost');
+    if (!this.retireGeneration(generation, 'connection_lost')) return;
     if (this.recoveryTask) return;
     this.recoveryAbort = new AbortController();
     this.recoveryTask = this.recover(this.recoveryAbort.signal).finally(() => {
@@ -136,6 +132,7 @@ export class CodexSessionRuntime {
       this.setConnection({ state: 'reconnecting', reason: 'connection_lost', attempt, nextRetryAt: Date.now() + delay });
       let connecting: Promise<CodexAppServerTransport> | undefined;
       let nextTransport: CodexAppServerTransport | undefined;
+      let generation: number | undefined;
       try {
         await abortableDelay(delay, signal);
         connecting = this.recoveryPlan.connect();
@@ -145,17 +142,19 @@ export class CodexSessionRuntime {
           return;
         }
         this.setConnection({ state: 'restoring', reason: 'connection_lost', attempt });
-        const generation = this.bindTransport(nextTransport);
-        for (const session of this.uniqueSessions()) session.replaceTransport(nextTransport, generation);
+        const activeGeneration = this.bindTransport(nextTransport);
+        generation = activeGeneration;
+        for (const session of this.uniqueSessions()) session.replaceTransport(nextTransport, activeGeneration);
         await sharedRestorationSemaphore.run(
-          () => withDeadline(this.restore(generation), settings.restorationDeadlineMs, signal, 'Codex shared restoration'),
+          () => withDeadline(this.restore(activeGeneration), settings.restorationDeadlineMs, signal, 'Codex shared restoration'),
           signal,
         );
-        if (generation !== this.generation || signal.aborted || this.closed) continue;
+        if (activeGeneration !== this.generation || signal.aborted || this.closed) continue;
         this.setConnection({ state: 'connected' });
         return;
       } catch (error) {
-        this.restorationBuffer = undefined;
+        if (generation === undefined) this.restorationBuffer = undefined;
+        else this.retireGeneration(generation, 'restoration_failed');
         if (!nextTransport && connecting) {
           void connecting.then(transport => transport.dispose()).catch(() => undefined);
         }
@@ -171,6 +170,21 @@ export class CodexSessionRuntime {
     if (!signal.aborted && !this.closed && settings.maximumAttempts !== undefined) {
       this.setConnection({ state: 'unavailable', reason: 'retry_exhausted', attempt: settings.maximumAttempts });
     }
+  }
+
+  private retireGeneration(generation: number, reason: string): boolean {
+    if (generation !== this.generation) return false;
+    this.generation += 1;
+    this.restorationBuffer = undefined;
+    this.discoveries.clear();
+    this.buffered.clear();
+    this.overflowed.clear();
+    const prefix = `${generation}:`;
+    for (const [key, dispatch] of this.pendingDispatches) {
+      if (key.startsWith(prefix)) dispatch.resolved = true;
+    }
+    for (const session of this.uniqueSessions()) session.beginRecovery(reason);
+    return true;
   }
 
   private async restore(generation: number): Promise<void> {
@@ -259,15 +273,15 @@ export class CodexSessionRuntime {
 
   private routeNotification(method: string, params: unknown): void {
     if (this.closed) return;
-    if (this.restorationBuffer) {
-      this.restorationBuffer.push({ method, params, sequence: ++this.restorationSequence });
-      return;
-    }
     const thread = isRecord(params) && isRecord(params.thread) ? params.thread : undefined;
     const id = isRecord(params) ? readString(params.threadId) ?? (thread ? readString(thread.id) : undefined) : undefined;
     if (id && method === 'serverRequest/resolved' && isRecord(params)) {
       const dispatch = this.pendingDispatches.get(`${this.generation}:${id}:${params.requestId}`);
       if (dispatch) dispatch.resolved = true;
+    }
+    if (this.restorationBuffer) {
+      this.restorationBuffer.push({ method, params, sequence: ++this.restorationSequence });
+      return;
     }
     if (!id) { this.root.receiveNotification(method, params); return; }
     if (isRecord(params) && (method === 'item/started' || method === 'item/completed')) this.inspectItem(id, readString(params.turnId), params.item);

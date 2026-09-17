@@ -7,3 +7,5 @@ export * from './registrations.js';
 export * from './copilot.js';
 export * from './copilot-directory.js';
 export * from './execution-policy.js';
+
+export * from './workspace-folders.js';

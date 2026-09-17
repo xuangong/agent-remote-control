@@ -655,12 +655,14 @@ export function createHostBroker(options: HostBrokerOptions) {
       });
       return json(200, { ok: true });
     }
-    const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|models|child\/attach|attach|create)$/.exec(url.pathname);
+    const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|workspace-folders|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {
       requireAccess(directory[1]!, subject);
-      const host = requireHost(directory[1]!); const action = directory[2]!;
+      const action = directory[2]!;
+      if (action === 'workspace-folders') requireOwner(subject);
+      const host = requireHost(directory[1]!);
       if (action === 'models' && request.method === 'GET' && host.legacyDsh) return json(200, { models: [] });
-      if (['catalog', 'catalog/revision', 'workspaces', 'models'].includes(action) && request.method === 'GET') {
+      if (['catalog', 'catalog/revision', 'workspaces', 'workspace-folders', 'models'].includes(action) && request.method === 'GET') {
         const query = new URLSearchParams(url.search);
         const providerId = query.get('providerId');
         if (!host.legacyDsh && (!providerId || !host.providers.some((provider) => provider.providerId === providerId))) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');

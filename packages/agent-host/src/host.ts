@@ -1,3 +1,4 @@
+import { browseWorkspaceFolders, WorkspaceFolderError } from './workspace-folders.js';
 import { HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { createControllerPreviews } from './previews.js';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
@@ -224,6 +225,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (request.method === 'GET') {
         const providerId = string(url.searchParams.get('providerId'), 'providerId');
         const directory = registration(providerId).directory;
+        if (url.pathname === '/remote/workspace-folders') return json(200, await browseWorkspaceFolders(url.searchParams, options.executionPolicy, (await directory.workspaces())[0]?.path));
         if (url.pathname === '/remote/workspaces') return json(200, { workspaces: await directory.workspaces() });
         if (url.pathname === '/remote/models') return json(200, await (directory.models?.() ?? { models: [] }));
         const catalog = catalogs.get(providerId)!;
@@ -269,6 +271,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     } catch (error) {
       if (error instanceof AgentSessionInUseError) return json(409, { error: error.message, code: 'session_in_use' });
       if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
+      if (error instanceof WorkspaceFolderError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });
       if (request.method === 'GET') return json(503, { error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' });

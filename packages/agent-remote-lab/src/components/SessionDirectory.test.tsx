@@ -2,7 +2,7 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { DirectoryError, SessionDirectoryClient, type SessionSummary } from '../directory-client.js';
 import { render } from '../test/setup.js';
-import { SessionDirectory } from './SessionDirectory.js';
+import { SessionConfiguration, SessionDirectory } from './SessionDirectory.js';
 
 const summary = (nativeSessionId: string): SessionSummary => ({ nativeSessionId, providerId: 'recorded', title: nativeSessionId, state: 'idle', createdAt: '2026-09-09T00:00:00Z', updatedAt: '2026-09-09T00:00:00Z' });
 function button(container: HTMLElement, label: string): HTMLButtonElement { return [...container.querySelectorAll('button')].find((item) => item.textContent === label)!; }
@@ -103,4 +103,12 @@ it('distinguishes unknown activity from idle and keeps unknown sessions openable
   expect(rows.map(row => row.disabled)).toEqual([false, false, false, false, true]);
   await act(async () => rows[0]!.click());
   expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({nativeSessionId: 'unknown'}));
+});
+
+it('keeps registered workspace selection without offering folder browsing to shared users', async () => {
+  const directory = new SessionDirectoryClient('http://localhost');
+  vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [{ id: 'project', name: 'Project', path: '/work/project' }] });
+  const container = await render(<SessionConfiguration directory={directory} providerId="codex" value={{}} disabled={false} canBrowse={false} onChange={() => {}} />);
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Browse…')).toBe(false);
+  expect(container.querySelector('#session-workspace')?.textContent).toContain('Project');
 });

@@ -1,3 +1,4 @@
+import { WorkspaceFolderPicker } from './WorkspaceFolderPicker.js';
 import { useEffect, useRef, useState } from 'react';
 import { openedEntry, sessionForest, sessionKey, sessionStatusLabel, type SessionEntry } from '../session-tree.js';
 import { SessionTree } from './SessionTree.js';
@@ -140,15 +141,17 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
 function stateLabel(state: SessionSummary['state']): string { return state === 'running' ? 'Working' : state === 'waiting' ? 'Waiting' : state === 'unavailable' ? 'Unavailable' : state === 'idle' ? 'Idle' : 'Unknown'; }
 function formatTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
 
-export function SessionConfiguration({ directory, providerId, disabled, value, onChange }: {
-  directory: SessionDirectoryClient; providerId: string; disabled: boolean; value: CreateSessionOptions; onChange(value: CreateSessionOptions): void;
+export function SessionConfiguration({ directory, providerId, disabled, value, onChange, canBrowse = true }: {
+  directory: SessionDirectoryClient; providerId: string; disabled: boolean; value: CreateSessionOptions; onChange(value: CreateSessionOptions): void; canBrowse?: boolean;
 }) {
+  const [picking, setPicking] = useState(false);
   const [workspaces, setWorkspaces] = useState<SessionWorkspace[]>([]);
   const [failure, setFailure] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     let retired = false;
+    setPicking(false);
     setWorkspaces([]);
     setFailure(undefined);
     if (!providerId) return;
@@ -160,10 +163,15 @@ export function SessionConfiguration({ directory, providerId, disabled, value, o
   }, [directory, providerId, retry]);
   return <div className="lab-session-configuration">
     <label htmlFor="session-workspace">Workspace</label>
-    <select id="session-workspace" value={value.workspaceId ?? ''} disabled={disabled || loading} onChange={(event) => onChange({ ...value, workspaceId: event.target.value || undefined, cwd: undefined })}>
+    <div className="lab-workspace-field"><select id="session-workspace" value={value.cwd ? '__custom_folder' : value.workspaceId ?? ''} disabled={disabled || loading} onChange={(event) => onChange({ ...value, workspaceId: event.target.value || undefined, cwd: undefined })}>
       <option value="">Host default</option>
+      {value.cwd ? <option value="__custom_folder">{value.cwd}</option> : null}
       {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} · {workspace.path}</option>)}
     </select>
+    {canBrowse && providerId !== 'dsh' ? <button type="button" disabled={disabled || loading} onClick={() => setPicking(true)}>Browse…</button> : null}</div>
+    {picking && canBrowse && !disabled ? <WorkspaceFolderPicker key={providerId} directory={directory} providerId={providerId} workspaces={workspaces}
+      initialPath={value.cwd ?? workspaces.find(workspace => workspace.id === value.workspaceId)?.path}
+      onClose={() => setPicking(false)} onSelect={cwd => { onChange({ ...value, cwd, workspaceId: undefined }); setPicking(false); }} /> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure} <button type="button" onClick={() => setRetry((current) => current + 1)}>Retry workspaces</button></p> : null}
     {providerId === 'dsh' ? <p className="lab-control-note">Model, reasoning effort, and session mode follow DSH settings.</p> : <>
       {!value.workspaceId ? <><label htmlFor="session-directory">Working directory</label><input id="session-directory" value={value.cwd ?? ''} placeholder="Provider default" disabled={disabled} onChange={(event) => onChange({ ...value, cwd: event.target.value || undefined })} /></> : null}

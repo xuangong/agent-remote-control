@@ -429,3 +429,12 @@ it('releases an in-flight binding slot after a native rejection so the denied re
     body: '{"agentId":"retried-agent","nativeSessionId":"retried-native"}' }));
   expect((await retry)?.status).toBe(200); expect(broker.snapshot().bindings).toHaveLength(4096);
 }, 10000);
+
+it('does not expose Controller folder browsing to a shared session user', async () => {
+  const broker = createHostBroker({ origin: 'https://relay.example', ownerSubject: 'alice', initialState: { ...restoredState,
+    sharing: { grants: [{ hostId: 'host', subject: 'bob', label: 'Bob', sessionLimit: 1, revoked: false }], reservations: [] } } });
+  close.push(() => broker.close());
+  const result = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/workspace-folders?providerId=codex'), { principalSubject: () => 'bob' });
+  expect(result?.status).toBe(403);
+  expect(await result!.json()).toMatchObject({ code: 'owner_required' });
+});

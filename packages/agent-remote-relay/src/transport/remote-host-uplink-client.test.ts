@@ -16,6 +16,7 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
   }));
   const connections: WebSocket[] = [], pings: Buffer[] = [], states: string[] = [], acknowledgements: string[] = [];
   let registrations = 0;
+  const responses: Array<{ requestId: string; status: number; body: string }> = [];
   server.on('connection', socket => {
     connections.push(socket);
     socket.on('message', data => {
@@ -25,6 +26,7 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
         socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat }));
       }
       if (message.type === 'heartbeat_ack') acknowledgements.push(message.nonce);
+      if (message.type === 'rpc_response') responses.push(message);
     });
     socket.on('ping', payload => { pings.push(Buffer.from(payload)); });
   });
@@ -38,7 +40,7 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
   });
   closeables.push(() => client.close());
   await client.ready;
-  return { client, connections, pings, states, acknowledgements, registrations: () => registrations };
+  return { client, connections, pings, states, acknowledgements, responses, registrations: () => registrations };
 }
 
 async function until(predicate: () => boolean): Promise<void> {
@@ -69,6 +71,22 @@ describe('Remote Host uplink heartbeat', () => {
     await until(() => b.acknowledgements.includes('reconnected'));
     expect(b.connections[0]!.readyState).toBe(3);
     expect(b.pings).toHaveLength(0);
+  });
+
+  it('keeps the uplink and heartbeat alive after workspace folder requests', async () => {
+    const b = await broker({ intervalMs: 2000, timeoutMs: 500 });
+    const socket = b.connections[0]!;
+    for (const [index, query] of ['', '?providerId=codex&path=%2FUsers%2Fworkspace', '?hidden=1&search=project&offset=100'].entries()) {
+      const requestId = `folders-${index}`;
+      socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId, method: 'GET', path: `/remote/workspace-folders${query}` }));
+      await until(() => b.responses.some(response => response.requestId === requestId));
+      expect(b.responses.find(response => response.requestId === requestId)).toMatchObject({ status: 404, body: '{}' });
+      socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat', nonce: requestId }));
+      await until(() => b.acknowledgements.includes(requestId));
+    }
+    expect(socket.readyState).toBe(1);
+    expect(b.registrations()).toBe(1);
+    expect(b.states).toEqual(['connecting', 'registered']);
   });
 
   it('does not postpone cloud silence detection for repeated registrations or business traffic', async () => {

@@ -586,3 +586,23 @@ it('delivers the owner stop operation over the real Host uplink transport', asyn
     expect(JSON.parse(result.body)).toEqual({ results: [{ agentId: 'agent', status: 'unsupported', message: 'The native session does not support cancellation.' }] });
   } finally { await host.close(); await broker.close(); }
 });
+
+it('routes workspace browsing over the uplink without disrupting heartbeats', async () => {
+  const { realpath } = await import('node:fs/promises');
+  const root = await realpath(process.cwd());
+  const broker = await uplinkBroker('host', true, { intervalMs: 1000, timeoutMs: 500 });
+  const runtime = createAgentHost({ registrations: [fixture('codex')], installationId: 'folders', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'key' },
+    executionPolicy: { defaultWorkspace: root, allowedWorkspaceRoots: [root], lockPermissions: true } });
+  try {
+    await runtime.ready;
+    const result = await broker.rpc('GET', '/remote/workspace-folders?providerId=codex');
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toMatchObject({ path: root, parentPath: null });
+    const forbidden = await broker.rpc('GET', '/remote/workspace-folders?providerId=codex&path=%2F');
+    expect(forbidden.status).toBe(403);
+    await expect.poll(() => broker.heartbeatAcknowledgements(), { timeout: 3000 }).toBeGreaterThan(0);
+    expect(broker.registrations()).toBe(1);
+    expect(runtime.state).toBe('registered');
+  } finally { await runtime.close(); await broker.close(); }
+});

@@ -169,11 +169,13 @@ describe('Remote Host broker', () => {
     await fetch(f.url + base + '/catalog?providerId=codex&limit=2');
     await fetch(f.url + base + '/workspaces?providerId=codex');
     await fetch(f.url + base + '/models?providerId=codex');
+    expect((await fetch(f.url + base + '/workspace-folders?providerId=codex&path=%2Ftmp%2Fproject')).status).toBe(200);
     const created = await (await f.post(base + '/create', { providerId: 'codex', requestId: 'create-one', cwd: '/tmp/project',
       workspaceId: 'project', model: 'gpt-6', reasoningEffort: 'high', planning: true })).json();
     expect(created).toEqual({ agentId: 'host-agent', nativeSessionId: 'native-created' });
     expect(calls.filter((call) => call.method === 'GET').map((call) => call.path)).toEqual([
       '/remote/catalog?providerId=codex&limit=2', '/remote/workspaces?providerId=codex', '/remote/models?providerId=codex',
+      '/remote/workspace-folders?providerId=codex&path=%2Ftmp%2Fproject',
     ]);
     expect(JSON.parse(calls.find((call) => call.path === '/remote/create').body)).toEqual({ providerId: 'codex', requestId: 'create-one',
       cwd: '/tmp/project', workspaceId: 'project', model: 'gpt-6', reasoningEffort: 'high', planning: true });

@@ -11,6 +11,7 @@ export interface SessionSummary {
 }
 export interface SessionCatalogPage { items: SessionSummary[]; hasMore: boolean; nextCursor?: string; revision: string }
 export interface SessionWorkspace { id: string; name: string; path: string }
+export interface WorkspaceFolderPage { path: string; parentPath: string | null; roots: string[]; folders: Array<{ name: string; path: string }>; nextOffset: number | null }
 export interface CreateSessionOptions { workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
 export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string; createdAt?: string }
 export class DirectoryError extends Error {
@@ -19,8 +20,9 @@ export class DirectoryError extends Error {
 export class SessionDirectoryClient {
   readonly cachedPages = new Map<string, SessionCatalogPage>();
   constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly hostId = 'local') {}
-  private async request<T>(path: string, body?: unknown): Promise<T> {
-    const response = await this.fetcher(new URL(`v1/remote/${this.hostId === 'local' ? '' : `hosts/${encodeURIComponent(this.hostId)}/`}${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), body === undefined ? undefined : {
+  private async request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    const response = await this.fetcher(new URL(`v1/remote/${this.hostId === 'local' ? '' : `hosts/${encodeURIComponent(this.hostId)}/`}${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), body === undefined ? { signal } : {
+      signal,
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await response.json();
@@ -34,6 +36,14 @@ export class SessionDirectoryClient {
   }
   revision(providerId: string): Promise<{ revision: string }> { return this.request(`catalog/revision?${new URLSearchParams({ providerId })}`); }
   workspaces(providerId: string): Promise<{ workspaces: SessionWorkspace[] }> { return this.request(`workspaces?${new URLSearchParams({ providerId })}`); }
+  folders(providerId: string, options: { path?: string; offset?: number; search?: string; hidden?: boolean } = {}, signal?: AbortSignal): Promise<WorkspaceFolderPage> {
+    const query = new URLSearchParams({ providerId });
+    if (options.path) query.set('path', options.path);
+    if (options.offset) query.set('offset', String(options.offset));
+    if (options.search) query.set('search', options.search);
+    if (options.hidden) query.set('hidden', '1');
+    return this.request(`workspace-folders?${query}`, undefined, signal);
+  }
   attach(providerId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('attach', { providerId, nativeSessionId }); }
   attachChild(providerId: string, parentNativeSessionId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('child/attach', { providerId, parentNativeSessionId, nativeSessionId }); }
   create(providerId: string, requestId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('create', { providerId, requestId, ...options }); }

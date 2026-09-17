@@ -62,6 +62,17 @@ describe('Agent Remote uplink codecs', () => {
       .toEqual({ status: 'ok', value: request });
   });
 
+  it('accepts workspace folder browsing only as a target-free read', () => {
+    const request = { uplinkVersion: 2, type: 'rpc_request', requestId: 'folders', method: 'GET',
+      path: '/remote/workspace-folders?providerId=codex&path=%2FUsers%2Fworkspace&hidden=1&offset=100' } as const;
+    expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(request))).toEqual({ status: 'ok', value: request });
+    expect(protocol.encodeRemoteHostUplinkMessage(request)).toEqual({ status: 'ok', json: JSON.stringify(request) });
+    for (const invalid of [
+      { ...request, method: 'POST', body: '{}' }, { ...request, body: '{}' },
+      { ...request, sessionId: 'session' }, { ...request, path: '/remote/workspace-folders/delete' },
+    ]) expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(invalid)).status).toBe('rejected');
+  });
+
   it('accepts exact catalog metadata only as a target-free read', () => {
     const request = {
       uplinkVersion: 2,

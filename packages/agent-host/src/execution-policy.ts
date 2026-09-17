@@ -29,7 +29,7 @@ export async function createHostExecutionPolicy(env: NodeJS.ProcessEnv): Promise
   return policy;
 }
 export class HostExecutionPolicyError extends Error {}
-async function allowedWorkspace(policy: HostExecutionPolicy, cwd: string | undefined): Promise<string> {
+export async function allowedWorkspace(policy: HostExecutionPolicy, cwd: string | undefined): Promise<string> {
   if (!cwd) throw new HostExecutionPolicyError('Native session workspace is unavailable under the local Host policy.');
   let canonical: string;
   try {

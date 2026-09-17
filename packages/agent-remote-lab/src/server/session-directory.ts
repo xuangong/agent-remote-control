@@ -1,3 +1,4 @@
+import { browseWorkspaceFolders, WorkspaceFolderError } from '@agent-remote-controller/agent-remote-controller';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@agent-remote-controller/dsh';
@@ -105,7 +106,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           return;
         }
         void handle(request, response, url).catch((error) => {
-          if (error instanceof DirectoryError || error instanceof RemoteHostCatalogError) send(response, error.status, { code: error.code, error: error.message });
+          if (error instanceof DirectoryError || error instanceof RemoteHostCatalogError || error instanceof WorkspaceFolderError) send(response, error.status, { code: error.code, error: error.message });
           else send(response, 503, { code: 'operation_failed', error: error instanceof Error ? error.message : 'Session operation failed.' });
         });
       });
@@ -122,6 +123,11 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
             return send(response, 200, await catalog.page({ ...(limit === null ? {} : { limit: Number(limit) }), ...(cursor === null ? {} : { cursor }) }));
           }
           if (url.pathname === '/v1/remote/catalog/revision') return send(response, 200, { revision: await catalog.revision() });
+          if (url.pathname === '/v1/remote/workspace-folders') {
+            const workspaces = await source.workspaces();
+            const first = Array.isArray(workspaces) ? workspaces[0] : undefined;
+            return send(response, 200, await browseWorkspaceFolders(url.searchParams, undefined, typeof first?.path === 'string' ? first.path : undefined));
+          }
           if (url.pathname === '/v1/remote/workspaces') return send(response, 200, { workspaces: await source.workspaces() });
           if (url.pathname === '/v1/remote/models') return send(response, 200, await source.models?.() ?? { models: [] });
         }

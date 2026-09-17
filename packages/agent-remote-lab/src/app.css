@@ -1050,3 +1050,32 @@ textarea {
 
 /* Dialogs and panels restore focus without turning pointer actions into keyboard highlights. */
 html[data-input-modality="pointer"] :focus { outline: none !important; }
+
+.lab-workspace-field { display: flex; gap: 6px; min-width: 0; }
+.lab-workspace-field select { flex: 1; min-width: 0; }
+.lab-workspace-field button { flex: none; }
+.lab-folder-dialog { box-sizing: border-box; width: min(640px, calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 32px)); padding: 20px; border: 1px solid var(--obs-border); border-radius: 14px; color: var(--obs-text); background: var(--obs-surface); box-shadow: 0 18px 60px oklch(20% 0.02 250 / 0.2); }
+.lab-folder-dialog[open] { display: flex; flex-direction: column; gap: 14px; }
+.lab-folder-dialog::backdrop { background: oklch(20% 0.02 250 / 0.35); }
+.lab-folder-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.lab-folder-dialog h2 { margin: 0 0 4px; font-size: 1.15rem; }
+.lab-folder-dialog p { margin: 0; color: var(--obs-text-secondary); }
+.lab-folder-location { display: flex; gap: 6px; }
+.lab-folder-location label, .lab-folder-filters > label:first-child { flex: 1; min-width: 0; }
+.lab-folder-location input, .lab-folder-filters input[type="search"] { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); color: var(--obs-text); background: var(--obs-surface); font: inherit; }
+.lab-folder-shortcuts { display: flex; gap: 6px; overflow-x: auto; flex-shrink: 0; padding-bottom: 2px; }
+.lab-folder-shortcuts button { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; flex: none; font-size: 12px; }
+.lab-folder-filters { display: flex; gap: 12px; align-items: center; }
+.lab-folder-filters > label:last-child { display: flex; gap: 6px; align-items: center; white-space: nowrap; font-size: 12px; }
+.lab-folder-list { min-height: 160px; height: 320px; overflow: auto; overscroll-behavior: contain; border-block: 1px solid var(--obs-border); padding: 6px 0; }
+.lab-folder-list > p { padding: 14px 8px; }
+.lab-folder-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 8px; }
+.lab-folder-row > span:first-of-type { flex: 1; overflow-wrap: anywhere; min-width: 0; }
+.lab-folder-row svg { flex: none; color: var(--obs-text-secondary); }
+.lab-folder-dialog footer { display: flex; flex-direction: column; gap: 12px; }
+.lab-folder-dialog footer > span { overflow-wrap: anywhere; font-size: 12px; color: var(--obs-text-secondary); }
+.lab-folder-dialog footer > div { display: flex; justify-content: flex-end; gap: 8px; }
+.lab-folder-confirm { color: var(--obs-action); border-color: var(--obs-action); }
+@media (max-width: 600px) { .lab-folder-dialog { padding: 14px; gap: 10px; } .lab-folder-filters { flex-wrap: wrap; } .lab-folder-filters > label:first-child { flex-basis: 100%; } }
+
+@media (max-width: 600px) { .lab-folder-dialog input:not([type="checkbox"]) { font-size: 16px; } .lab-folder-dialog button { min-height: 40px; } }

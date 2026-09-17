@@ -9,7 +9,7 @@ or process takeover.
 ## Setup
 
 Use a Codex installation with native local app-server support. This integration
-was tested with Codex 0.153.4 on macOS. Keep the complete native installation,
+was tested with Codex 0.154.0 on macOS. Keep the complete native installation,
 including `codex-code-mode-host`, instead of copying only the main executable.
 
 Start the native daemon and connect the desktop terminal to it:
@@ -57,10 +57,9 @@ binding as before.
   shared thread. The existing Host workspace/grant checks remain in effect.
 - Closing a Remote session closes its connection, not the daemon or another
   subscriber. Native daemon lifetime and idle thread unloading remain native
-  policies. A broken native socket is surfaced as a failed session. Restore the
-  native daemon and restart the Host to discard failed cached bindings; automatic
-  native reconnection is not implemented. Ordinary browser reconnects continue
-  using the existing healthy Host connection.
+  policies. The Provider reconnects automatically after a socket failure while
+  keeping the existing Remote session and observer alive. Disposing the Remote
+  session cancels recovery without stopping the external daemon.
 - Both clients may submit input. Native turn ordering and steering apply; this
   is not collaborative editing of an unsent draft. Pending interactions are
   replayed to a joining client. Once answered, native resolution dismisses the
@@ -75,14 +74,52 @@ binding as before.
   capability for terminating arbitrary processes. Windows socket transport has
   not been validated.
 
+## Recovery behavior
+
+One recovery loop owns each loaded native root and all of its child sessions.
+Transient failures retry indefinitely with jittered exponential backoff from
+500 milliseconds to 30 seconds. Each connection attempt has a 10-second
+deadline, each restoration has a 30-second deadline, and at most four roots
+restore concurrently. An explicit test or embedding configuration may set a
+finite attempt limit. Permission rejection, incompatible native protocol, and a
+missing native thread stop retries and expose the runtime as unavailable.
+
+Recovery initializes the replacement transport, attaches the existing root with
+`thread/resume`, and reads authoritative root and child snapshots with
+`thread/read`. It does not issue `thread/start`, replay messages, start a turn,
+or resend cached setting updates. A thread with no persisted native rollout is
+unavailable after a daemon restart and is not recreated under a new identity.
+
+While reconnecting or restoring, all Provider mutations reject immediately.
+Notifications, native requests, snapshot results, and child discovery are fenced
+by transport generation so an old connection cannot change restored state. Any
+pending native interaction is published as `interaction_invalidated`; recovery
+does not fabricate an answer, rejection, or cancellation. Repeated native
+request IDs receive fresh public identities after recovery and after a Host
+restart.
+
+Once restoration completes, each observed session publishes one
+`timeline_replacement` containing the authoritative history and notifications
+buffered across the snapshot handoff. The original observer remains open and no
+second `history_boundary` is emitted. Loaded child session objects retain their
+identity and native direct-input eligibility.
+
 ## Verification
 
-`shared-runtime.local.test.ts` runs two independent provider clients against one
-real native Codex app-server and a local deterministic Responses fixture. No
-cloud model request or real user session is used. It covers simultaneous attach,
+`shared-runtime.local.test.ts` runs independent provider clients against one real
+native Codex app-server and a local deterministic Responses fixture. No cloud
+model request or real user session is used. It covers simultaneous attach,
 history, live messages from either client, continued use after one client closes,
-late-join question replay, duplicate-answer rejection, and disconnection while
-the other client still has a pending question, and explicit failure after daemon loss.
+late-join question replay, duplicate-answer rejection, disconnection while the
+other client still has a pending question, and stable recovery after the daemon
+disappears and returns at the same socket. The restart case persists a native
+turn before stopping the daemon so it verifies recovery of a real saved rollout.
+
+`shared-recovery.test.ts` uses a real Unix WebSocket transport with a deterministic
+app-server fixture. It covers authoritative replacement, unbounded default retry,
+explicit bounded retry, permanent missing-thread classification, interaction
+invalidation, generation-safe identities, repeated loss, child stability, and
+disposal cancellation.
 
 ```sh
 AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE=/path/to/codex \

@@ -15,6 +15,7 @@ import { spawnCodexAppServer } from './native.js';
 import { CodexAppServerSession } from './session.js';
 import { initializeCodexTransport } from './initialize.js';
 import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
+import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
 
 export interface CodexAppServerProviderOptions {
   executable?: string;
@@ -26,6 +27,7 @@ export interface CodexAppServerProviderOptions {
   requestTimeoutMs?: number;
   collaborationMode?: 'plan';
   onDiagnostic?: (line: string) => void;
+  sharedRecovery?: CodexSharedRecoverySettings;
   spawn?: (context: { cwd?: string }) => ChildProcessWithoutNullStreams | Promise<ChildProcessWithoutNullStreams>;
 }
 
@@ -64,7 +66,8 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
     const transport = await this.createTransport(config.cwd);
     try {
-      const session = await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative);
+      const session = await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative,
+        this.sharedRecoveryPlan(config.cwd));
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
@@ -78,7 +81,8 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const cwd = readPersistenceCwd(handle.opaque);
     const transport = await this.createTransport(cwd);
     try {
-      const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative);
+      const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative,
+        this.sharedRecoveryPlan(cwd));
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
@@ -114,6 +118,11 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       requestTimeoutMs: this.options.requestTimeoutMs,
       onDiagnostic: this.options.onDiagnostic,
     });
+  }
+
+  private sharedRecoveryPlan(cwd?: string): CodexSharedRecoveryPlan | undefined {
+    if (this.options.connectionMode !== 'shared') return undefined;
+    return { connect: () => this.createTransport(cwd), settings: this.options.sharedRecovery };
   }
 }
 

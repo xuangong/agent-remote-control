@@ -65,11 +65,28 @@ request_max_retries = 0
 stream_max_retries = 0
 `);
   const env = { ...process.env, CODEX_HOME: home, OPENAI_API_KEY: 'local-fixture' };
-  const daemon = spawn(executable!, ['app-server', '--listen', `unix://${socketPath}`], { env, stdio: 'pipe' });
   let stderr = '';
-  daemon.stderr.on('data', chunk => { stderr += String(chunk); });
-  daemon.stdout.resume();
+  let daemon = launchDaemon();
   const sessions: AgentSession[] = [];
+  function launchDaemon(): ChildProcessWithoutNullStreams {
+    const child = spawn(executable!, ['app-server', '--listen', `unix://${socketPath}`], { env, stdio: 'pipe' });
+    child.stderr.on('data', chunk => { stderr += String(chunk); });
+    child.stdout.resume();
+    return child;
+  }
+  async function waitForDaemon(): Promise<void> {
+    const deadline = Date.now() + 8000;
+    while (!await stat(socketPath).then(info => info.isSocket(), () => false)) {
+      if (daemon.exitCode !== null || Date.now() > deadline) throw new Error(`Shared daemon unavailable: ${stderr}`);
+      await delay(20);
+    }
+  }
+  const restartDaemon = async () => {
+    await rm(socketPath, { force: true });
+    stderr = '';
+    daemon = launchDaemon();
+    await waitForDaemon();
+  };
   const close = async () => {
     await Promise.allSettled(sessions.map(session => session.dispose()));
     await stop(daemon);
@@ -78,13 +95,9 @@ stream_max_retries = 0
     await rm(home, { recursive: true, force: true });
   };
   try {
-    const deadline = Date.now() + 8000;
-    while (!await stat(socketPath).then(info => info.isSocket(), () => false)) {
-      if (daemon.exitCode !== null || Date.now() > deadline) throw new Error(`Shared daemon unavailable: ${stderr}`);
-      await delay(20);
-    }
+    await waitForDaemon();
     const provider = () => new CodexAppServerProvider({ executable, env, connectionMode: 'shared', socketPath, requestTimeoutMs: 5000 });
-    return { home, daemon, sessions, provider, close };
+    return { home, get daemon() { return daemon; }, sessions, provider, restartDaemon, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -152,17 +165,24 @@ it.runIf(executable)('disconnects one question subscriber without interrupting t
   } finally { await f.close(); }
 }, 30000);
 
-it.runIf(executable)('surfaces native daemon loss instead of accepting messages into a stale connection', async () => {
+it.runIf(executable)('recovers the stable session after an isolated native daemon restart without accepting disconnected mutations', async () => {
   const f = await fixture();
   try {
     const session = await f.provider().createSession({ sessionId: 'desktop', cwd: f.home }); f.sessions.push(session);
     const stream = session.observe()[Symbol.asyncIterator]();
     while ((await stream.next()).value?.type !== 'history_boundary') { /* Drain bootstrap. */ }
-    const disconnected = until(stream, () => false).catch(error => error as Error);
+    await session.sendMessage('Persist before restart');
+    await until(stream, event => event.type === 'turn_completed');
     await stop(f.daemon);
-    expect(await disconnected).toMatchObject({ message: expect.stringContaining('shared app-server connection closed') });
-    await expect(session.sendMessage('Must not send')).rejects.toThrow('shared app-server connection closed');
-    expect((await session.runtimeInfo()).status).toBe('failed');
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('reconnecting');
+    await expect(session.sendMessage('Must not send')).rejects.toThrow(/reconnecting|restoring/i);
+    await f.restartDaemon();
+    while ((await stream.next()).value?.type !== 'timeline_replacement') { /* Drain recovery state. */ }
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+    await session.sendMessage('Continue after recovery');
+    await expect(until(stream, event => event.type === 'turn_completed')).resolves.toContainEqual(
+      expect.objectContaining({ type: 'timeline', item: expect.objectContaining({ type: 'assistant_message', text: 'SHARED_OK' }) }),
+    );
   } finally { await f.close(); }
 }, 30000);
 

@@ -30,6 +30,7 @@ export type RemoteSessionStatus = 'idle' | 'connecting' | 'catching_up' | 'ready
 
 export interface RemoteSessionClientOptions {
   readonly historyPageSize?: number;
+  readonly connectionTimeoutMs?: number;
   readonly operationTimeoutMs?: number;
   readonly reconnectInitialDelayMs?: number;
   readonly reconnectMaxDelayMs?: number;
@@ -49,6 +50,9 @@ interface PendingOperation {
 
 export class RemoteSessionClient {
   private readonly historyPageSize: number;
+  private readonly connectionTimeoutMs: number;
+  private connectionDeadline?: ReturnType<typeof setTimeout>;
+  private connectionOpen = false;
   private readonly operationTimeoutMs: number;
   private readonly reconnectInitialDelayMs: number;
   private readonly reconnectMaxDelayMs: number;
@@ -74,6 +78,7 @@ export class RemoteSessionClient {
     private readonly replica: AgentReplica,
     options: RemoteSessionClientOptions = {},
   ) {
+    this.connectionTimeoutMs = options.connectionTimeoutMs ?? 20_000;
     this.historyPageSize = options.historyPageSize ?? 100;
     this.operationTimeoutMs = options.operationTimeoutMs ?? 10_000;
     this.reconnectInitialDelayMs = options.reconnectInitialDelayMs ?? 250;
@@ -99,6 +104,7 @@ export class RemoteSessionClient {
     }
     this.stopConnection();
     this.setStatus('connecting');
+    this.armConnectionDeadline(generation);
     this.unsubscribeDiagnostic = this.transport.onDiagnostic((diagnostic) => {
       if (generation !== this.generation) return;
       this.replica.reportDiagnostic(diagnostic.code, diagnostic.message, diagnostic.recoverable);
@@ -106,14 +112,13 @@ export class RemoteSessionClient {
     this.connection = this.transport.connect(this.agentId, {
       onOpen: () => {
         if (generation !== this.generation) return;
+        this.connectionOpen = true;
         this.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' });
       },
       onMessage: (message) => this.receive(generation, message),
       onDisconnect: () => {
         if (generation !== this.generation) return;
-        this.rejectPendingOperations('connection_disconnected', 'Remote session connection disconnected.', true);
-        this.setStatus('disconnected');
-        this.scheduleRestart(generation);
+        this.restartDisconnected(generation);
       },
     });
   }
@@ -154,11 +159,32 @@ export class RemoteSessionClient {
   }
 
   sendMessage(text: string, options?: AgentMessageOptions & { operationId?: string }): Promise<CommandAcknowledgementMessage> {
-    const outgoingId = this.replica.beginMessage(this.agentId, text, options?.delivery);
+    const operationId = options?.operationId ?? this.createOperationId();
+    const outgoingId = this.replica.beginMessage(this.agentId, text, options?.delivery, operationId);
+    return this.sendOutgoingMessage(outgoingId, operationId, text, options);
+  }
+
+  retryMessage(id: string): Promise<CommandAcknowledgementMessage> {
+    const state = this.replica.getState();
+    const message = state.outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
+    if (!message || !['failed', 'unconfirmed'].includes(message.status)) return Promise.reject(new Error('This message is not available to retry.'));
+    if (!this.connectionOpen) return Promise.reject(new RemoteOperationError('connection_not_ready', 'Wait for the session to reconnect, then retry.', true));
+    const operationId = message.status === 'unconfirmed' && !message.retryRequiresNewOperation && message.epoch === state.timeline.epoch && message.operationId
+      ? message.operationId : this.createOperationId();
+    this.replica.retryMessage(id, operationId);
+    return this.sendOutgoingMessage(id, operationId, message.text, { delivery: message.delivery });
+  }
+
+  deleteMessage(id: string): void {
+    const message = this.replica.getState().outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
+    if (message && ['failed', 'unconfirmed'].includes(message.status)) this.replica.deleteMessage(id);
+  }
+
+  private sendOutgoingMessage(outgoingId: string, operationId: string, text: string, options?: AgentMessageOptions): Promise<CommandAcknowledgementMessage> {
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'send_message',
-      payload: { requestId: this.createRequestId(), operationId: options?.operationId ?? this.createOperationId(), agentId: this.agentId, text,
+      payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, text,
         ...(options?.delivery === undefined ? {} : { delivery: options.delivery }) },
     } as const;
     const operation = this.sendOperation(message, 'command_acknowledged:send_message', (response): response is CommandAcknowledgementMessage => (
@@ -166,11 +192,13 @@ export class RemoteSessionClient {
     ));
     void operation.then(() => this.replica.updateMessage(outgoingId, 'awaiting_echo'), error => {
       const uncertain = error instanceof RemoteOperationError && [
-        'operation_timeout', 'connection_disconnected', 'operation_stopped', 'operation_send_failed', 'command_failed', 'operation_outcome_unknown',
+        'operation_timeout', 'connection_disconnected', 'operation_stopped', 'command_failed', 'operation_outcome_unknown',
       ].includes(error.code);
+      const retryRequiresNewOperation = error instanceof RemoteOperationError && ['command_failed', 'operation_outcome_unknown'].includes(error.code);
       this.replica.updateMessage(outgoingId, uncertain ? 'unconfirmed' : 'failed',
-        uncertain ? 'Delivery is not confirmed. Check the conversation before sending again.'
-          : error instanceof Error ? error.message : 'The message could not be sent.');
+        retryRequiresNewOperation ? 'The previous result cannot be recovered. Check the conversation before retrying; Retry starts a new attempt.'
+          : uncertain ? 'Delivery is not confirmed. Check the conversation before sending again.'
+          : error instanceof Error ? error.message : 'The message could not be sent.', retryRequiresNewOperation);
     });
     return operation;
   }
@@ -377,6 +405,7 @@ export class RemoteSessionClient {
     const controller = new AbortController();
     this.recovery = controller;
     this.setStatus('catching_up');
+    this.armConnectionDeadline(generation);
     let nextCursor = cursor;
     try {
       while (true) {
@@ -401,17 +430,19 @@ export class RemoteSessionClient {
         if (!continuation) {
           this.recovery = undefined;
           this.reconnectAttempt = 0;
+          clearTimeout(this.connectionDeadline);
+          this.connectionDeadline = undefined;
           this.setStatus('ready');
           return;
         }
         nextCursor = continuation;
+        this.armConnectionDeadline(generation);
       }
     } catch {
       if (generation !== this.generation || this.recovery !== controller) return;
       this.recovery = undefined;
       this.replica.reportDiagnostic('timeline_recovery_failed', 'Timeline recovery failed.', true);
-      this.setStatus('disconnected');
-      this.scheduleRestart(generation);
+      this.restartDisconnected(generation);
     }
   }
 
@@ -423,6 +454,26 @@ export class RemoteSessionClient {
       || continuation.seq <= cursor.seq
     ) throw new Error('Timeline recovery did not advance.');
     return continuation;
+  }
+
+  private armConnectionDeadline(generation: number): void {
+    clearTimeout(this.connectionDeadline);
+    this.connectionDeadline = setTimeout(() => {
+      if (generation !== this.generation) return;
+      this.replica.reportDiagnostic('connection_timeout', 'Session synchronization timed out. Reconnecting.', true);
+      this.restartDisconnected(generation);
+    }, this.connectionTimeoutMs);
+    if (typeof this.connectionDeadline === 'object') this.connectionDeadline.unref?.();
+  }
+
+  private restartDisconnected(generation: number): void {
+    if (generation !== this.generation) return;
+    this.generation += 1;
+    this.rejectPendingOperations('connection_disconnected', 'Remote session connection disconnected.', true);
+    this.stopConnection();
+    const nextGeneration = this.generation;
+    this.setStatus('disconnected');
+    this.scheduleRestart(nextGeneration);
   }
 
   private scheduleRestart(generation: number): void {
@@ -449,6 +500,9 @@ export class RemoteSessionClient {
     correlationId = message.payload.requestId,
   ): Promise<T> {
     const requestId = correlationId;
+    if (!this.connectionOpen) return this.observeRejection(Promise.reject(new RemoteOperationError(
+      'connection_not_ready', 'Not sent. Wait for the session to reconnect, then retry.', true, requestId,
+    )));
     const operations = this.pendingOperations.get(requestId) ?? new Map<string, PendingOperation>();
     if (operations.has(operationType)) {
       return this.observeRejection(Promise.reject(new RemoteOperationError(
@@ -460,6 +514,7 @@ export class RemoteSessionClient {
     }
     this.pendingOperations.set(requestId, operations);
     const operation = new Promise<T>((resolve, reject) => {
+      const generation = this.generation;
       const timeout = timeoutMs === null ? undefined : setTimeout(() => {
         this.rejectPendingOperation(requestId, operationType, new RemoteOperationError(
           'operation_timeout',
@@ -467,6 +522,7 @@ export class RemoteSessionClient {
           true,
           requestId,
         ));
+        this.restartDisconnected(generation);
       }, timeoutMs);
       operations.set(operationType, {
         matches: matches as PendingOperation['matches'],
@@ -483,6 +539,7 @@ export class RemoteSessionClient {
           true,
           requestId,
         ));
+        this.restartDisconnected(generation);
       }
     });
     return this.observeRejection(operation);
@@ -535,6 +592,9 @@ export class RemoteSessionClient {
   }
 
   private stopConnection(): void {
+    this.connectionOpen = false;
+    clearTimeout(this.connectionDeadline);
+    this.connectionDeadline = undefined;
     this.olderHistory?.controller.abort();
     this.olderHistory = undefined;
     this.cancelReconnect?.();

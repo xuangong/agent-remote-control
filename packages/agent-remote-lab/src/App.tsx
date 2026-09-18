@@ -30,7 +30,9 @@ import {
   type RemoteAgentTransport,
   type RemoteSessionStatus,
 } from '@agent-remote-controller/agent-remote-web';
-import { ReadingPositions, RecoveryScope, readDrafts, saveDrafts } from './conversation-recovery.js';
+import { ReadingPositions, RecoveryScope, readDrafts, saveDrafts, readLastSession, saveLastSession } from './conversation-recovery.js';
+import { recoverMessages } from './message-recovery.js';
+import { restoreSession } from './session-restoration.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
@@ -70,6 +72,8 @@ export interface LabTransport extends RemoteAgentTransport {
 
 export interface AppActions {
   loadOlder?(): void | Promise<void>;
+  retryMessage?(id: string): Promise<void>;
+  deleteMessage?(id: string): void;
   sendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
@@ -115,7 +119,10 @@ export function App({
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
   const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
-    try { return { target: readControllerLocation(new URLSearchParams(window.location.search)) }; }
+    try {
+      const target = readControllerLocation(new URLSearchParams(window.location.search));
+      return { target: Object.keys(target).length ? target : readLastSession(baseUrl) };
+    }
     catch { return { error: 'Invalid session link.' }; }
   });
   const requestedHostId = requested.target?.hostId;
@@ -305,6 +312,7 @@ export function App({
 
   const attach = useCallback((agentId: string): void => {
     navigationGeneration.current += 1;
+    setUncertainMutation(false);
     unsubscribeReplicaRef.current?.();
     unsubscribeReplicaRef.current = undefined;
     clientRef.current?.stop();
@@ -319,14 +327,17 @@ export function App({
     setAttachingAgentId(agentId);
     const replica = replicas.current.get(agentId) ?? new AgentReplica();
     replicas.current.set(agentId, replica);
+    const saved = openedSessionsRef.current.find(item => item.agentId === agentId);
+    const stopMessageRecovery = recoverMessages(replica, baseUrl, saved ? sessionKey(saved) : agentId, agentId);
     const client = new RemoteSessionClient(agentId, transport, replica, { historyPageSize: 100 });
     replicaRef.current = replica;
     clientRef.current = client;
-    unsubscribeReplicaRef.current = replica.subscribe(() => { if (replicaRef.current === replica) setState(replica.getState()); });
+    const unsubscribe = replica.subscribe(() => { if (replicaRef.current === replica) setState(replica.getState()); });
+    unsubscribeReplicaRef.current = () => { unsubscribe(); stopMessageRecovery(); };
     client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
     client.start();
     rememberAgent(agentId);
-  }, [transport]);
+  }, [baseUrl, transport]);
 
   useEffect(() => {
     if (initialState) return;
@@ -344,44 +355,39 @@ export function App({
   useEffect(() => {
     if (initialState) return;
     if (requested.error) return;
-    const location = requested.target;
-    if (location?.hostId && location.providerId && location.nativeSessionId) {
-      let retired = false;
-      const generation = navigationGeneration.current;
-      const target = new SessionDirectoryClient(baseUrl, undefined, location.hostId);
-      setAttachingAgentId(location.agentId ?? location.nativeSessionId);
-      setStatus('connecting');
-      const request = location.parentNativeSessionId
-        ? target.attachChild(location.providerId, location.parentNativeSessionId, location.nativeSessionId)
-        : target.attach(location.providerId, location.nativeSessionId);
-      void request.then((result) => {
-        if (retired || navigationGeneration.current !== generation) return;
-        rememberSession({ hostId: location.hostId, providerId: location.providerId!, nativeSessionId: location.nativeSessionId!,
-          agentId: result.agentId, parentNativeSessionId: location.parentNativeSessionId,
-          title: openedSessionsRef.current.find((session) => session.hostId === location.hostId && session.providerId === location.providerId && session.nativeSessionId === location.nativeSessionId)?.title ?? 'Session' });
-        if (location.hostId === 'local') setLocalProviderId(location.providerId!);
-        setProviderName(providerConnectionName(location.hostId!, location.providerId!));
-        attach(result.agentId);
-      }).catch((error) => {
-        if (retired || navigationGeneration.current !== generation) return;
-        setAttachingAgentId(undefined); setStatus('idle');
-        setFailure(message(error, 'This session is unavailable or your account does not have access.'));
-        if (compactLayoutRef.current) setContextOpen(true);
-      });
-      return () => { retired = true; clientRef.current?.stop(); };
-    }
-    if (requestedHostId) return () => clientRef.current?.stop();
     const remembered = rememberedAgent();
-    if (remembered) {
-      const saved = openedSessionsRef.current.find((item) => item.agentId === remembered);
-      if (directory && saved) {
-        setProviderName(providerConnectionName(saved.hostId ?? 'local', saved.providerId));
-        const target = new SessionDirectoryClient(baseUrl, undefined, saved.hostId ?? 'local');
-        const request = saved.parentNativeSessionId ? target.attachChild(saved.providerId, saved.parentNativeSessionId, saved.nativeSessionId) : target.attach(saved.providerId, saved.nativeSessionId);
-        void request.then((result) => { rememberSession({ ...saved, agentId: result.agentId }); attach(result.agentId); }).catch((error) => setFailure(message(error, 'Session could not be reconnected.')));
-      } else attach(remembered);
+    const saved = openedSessionsRef.current.find(item => item.agentId === remembered);
+    const location = requested.target?.hostId ? requested.target
+      : directory && saved ? { ...saved, hostId: saved.hostId ?? 'local' } : undefined;
+    if (!location?.hostId || !location.providerId || !location.nativeSessionId) {
+      if (!requestedHostId && remembered) attach(remembered);
+      return () => clientRef.current?.stop();
     }
-    return () => clientRef.current?.stop();
+    const { hostId, providerId: restoredProvider, nativeSessionId, parentNativeSessionId } = location;
+    const generation = navigationGeneration.current;
+    const target = new SessionDirectoryClient(baseUrl, undefined, hostId);
+    setAttachingAgentId(location.agentId ?? nativeSessionId);
+    setStatus('connecting');
+    const cancel = restoreSession({
+      active: () => navigationGeneration.current === generation,
+      open: signal => parentNativeSessionId
+        ? target.attachChild(restoredProvider, parentNativeSessionId, nativeSessionId, signal)
+        : target.attach(restoredProvider, nativeSessionId, signal),
+      restored: result => {
+        rememberSession({ hostId, providerId: restoredProvider, nativeSessionId,
+          agentId: result.agentId, parentNativeSessionId,
+          title: openedSessionsRef.current.find(session => session.hostId === hostId && session.providerId === restoredProvider && session.nativeSessionId === nativeSessionId)?.title ?? 'Session' });
+        if (hostId === 'local') setLocalProviderId(restoredProvider);
+        setProviderName(providerConnectionName(hostId, restoredProvider));
+        setFailure(undefined);
+        attach(result.agentId);
+      },
+      failed: (error, retrying) => {
+        setFailure(message(error, 'Session could not be reconnected.') + (retrying ? ' Reconnecting automatically…' : ''));
+        if (!retrying) { setAttachingAgentId(undefined); setStatus('idle'); if (compactLayoutRef.current) setContextOpen(true); }
+      },
+    });
+    return () => { cancel(); clientRef.current?.stop(); };
   }, [attach, baseUrl, initialState, requestedHostId]);
 
   useEffect(() => {
@@ -424,7 +430,9 @@ export function App({
 
   function rememberSession(value: OpenedSession): void {
     const item = openedSessionMetadata(value);
-    setOpenedSessions((current) => [item, ...current.filter((entry) => !((entry.hostId ?? 'local') === (item.hostId ?? 'local') && entry.providerId === item.providerId && entry.nativeSessionId === item.nativeSessionId) && entry.agentId !== item.agentId)]);
+    const next = [item, ...openedSessionsRef.current.filter((entry) => !((entry.hostId ?? 'local') === (item.hostId ?? 'local') && entry.providerId === item.providerId && entry.nativeSessionId === item.nativeSessionId) && entry.agentId !== item.agentId)];
+    openedSessionsRef.current = next;
+    setOpenedSessions(next);
   }
 
   async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }): Promise<boolean> {
@@ -651,7 +659,7 @@ export function App({
   async function runMutation<T>(operation: () => Promise<T>): Promise<T> {
     setUncertainMutation(false);
     try { return await operation(); } catch (error) {
-      if (error instanceof RemoteOperationError && ['connection_disconnected', 'operation_timeout', 'operation_send_failed'].includes(error.code)) setUncertainMutation(true);
+      if (error instanceof RemoteOperationError && ['connection_disconnected', 'operation_timeout'].includes(error.code)) setUncertainMutation(true);
       throw error;
     }
   }
@@ -674,6 +682,9 @@ export function App({
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
   const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
+  useEffect(() => {
+    if (addressSession && state?.agent && !initialState) saveLastSession(baseUrl, { ...addressSession, hostId: addressSession.hostId ?? 'local' });
+  }, [baseUrl, addressSession?.agentId, addressSession?.hostId, addressSession?.providerId, addressSession?.nativeSessionId, addressSession?.parentNativeSessionId, state?.agent?.id, initialState]);
 
   const traceScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
   const traceRequest = traceNavigation?.scope === traceScope ? traceNavigation : undefined;
@@ -807,7 +818,9 @@ export function App({
 
   const clientActions: AppActions = actions ?? {
     loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
-    sendMessage: async (text, options) => { await runMutation(() => commandClient().sendMessage(text, options)); },
+    sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
+    retryMessage: async (id) => { await commandClient().retryMessage(id); },
+    deleteMessage: (id) => commandClient().deleteMessage(id),
     steer: async (text) => { await runMutation(() => commandClient().steer(text)); },
     cancel: async () => { await runMutation(() => commandClient().cancel()); },
     listCommands: () => commandClient().listCommands(),
@@ -973,7 +986,7 @@ export function App({
         <LabWorkbench
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
           revealEntry={traceRequest?.view === 'workbench' ? traceRequest : undefined}
-          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : {}} visible={activeView === 'workbench' && primaryExpanded}
+          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : { deleteMessage: conversationActions.deleteMessage }} visible={activeView === 'workbench' && primaryExpanded}
           consoleCommands={directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
           onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}

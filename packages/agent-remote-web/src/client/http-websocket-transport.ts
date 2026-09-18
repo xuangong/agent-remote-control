@@ -17,6 +17,7 @@ import {
   type TimelineDirection,
 } from '@agent-remote-controller/agent-remote-protocol';
 
+import { watchPageResume } from './page-resume.js';
 import { RemoteOperationError } from './transport.js';
 import type {
   RemoteAgentTransport,
@@ -33,6 +34,7 @@ type WebSocketEventHandler<TEvent> = {
 }['bivarianceHack'];
 
 export interface WebSocketLike {
+  readonly readyState?: number;
   onopen: WebSocketEventHandler<unknown> | null;
   onmessage: WebSocketEventHandler<{ data: unknown }> | null;
   onclose: WebSocketEventHandler<unknown> | null;
@@ -158,6 +160,18 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
       `v1/sessions/${encodeURIComponent(agentId)}/events`,
     ));
     let active = true;
+    const retire = () => {
+      if (!active) return;
+      active = false;
+      unwatch();
+      socket.close();
+    };
+    const disconnect = () => {
+      if (!active) return;
+      retire();
+      listener.onDisconnect();
+    };
+    const unwatch = watchPageResume(disconnect);
     socket.onopen = () => {
       if (active) listener.onOpen();
     };
@@ -176,7 +190,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
       listener.onMessage(decoded.value);
     };
     socket.onclose = () => {
-      if (active) listener.onDisconnect();
+      disconnect();
     };
     socket.onerror = () => {
       if (!active) return;
@@ -184,20 +198,17 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
         source: 'websocket', code: 'connection_failed',
         message: 'Relay WebSocket connection failed.', recoverable: true,
       });
+      disconnect();
     };
     return {
       send: (message) => {
-        if (!active) throw new Error('Remote WebSocket connection is closed.');
+        if (!active || (socket.readyState !== undefined && socket.readyState !== 1)) throw new Error('Remote WebSocket connection is closed.');
         const encoded = encodeClientMessage(message);
         if (encoded.status === 'rejected') throw new Error('Client message was rejected by the public protocol.');
         socket.send(encoded.json);
         this.observe({ direction: 'outbound', channel: 'websocket', message });
       },
-      close: () => {
-        if (!active) return;
-        active = false;
-        socket.close();
-      },
+      close: retire,
     };
   }
 

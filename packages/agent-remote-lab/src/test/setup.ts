@@ -17,7 +17,10 @@ afterEach(async () => {
     await act(async () => entry.root.unmount());
     entry.container.remove();
   }
-  if (typeof window !== 'undefined') window.history.replaceState(null, '', '/');
+  if (typeof window !== 'undefined') {
+    window.history.replaceState(null, '', '/');
+    for (const key of Object.keys(localStorage)) if (key.startsWith('agent-remote:recovery:')) localStorage.removeItem(key);
+  }
 });
 
 export async function render(node: ReactNode): Promise<HTMLDivElement> {

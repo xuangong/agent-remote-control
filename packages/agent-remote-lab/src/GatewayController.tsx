@@ -1,3 +1,4 @@
+import { watchPageResume } from '@agent-remote-controller/agent-remote-web';
 import { controllerPath, readControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
@@ -82,9 +83,15 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
         } else { setFailed(true); retire(); }
       } finally { inFlight = false; }
     }
+    const unwatch = watchPageResume(() => {
+      if (abort.signal.aborted || !current || current.refreshAfterMs === undefined) return;
+      clearTimeout(refresh);
+      if (current.expiresAt <= Date.now()) suspend();
+      void request(true);
+    });
     const deadline = setTimeout(() => { setFailed(true); retire(); }, 12_000);
     void request(false).finally(() => clearTimeout(deadline));
-    return () => { abort.abort(); clearTimeout(deadline); clearTimeout(expiry); clearTimeout(refresh); clearTimeout(recovery); };
+    return () => { unwatch(); abort.abort(); clearTimeout(deadline); clearTimeout(expiry); clearTimeout(refresh); clearTimeout(recovery); };
   }, [attempt]);
   function signedOut(): void {
     stop.current(); setSecurityOpen(false);

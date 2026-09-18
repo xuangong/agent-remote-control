@@ -24,6 +24,8 @@ export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
   readonly state: AgentReplicaState;
+  readonly onRetryMessage?: (id: string) => Promise<void>;
+  readonly onDeleteMessage?: (id: string) => void;
   readonly onInspectEntry?: (entryKey: string) => void;
   readonly inspectedEntryKey?: string;
   readonly childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[];
@@ -45,6 +47,8 @@ export interface AgentTimelineProps {
 
 export function AgentTimeline({
   state,
+  onRetryMessage,
+  onDeleteMessage,
   registry,
   resolveSessionLink,
   childrenFor,
@@ -130,7 +134,7 @@ export function AgentTimeline({
               <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
             </> : null}
           </TimelineEntry>)}
-      {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} />)}
+      {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
     </div>
 
     {!contentOnly ? <AgentChildSessionList childrenFor={childrenFor} key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} /> : null}

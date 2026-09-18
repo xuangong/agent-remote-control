@@ -15,7 +15,7 @@ export interface WorkspaceFolderPage { path: string; parentPath: string | null; 
 export interface CreateSessionOptions { workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
 export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string; createdAt?: string }
 export class DirectoryError extends Error {
-  constructor(message: string, readonly code?: string) { super(message); }
+  constructor(message: string, readonly code?: string, readonly status?: number) { super(message); }
 }
 export class SessionDirectoryClient {
   readonly cachedPages = new Map<string, SessionCatalogPage>();
@@ -26,7 +26,7 @@ export class SessionDirectoryClient {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code);
+    if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status);
     return data as T;
   }
   list(providerId: string, cursor?: string): Promise<SessionCatalogPage> {
@@ -44,11 +44,11 @@ export class SessionDirectoryClient {
     if (options.hidden) query.set('hidden', '1');
     return this.request(`workspace-folders?${query}`, undefined, signal);
   }
-  attach(providerId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('attach', { providerId, nativeSessionId }); }
+  attach(providerId: string, nativeSessionId: string, signal?: AbortSignal): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('attach', { providerId, nativeSessionId }, signal); }
   createFolder(providerId: string, parentPath: string, name: string, signal?: AbortSignal): Promise<{ path: string }> {
     return this.request('workspace-folders/create', { providerId, parentPath, name }, signal);
   }
-  attachChild(providerId: string, parentNativeSessionId: string, nativeSessionId: string): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('child/attach', { providerId, parentNativeSessionId, nativeSessionId }); }
+  attachChild(providerId: string, parentNativeSessionId: string, nativeSessionId: string, signal?: AbortSignal): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('child/attach', { providerId, parentNativeSessionId, nativeSessionId }, signal); }
   create(providerId: string, operationId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('create', { providerId, operationId, ...options }); }
 }
 

@@ -18,6 +18,8 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export interface LabWorkbenchActions {
   loadOlder?(): void | Promise<void>;
+  retryMessage?(id: string): Promise<void>;
+  deleteMessage?(id: string): void;
   sendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
@@ -100,6 +102,8 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
             {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
             <AgentTimeline
               state={state}
+              onRetryMessage={runtimeMutationDisabled ? undefined : actions.retryMessage}
+              onDeleteMessage={actions.deleteMessage}
               onInspectEntry={onInspectEntry}
               inspectedEntryKey={revealEntry?.key}
               showHeader={false}

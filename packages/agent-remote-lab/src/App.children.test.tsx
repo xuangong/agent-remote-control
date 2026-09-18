@@ -168,7 +168,7 @@ it('persists refreshed child titles over saved nicknames before switching conver
   expect(f.container.querySelector('[aria-label="Conversation path"]')?.textContent).toContain('Review transport');
 });
 
-it('owns only one active replica subscription while revisiting parent and child chats', async () => {
+it('releases view and delivery-persistence subscriptions while revisiting parent and child chats', async () => {
   const subscribe = AgentReplica.prototype.subscribe;
   let activeSubscriptions = 0;
   vi.spyOn(AgentReplica.prototype, 'subscribe').mockImplementation(function (this: AgentReplica, listener) {
@@ -177,12 +177,12 @@ it('owns only one active replica subscription while revisiting parent and child 
     return () => { activeSubscriptions -= 1; unsubscribe(); };
   });
   const f = await setup(false, { live: true });
-  expect(activeSubscriptions).toBe(1);
+  expect(activeSubscriptions).toBe(2);
   for (let revisit = 0; revisit < 3; revisit += 1) {
     await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
-    expect(activeSubscriptions).toBe(1);
+    expect(activeSubscriptions).toBe(2);
     await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
-    expect(activeSubscriptions).toBe(1);
+    expect(activeSubscriptions).toBe(2);
   }
 });
 

@@ -227,3 +227,15 @@ it('manages browser sessions without unmounting drafts and clears private state 
   expect(sessionStorage.getItem('agent-remote:recovery:test:drafts')).toBeNull();
   expect(view.querySelector('input')).toBeNull();
 });
+
+it('renews frozen access as soon as the page is shown without waiting for old timers', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 120000, refreshAfterMs: 60000 }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = await render(<GatewayController>{() => <input defaultValue="Keep draft" />}</GatewayController>);
+  const input = view.querySelector('input');
+  vi.setSystemTime(Date.now() + 180000);
+  await act(async () => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  expect(fetcher.mock.calls).toHaveLength(2);
+  expect(view.querySelector('input')).toBe(input);
+});

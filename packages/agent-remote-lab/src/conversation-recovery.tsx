@@ -1,8 +1,23 @@
 import { createContext } from 'react';
+import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import type { TimelineReadingPosition } from '@agent-remote-controller/agent-remote-web/react';
 
 const prefix = 'agent-remote:recovery:';
 export const RecoveryScope = createContext<ReadingPositions | undefined>(undefined);
+
+export function readLastSession(scope: string): ControllerLocation | undefined {
+  try {
+    const path = localStorage.getItem(`${prefix}${scope}:session`);
+    if (!path?.startsWith('/?')) return;
+    const location = readControllerLocation(new URLSearchParams(path.slice(2)));
+    if (location.hostId && location.providerId && location.nativeSessionId) return location;
+  } catch { /* Corrupt or unavailable storage must not prevent opening the app. */ }
+}
+
+export function saveLastSession(scope: string, location: ControllerLocation): void {
+  try { localStorage.setItem(`${prefix}${scope}:session`, controllerPath(location)); }
+  catch { /* The current conversation remains usable without storage. */ }
+}
 
 export function readDrafts(scope: string): Record<string, string> {
   try {
@@ -19,14 +34,16 @@ export function saveDrafts(scope: string, drafts: Record<string, string>): void 
 
 export function clearConversationRecovery(): void {
   try {
-    for (const key of Object.keys(sessionStorage)) if (key.startsWith(prefix)) sessionStorage.removeItem(key);
+    for (const storage of [sessionStorage, localStorage]) {
+      for (const key of Object.keys(storage)) if (key.startsWith(prefix)) storage.removeItem(key);
+    }
   } catch { /* Signing out must also work when storage is disabled. */ }
 }
 
 // The renderer owns anchors; the application only stores them for this tab and relay.
 export class ReadingPositions extends Map<string, TimelineReadingPosition> {
   private readonly storageKey: string;
-  constructor(scope: string) {
+  constructor(readonly scope: string) {
     super();
     this.storageKey = `${prefix}${scope}:reading`;
     try {

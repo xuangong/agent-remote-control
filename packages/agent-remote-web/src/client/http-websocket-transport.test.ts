@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import {
   PROTOCOL_VERSION,
@@ -443,3 +443,25 @@ class FakeWebSocket {
   message(data: unknown): void { this.onmessage?.({ data }); }
   error(event: unknown): void { this.onerror?.(event); }
 }
+
+
+it('retires a silent socket when a background page becomes visible, only once', () => {
+  const socket = new FakeWebSocket('ws://relay.test');
+  const disconnect = vi.fn();
+  const transport = new HttpWebSocketTransport('http://relay.test', { webSocketFactory: () => socket });
+  const connection = transport.connect('agent', { onOpen() {}, onMessage() {}, onDisconnect: disconnect });
+  try {
+    socket.open();
+    window.dispatchEvent(new Event('pageshow'));
+    expect(disconnect).not.toHaveBeenCalled();
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(disconnect).not.toHaveBeenCalled();
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(() => connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' })).toThrow();
+    expect(socket.sent).toEqual([]);
+  } finally { connection.close(); vi.restoreAllMocks(); }
+});

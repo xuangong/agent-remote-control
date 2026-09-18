@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { clearConversationRecovery, ReadingPositions, readDrafts, saveDrafts } from './conversation-recovery.js';
+import { clearConversationRecovery, ReadingPositions, readDrafts, saveDrafts, readLastSession, saveLastSession } from './conversation-recovery.js';
 
-afterEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
+afterEach(() => { sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); });
 
 it('restores drafts and independent reading anchors within a relay scope', () => {
   saveDrafts('alice', { root: 'Unsent root', side: 'Unsent side' });
@@ -38,4 +38,17 @@ it('keeps in-memory interaction available when browser storage is denied', () =>
   const positions = new ReadingPositions('relay');
   positions.set('root', { following: false });
   expect(positions.get('root')).toEqual({ following: false });
+});
+
+
+it('restores the last session from a fresh home launch and removes it on sign out', () => {
+  const session = { hostId: 'host-one', providerId: 'codex', nativeSessionId: 'native', agentId: 'old-binding', parentNativeSessionId: 'parent' };
+  saveLastSession('relay', session);
+  sessionStorage.clear();
+  expect(readLastSession('relay')).toEqual(session);
+  expect(readLastSession('another-relay')).toBeUndefined();
+  localStorage.setItem('unrelated', 'keep');
+  clearConversationRecovery();
+  expect(readLastSession('relay')).toBeUndefined();
+  expect(localStorage.getItem('unrelated')).toBe('keep');
 });

@@ -2,17 +2,16 @@ import type { AgentReplicaState, OutgoingMessage } from './types.js';
 
 /** A native echo can arrive before acknowledgement or later through history recovery. */
 export class MessageOutbox {
-  private nextId = 0;
-  private readonly consumed = new Set<string>();
 
-  create(state: AgentReplicaState, agentId: string, text: string, delivery?: OutgoingMessage['delivery']): OutgoingMessage {
-    return { id: `outgoing-${++this.nextId}`, agentId, text, delivery, status: 'sending',
+  create(state: AgentReplicaState, agentId: string, text: string, delivery?: OutgoingMessage['delivery'], operationId?: string): OutgoingMessage {
+    return { id: `outgoing-${crypto.randomUUID()}`, operationId, agentId, text, delivery, status: 'sending',
       epoch: state.timeline.epoch, afterSeq: state.timeline.nextSeq - 1 };
   }
 
   reconcile(state: AgentReplicaState): AgentReplicaState {
     const outgoing = state.outgoingMessages;
-    if (!outgoing?.length) { this.consumed.clear(); return state; }
+    if (!outgoing?.length) return state;
+    const consumed = new Map<string, number>();
     let changed = false;
     const remaining: OutgoingMessage[] = [];
     for (const message of outgoing) {
@@ -28,14 +27,20 @@ export class MessageOutbox {
       // consuming each occurrence once so repeated identical sends stay distinct.
       const echo = state.timeline.entries.find(entry => entry.seqStart > message.afterSeq
         && entry.item.type === 'user_message' && normalize(entry.item.text) === normalize(message.text)
-        && !this.consumed.has(JSON.stringify([state.timeline.epoch, entry.providerId, entry.seqStart])));
+        && entry.seqStart > (consumed.get(normalize(message.text)) ?? -1));
       if (echo) {
-        this.consumed.add(JSON.stringify([state.timeline.epoch, echo.providerId, echo.seqStart]));
+        consumed.set(normalize(message.text), echo.seqStart);
         changed = true;
       } else remaining.push(message);
     }
-    if (!remaining.length) this.consumed.clear();
-    return changed ? { ...state, outgoingMessages: remaining } : state;
+    // Retain the consumed cursor with each identical input so a page restart
+    // cannot reuse an earlier echo for a different pending submission.
+    const pending = remaining.map(message => {
+      const seq = consumed.get(normalize(message.text));
+      if (message.status === 'failed' || message.epoch !== state.timeline.epoch || seq === undefined || seq <= message.afterSeq) return message;
+      return { ...message, afterSeq: seq };
+    });
+    return changed ? { ...state, outgoingMessages: pending } : state;
   }
 }
 

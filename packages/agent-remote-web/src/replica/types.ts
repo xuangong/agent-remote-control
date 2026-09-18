@@ -33,6 +33,8 @@ export interface TimelineReplicaState {
 
 /** Local delivery feedback, separate from the authoritative timeline and its cursor. */
 export interface OutgoingMessage {
+  readonly operationId?: string;
+  readonly retryRequiresNewOperation?: boolean;
   readonly id: string;
   readonly agentId: string;
   readonly text: string;

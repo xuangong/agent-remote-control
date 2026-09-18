@@ -31,7 +31,7 @@ export class AgentReplica {
   private state = createReplicaState();
   private readonly listeners = new Set<() => void>();
   private readonly outbox = new MessageOutbox();
-  private readonly messageTimers = new Map<string, { confirmation?: ReturnType<typeof setTimeout>; removal?: ReturnType<typeof setTimeout> }>();
+  private readonly messageTimers = new Map<string, { confirmation?: ReturnType<typeof setTimeout> }>();
 
   getState(): AgentReplicaState {
     return this.state;
@@ -42,17 +42,37 @@ export class AgentReplica {
     return () => this.listeners.delete(listener);
   }
 
-  beginMessage(agentId: string, text: string, delivery?: OutgoingMessage['delivery']): string {
-    const message = this.outbox.create(this.state, agentId, text, delivery);
+  beginMessage(agentId: string, text: string, delivery?: OutgoingMessage['delivery'], operationId?: string): string {
+    const message = this.outbox.create(this.state, agentId, text, delivery, operationId);
     this.replace({ ...this.state, outgoingMessages: [...(this.state.outgoingMessages ?? []), message] });
     return message.id;
   }
 
-  updateMessage(id: string, status: OutgoingMessage['status'], error?: string): void {
+  restoreMessages(messages: readonly OutgoingMessage[]): void {
+    if (this.state.outgoingMessages?.length) return;
+    this.replace({ ...this.state, outgoingMessages: messages.map(message => ({ ...message,
+      status: message.status === 'failed' ? 'failed' : 'unconfirmed',
+      error: message.error ?? 'Delivery was not confirmed before this page closed. Check the conversation before retrying.',
+    })) });
+  }
+
+  retryMessage(id: string, operationId: string): void {
+    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id
+      ? { ...message, operationId, retryRequiresNewOperation: false, status: 'sending', error: undefined,
+          epoch: this.state.timeline.epoch,
+          afterSeq: message.epoch === this.state.timeline.epoch && message.status === 'unconfirmed' ? message.afterSeq : this.state.timeline.nextSeq - 1 }
+      : message) });
+  }
+
+  deleteMessage(id: string): void {
+    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.filter(message => message.id !== id) });
+  }
+
+  updateMessage(id: string, status: OutgoingMessage['status'], error?: string, retryRequiresNewOperation?: boolean): void {
     const existing = this.state.outgoingMessages?.find(message => message.id === id);
     if (!existing || (status === 'awaiting_echo' && (existing.status === 'failed' || existing.status === 'unconfirmed'))) return;
     this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id
-      ? { ...message, status, error } : message) });
+      ? { ...message, status, error, retryRequiresNewOperation: retryRequiresNewOperation ?? message.retryRequiresNewOperation } : message) });
   }
 
   applySnapshot(snapshot: AgentSnapshot | AgentUpdateMessage, options?: SnapshotApplicationOptions): void {
@@ -115,7 +135,7 @@ export class AgentReplica {
     const messages = this.state.outgoingMessages ?? [];
     for (const [id, timers] of this.messageTimers) {
       if (messages.some(message => message.id === id)) continue;
-      clearTimeout(timers.confirmation); clearTimeout(timers.removal);
+      clearTimeout(timers.confirmation);
       this.messageTimers.delete(id);
     }
     for (const message of messages) {
@@ -123,9 +143,7 @@ export class AgentReplica {
       this.messageTimers.set(message.id, timers);
       if (message.status === 'failed' || message.status === 'unconfirmed') {
         clearTimeout(timers.confirmation); timers.confirmation = undefined;
-        timers.removal ??= backgroundTimer(() => this.replace({ ...this.state,
-          outgoingMessages: this.state.outgoingMessages?.filter(item => item.id !== message.id) }), 10_000);
-      } else if (!timers.confirmation && !timers.removal) {
+      } else if (!timers.confirmation) {
         timers.confirmation = backgroundTimer(() => this.updateMessage(message.id, 'unconfirmed',
           'No message confirmation arrived within 30 seconds. Check the conversation before sending again.'), 30_000);
       }

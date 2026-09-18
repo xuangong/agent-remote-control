@@ -673,3 +673,10 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-file-preview { width: 100%; max-height: 100dvh; }
   .agent-file-image { padding: 12px; }
 }
+
+.agent-outgoing-message[data-delivery-state="unconfirmed"] .agent-message-delivery { color: var(--agent-danger); }
+.agent-message-delivery:has(.agent-delivery-actions) { justify-content: flex-end; gap: 0; }
+.agent-delivery-actions { display: inline-flex; gap: 2px; }
+.agent-outgoing-message .agent-delivery-actions button,
+.agent-outgoing-message .agent-delivery-error-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; width: 32px; min-height: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; }
+.agent-delivery-actions button:disabled { opacity: .45; cursor: default; }

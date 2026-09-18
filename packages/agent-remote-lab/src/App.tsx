@@ -58,6 +58,8 @@ import { SupportingRail } from './components/SupportingRail.js';
 import { SidebarResize, useSidebarWidth } from './components/SidebarResize.js';
 import { TraceView } from './components/TraceView.js';
 import { HostPreviewList } from './components/HostPreviewList.js';
+import { HostVscodeTunnel } from './components/HostVscodeTunnel.js';
+import { HttpVscodeTunnelClient, VscodeTunnelScope } from './vscode-tunnel.js';
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -119,6 +121,7 @@ export function App({
   const [selectedHost, setSelectedHost] = useState<RemoteHost>(() => requestedHostId
     ? { id: requestedHostId, name: 'Requested Host', online: false, providers: [], providerId: '' }
     : { id: 'local', name: 'Recorded fixture', online: true });
+  const vscodeTunnelClient = useMemo(() => new HttpVscodeTunnelClient(baseUrl), [baseUrl]);
   const hostClient = useMemo(() => hostService ?? new RemoteHostClient(baseUrl), [baseUrl, hostService]);
   const previewClient = useMemo(() => new HttpPreviewClient(baseUrl), [baseUrl]);
   const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
@@ -822,7 +825,7 @@ export function App({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
-  return <PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost}><PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       {stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
@@ -916,6 +919,7 @@ export function App({
         <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
       </section> : null}
       {directory ? <HostPairing managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {sessionPanel === 'list' || sessionPanel === 'settings' ? <HostVscodeTunnel /> : null}
       {sessionPanel === 'list' && previewHost?.access !== 'shared' && previewHost ? <HostPreviewList onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
       {providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
@@ -1038,7 +1042,7 @@ export function App({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope>;
+  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope>;
 }
 
 function PreviewScope({ client, host, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly children: ReactNode }) {

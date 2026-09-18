@@ -576,6 +576,18 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (access?.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
     const subject = principal(context);
+    const vscodeTunnel = /^\/v1\/remote\/hosts\/([^/]+)\/vscode-tunnel(?:\/(start|stop))?$/.exec(url.pathname);
+    if (vscodeTunnel) {
+      requireOwner(subject); requireAccess(vscodeTunnel[1]!, subject);
+      const action = vscodeTunnel[2];
+      if ((!action && request.method !== 'GET') || (action && request.method !== 'POST')) return json(405, { error: 'Method is not allowed.' });
+      const body = action ? await readBody(request) : undefined;
+      if (action === 'start' && body?.acceptLicense !== true) return json(400, { error: 'Accept the VS Code Server license terms before starting.' });
+      const result = await rpc(requireHost(vscodeTunnel[1]!), action ? 'POST' : 'GET', `/remote/vscode-tunnel${action ? `/${action}` : ''}`, undefined,
+        action ? JSON.stringify(action === 'start' ? { acceptLicense: true } : {}) : undefined);
+      requireOwner(principal(context)); requireAccess(vscodeTunnel[1]!, principal(context));
+      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
     const previewSession = /^\/v1\/sessions\/([^/]+)\/previews$/.exec(url.pathname);
     if (previewSession && request.method === 'POST') {
       requireOwner(subject);

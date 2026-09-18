@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import * as protocol from './index.js';
 
 describe('Agent Remote uplink codecs', () => {
+  it('allows only Host-level VS Code status and explicit start/stop mutations', () => {
+    const request = { uplinkVersion: 2, type: 'rpc_request', requestId: 'vscode', method: 'GET', path: '/remote/vscode-tunnel' } as const;
+    for (const valid of [request, ...['start', 'stop'].map(action => ({ ...request, method: 'POST' as const, path: `${request.path}/${action}`, body: '{}' }))]) {
+      expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(valid))).toEqual({ status: 'ok', value: valid });
+      expect(protocol.encodeRemoteHostUplinkMessage(valid).status).toBe('ok');
+    }
+    for (const invalid of [
+      { ...request, body: '{}' }, { ...request, sessionId: 'session' }, { ...request, method: 'POST', body: '{}' },
+      { ...request, path: `${request.path}/start` }, { ...request, path: `${request.path}/stop/extra`, method: 'POST', body: '{}' },
+      { ...request, path: `${request.path}/exec`, method: 'POST', body: '{}' },
+    ]) expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(invalid)).status).toBe('rejected');
+  });
+
   it('accepts a v2 Host registration and a target-bound stream', () => {
     const registration = {
       uplinkVersion: 2,

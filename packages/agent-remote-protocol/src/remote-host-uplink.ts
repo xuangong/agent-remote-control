@@ -33,7 +33,7 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|child/attach|attach|create|stop|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
@@ -95,7 +95,7 @@ function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplink
     if (pathname === '/remote/previews') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
     if (pathname.startsWith('/remote/')) {
       const isRead = pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
-        || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models';
+        || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models' || pathname === '/remote/vscode-tunnel';
       if ((isRead && (value.method !== 'GET' || value.body !== undefined))
         || (!isRead && (value.method !== 'POST' || value.body === undefined))) return false;
     }

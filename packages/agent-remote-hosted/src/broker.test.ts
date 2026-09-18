@@ -106,6 +106,38 @@ async function restoredFixture(options: Partial<import('./broker.js').HostBroker
   return { broker, native: pair.native };
 }
 
+it('routes VS Code tunnel controls only for the owner and does not cache device codes', async () => {
+  const { broker, native } = await restoredFixture({ ownerSubject: 'alice' });
+  const calls: Array<{ path: string; body?: string }> = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    calls.push(message);
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId,
+      status: 200, body: JSON.stringify({ status: 'awaiting_auth', processAlive: true, revision: 1,
+        authorization: { url: 'https://github.com/login/device', code: '9491-B98B' } }) }));
+  });
+  const request = (action = '', body?: unknown) => new Request(`https://relay.example/v1/remote/hosts/host/vscode-tunnel${action}`, {
+    ...(body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  });
+  const owner = { principalSubject: () => 'alice' };
+  expect((await broker.handleRequest(request(), { principalSubject: () => 'bob' }))?.status).toBe(403);
+  expect((await broker.handleRequest(request('/start', { acceptLicense: true }), { principalSubject: () => 'bob' }))?.status).toBe(403);
+  expect((await broker.handleRequest(request('/stop', {}), { principalSubject: () => 'bob' }))?.status).toBe(403);
+  expect((await broker.handleRequest(request('/start', {}), owner))?.status).toBe(400);
+  expect(calls).toHaveLength(0);
+  const status = await broker.handleRequest(request(), owner);
+  expect(status?.headers.get('cache-control')).toBe('no-store');
+  expect((await status!.json()).authorization.code).toBe('9491-B98B');
+  expect((await broker.handleRequest(request('/start', { acceptLicense: true, executable: 'untrusted' }), owner))?.status).toBe(200);
+  expect((await broker.handleRequest(request('/stop', {}), owner))?.status).toBe(200);
+  expect(calls.map(call => [call.path, call.body])).toEqual([
+    ['/remote/vscode-tunnel', undefined], ['/remote/vscode-tunnel/start', '{"acceptLicense":true}'], ['/remote/vscode-tunnel/stop', '{}'],
+  ]);
+  native.close();
+  expect((await broker.handleRequest(request(), owner))?.status).toBe(503);
+});
+
 it.each([
   { subject: 'alice', rejection: 'operation_capacity_exceeded' },
   { subject: 'bob', rejection: 'operation_capacity_exceeded' },

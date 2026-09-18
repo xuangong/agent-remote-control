@@ -82,6 +82,7 @@ flowchart LR
 | [web.md](web.md) | Headless recovery and React DOM presentation. |
 | [debugger.md](debugger.md) | Terminal presentation over the shared headless client. |
 | [lab.md](lab.md) | The workbench, temporary Host pairing, discovery, creation, and protocol validation. |
+| [host-vscode-tunnel.md](host-vscode-tunnel.md) | Host-owned VS Code process lifetime, device authorization, resource reclamation, and workspace links. |
 
 ## Implementation Anchors
 

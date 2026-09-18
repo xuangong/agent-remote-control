@@ -11,6 +11,7 @@ import { sessionActivity } from '../session-activity.js';
 import { RecoveryScope } from '../conversation-recovery.js';
 import { LiveControlPanel } from './LiveControlPanel.js';
 import { PlanningControl } from './PlanningControl.js';
+import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 import type { TraceEntryRequest } from '../trace-model.js';
 
@@ -84,6 +85,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
         <h2 className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `Connecting to ${attachingAgentId}` : 'Ready for a session'}</h2>
       </div>
       {sessionManager}
+      <WorkspaceVscodeLink workspace={state?.agent?.cwd} />
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? 'Connecting' : 'Awaiting Agent'}</span>
     </header>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />

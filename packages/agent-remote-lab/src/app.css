@@ -148,6 +148,22 @@ textarea {
 .lab-host-previews li code { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .lab-host-previews li span, .lab-host-previews li small { color: var(--obs-text-secondary); font-size: 11px; }
 .lab-preview-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.lab-host-vscode { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-border); font-size: 12px; }
+.lab-vscode-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lab-vscode-status small { color: var(--obs-text-secondary); margin-left: auto; }
+.lab-vscode-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--obs-text-secondary); }
+.lab-vscode-status[data-status="connected"] .lab-vscode-dot { background: var(--obs-success); }
+.lab-vscode-status[data-status="awaiting_auth"] .lab-vscode-dot { background: var(--obs-warning); }
+.lab-vscode-status[data-status="failed"] .lab-vscode-dot { background: var(--obs-danger); }
+.lab-vscode-machine { overflow-wrap: anywhere; }
+.lab-vscode-authorization { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--obs-border); border-radius: 8px; background: var(--obs-canvas); }
+.lab-vscode-authorization p { margin: 0; }
+.lab-vscode-authorization > code { font-size: 20px; letter-spacing: .08em; user-select: all; }
+.lab-vscode-authorization > div, .lab-vscode-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.lab-vscode-consent { display: flex; align-items: flex-start; gap: 6px; color: var(--obs-text-secondary); }
+.lab-vscode-consent input { flex: 0 0 auto; width: auto; margin: 2px 0 0; }
+.lab-vscode-workspace { flex: 0 0 auto; font-size: 11px; white-space: nowrap; color: var(--obs-action); text-decoration: none; }
+.lab-vscode-unavailable { color: var(--obs-text-secondary); opacity: .6; }
 
 .lab-app-bar {
   z-index: 20;

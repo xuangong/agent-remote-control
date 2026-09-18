@@ -251,3 +251,9 @@ Host must be restarted to apply provider configuration changes.
 ## Local previews and images
 
 The managed Controller enables authenticated loopback previews on the Relay origin by default. Registrations persist in the managed state directory, expire after one hour by default, and reconnect on startup without extending their deadline. Set `AGENT_HOST_PREVIEW_TTL_MS` to change the fixed lifetime and `AGENT_HOST_PREVIEW_PROTECTED_PORTS` to a comma-separated list of TCP ports that must not be exposed. Markdown image reads are scoped to the session working directory and use existing session resource transport. See [local previews](../../docs/current/agent-remote/local-previews.md) for the complete behavior and configuration.
+
+## VS Code tunnels
+
+The Host owner can manage one VS Code tunnel from the web sidebar. The Controller checks `code tunnel --help` before enabling the feature, starts from its state directory, exposes device authorization and connection state, and supplies per-session workspace links. `AGENT_HOST_VSCODE` explicitly selects a local CLI executable; otherwise `code` must be available on the Controller’s PATH. Missing or unsupported CLIs disable the controls.
+
+The managed tunnel is reclaimed when the Controller exits or crashes, or after five minutes continuously disconnected from the Relay. Set `AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS` to a positive millisecond duration to change that grace period. Reclamation and Controller restart require an explicit start from the UI. Short interruptions and browser closure retain the running tunnel. macOS and Linux are supported; Windows process-tree management is not implemented. See the [Host VS Code tunnel design](../../docs/current/agent-remote/host-vscode-tunnel.md).

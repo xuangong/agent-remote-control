@@ -1,6 +1,7 @@
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { createControllerPreviews } from './previews.js';
+import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from './operation-cache.js';
 import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
@@ -37,6 +38,7 @@ export interface AgentHostRuntime {
   close(): Promise<void>;
 }
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
+  vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
   installationId: string;
   name: string;
@@ -54,6 +56,7 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const runtime = createAgentHostRuntime(options);
   const previews = options.preview ? createControllerPreviews(options.preview) : undefined;
+  const vscodeTunnel = options.vscodeTunnel ? createVscodeTunnelManager({ ...options.vscodeTunnel, installationId: options.installationId }) : undefined;
   let state: AgentHost['state'] = 'connecting';
   let generation = 0;
   let closed = false;
@@ -72,12 +75,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         credentialPersistence = pending;
         return pending;
       } : undefined,
-      resolveSession: runtime.resolveSession, control: request => request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
+      resolveSession: runtime.resolveSession, control: request => request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
+        : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
       operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
         registered: info => previews.registered({ ...info, url: config.url }) } : undefined,
       onDiagnostic: options.onDiagnostic ? diagnostic => options.onDiagnostic!({ ...diagnostic, uplinkGeneration: current }) : undefined,
-      onStateChange(next) { if (generation === current && !closed) state = next; } }) };
+      onStateChange(next) { if (generation === current && !closed) { state = next; vscodeTunnel?.setRelayConnected(next === 'registered'); } } }) };
   };
   connection = connect(options.uplink);
   const ready = connection.client.ready;
@@ -99,7 +103,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     },
     close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed';
       connection.superseded = true;
-      await bounded(Promise.allSettled([connection.client.close(), previews?.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
+      await bounded(Promise.allSettled([connection.client.close(), previews?.close(), vscodeTunnel?.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
     })(); },
   };
 }

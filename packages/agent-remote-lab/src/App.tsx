@@ -39,7 +39,7 @@ import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { PreviewProvider, PreviewWorkspace, TimelineDisplay, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
+import { PreviewProvider, PreviewWorkspace, TimelineDisplay, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench } from './components/LabWorkbench.js';
@@ -662,6 +662,10 @@ export function App({
     setTraceNavigation(previous => previous?.scope === traceScope ? previous : undefined);
   }, [traceScope]);
   function inspectTimelineEntry(key: string, view: 'workbench' | 'trace') {
+    if (view === 'workbench' && timelineDisplay === 'content' && state) {
+      const item = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries).find(entry => entry.key === key)?.entry.item;
+      if (item && !isContentOnlyItem(item)) setTimelineDisplay('simple');
+    }
     setTraceNavigation({ scope: traceScope, key, view, requestId: ++traceRequestCounter.current });
     if (view === 'workbench') setSideFocus(stackRoot ? sessionKey(stackRoot) : undefined);
     setActiveView(view);
@@ -812,6 +816,7 @@ export function App({
     </nav> : null}
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
+      contentOnly={timelineDisplay === 'content'} onToggleContentOnly={() => setTimelineDisplay(value => value === 'content' ? 'preview' : 'content')}
       simpleConversation={timelineDisplay === 'simple'} onToggleSimpleConversation={() => setTimelineDisplay(value => value === 'simple' ? 'preview' : 'simple')}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
       onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />

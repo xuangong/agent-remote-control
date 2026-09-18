@@ -88,6 +88,7 @@ const fileChangeState: AgentReplicaState = { ...replicaState, timeline: {
   }],
 } };
 const previewItems: AgentTimelineItem[] = [
+  { type: 'user_message', text: 'Please **fix the renderer**.' },
   { type: 'assistant_message', text: 'I found the failing assertion and updated the renderer.' },
   { type: 'reasoning', text: 'Check the existing event and preserve the original result.\nShow a short preview before opening the complete details.' },
   { type: 'tool_call', callId: 'preview-shell', name: 'command', status: 'completed', error: null,
@@ -105,9 +106,23 @@ const previewItems: AgentTimelineItem[] = [
 const previewState: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false, entries: previewItems.map((item, index) => ({
   providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-09-15T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item,
 })) } };
+const planningItems: AgentTimelineItem[] = [
+  { type: 'tool_call', callId: 'plan-update', name: 'functions.update_plan', status: 'completed', error: null,
+    detail: { type: 'other', description: 'Update implementation plan' }, result: { content: [{ type: 'text', text: 'Plan updated' }] } },
+  { type: 'todo', items: [{ text: 'Implement the view', completed: true, status: 'completed' },
+    { text: 'Validate on mobile', completed: false, status: 'in_progress' }] },
+  { type: 'interaction', request: { kind: 'plan_approval', requestId: 'content-plan', plan: 'Keep task progress visible.', allowedActions: ['approve'] },
+    response: { kind: 'plan_approval', action: 'approve' } },
+];
+const contentState: AgentReplicaState = { ...previewState, timeline: { ...previewState.timeline, entries: [
+  ...previewState.timeline.entries, ...planningItems.map((item, index) => ({
+    providerId: 'recorded', seqStart: previewItems.length + index + 1, seqEnd: previewItems.length + index + 1,
+    timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item,
+  })),
+] } };
 createRoot(document.getElementById('root')!).render(
   <main style={{ height: '100dvh' }}>
-    {view === 'previews' ? <App initialState={previewState} initialSessionStatus="ready" /> : view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
+    {view === 'previews' || view === 'content' ? <App initialState={view === 'content' ? contentState : previewState} initialSessionStatus="ready" /> : view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
       : view === 'trace' ? <TraceView state={state} />
       : view === 'inspector' ? <ReplicaInspector state={state} sessionStatus="ready" providerName={long} />
       : view === 'command' ? <AgentCommandDetails command={{ id: long, name: long, description: long, kind: 'skill', documentation: { resourceId: 'documentation', locator: 'SKILL.md', status: 'available' } }} resources={state.resources} onClose={() => {}} />

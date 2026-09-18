@@ -32,6 +32,8 @@ below the application's existing 320px minimum width.
 
 ## Conversation previews
 
+View's **Content only view** checkbox appears above **Simple conversation view**. The two modes are mutually exclusive; clearing the selected mode restores default previews. Content only renders user messages and assistant text/Markdown, including inline Markdown images and links, and groups adjacent visible messages. It also retains plan/task-management tool calls, task boards with their live completion states, and completed interactions including answered questions and approval decisions. Retained tools and answered questions use bounded previews with expandable details. Reasoning, other tools, runtime notices, compaction, resource cards, preview registration controls, renderer extensions, inline subagent lists and Trace shortcuts are hidden. The complete replica remains available to Trace and the other conversation modes. Pending interaction controls and outgoing message delivery feedback remain available. A loaded history page with no matching items shows an empty content state and retains older-history navigation. Browser storage remembers the mode for both primary and Side conversations. Explicitly choosing Show in Conversation for a hidden execution event in Trace switches to Simple mode so the target can be revealed.
+
 The default conversation shows bounded previews before full disclosure. View's
 **Simple conversation view** checkbox restores the title-oriented display for
 untouched items. This preference is stored in the current browser and applies to

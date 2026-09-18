@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useContext, useRef, useState } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -17,6 +17,7 @@ import { PreviewActions, type PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
 import { TimelineEntry } from './TimelineEntry.js';
+import { TimelineDisplay, isContentOnlyItem } from './TimelineDisplay.js';
 
 export type AgentTimelineState = AgentReplicaState;
 
@@ -63,7 +64,9 @@ export function AgentTimeline({
 }: AgentTimelineProps) {
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
-  const renderModel = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries);
+  const contentOnly = useContext(TimelineDisplay) === 'content';
+  const entries = contentOnly ? state.timeline.entries.filter(({ item }) => isContentOnlyItem(item)) : state.timeline.entries;
+  const renderModel = createTimelineRenderModel(state.timeline.epoch, entries);
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
   const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);
@@ -111,23 +114,25 @@ export function AgentTimeline({
 
     <div className="agent-timeline-entries" aria-live="polite">
       {renderModel.length === 0 && outgoing.length === 0
-        ? <p className="agent-timeline-empty">No timeline activity.</p>
+        ? <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
         : renderModel.map(({ entry, key, messageGroup }) => <TimelineEntry key={key} entryKey={key}
             timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
-            inspected={inspectedEntryKey === key} inspect={onInspectEntry ? () => onInspectEntry(key) : undefined}>
+            inspected={inspectedEntryKey === key} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(key) : undefined}>
             <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
               resources={state.resources} resourceBindings={entry.resources}
               resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch])}
               onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
-            {previews && state.agent?.id ? <PreviewActions agentId={state.agent.id} itemId={key} text={previewText(entry.item)} controller={previews} /> : null}
-            {registry?.render(entry.item)}
-            <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
-            <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
+            {!contentOnly ? <>
+              {previews && state.agent?.id ? <PreviewActions agentId={state.agent.id} itemId={key} text={previewText(entry.item)} controller={previews} /> : null}
+              {registry?.render(entry.item)}
+              <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
+              <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
+            </> : null}
           </TimelineEntry>)}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} />)}
     </div>
 
-    <AgentChildSessionList childrenFor={childrenFor} key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
+    {!contentOnly ? <AgentChildSessionList childrenFor={childrenFor} key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} /> : null}
 
     {state.pendingInteractions.length > 0 ? <aside className="agent-interactions" aria-label="Pending interactions">
       {state.pendingInteractions.map((request) => <fieldset

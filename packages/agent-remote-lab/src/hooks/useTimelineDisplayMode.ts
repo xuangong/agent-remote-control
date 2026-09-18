@@ -4,7 +4,10 @@ import type { TimelineDisplayMode } from '@agent-remote-controller/agent-remote-
 const key = 'agent-remote:timeline-display';
 export function useTimelineDisplayMode() {
   const [mode, setMode] = useState<TimelineDisplayMode>(() => {
-    try { return window.localStorage.getItem(key) === 'simple' ? 'simple' : 'preview'; }
+    try {
+      const saved = window.localStorage.getItem(key);
+      return saved === 'simple' || saved === 'content' ? saved : 'preview';
+    }
     catch { return 'preview'; }
   });
   useEffect(() => {

@@ -12,6 +12,62 @@ import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 describe('App', () => {
+  it('reveals a filtered execution event when explicitly opening it from Trace', async () => {
+    const key = 'agent-remote:timeline-display';
+    window.localStorage.setItem(key, 'content');
+    const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
+      providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+      item: { type: 'reasoning' as const, text: 'Inspect this reasoning.' },
+    }] } };
+    try {
+      const container = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
+      expect(container.querySelector('.agent-reasoning')).toBeNull();
+      await act(async () => tab(container, 'Trace').click());
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-trace-entry-key]')!.click());
+      const show = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Show in Conversation')!;
+      await act(async () => show.click());
+      expect(tab(container, 'Workbench').getAttribute('aria-selected')).toBe('true');
+      expect(container.querySelector('[data-inspected="true"] .agent-reasoning')).not.toBeNull();
+      expect(window.localStorage.getItem(key)).toBe('simple');
+    } finally { window.localStorage.removeItem(key); }
+  });
+
+  it('offers content-only above simple view, switches modes exclusively, and restores content-only after remount', async () => {
+    const key = 'agent-remote:timeline-display';
+    window.localStorage.removeItem(key);
+    const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [
+      { type: 'user_message' as const, text: 'The requirement.' },
+      { type: 'reasoning' as const, text: 'Execution details.' },
+      { type: 'assistant_message' as const, text: 'The summary.' },
+    ].map((item, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1,
+      timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item })) } };
+    try {
+      const container = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      const content = container.querySelector<HTMLInputElement>('[aria-label="Content only view"]');
+      const simple = container.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]')!;
+      expect(content).not.toBeNull();
+      expect(content!.compareDocumentPosition(simple) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      await act(async () => content!.click());
+      expect(simple.checked).toBe(false);
+      expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
+      expect(container.querySelector('.agent-message-user')?.textContent).toContain('The requirement.');
+      expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('The summary.');
+      expect(window.localStorage.getItem(key)).toBe('content');
+      const restored = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
+      expect(restored.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
+      await act(async () => simple.click());
+      expect(content!.checked).toBe(false);
+      expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(3);
+      expect(container.querySelector('.agent-content-preview')).toBeNull();
+      await act(async () => content!.click());
+      expect(simple.checked).toBe(false);
+      await act(async () => content!.click());
+      expect(window.localStorage.getItem(key)).toBe('preview');
+      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Execution details.');
+    } finally { window.localStorage.removeItem(key); }
+  });
+
   it('does not restore an old inspect request after leaving and returning to a session', async () => {
     window.history.replaceState(null, '', '/?agent=agent-1');
     let creations = 0;

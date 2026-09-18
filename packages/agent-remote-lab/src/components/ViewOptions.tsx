@@ -7,6 +7,8 @@ interface ViewOptionsProps {
   inspectorVisible: boolean;
   compact: boolean;
   inert: boolean;
+  contentOnly?: boolean;
+  onToggleContentOnly?(): void;
   simpleConversation?: boolean;
   onToggleSimpleConversation?(): void;
   onSetAllVisible(visible: boolean): void;
@@ -15,7 +17,7 @@ interface ViewOptionsProps {
   onToggleInspector(): void;
 }
 
-export function ViewOptions({ triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, simpleConversation, onToggleSimpleConversation, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
+export function ViewOptions({ triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, contentOnly, onToggleContentOnly, simpleConversation, onToggleSimpleConversation, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -51,6 +53,7 @@ export function ViewOptions({ triggerRef, headerVisible, sidebarVisible, inspect
       <span>View</span>
     </button>
     {open ? <section id="lab-view-options-panel" className="lab-view-options-panel" aria-label="View options">
+      {onToggleContentOnly ? <label><span>Content only view</span><input type="checkbox" aria-label="Content only view" checked={contentOnly ?? false} onChange={onToggleContentOnly} /></label> : null}
       {onToggleSimpleConversation ? <label><span>Simple conversation view</span><input type="checkbox" aria-label="Simple conversation view" checked={simpleConversation ?? false} onChange={onToggleSimpleConversation} /></label> : null}
       <div className="lab-view-options-heading">
         <p>Panels</p>

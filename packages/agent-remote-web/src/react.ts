@@ -1,5 +1,5 @@
 export { AgentTimeline } from './react/AgentTimeline.js';
-export { TimelineDisplay } from './react/TimelineDisplay.js';
+export { TimelineDisplay, isContentOnlyItem } from './react/TimelineDisplay.js';
 export type { TimelineDisplayMode } from './react/TimelineDisplay.js';
 export type { AgentTimelineProps, AgentTimelineState } from './react/AgentTimeline.js';
 export { PreviewActions, discoverLoopbackTargets } from './react/PreviewActions.js';

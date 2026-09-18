@@ -237,6 +237,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   }
 
   function onTouchMove(event: TouchEvent<HTMLDivElement>): void {
+    if (event.defaultPrevented) return;
     const y = event.touches[0]?.clientY;
     if (y !== undefined && touchY.current !== undefined && y > touchY.current) { historyIntent.current = true; pauseFollowing(); prefetchHistory(); }
     touchY.current = y;

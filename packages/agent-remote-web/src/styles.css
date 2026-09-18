@@ -625,3 +625,18 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-timeline-entry[data-inspected] { outline: 2px solid var(--agent-signal); outline-offset: 3px; border-radius: 4px; }
 .agent-inspect-entry:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 2px; }
 @media (hover: none) { .agent-inspect-entry { opacity: .7; } }
+
+.agent-entry-content { min-width: 0; }
+.agent-entry-time { display: none; }
+@media (max-width: 1180px) {
+  .agent-timeline-entry { overflow-x: clip; }
+  .agent-entry-content { transform: translateX(var(--agent-time-offset, 0px)); transition: transform 180ms ease-out; }
+  .agent-timeline-entry[data-time-dragging] > .agent-entry-content { transition: none; }
+  .agent-entry-time { display: flex; visibility: hidden; position: absolute; top: var(--agent-time-top); width: 108px; padding: 0 4px; box-sizing: border-box; transform: translateY(-50%); flex-direction: column; align-items: center; gap: 3px; color: var(--agent-muted); font: 11px/1.4 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+  .agent-timeline-entry[data-time-side="left"] > .agent-entry-time { left: 0; }
+  .agent-timeline-entry[data-time-side="right"] > .agent-entry-time { right: 0; }
+  .agent-timeline-entry[data-time-revealed] > .agent-entry-time { visibility: visible; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-entry-content { transition: none; }
+}

@@ -405,6 +405,14 @@ export class CodexEventProjector {
     if (type === 'contextCompaction') {
       return { type: 'compaction', status: lifecycle === 'started' ? 'loading' : 'completed' };
     }
+    if (type === 'sleep') {
+      const duration = item.durationMs;
+      const seconds = typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration / 1000 : undefined;
+      // Sleep can end on new input; the requested duration is not elapsed time.
+      return this.toolItem(id, 'clock.sleep', lifecycle === 'started' ? 'running' : 'completed', {
+        type: 'other', description: seconds === undefined ? 'Wait' : `Wait up to ${seconds} ${seconds === 1 ? 'second' : 'seconds'} (requested)`,
+      });
+    }
     if (type === 'commandExecution') return this.mapCommand(item, lifecycle);
     if (type === 'fileChange') return this.mapFileChange(item, lifecycle);
     if (type === 'mcpToolCall') return this.mapMcpTool(item, lifecycle);

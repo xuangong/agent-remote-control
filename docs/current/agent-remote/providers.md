@@ -54,6 +54,8 @@ Relay delays readiness until it observes the single history boundary, buffers ea
 
 ## Codex process and native directory
 
+Native `sleep` items map to ordinary `clock.sleep` tool calls. Started and completed observations share the native call ID, and history uses the completed form. The detail records the requested wait duration; it does not claim actual elapsed time or a wake-up reason because the item carries neither (`packages/agent-provider-codex/src/projector.ts`).
+
 The process launcher verifies an explicitly selected working directory before spawning Codex. Missing directories and paths that are not directories produce workspace-specific errors; the launcher does not substitute another project (`packages/agent-provider-codex/src/native.ts`).
 
 The independent Agent Host composes the real Codex Provider and owns one app-server process per opened root session tree. The default Lab backend composes Recorded and the Host broker without constructing Codex. Codex receives JSONL events over stdio, retains a bounded stderr tail for exit diagnostics, and uses the selected native home and login. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-host/src/directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).

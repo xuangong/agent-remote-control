@@ -13,7 +13,7 @@ function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, conti
   const scroll = useTimelineScroll(identity, true, positions, continuityIdentity ? { identity: continuityIdentity, positions: followingPositions } : undefined, history);
   controls?.(scroll);
   onRender?.(scroll.showLatest);
-  return <div onWheel={scroll.onWheel} onScroll={scroll.onScroll} ref={(element) => {
+  return <div onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove} onWheel={scroll.onWheel} onScroll={scroll.onScroll} ref={(element) => {
     (scroll.viewportRef as MutableRefObject<HTMLDivElement | null>).current = element;
     if (!element || element.dataset.configured) return;
     element.dataset.configured = 'true';
@@ -44,6 +44,18 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 const viewport = () => container.firstElementChild as HTMLDivElement;
+it('continues following new content after a child consumes a horizontal touch gesture', () => {
+  act(() => root.render(<Surface />));
+  const target = viewport().firstElementChild!;
+  act(() => {
+    target.dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientY: 100 }] }));
+    const move = Object.assign(new Event('touchmove', { bubbles: true, cancelable: true }), { touches: [{ clientY: 120 }] });
+    move.preventDefault();
+    target.dispatchEvent(move);
+  });
+  act(() => root.render(<Surface entryCount={11} />));
+  expect(viewport().scrollTop).toBe(1000);
+});
 function readEarlier() {
   act(() => {
     viewport().dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));

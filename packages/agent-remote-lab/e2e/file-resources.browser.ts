@@ -13,7 +13,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     onPreviewCleanup(() => rm(workspace, { recursive: true, force: true }));
     const codePath = join(workspace, 'main.ts');
     await writeFile(codePath, 'export const greeting = "你好";\n// Read only');
-    await writeFile(join(workspace, 'report.md'), '# Report\n\n**Summary**');
+    await writeFile(join(workspace, 'report.md'), '# Report\n\n**Summary**\n\n' + 'This is a long paragraph for reading source on a mobile screen. '.repeat(20));
     await writeFile(join(workspace, 'page.html'), '<!doctype html><script>window.fileExecuted = true</script>');
     const png = await readFile(new URL('./fixtures/markdown-wide.png', import.meta.url));
     await writeFile(join(workspace, 'wide.png'), png);
@@ -88,6 +88,22 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await panel.getByRole('button', { name: 'Close file preview' }).click();
     await page.getByRole('button', { name: 'Markdown', exact: true }).click();
     await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('**Summary**');
+    const measureSource = () => panel.locator('.cm-content').evaluate(element => {
+      const text = element.querySelector('.cm-line')!;
+      const range = document.createRange(); range.selectNodeContents(text);
+      return { font: getComputedStyle(text).fontSize, height: range.getBoundingClientRect().height,
+        scale: window.visualViewport?.scale };
+    });
+    const wrapped = await measureSource();
+    await panel.getByRole('button', { name: 'Wrap lines', exact: true }).click();
+    await expect.poll(() => panel.locator('.cm-lineWrapping').count()).toBe(0);
+    const unwrapped = await measureSource();
+    expect(unwrapped.height).toBeCloseTo(wrapped.height, 1);
+    expect(unwrapped.font).toBe(wrapped.font);
+    expect(unwrapped.scale).toBe(wrapped.scale);
+    await panel.getByRole('button', { name: 'Wrap lines', exact: true }).click();
+    await expect.poll(() => panel.locator('.cm-lineWrapping').count()).toBe(1);
+    expect((await measureSource()).height).toBeCloseTo(wrapped.height, 1);
     await panel.getByRole('button', { name: 'Close file preview' }).click();
     await page.getByRole('button', { name: 'HTML', exact: true }).click();
     await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('<script>');

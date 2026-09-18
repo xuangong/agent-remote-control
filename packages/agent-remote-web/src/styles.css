@@ -663,7 +663,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-file-heading strong { font-size: 13px; font-weight: 600; }
 .agent-file-heading small { color: var(--agent-muted); font-size: 11px; }
 .agent-file-body { flex: 1; min-height: 0; overflow: hidden; }
-.agent-file-code { height: 100%; min-height: 0; }
+.agent-file-code { height: 100%; min-height: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .agent-file-message { padding: 20px; color: var(--agent-muted); overflow-wrap: anywhere; }
 .agent-file-message[role="alert"] { color: var(--agent-danger); }
 .agent-file-image { display: flex; align-items: flex-start; justify-content: center; padding: 20px; height: 100%; box-sizing: border-box; overflow: auto; }

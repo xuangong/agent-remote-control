@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
+import { sessionActivity } from '../session-activity.js';
 
 export function useSessionEntries(opened: readonly OpenedSession[], state?: AgentReplicaState): SessionEntry[] {
   const [observed, setObserved] = useState<{ entries: SessionEntry[]; childTitles: Map<string, string> }>(() => ({ entries: [], childTitles: new Map() }));
   const agent = state?.agent;
+  const activity = sessionActivity(state);
   const merged = useMemo(() => {
     const items = new Map(observed.entries.map((item) => [sessionKey(item), item]));
     const childTitles = new Map(observed.childTitles);
@@ -16,7 +18,7 @@ export function useSessionEntries(opened: readonly OpenedSession[], state?: Agen
     if (agent?.runtimeInfo.sessionId) {
       const saved = [...items.values()].find((item) => item.agentId === agent.id);
       const current: SessionEntry = { ...saved, hostId: saved?.hostId ?? 'local', agentId: agent.id, providerId: agent.providerId,
-        nativeSessionId: agent.runtimeInfo.sessionId, title: saved?.title ?? 'Current session', status: agent.status };
+        nativeSessionId: agent.runtimeInfo.sessionId, title: saved?.title ?? 'Current session', status: activity };
       items.set(sessionKey(current), { ...items.get(sessionKey(current)), ...current });
       for (const child of agent.runtimeInfo.childSessions ?? []) {
         const entry: SessionEntry = { ...child, hostId: current.hostId, providerId: current.providerId, parentAgentId: agent.id, parentNativeSessionId: current.nativeSessionId };
@@ -25,8 +27,8 @@ export function useSessionEntries(opened: readonly OpenedSession[], state?: Agen
       }
     }
     return { entries: [...items.values()], childTitles };
-  }, [observed, opened, agent]);
+  }, [observed, opened, agent, activity]);
   // Cache relationships independently of the active chat subscription and opened views.
-  useEffect(() => { setObserved(merged); }, [opened, agent]);
+  useEffect(() => { setObserved(merged); }, [opened, agent, activity]);
   return merged.entries;
 }

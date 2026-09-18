@@ -654,9 +654,7 @@ textarea {
 .lab-session-row small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text-secondary); font-size: .8rem; }
 .lab-session-row > span { display: flex; align-items: center; gap: 5px; width: 100%; color: var(--obs-text-secondary); font-size: .72rem; }
 .lab-session-row time { margin-left: auto; }
-.lab-session-indicator { width: 5px; height: 5px; border-radius: 50%; background: var(--obs-success); }
-.lab-session-running, .lab-session-waiting { background: var(--obs-warning); }
-.lab-session-unavailable { background: var(--obs-text-secondary); }
+.lab-session-indicator { width: 5px; height: 5px; border-radius: 50%; color: var(--obs-text-secondary); background: currentColor; }
 .lab-opened-session { display: flex; align-items: center; min-width: 0; }
 .lab-opened-session .lab-session-row { flex: 1; }
 .lab-session-close { flex-shrink: 0; min-height: 32px; width: 28px; padding: 0; border-color: transparent; background: transparent; color: var(--obs-text-secondary); }

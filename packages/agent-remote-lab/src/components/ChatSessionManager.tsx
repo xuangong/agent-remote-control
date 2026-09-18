@@ -30,7 +30,7 @@ export function ChatSessionManager({ current, entries, busy, onOpen }: { current
     </button>
     {expanded ? <SessionTree defaultExpanded nodes={family ? [family] : sessionForest([current])} activeKey={key} renderRow={(item, placeholder) => <button type="button" className="lab-session-row lab-chat-session-row" data-working={!!item.parentNativeSessionId && item.status === 'running' || undefined} aria-current={sessionKey(item) === key ? 'page' : undefined}
       disabled={busy || placeholder || sessionKey(item) === key} onClick={() => onOpen(item)}>
-      <strong>{item.title}</strong><small>{sessionKey(item) === key ? 'Current' : item.parentNativeSessionId ? item.role ?? 'Subagent' : 'Parent'}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small>
+      <strong className="agent-session-title" data-session-status={item.status}>{item.title}</strong><small>{sessionKey(item) === key ? 'Current' : item.parentNativeSessionId ? item.role ?? 'Subagent' : 'Parent'}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small>
     </button>} /> : null}
   </section>;
 }

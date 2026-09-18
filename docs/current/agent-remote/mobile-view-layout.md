@@ -30,6 +30,20 @@ This is deterministic browser coverage without model calls. It does not assert
 physical iOS Safari testing, arbitrary third-party renderer behavior, or support
 below the application's existing 320px minimum width.
 
+## Session title status
+
+Session titles use green for working, yellow for waiting on input, dark text for idle and gray for closed. Starting uses the waiting color, while failed sessions retain the error color. Existing status text and selection backgrounds remain available alongside color. The same palette covers conversation headings and paths, the mobile session selector, opened/discovered session lists, the Sessions tree, inline subagents, Side titles, collapsed windows and the Trace session title.
+
+The current replica supplies activity: pending questions or approvals take precedence over an active turn, and terminal closed/failed states take precedence over stale pending data. Side conversations publish their observed activity through their existing subscriptions so collapsed titles and session lists update without additional connections. Catalog-only rows use their catalog state until a live observation is available. Removing a view from the opened list does not change the underlying session to closed. Regression coverage is in `session-activity.test.ts` and `e2e/session-title-status.spec.ts`.
+
+## Timeline timestamps
+
+Above 1180 CSS pixels, built-in Timeline titles show the event's local calendar date and time by default. Double-clicking any title toggles all title timestamps together, including other mounted conversations and subsequently loaded events. The preference lasts for the current page; a reload shows timestamps again. Each event is formatted through `Intl.DateTimeFormat` without a fixed timezone. Invalid timestamps and optimistic messages without an authoritative event timestamp do not invent a time.
+
+Tool, reasoning and runtime-notice titles retain single-click disclosure. Pointer clicks on the title text wait 500 ms to distinguish a double click; double-clicking toggles timestamps without changing disclosure. Arrows, summaries, subagent links and keyboard disclosure retain their existing actions. Focused message/receipt titles support Enter or Space, and Alt+T within a timeline entry toggles all timestamps. No extra toolbar or timeline row is added.
+
+At 1180 CSS pixels and below, inline timestamps and desktop title controls are hidden. The existing sender-direction swipe reveals the same local timestamp independently of the desktop visibility preference. Browser coverage in `e2e/timeline-time.spec.ts` verifies disclosure independence, synchronized conversations, streaming updates, local date boundaries, the responsive boundary and mobile gestures.
+
 ## Conversation previews
 
 View's **Content only view** checkbox appears above **Simple conversation view**. The two modes are mutually exclusive; clearing the selected mode restores default previews. Content only renders user messages and assistant text/Markdown, including inline Markdown images and links, and groups adjacent visible messages. It also retains plan/task-management tool calls, task boards with their live completion states, and completed interactions including answered questions and approval decisions. Retained tools and answered questions use bounded previews with expandable details. Reasoning, other tools, runtime notices, compaction, resource cards, preview registration controls, renderer extensions, inline subagent lists and Trace shortcuts are hidden. The complete replica remains available to Trace and the other conversation modes. Pending interaction controls and outgoing message delivery feedback remain available. A loaded history page with no matching items shows an empty content state and retains older-history navigation. Browser storage remembers the mode for both primary and Side conversations. Explicitly choosing Show in Conversation for a hidden execution event in Trace switches to Simple mode so the target can be revealed.

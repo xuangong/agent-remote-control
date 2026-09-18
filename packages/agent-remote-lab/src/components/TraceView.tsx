@@ -1,3 +1,4 @@
+import { sessionActivity } from '../session-activity.js';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
 import { createTimelineRenderModel, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
@@ -75,7 +76,7 @@ export function TraceView({ state, visible = true, revealEntry, onShowConversati
         <ul>{waits.map(({ entry, key }) => {
           const current = sessionStatus === 'ready' && state?.agent?.activeTurn?.turnId === entry.turnId && entry.turnId !== undefined;
           return <li key={key} data-wait-call={entry.item.type === 'tool_call' ? entry.item.callId : undefined}>
-            <div><strong>{sessionTitle || state?.agent?.runtimeInfo.sessionId || 'This session'}</strong>
+            <div><strong className="agent-session-title" data-session-status={sessionActivity(state)}>{sessionTitle || state?.agent?.runtimeInfo.sessionId || 'This session'}</strong>
               <span>{current ? 'Waiting for' : 'Last observed waiting for'}</span>
               {traceSessionReferences(entry.item).length ? <TraceSessionLinks item={entry.item} resolveSessionLink={resolveSessionLink} /> : <span>{traceItemSummary(entry.item)}</span>}
             </div>

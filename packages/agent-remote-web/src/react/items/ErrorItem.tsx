@@ -1,3 +1,4 @@
+import { TimelineTitle } from '../TimelineTitle.js';
 import { useId } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ContentPreview } from './ContentPreview.js';
@@ -11,7 +12,7 @@ export function ErrorItem({ item }: { readonly item: Extract<AgentTimelineItem, 
     <button className="agent-notice-toggle" type="button" aria-expanded={expanded} aria-controls={detailsId}
       onClick={toggle}>
       <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
-      <span className="agent-notice-label">Runtime notice</span>
+      <TimelineTitle className="agent-notice-label" disclose={toggle}>Runtime notice</TimelineTitle>
       {!preview ? <span className="agent-notice-summary">{summary.length > 100 ? `${summary.slice(0, 100)}…` : summary}</span> : null}
     </button>
     {preview ? <ContentPreview text={item.message} /> : null}

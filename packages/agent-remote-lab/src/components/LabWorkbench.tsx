@@ -7,6 +7,7 @@ import type {
 import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
 import { AgentCommandDetails, AgentTimeline, PreviewDock, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
 
+import { sessionActivity } from '../session-activity.js';
 import { RecoveryScope } from '../conversation-recovery.js';
 import { LiveControlPanel } from './LiveControlPanel.js';
 import { PlanningControl } from './PlanningControl.js';
@@ -60,6 +61,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
       : runtimeConnection?.state === 'unavailable'
         ? 'Native runtime is unavailable. Changes are unavailable.'
         : undefined;
+  const activity = sessionActivity(state);
   const activityLabel = agentFailure ? 'Agent failed'
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
@@ -70,16 +72,16 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
     : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
     : runtimeConnection?.state === 'restoring' ? 'Restoring'
     : runtimeConnection?.state === 'unavailable' ? 'Unavailable'
-    : state.agent.status === 'closed' ? 'Closed'
-    : state.agent.status === 'starting' ? 'Starting'
-    : state.pendingInteractions.length > 0 || state.agent.status === 'waiting' ? 'Waiting for response'
-    : state.agent.activeTurn || state.agent.status === 'running' ? 'Working'
+    : activity === 'closed' ? 'Closed'
+    : activity === 'starting' ? 'Starting'
+    : activity === 'waiting' ? 'Waiting for response'
+    : activity === 'running' ? 'Working'
     : 'Ready';
   return <div className={`lab-workbench-layout${selectedCommand ? ' lab-command-details-open' : ''}`}>
     <header className="lab-workbench-heading">
       <div>
         {conversationPath}
-        <h2>{hasReplica ? 'Conversation' : isAttaching ? `Connecting to ${attachingAgentId}` : 'Ready for a session'}</h2>
+        <h2 className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `Connecting to ${attachingAgentId}` : 'Ready for a session'}</h2>
       </div>
       {sessionManager}
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? 'Connecting' : 'Awaiting Agent'}</span>

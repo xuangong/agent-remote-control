@@ -560,6 +560,12 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-child-session[data-working] .agent-child-title, .agent-child-status-running { color: var(--agent-action-text); font-weight: 600; }
 .agent-child-status-waiting { color: var(--agent-running); font-weight: 600; }
 .agent-child-status-failed { color: var(--agent-danger); }
+.agent-session-title[data-session-status="running"] { color: var(--agent-success-text); }
+.agent-session-title[data-session-status="waiting"],
+.agent-session-title[data-session-status="starting"] { color: oklch(0.52 0.108 87); }
+.agent-session-title[data-session-status="idle"] { color: var(--agent-ink); }
+.agent-session-title[data-session-status="closed"] { color: var(--agent-muted); }
+.agent-session-title[data-session-status="failed"] { color: var(--agent-danger); }
 @media (max-width: 560px) {
   .agent-child-branch-row { grid-template-columns: 44px minmax(0, 1fr); }
   .agent-child-toggle { width: 44px; min-height: 44px; }
@@ -627,8 +633,16 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 @media (hover: none) { .agent-inspect-entry { opacity: .7; } }
 
 .agent-entry-content { min-width: 0; }
+.agent-timeline-title { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.agent-time-title-label { display: inline-flex; min-width: 0; max-width: 100%; }
+.agent-time-title-control { min-width: 0; max-width: 100%; padding: 0; border: 0; border-radius: 2px; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: inherit; cursor: pointer; }
+.agent-time-title-control:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 3px; }
+.agent-title-time { color: var(--agent-muted); font: 11px/1.4 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; white-space: nowrap; }
+.agent-time-title-mobile { display: none; }
 .agent-entry-time { display: none; }
 @media (max-width: 1180px) {
+  .agent-time-title-control, .agent-title-time { display: none; }
+  .agent-time-title-mobile { display: inline; }
   .agent-timeline-entry { overflow-x: clip; }
   .agent-entry-content { transform: translateX(var(--agent-time-offset, 0px)); transition: transform 180ms ease-out; }
   .agent-timeline-entry[data-time-dragging] > .agent-entry-content { transition: none; }

@@ -111,7 +111,7 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
     {opened.length > 0 ? <section className="lab-session-directory" aria-label="Opened sessions">
       <div className="lab-directory-heading"><h2>Opened sessions</h2><span>{opened.length}</span></div>
       <SessionTree key={search.trim() ? `search:${search}` : 'all'} defaultExpanded={!!search.trim()} nodes={openedTree} activeKey={activeKey} renderRow={(item, placeholder) => <>
-        <button type="button" className="lab-session-row" aria-current={item.agentId === activeAgentId ? 'page' : undefined} disabled={busy || (placeholder && !onOpenRelated)} onClick={() => { const saved = opened.find((entry) => entry.agentId === item.agentId); if (saved && !placeholder) onSelect(saved); else openRelated(item); }}><strong>{item.title}</strong><small>{placeholder ? 'Parent · View closed' : item.role ?? item.providerId}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small></button>
+        <button type="button" className="lab-session-row" aria-current={item.agentId === activeAgentId ? 'page' : undefined} disabled={busy || (placeholder && !onOpenRelated)} onClick={() => { const saved = opened.find((entry) => entry.agentId === item.agentId); if (saved && !placeholder) onSelect(saved); else openRelated(item); }}><strong className="agent-session-title" data-session-status={item.status}>{item.title}</strong><small>{placeholder ? 'Parent · View closed' : item.role ?? item.providerId}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small></button>
         {!placeholder && item.agentId ? <button type="button" className="lab-session-close" aria-label={`Close ${item.title}`} title="Remove from opened sessions" onClick={() => onClose(item.agentId!)}>×</button> : null}
       </>} />
     </section> : null}
@@ -128,9 +128,9 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
         const saved = openedByKey.get(sessionKey(item));
         const current = sessionKey(item) === activeKey;
         return <button type="button" className="lab-session-row" aria-current={current ? 'page' : undefined} disabled={busy || (!saved && (related ? !onOpenRelated : summary?.state === 'unavailable'))} onClick={() => { if (saved) onSelect(saved); else if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>
-          <strong>{item.title || item.nativeSessionId}</strong>
+          <strong className="agent-session-title" data-session-status={item.status ?? summary?.state}>{item.title || item.nativeSessionId}</strong>
           <small>{current ? 'Current session · ' : saved ? 'Opened · ' : ''}{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
-          <span><i className={`lab-session-indicator lab-session-${item.status ?? summary?.state ?? 'unavailable'}`} aria-hidden="true" />{sessionStatusLabel(item) || (summary ? stateLabel(summary.state) : placeholder ? 'Parent session' : 'Discovered')}{summary ? <time dateTime={summary.updatedAt}>{formatTime(summary.updatedAt)}</time> : null}</span>
+          <span><i className="lab-session-indicator agent-session-title" data-session-status={item.status ?? summary?.state} aria-hidden="true" />{sessionStatusLabel(item) || (summary ? stateLabel(summary.state) : placeholder ? 'Parent session' : 'Discovered')}{summary ? <time dateTime={summary.updatedAt}>{formatTime(summary.updatedAt)}</time> : null}</span>
         </button>;
       }} />
       {page?.hasMore ? <button type="button" className="lab-directory-more" disabled={loading || expired} onClick={() => void load(page.nextCursor)}>Load more sessions</button> : null}

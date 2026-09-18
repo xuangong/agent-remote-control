@@ -1,3 +1,4 @@
+import { TimelineTitle } from '../TimelineTitle.js';
 import { useId } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ContentPreview } from './ContentPreview.js';
@@ -30,7 +31,7 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
           <path d="M4 3.5H2.5V14H13.5V3.5H12M5.5 2H10.5V5H5.5V2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
           <path d={!response.dismissed && answeredCount === rows.length ? 'M5 9L7 11L11 7' : 'M5 9H11'} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <span className="agent-question-receipt-status">{status}</span>
+        <TimelineTitle className="agent-question-receipt-status">{status}</TimelineTitle>
         <span className="agent-question-receipt-count">{count}</span>
       </div>
       <button className="agent-question-context-toggle" type="button" aria-expanded={showQuestions} aria-controls={answersId} onClick={toggle}>

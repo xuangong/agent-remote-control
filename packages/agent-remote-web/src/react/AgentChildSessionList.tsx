@@ -50,7 +50,7 @@ export function AgentChildSessionList({ children, childrenFor, label = 'Subagent
           onClick={() => { void open(child); }}>
           <span className="agent-child-icon" aria-hidden="true">↳</span>
           <span className="agent-child-content">
-            <span className="agent-child-title">{child.title}{child.role ? <small>{child.role}</small> : null}</span>
+            <span className="agent-child-title"><span className="agent-session-title" data-session-status={child.status}>{child.title}</span>{child.role ? <small>{child.role}</small> : null}</span>
             {node.children.length > 0 ? <small className="agent-child-descendants" data-working={node.working > (child.status === 'running' ? 1 : 0) || undefined}>{node.total - 1} subagents{node.working ? ` · ${node.working} working in branch` : ''}</small> : null}
             {child.description ? <span className="agent-child-description">{child.description}</span> : null}
           </span>

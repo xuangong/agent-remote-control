@@ -1,3 +1,4 @@
+import { TimelineTitle } from '../TimelineTitle.js';
 import { useId } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ContentPreview } from './ContentPreview.js';
@@ -15,7 +16,7 @@ export function ReasoningItem({ item }: { readonly item: Extract<AgentTimelineIt
       aria-controls={contentId}
       onClick={toggle}
     >
-      <span>Reasoning trace</span><span aria-hidden="true">{expanded ? '−' : '+'}</span>
+      <TimelineTitle disclose={toggle}>Reasoning trace</TimelineTitle><span aria-hidden="true">{expanded ? '−' : '+'}</span>
     </button>
     {preview ? <ContentPreview text={item.text} /> : null}
     <div id={contentId} className="agent-reasoning-details" hidden={!expanded}>{expanded ? <MarkdownContent markdown={item.text} className="agent-reasoning-content" /> : null}</div>

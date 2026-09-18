@@ -1,3 +1,4 @@
+import { TimelineTitle } from '../TimelineTitle.js';
 import type { AgentTaskItem, AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
 
 function status(item: AgentTaskItem): 'pending' | 'in_progress' | 'completed' {
@@ -9,7 +10,7 @@ const labels = { pending: 'Pending', in_progress: 'In progress', completed: 'Com
 
 export function TodoItem({ item }: { readonly item: Extract<AgentTimelineItem, { type: 'todo' }> }) {
   return <article className="agent-timeline-item agent-todo">
-    <header className="agent-item-header"><span className="agent-item-kicker">TASK BOARD</span><strong>Execution plan</strong></header>
+    <header className="agent-item-header"><span className="agent-item-kicker">TASK BOARD</span><TimelineTitle><strong>Execution plan</strong></TimelineTitle></header>
     <ol>{item.items.map((task, index) => {
       const current = status(task);
       return <li key={task.id ?? `${task.text}-${index}`} className={`agent-state-${current}`}>

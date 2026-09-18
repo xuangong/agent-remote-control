@@ -1,3 +1,4 @@
+import { TimelineTitle } from '../TimelineTitle.js';
 import { ToolResultView } from './ToolResultView.js';
 import { Fragment, useId, useState } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
@@ -20,7 +21,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
   const target = reference && resolveSessionLink?.(reference.nativeSessionId);
   const summary = toolSummary(item.detail);
   const offset = reference ? summary.indexOf(reference.title) : -1;
-  const toggleLabel = <><span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span><strong>{item.name}</strong></>;
+  const toggleLabel = <><span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span><TimelineTitle disclose={toggle}><strong>{item.name}</strong></TimelineTitle></>;
   const linkedSummary = references?.length ? <span className="agent-tool-summary agent-tool-references">
     {summary}{' '}{references.map((entry, index) => {
       const destination = resolveSessionLink?.(entry.nativeSessionId);
@@ -58,7 +59,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
         onClick={toggle}
       >
         <span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
-        <strong>{item.name}</strong>
+        <TimelineTitle disclose={toggle}><strong>{item.name}</strong></TimelineTitle>
         <span className={`agent-tool-summary${item.detail.type === 'other' ? ' agent-tool-description' : ''}`}>{toolSummary(item.detail)}</span>
         <span className="agent-state-label">{statusLabels[item.status]}</span>
       </button>}

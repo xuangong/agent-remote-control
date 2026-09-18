@@ -218,9 +218,9 @@ describe('AgentTimeline', () => {
     expect(messages.map((message) => message.dataset.messageGroup)).toEqual([
       'first', 'last', 'single', 'first', 'last',
     ]);
-    expect(messages.map((message) => message.textContent)).toEqual([
-      'AssistantFirst answer', 'AssistantSecond answer', 'AssistantThird answer',
-      'YouFirst prompt', 'YouSecond prompt',
+    expect(messages.map((message) => message.querySelector('.agent-markdown')?.textContent)).toEqual([
+      'First answer', 'Second answer', 'Third answer',
+      'First prompt', 'Second prompt',
     ]);
   });
 

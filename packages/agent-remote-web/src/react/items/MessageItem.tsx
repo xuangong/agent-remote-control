@@ -1,3 +1,4 @@
+import { TimelineTitle } from '../TimelineTitle.js';
 import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
 import { MarkdownContent } from '../MarkdownContent.js';
 import type { MessageGroupPosition } from '../timeline-render-model.js';
@@ -33,7 +34,7 @@ function MessageBubble({ item, messageGroup = 'single', resourceContext }: Messa
     data-message-group={messageGroup}
   >
     <header className="agent-item-header">
-      <span className="agent-item-kicker">{user ? 'You' : 'Assistant'}</span>
+      <TimelineTitle className="agent-item-kicker">{user ? 'You' : 'Assistant'}</TimelineTitle>
     </header>
     <MarkdownContent markdown={item.text} resourceContext={resourceContext} />
   </article>;

@@ -37,6 +37,7 @@ import { DirectoryError, RemoteHostClient, SessionDirectoryClient, type CreateSe
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
+import { sessionActivity } from './session-activity.js';
 import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
 import { PreviewProvider, PreviewWorkspace, TimelineDisplay, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
@@ -130,6 +131,10 @@ export function App({
   const [, setForkRevision] = useState(0);
   useEffect(() => forkStore.subscribe(() => setForkRevision((value) => value + 1)), [forkStore]);
   const [sideSessions, setSideSessions] = useState<OpenedSession[]>([]);
+  const [sideActivity, setSideActivity] = useState<Record<string, ReturnType<typeof sessionActivity>>>({});
+  const observeSideActivity = useCallback((agentId: string, activity: ReturnType<typeof sessionActivity>) => {
+    setSideActivity(current => current[agentId] === activity ? current : { ...current, [agentId]: activity });
+  }, []);
   const [sideSelections, setSideSelections] = useState<SideSelections>({});
   const [sideFocus, setSideFocus] = useState<string>();
   const sideRequests = useRef(new Map<string, number>());
@@ -600,7 +605,17 @@ export function App({
     ancestors.unshift(ancestor);
     ancestorId = ancestor.parentAgentId;
   }
-  const sessionEntries = useSessionEntries(openedSessions, state);
+  const observedSessionEntries = useSessionEntries(openedSessions, state);
+  const sessionEntries = useMemo(() => {
+    const entries = new Map(observedSessionEntries.map(entry => [sessionKey(entry), entry]));
+    for (const session of sideSessions) {
+      if (session.agentId === state?.agent?.id) continue;
+      const key = sessionKey(session);
+      const observed = entries.get(key);
+      entries.set(key, { ...observed, ...session, status: sideActivity[session.agentId] ?? observed?.status });
+    }
+    return [...entries.values()];
+  }, [observedSessionEntries, sideSessions, sideActivity, state?.agent?.id]);
   useEffect(() => {
     const childTitles = new Map(sessionEntries.filter((item) => item.parentNativeSessionId).map((item) => [sessionKey(item), item.title]));
     setOpenedSessions((current) => {
@@ -810,9 +825,9 @@ export function App({
   return <PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
-      {stackPath.length > 1 ? <select aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
-        {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
-      </select> : <span className="lab-mobile-session-title">{activeOpened?.title || 'Agent Remote'}</span>}
+      {stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
+        {stackPath.map((session, index) => <option className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === session.agentId)?.status} key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
+      </select> : <span className="lab-mobile-session-title agent-session-title" data-session-status={sessionActivity(state)}>{activeOpened?.title || 'Agent Remote'}</span>}
     </nav> : null}
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
@@ -948,7 +963,7 @@ export function App({
       >
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
-        <CollapsedConversations sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
+        <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <div className="lab-primary-conversation" hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
         <LabWorkbench
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
@@ -964,10 +979,10 @@ export function App({
           </nav>{directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}{stackRoot ? <SessionLink session={stackRoot} /> : null}</>}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
-              <button type="button" disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
+              <button type="button" className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === ancestor.agentId)?.status} disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
               <span aria-hidden="true"> / </span>
             </span>)}
-            <span aria-current="page">{activeOpened?.title}</span>
+            <span className="agent-session-title" data-session-status={sessionActivity(state)} aria-current="page">{activeOpened?.title}</span>
           </nav> : null}
           resolveSessionLink={resolveSessionLink}
           childrenFor={currentSession ? nativeSessionId => sessionChildren({ ...currentSession, nativeSessionId }, sessionEntries) : undefined}
@@ -981,7 +996,7 @@ export function App({
         />
         </div>
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
-          key={sessionKey(session)} session={session} transport={transport} store={forkStore}
+          key={sessionKey(session)} session={session} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
           position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}
           expanded={expandedKeys.has(sessionKey(session))}
           focused={focusedWindow !== undefined && sessionKey(focusedWindow) === sessionKey(session)}
@@ -990,7 +1005,7 @@ export function App({
           visible={activeView === 'workbench'} draft={messageDrafts[session.agentId] ?? ''}
           onDraftChange={(text) => setMessageDrafts((current) => ({ ...current, [session.agentId]: text }))}
           onFocus={() => { if (sideFocus !== sessionKey(session)) setSideFocus(sessionKey(session)); }} onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
-        <CollapsedConversations sessions={stackPath.slice(stackRange.end + 1)} offset={stackRange.end + 1} onExpand={revealSession} />
+        <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(stackRange.end + 1)} offset={stackRange.end + 1} onExpand={revealSession} />
         </div>
       </section>
       <section

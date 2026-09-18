@@ -44,7 +44,7 @@ for (const engine of [chromium, webkit]) it(`preserves local Markdown images acr
   await writeFile(join(workspace, 'result.png'), Buffer.from(png, 'base64'));
   let browserScript = '';
   const f = await previewFixture({ workspace, servePage: async (request, response) => {
-    if(request.url === '/markdown-fixture.js') { response.setHeader('content-type', 'application/javascript'); response.end(browserScript); return true; }
+    if(request.url === '/markdown-fixture.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
     if(request.url === '/markdown-fixture') { response.setHeader('content-type', 'text/html'); response.end('<!doctype html><div id="root">Loading</div><script src="/markdown-fixture.js"></script>'); return true; }
     return false;
   } });
@@ -118,7 +118,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   let browserScript = '';
   const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
   const f = await previewFixture({ ttlMs: 8000, target: `http://127.0.0.1:${port}`, servePage: async (request, response) => {
-    if (request.url === '/workbench.js') { response.setHeader('content-type', 'application/javascript'); response.end(browserScript); return true; }
+    if (request.url === '/workbench.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
     if (request.url === '/workbench') { response.setHeader('content-type', 'text/html'); response.setHeader('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https://external.test"); response.end(`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style><div id="root"></div><script src="/workbench.js"></script>`); return true; }
     return false;
   } });
@@ -154,6 +154,8 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   const page = await context.newPage(); page.setDefaultTimeout(7000);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(f.url + '/workbench');
+  await page.waitForLoadState('networkidle');
+  expect(errors).toEqual([]);
   const viewButton = page.getByRole('button', { name: 'View options', exact: true });
   const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
   for (const trigger of [viewButton, settingsButton]) {

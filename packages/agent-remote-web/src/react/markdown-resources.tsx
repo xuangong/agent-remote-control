@@ -1,18 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import type { ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 
-import type { AgentReplicaState } from '../replica/types.js';
+import { FilePreviewContext } from './FilePreviewContext.js';
 import { MarkdownImageFrame } from './MarkdownImageFrame.js';
 import { canPreviewImage } from './ResourceCard.js';
 
-export interface MarkdownResourceContext {
-  readonly scopeKey: string;
-  readonly bindings: readonly ResourceBinding[];
-  readonly resources: AgentReplicaState['resources'];
-  readonly resolveResource: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
-  readonly requestResource: (binding: ResourceBinding) => Promise<void>;
-}
-
+export type { MarkdownResourceContext } from './local-resource.js';
+import { loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
 interface HastNode {
   type?: string;
   tagName?: string;
@@ -21,26 +15,26 @@ interface HastNode {
   children?: HastNode[];
 }
 
-const resolutions = new Map<string, Promise<ResourceBinding>>();
-const requests = new Map<string, Promise<void>>();
-const MAX_CACHE_ENTRIES = 256;
-
-export function markLocalMarkdownImages() {
+export function markLocalMarkdownResources() {
   return (tree: HastNode): void => visit(tree);
 }
 
-function visit(node: HastNode): void {
+function visit(node: HastNode, linked = false): void {
+  if (node.type === 'element' && node.tagName === 'a' && typeof node.properties?.href === 'string' && isLocalLocator(node.properties.href)) {
+    node.data = { ...node.data, localResourceLocator: node.properties.href };
+    delete node.properties.href;
+  }
   if (node.type === 'element' && node.tagName === 'img' && typeof node.properties?.src === 'string') {
     const locator = node.properties.src;
     if (isLocalLocator(locator)) {
-      node.data = { ...node.data, localResourceLocator: locator };
+      node.data = { ...node.data, localResourceLocator: locator, linked };
       delete node.properties.src;
     }
   }
-  node.children?.forEach(visit);
+  node.children?.forEach(child => visit(child, linked || node.tagName === 'a'));
 }
 
-function isLocalLocator(locator: string): boolean {
+export function isLocalLocator(locator: string): boolean {
   if (!locator || locator.startsWith('//') || locator.startsWith('#')) return false;
   try {
     const url = new URL(locator);
@@ -61,6 +55,7 @@ export function MarkdownResourceImage({
   readonly context?: MarkdownResourceContext;
   readonly sourceLocator?: string;
 }) {
+  const preview = useContext(FilePreviewContext);
   const imageNode = node as HastNode | undefined;
   const locator = typeof imageNode?.data?.localResourceLocator === 'string'
     ? imageNode.data.localResourceLocator
@@ -73,7 +68,7 @@ export function MarkdownResourceImage({
   useEffect(() => {
     let current = true;
     if (!locator || !context) return () => { current = false; };
-    void load(context, locator, sourceLocator, (resolved) => {
+    void loadLocalResource(context, locator, sourceLocator, (resolved) => {
       if (current) setResult({ key, binding: resolved });
     }).catch((error: unknown) => {
       if (current) setResult(previous => ({ key, binding: previous?.key === key ? previous.binding : undefined,
@@ -90,48 +85,8 @@ export function MarkdownResourceImage({
     : detail?.status === 'failed' ? detail.message
     : binding?.status === 'unavailable' ? 'Image resource is unavailable.'
     : detail?.status === 'available' && !canPreviewImage(detail.mediaType) ? 'This resource is not a supported image.' : undefined);
-  return <MarkdownImageFrame key={key} src={src} alt={alt ?? locator} failure={reason}
+  const frame = <MarkdownImageFrame key={key} src={src} alt={alt ?? locator} failure={reason}
     dimensions={detail?.status === 'available' ? detail.imageDimensions : undefined} />;
-}
-
-async function load(
-  context: MarkdownResourceContext,
-  locator: string,
-  sourceLocator: string | undefined,
-  onResolved: (binding: ResourceBinding) => void,
-): Promise<ResourceBinding> {
-  const existing = sourceLocator === undefined ? context.bindings.find((binding) => binding.locator === locator) : undefined;
-  const resolveKey = JSON.stringify([context.scopeKey, sourceLocator ?? null, locator]);
-  let resolution = existing ? Promise.resolve(existing) : resolutions.get(resolveKey);
-  if (!resolution) {
-    resolution = context.resolveResource(locator, sourceLocator).catch((error) => {
-      resolutions.delete(resolveKey);
-      throw error;
-    });
-    cache(resolutions, resolveKey, resolution);
-  }
-  const binding = await resolution;
-  onResolved(binding);
-  if (binding.status === 'unavailable') return binding;
-  const detail = context.resources[binding.resourceId];
-  if (detail?.status === 'unavailable') return binding;
-  if (detail?.status === 'available' && 'contentBase64' in detail) return binding;
-  // Metadata can arrive while the same immutable resource is already in flight.
-  const requestKey = JSON.stringify([context.scopeKey, binding.resourceId]);
-  let request = requests.get(requestKey);
-  if (!request) {
-    request = context.requestResource(binding);
-    cache(requests, requestKey, request);
-    void request.then(
-      () => { if (requests.get(requestKey) === request) requests.delete(requestKey); },
-      () => { if (requests.get(requestKey) === request) requests.delete(requestKey); },
-    );
-  }
-  await request;
-  return binding;
-}
-
-function cache<T>(entries: Map<string, T>, key: string, value: T): void {
-  entries.set(key, value);
-  while (entries.size > MAX_CACHE_ENTRIES) entries.delete(entries.keys().next().value as string);
+  return preview && !imageNode?.data?.linked ? <button type="button" className="agent-resource-image-open" aria-label={`Open image: ${alt ?? locator}`}
+    onClick={() => preview.open({ locator, sourceLocator, context })}>{frame}</button> : frame;
 }

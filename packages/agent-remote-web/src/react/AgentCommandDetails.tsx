@@ -1,3 +1,4 @@
+import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { AgentCommand, ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
@@ -6,7 +7,7 @@ import { MarkdownContent } from './MarkdownContent.js';
 export interface AgentCommandDetailsProps {
   command: AgentCommand;
   resources: AgentReplicaState['resources'];
-  onRequestResource?(binding: ResourceBinding): Promise<void>;
+  onRequestResource?(binding: ResourceBinding): Promise<void | ResourceResponseState>;
   onResolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
   resourceScopeKey?: string;
   onClose(): void;

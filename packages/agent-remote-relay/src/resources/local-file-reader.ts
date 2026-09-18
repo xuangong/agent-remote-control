@@ -2,10 +2,13 @@ import { constants } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { detectMediaType } from './media-type.js';
 
 import type { AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
 
-export const DEFAULT_MAX_LOCAL_RASTER_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_MAX_LOCAL_RESOURCE_BYTES = 4 * 1024 * 1024;
+
+export const DEFAULT_MAX_LOCAL_TEXT_BYTES = 1024 * 1024;
 
 export interface LocalFileResourceReader {
   read(locator: string, sourceLocator?: string): Promise<AgentResourceReadResult>;
@@ -19,7 +22,7 @@ export interface LocalFileResourceReaderOptions {
 export async function createLocalFileResourceReader(
   options: LocalFileResourceReaderOptions,
 ): Promise<LocalFileResourceReader> {
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_LOCAL_RASTER_BYTES;
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_LOCAL_RESOURCE_BYTES;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new RangeError('Local resource byte limit must be positive.');
   const roots = [...new Set(await Promise.all(options.roots.map((root) => realpath(root))))];
   if (roots.length === 0) throw new Error('At least one local resource root is required.');
@@ -41,7 +44,8 @@ export async function createLocalFileResourceReader(
       let handle;
       try {
         const expected = await stat(canonical);
-        handle = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        if (!expected.isFile()) return unavailable('Local resource is not a regular file.');
+        handle = await open(canonical, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
         const opened = await handle.stat();
         if (!opened.isFile()) return unavailable('Local resource is not a regular file.');
         if (opened.dev !== expected.dev || opened.ino !== expected.ino) return unavailable('Local resource changed while it was opened.');
@@ -58,10 +62,15 @@ export async function createLocalFileResourceReader(
           return unavailable('Local resource changed while it was read.');
         }
         const bytes = buffer.slice(0, length);
-        const mediaType = rasterMediaType(bytes);
-        return mediaType
-          ? { status: 'available', bytes, mediaType }
-          : unavailable('Local resource is not a supported raster image.');
+        const mediaType = detectMediaType(bytes);
+        const image = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mediaType);
+        if (!image) {
+          if (!['text/plain', 'text/html', 'image/svg+xml', 'application/json'].includes(mediaType) || bytes.includes(0)) {
+            return unavailable('Local resource is not a supported image or UTF-8 text file.');
+          }
+          if (bytes.byteLength > DEFAULT_MAX_LOCAL_TEXT_BYTES) return unavailable('Text preview exceeds the 1 MiB limit.');
+        }
+        return { status: 'available', bytes, mediaType };
       } catch {
         return unavailable('Local resource could not be read.');
       } finally {
@@ -101,19 +110,6 @@ function localSourcePath(locator: string): string | undefined {
 function contains(root: string, candidate: string): boolean {
   const path = relative(root, candidate);
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path));
-}
-
-function rasterMediaType(bytes: Uint8Array): string | undefined {
-  if (startsWith(bytes, [137, 80, 78, 71, 13, 10, 26, 10])) return 'image/png';
-  if (startsWith(bytes, [255, 216, 255])) return 'image/jpeg';
-  const header = String.fromCharCode(...bytes.slice(0, 12));
-  if (header.startsWith('GIF87a') || header.startsWith('GIF89a')) return 'image/gif';
-  if (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP') return 'image/webp';
-  return undefined;
-}
-
-function startsWith(bytes: Uint8Array, signature: readonly number[]): boolean {
-  return signature.every((value, index) => bytes[index] === value);
 }
 
 function unavailable(reason: string): AgentResourceReadResult {

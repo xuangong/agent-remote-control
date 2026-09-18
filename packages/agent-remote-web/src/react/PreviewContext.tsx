@@ -135,7 +135,7 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
   }), [canManage, client, currentState, hostId, refresh, scope, requests, updateBrowsers]);
 
   return <Context.Provider value={value}><DockContext.Provider value={{ browsers: currentBrowsers, activeKey, resume: resumeBrowser, close: closeBrowser }}>
-    <PreviewWorkspaceContext.Provider value={{ open: currentBrowsers.some(entry => entry.key === activeKey), setContainer }}>
+    <PreviewWorkspaceContext.Provider value={{ open: currentBrowsers.some(entry => entry.key === activeKey), setContainer, hide: minimizeBrowser }}>
     {children}
     {currentBrowsers.map(browser => {
       const selected = currentState.registrations.find(item => item.id === browser.id);

@@ -35,6 +35,30 @@ describe('local file resource reader', () => {
     await expect(reader.read('./my%20image.png', document)).resolves.toMatchObject({ status: 'available', mediaType: 'image/png' });
   });
 
+  test('reads code, Markdown and HTML as source through the same authorized reader', async () => {
+    const root = await workspace();
+    const reader = await createLocalFileResourceReader({ roots: [root] });
+    for (const [name, text, mediaType] of [
+      ['source.ts', 'export const greeting = "你好";', 'text/plain'],
+      ['report.md', '# Report\n\n![Result](./result.png)', 'text/plain'],
+      ['page.html', '<!doctype html><script>alert(1)</script>', 'text/html'],
+      ['config.json', '{"enabled": true}', 'application/json'],
+      ['icon.svg', '<svg><script>alert(1)</script></svg>', 'image/svg+xml'],
+    ]) {
+      await writeFile(join(root, name!), text!);
+      await expect(reader.read(name!)).resolves.toEqual({ status: 'available', mediaType, bytes: new TextEncoder().encode(text) });
+    }
+  });
+
+  test('bounds text previews and rejects binary bytes disguised as source', async () => {
+    const root = await workspace();
+    const reader = await createLocalFileResourceReader({ roots: [root] });
+    await writeFile(join(root, 'binary.ts'), Uint8Array.from([97, 0, 98]));
+    await writeFile(join(root, 'large.ts'), 'a'.repeat(1024 * 1024 + 1));
+    await expect(reader.read('binary.ts')).resolves.toMatchObject({ status: 'unavailable' });
+    await expect(reader.read('large.ts')).resolves.toMatchObject({ status: 'unavailable' });
+  });
+
   test('denies paths outside the authorized roots including traversal and symlink escapes', async () => {
     const root = await workspace();
     const outsideRoot = await workspace();
@@ -50,13 +74,13 @@ describe('local file resource reader', () => {
 
   test('denies unsupported, empty, non-regular, and oversized files before returning bytes', async () => {
     const root = await workspace();
-    await writeFile(join(root, 'text.png'), 'not really png');
+    await writeFile(join(root, 'binary.bin'), Uint8Array.from([0, 1, 2, 255]));
     await writeFile(join(root, 'empty.png'), '');
     await writeFile(join(root, 'large.png'), Uint8Array.from([...PNG, ...new Uint8Array(32)]));
     await mkdir(join(root, 'directory.png'));
     const reader = await createLocalFileResourceReader({ roots: [root], maxBytes: 16 });
 
-    await expect(reader.read('text.png')).resolves.toMatchObject({ status: 'unavailable' });
+    await expect(reader.read('binary.bin')).resolves.toMatchObject({ status: 'unavailable' });
     await expect(reader.read('empty.png')).resolves.toMatchObject({ status: 'unavailable' });
     await expect(reader.read('large.png')).resolves.toMatchObject({ status: 'unavailable' });
     await expect(reader.read('directory.png')).resolves.toMatchObject({ status: 'unavailable' });

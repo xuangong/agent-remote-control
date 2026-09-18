@@ -33,6 +33,11 @@
   },
   "dependencies": {
     "@agent-remote-controller/agent-remote-protocol": "workspace:*",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.4",
+    "@codemirror/view": "^6.43.11",
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1"

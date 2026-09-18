@@ -44,7 +44,7 @@ export function SideConversation({ session, transport, store, draft, onDraftChan
     loadOlder: () => active.loadOlder(), sendMessage: async (text, options) => { await active.sendMessage(text, options); }, cancel: async () => { await active.cancel(); },
     setPlanning: async (value) => { await active.setPlanning(value); }, setSessionSetting: async (id, value) => { await active.setSessionSetting(id, value); },
     listCommands: () => active.listCommands(), executeCommand: (id, args) => active.executeCommand(id, args),
-    respondToInteraction: async (id, response) => { await active.respondToInteraction(id, response); }, requestResource: async (binding) => { await active.requestResource(binding.resourceId); },
+    respondToInteraction: async (id, response) => { await active.respondToInteraction(id, response); }, requestResource: async (binding) => (await active.requestResource(binding.resourceId)).payload.state,
     resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
   } : {};
   return <aside className="lab-side-conversation" aria-label="Side conversation" ref={panel} onFocusCapture={onFocus} hidden={!expanded} style={{ order: position }}>

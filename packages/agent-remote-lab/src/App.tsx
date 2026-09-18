@@ -1,3 +1,4 @@
+import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
 import { SessionLink } from './components/SessionLink.js';
@@ -77,7 +78,7 @@ export interface AppActions {
   listCommands?(): Promise<AgentCommand[]>;
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
   respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
-  requestResource?(binding: ResourceBinding): Promise<void>;
+  requestResource?(binding: ResourceBinding): Promise<void | ResourceResponseState>;
   resolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
   advanceFixture?(): void | Promise<void>;
   rehydrateFixture?(): void | Promise<void>;
@@ -814,7 +815,7 @@ export function App({
     setSessionSetting: async (id, value) => { await runMutation(() => commandClient().setSessionSetting(id, value)); },
     setPlanning: async (active) => { await runMutation(() => commandClient().setPlanning(active)); },
     respondToInteraction: async (requestId, response) => { await runMutation(() => commandClient().respondToInteraction(requestId, response)); },
-    requestResource: async (binding) => { await commandClient().requestResource(binding.resourceId); },
+    requestResource: async (binding) => (await commandClient().requestResource(binding.resourceId)).payload.state,
     resolveResource: (locator, sourceLocator) => commandClient().resolveResource(locator, sourceLocator),
     ...(fixtureAction && activeAgentId && state?.agent?.providerId === 'recorded' && !activeRemoteSession ? {
       advanceFixture: () => fixtureAction(activeAgentId, 'advance'),
@@ -955,7 +956,7 @@ export function App({
       </div>
     </SupportingRail>
     {!compactLayout && contextVisible ? <SidebarResize width={sidebar.width} maximum={sidebar.maximum} onChange={sidebar.setWidth} /> : null}
-    <PreviewWorkspace className="lab-main-stage" {...backgroundInert}>
+    <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
       <section
         ref={workbenchPanelRef}
         id="lab-workbench"

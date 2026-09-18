@@ -1,3 +1,4 @@
+import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import { useContext, useRef, useState } from 'react';
 import type {
   AgentInteractionResponse,
@@ -35,7 +36,7 @@ export interface AgentTimelineProps {
   readonly onLoadOlder?: () => void | Promise<void>;
   readonly onInteractionResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
   readonly interactionDisabled?: boolean;
-  readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void>;
+  readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
   readonly onResourceResolve?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
   readonly questionDrafts?: Readonly<Record<string, QuestionDraft>>;
   readonly onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void;

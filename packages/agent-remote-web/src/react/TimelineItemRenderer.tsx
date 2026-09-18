@@ -1,3 +1,4 @@
+import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentTimelineItem, ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
 import { useMemo } from 'react';
@@ -19,7 +20,7 @@ export interface TimelineItemRendererProps {
   readonly resourceBindings?: readonly ResourceBinding[];
   readonly resourceScopeKey?: string;
   readonly onResourceResolve?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
-  readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void>;
+  readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
 }
 
 export function TimelineItemRenderer({ item, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest }: TimelineItemRendererProps) {

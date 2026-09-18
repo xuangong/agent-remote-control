@@ -1,3 +1,4 @@
+import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
@@ -22,7 +23,7 @@ export interface AgentComposerProps {
   onListCommands?(): Promise<AgentCommand[]>;
   onExecuteCommand?(id: string, args: string): Promise<AgentCommandResult>;
   onInspectCommand?(command: AgentCommand): void;
-  onRequestResource?(binding: ResourceBinding): Promise<void>;
+  onRequestResource?(binding: ResourceBinding): Promise<void | ResourceResponseState>;
   onResolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
 }
 

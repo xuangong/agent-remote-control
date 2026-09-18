@@ -1,7 +1,9 @@
-import { act } from 'react';
+import { act, useContext } from 'react';
 import { expect, it, vi } from 'vitest';
 
 import { render, rerender, unmount } from '../test/setup.js';
+import { PreviewWorkspace } from './PreviewWorkspace.js';
+import { FilePreviewContext } from './FilePreviewContext.js';
 import { HttpPreviewClient } from '../client/preview-client.js';
 import { PreviewDock, PreviewProvider, usePreviewController, type PreviewContextValue } from './PreviewContext.js';
 
@@ -219,4 +221,29 @@ it('stops retained preview renewal immediately after local unregister even when 
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); window.dispatchEvent(new Event('pageshow')); });
     expect(renew).toHaveBeenCalledTimes(1);
   } finally { await unmount(container); snapshot.resolve({ registrations: [] }); vi.useRealTimers(); }
+});
+
+
+vi.mock('./FilePreview.js', () => ({ FilePreview: () => <section data-file-preview /> }));
+
+it('shares the sidebar between file and webpage previews without losing the webpage dock', async () => {
+  const client = previewClient(vi.fn(async () => 'entry'));
+  let controller!: PreviewContextValue;
+  function FileLink() {
+    const files = useContext(FilePreviewContext)!;
+    return <button onClick={() => files.open({ locator: './report.md', context: {
+      scopeKey: 'session', resources: {}, bindings: [], resolveResource: vi.fn(), requestResource: vi.fn(),
+    } })}>Open file</button>;
+  }
+  const container = await render(<PreviewProvider client={client} hostId="one" canManage><PreviewWorkspace>
+    <Probe capture={value => controller = value} /><FileLink />
+  </PreviewWorkspace></PreviewProvider>);
+  await act(async () => { await controller.open('preview', 'http://localhost:5173', 'agent'); });
+  expect(container.querySelector('[data-browser]')?.getAttribute('data-visible')).toBe('true');
+  await act(async () => Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Open file')!.click());
+  expect(container.querySelector('[data-file-preview]')).not.toBeNull();
+  expect(container.querySelector('[data-browser]')?.getAttribute('data-visible')).toBe('false');
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-key]')!.click());
+  expect(container.querySelector('[data-file-preview]')).toBeNull();
+  expect(container.querySelector('[data-browser]')?.getAttribute('data-visible')).toBe('true');
 });

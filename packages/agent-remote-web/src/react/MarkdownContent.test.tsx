@@ -2,6 +2,7 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { render, rerender } from '../test/setup.js';
+import { FilePreviewContext } from './FilePreviewContext.js';
 import { MarkdownContent } from './MarkdownContent.js';
 
 describe('MarkdownContent', () => {
@@ -94,7 +95,7 @@ describe('MarkdownContent', () => {
     expect(container.textContent).toContain('unsafe');
     expect(container.textContent).toContain('Diagram');
     expect(Array.from(container.querySelectorAll('a'), (link) => link.getAttribute('href'))).toEqual([
-      '/docs/guide', '#result', 'mailto:hello@example.com',
+      '#result', 'mailto:hello@example.com',
     ]);
   });
 
@@ -268,4 +269,19 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('img')).not.toBeNull();
   });
 
+});
+
+it('opens local file links through resource RPC without navigating the site', async () => {
+  const opened: string[] = [];
+  const resourceContext = { scopeKey: 'file-links', bindings: [], resources: {}, resolveResource: vi.fn(), requestResource: vi.fn() };
+  const container = await render(<FilePreviewContext.Provider value={{ open: request => { opened.push(request.locator); } }}>
+    <MarkdownContent markdown={'[Absolute](/workspace/report.md) [Relative](./src/main.ts) [File](file:///workspace/report.md) [Web](https://example.com) [Anchor](#details)'} resourceContext={resourceContext} />
+  </FilePreviewContext.Provider>);
+  const local = Array.from(container.querySelectorAll<HTMLButtonElement>('button'));
+  expect(local.map(button => button.textContent)).toEqual(['Absolute', 'Relative', 'File']);
+  for (const button of local) await act(async () => button.click());
+  expect(opened).toEqual(['/workspace/report.md', './src/main.ts', 'file:///workspace/report.md']);
+  expect(container.querySelector('a[href="https://example.com"]')).not.toBeNull();
+  expect(container.querySelector('a[href="#details"]')).not.toBeNull();
+  expect(resourceContext.resolveResource).not.toHaveBeenCalled();
 });

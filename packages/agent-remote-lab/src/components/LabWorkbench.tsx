@@ -1,3 +1,4 @@
+import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
 import { useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
@@ -21,7 +22,7 @@ export interface LabWorkbenchActions {
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
   respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
-  requestResource?(binding: ResourceBinding): Promise<void>;
+  requestResource?(binding: ResourceBinding): Promise<void | ResourceResponseState>;
   resolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
   setPlanning?(active: boolean): Promise<void>;
   setSessionSetting?(id: string, value: string): Promise<void>;

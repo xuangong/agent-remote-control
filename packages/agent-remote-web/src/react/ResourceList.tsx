@@ -1,3 +1,4 @@
+import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 
@@ -7,7 +8,7 @@ import { canPreviewImage, ResourceCard } from './ResourceCard.js';
 export interface ResourceListProps {
   readonly bindings: readonly ResourceBinding[];
   readonly resources: AgentReplicaState['resources'];
-  readonly onRequest?: (binding: ResourceBinding) => Promise<void>;
+  readonly onRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
 }
 
 export function ResourceList({ bindings, resources, onRequest }: ResourceListProps) {

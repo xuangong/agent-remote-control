@@ -98,3 +98,5 @@ flowchart LR
 - `packages/agent-remote-lab/src/server/session-directory.ts:16`
 
 Provider feasibility and delivery order: [Paseo comparison and gap ledger](provider-gap-analysis.md).
+
+- [Session connection diagnostics](session-recovery-errors.md): error boundaries, recovery behavior, and Controller log fields.

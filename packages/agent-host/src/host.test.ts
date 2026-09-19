@@ -1,3 +1,4 @@
+import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/src/index.js';
 import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -134,7 +135,7 @@ describe('Agent Host runtime', () => {
       const result = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'relay',
         body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native' }) });
       expect(result.status).toBe(503);
-      expect(JSON.parse(result.body)).toEqual({ code: 'mutation_outcome_unknown', error: 'Remote Host operation outcome is unknown.' });
+      expect(JSON.parse(result.body)).toEqual({ code: 'session_attach_failed', error: 'The Host could not open the native session. Check the Controller log and reopen it from the session list.', requestId: expect.any(String) });
       expect(app.child.killed).toBe(true);
     } finally { await host.close(); }
   });
@@ -473,13 +474,13 @@ describe('Agent Host runtime', () => {
       const first = await broker.rpc('GET', '/remote/catalog?providerId=codex&limit=1');
       const cursor = JSON.parse(first.body).nextCursor as string;
       const expired = await broker.rpc('GET', `/remote/catalog?providerId=dsh&cursor=${encodeURIComponent(cursor)}`);
-      expect(expired).toEqual({ status: 409, body: JSON.stringify({ error: 'The catalog read view is unavailable. Refresh the catalog.', code: 'cursor_expired' }) });
+      expect(expired).toEqual({ status: 409, body: JSON.stringify({ error: 'The catalog read view is unavailable. Refresh the catalog.', code: 'cursor_expired', requestId: 'rpc-2' }) });
       const invalidCursor = await broker.rpc('GET', '/remote/catalog?providerId=codex&cursor=invalid');
-      expect(invalidCursor).toEqual({ status: 400, body: JSON.stringify({ error: 'Invalid catalog cursor.', code: 'invalid_request' }) });
+      expect(invalidCursor).toEqual({ status: 400, body: JSON.stringify({ error: 'Invalid catalog cursor.', code: 'invalid_request', requestId: 'rpc-3' }) });
       const invalidLimit = await broker.rpc('GET', '/remote/catalog?providerId=codex&limit=0');
-      expect(invalidLimit).toEqual({ status: 400, body: JSON.stringify({ error: 'Catalog page size must be an integer from 1 to 100.', code: 'invalid_request' }) });
+      expect(invalidLimit).toEqual({ status: 400, body: JSON.stringify({ error: 'Catalog page size must be an integer from 1 to 100.', code: 'invalid_request', requestId: 'rpc-4' }) });
       const unavailable = await broker.rpc('GET', '/remote/catalog?providerId=failing');
-      expect(unavailable).toEqual({ status: 503, body: JSON.stringify({ error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' }) });
+      expect(unavailable).toEqual({ status: 503, body: JSON.stringify({ error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable', requestId: 'rpc-5' }) });
     } finally { await host.close(); await broker.close(); }
   });
   it('returns both identities and deduplicates a creation request', async () => {
@@ -804,3 +805,76 @@ it('routes workspace browsing over the uplink without disrupting heartbeats', as
     expect(runtime.state).toBe('registered');
   } finally { await runtime.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+
+it('reports a confirmed attach failure over a real uplink without classifying it as a mutation', async () => {
+  const broker = await uplinkBroker('diagnostic-host');
+  const registration = fixture('codex');
+  registration.directory.open = async () => { throw new Error('native payload and arc_secret'); };
+  const diagnostics: unknown[] = [];
+  const host = createAgentHost({ registrations: [registration], installationId: 'diagnostic-installation', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'test-key' }, onRequestDiagnostic: diagnostic => { diagnostics.push(diagnostic); } });
+  try {
+    await host.ready;
+    const result = await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'codex', nativeSessionId: 'native' });
+    expect(result.status).toBe(503);
+    expect(JSON.parse(result.body)).toMatchObject({ code: 'session_attach_failed', requestId: 'rpc-1' });
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ event: 'host_request_started', requestId: 'rpc-1', operation: 'session_attach' }),
+      expect.objectContaining({ event: 'host_request_completed', requestId: 'rpc-1', operation: 'session_attach', code: 'session_attach_failed', status: 503, elapsedMs: expect.any(Number) }),
+    ]);
+    expect(JSON.stringify(diagnostics)).not.toMatch(/arc_secret|native payload/);
+  } finally { await host.close(); await broker.close(); }
+});
+
+
+it('reuses a slow native opening after a Relay timeout over a real WebSocket', async () => {
+  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 50 });
+  const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));
+  const { key } = await pairing!.json();
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await once(server, 'listening');
+  server.on('connection', async socket => {
+    const prepared = await broker.prepareUpgrade(new Request('http://relay.test/ws/remote-host', { headers: { authorization: `Bearer ${key}` } }));
+    if (!prepared || prepared instanceof Response) { socket.close(); return; }
+    const relaySocket: RelaySocket = {
+      get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
+      send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
+      onMessage(listener) { const receive = (data: import('ws').RawData, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
+      onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
+      onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
+    };
+    prepared.accept(relaySocket);
+  });
+  const registration = fixture('codex');
+  const open = registration.directory.open;
+  let release!: () => void, completed!: () => void, openings = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const settled = new Promise<void>(resolve => { completed = resolve; });
+  registration.directory.open = async id => { openings++; await gate; return open(id); };
+  const diagnostics: Array<{ requestId: string; event: string }> = [];
+  const host = createAgentHost({ registrations: [registration], installationId: 'slow-host', name: 'Host',
+    uplink: { url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, remoteKey: key },
+    onRequestDiagnostic(diagnostic) { diagnostics.push(diagnostic); if (diagnostic.event === 'host_request_completed') completed(); } });
+  try {
+    const { hostId } = await host.ready;
+    const request = () => broker.handleRequest(new Request(`http://relay.test/v1/remote/hosts/${hostId}/attach`, {
+      method: 'POST', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'slow-native' }),
+    }));
+    const timeout = await request();
+    expect(timeout?.status).toBe(504);
+    const failure = await timeout!.json();
+    expect(failure.code).toBe('session_attach_timeout');
+    expect(diagnostics).toContainEqual(expect.objectContaining({ requestId: failure.requestId, event: 'host_request_started' }));
+    release(); await settled;
+    const result = await request();
+    expect(result?.status).toBe(200);
+    expect(await result!.json()).toMatchObject({ nativeSessionId: 'slow-native' });
+    expect(openings).toBe(1);
+    expect(registration.sessions.get('slow-native')?.sentMessages).toEqual([]);
+  } finally {
+    release(); await host.close(); broker.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}, 10000);

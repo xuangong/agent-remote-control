@@ -667,3 +667,40 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   const promise = new Promise<T>((accept) => { resolve = accept; });
   return { promise, resolve };
 }
+
+
+it('shows recovery waiting without a failure alert and clears it after a successful retry', async () => {
+  vi.useFakeTimers();
+  window.history.replaceState(null, '', '/?host=desk&agent=stale&provider=codex&session=native');
+  const request = vi.fn().mockResolvedValueOnce(Response.json({ code: 'session_attach_timeout', error: 'Timeout', requestId: 'rpc-1' }, { status: 504 }))
+    .mockResolvedValue(Response.json({ agentId: 'restored', nativeSessionId: 'native' }));
+  vi.stubGlobal('fetch', request);
+  const connect = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
+  try {
+    const container = await render(<App transport={labTransport({ connect })} />);
+    expect(container.querySelector('.lab-session-notice [role="status"]')?.textContent).toContain('may still be opening');
+    expect(container.querySelector('.lab-session-notice [role="alert"]')).toBeNull();
+    expect(connect).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(connect).toHaveBeenCalledWith('restored', expect.any(Object));
+    expect(container.querySelector('.lab-session-notice')).toBeNull();
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
+});
+
+
+it('notifies a failed send without clearing the draft or replaying it after dismissal', async () => {
+  const sendMessage = vi.fn(async () => { throw new Error('The message was not accepted.'); });
+  const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{ sendMessage }} />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Keep this failed message');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  expect(container.querySelector('.lab-toast')?.textContent).toContain('The message was not accepted.');
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-toast button')!.click());
+  expect(input.value).toBe('Keep this failed message');
+  expect(sendMessage).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('The message was not accepted.');
+});

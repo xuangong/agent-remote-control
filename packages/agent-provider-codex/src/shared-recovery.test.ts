@@ -600,12 +600,14 @@ describe('shared Codex recovery', () => {
     })));
     const releases = harnesses.map(() => deferred());
     let entered = 0;
+    const enteredRoots: number[] = [];
     let active = 0;
     let maximumActive = 0;
     harnesses.forEach(({ server }, index) => {
       server.requestHook = async ({ connection, method }) => {
         if (connection !== 2 || method !== 'initialize') return undefined;
         entered += 1;
+        enteredRoots.push(index);
         active += 1;
         maximumActive = Math.max(maximumActive, active);
         await releases[index].promise;
@@ -620,7 +622,7 @@ describe('shared Codex recovery', () => {
     expect(entered).toBe(4);
     expect(maximumActive).toBe(4);
 
-    releases[0].resolve(undefined);
+    releases[enteredRoots[0]!]!.resolve(undefined);
     await expect.poll(() => entered).toBe(5);
     for (const release of releases) release.resolve(undefined);
     await Promise.all(harnesses.map(({ session }) => expect.poll(async () =>

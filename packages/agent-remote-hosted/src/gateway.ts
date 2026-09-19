@@ -1,3 +1,4 @@
+import { unavailableRoute } from './session-errors.js';
 import { createSecurityPolicy } from './security.js';
 import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
@@ -297,7 +298,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     return result ?? (path === '/v1/providers' && request.method === 'GET'
       ? json(200, { protocolVersion: '1.4.0', type: 'provider_list', payload: { providers: [] } })
-      : json(404, { error: 'Route or session is unavailable.' }));
+      : json(404, unavailableRoute(path)));
   }
   async function prepare(request: Request) {
     const url = new URL(request.url);

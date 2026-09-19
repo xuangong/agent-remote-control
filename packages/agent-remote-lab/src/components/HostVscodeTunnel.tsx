@@ -1,3 +1,4 @@
+import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import { vscodeTunnelLink, vscodeWorkspaceLink } from '@agent-remote-controller/agent-remote-protocol';
 import { useVscodeTunnel } from '../vscode-tunnel.js';
@@ -11,6 +12,7 @@ export function HostVscodeTunnel() {
   const [accepted, setAccepted] = useState(false);
   const [copied, setCopied] = useState<string>();
   const [copyFailed, setCopyFailed] = useState(false);
+  useFeedbackToast('VS Code connection', controller?.error);
   if (!controller) return null;
   const { host, state, busy, error, errorCode } = controller;
   const online = host.online && !error;

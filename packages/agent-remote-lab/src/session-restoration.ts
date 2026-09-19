@@ -27,6 +27,8 @@ export function restoreSession<T>(options: {
       options.restored(result);
     } catch (error) {
       if (!active() || pending !== controller) return;
+      if (controller.signal.aborted) error = new DirectoryError(
+        'The browser stopped waiting for the session to open. The Host may still be opening it.', 'session_attach_wait_timeout', 408);
       const status = error instanceof DirectoryError ? error.status : undefined;
       const retrying = status === undefined || status >= 500 || status === 408 || status === 429;
       options.failed(error, retrying);

@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, it } from 'vitest';
-import { RemoteHostClient } from './directory-client.js';
+import { RemoteHostClient, SessionDirectoryClient } from './directory-client.js';
 
 it('revokes the selected Host over the user-scoped HTTP endpoint', async () => {
   const requests: Array<{ method?: string; path?: string; body: string; contentType?: string }> = [];
@@ -41,4 +41,14 @@ it('sends owner stop and rotation requests without credentials and retains fresh
     expect(await client.stop('host/one')).toEqual({ results: [{ agentId: 'one', status: 'unsupported' }] });
     expect(paths).toEqual(['/u/tenant/v1/remote/hosts/host%2Fone/rotate', '/u/tenant/v1/remote/hosts/host%2Fone/stop']);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+
+it('retains the server request ID, status and error code when opening a session', async () => {
+  const client = new SessionDirectoryClient('http://localhost/', async () => Response.json({
+    code: 'native_history_timeout', error: 'History deadline', requestId: 'request-123',
+  }, { status: 503 }));
+  await expect(client.attach('codex', 'native')).rejects.toMatchObject({
+    code: 'native_history_timeout', status: 503, requestId: 'request-123', message: 'History deadline',
+  });
 });

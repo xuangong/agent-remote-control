@@ -580,3 +580,36 @@ it('does not expose Controller folder browsing to a shared session user', async 
   expect(create?.status).toBe(403);
   expect(await create!.json()).toMatchObject({ code: 'owner_required' });
 });
+
+
+it.each([
+  ['/v1/remote/hosts/host/attach', { providerId: 'codex', nativeSessionId: 'native-session' }, 'session_attach_timeout'],
+  ['/v1/remote/hosts/host/catalog?providerId=codex', undefined, 'host_read_timeout'],
+  ['/v1/remote/hosts/host/create', { providerId: 'codex', operationId: operationOne }, 'host_timeout'],
+] as const)('classifies the deadline for %s without claiming native failure', async (path, body, code) => {
+  const { broker } = await restoredFixture({ rpcTimeoutMs: 20 });
+  const response = await broker.handleRequest(new Request(`https://relay.example${path}`, body ? {
+    method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' },
+  } : undefined));
+  expect(response?.status).toBe(504);
+  const error = await response!.json();
+  expect(error).toMatchObject({ code, requestId: expect.any(String) });
+  if (code === 'session_attach_timeout') expect(error.error).toContain('may still be opening');
+  if (code === 'host_read_timeout') expect(error.error).not.toContain('operation outcome');
+});
+
+it.each(['native_runtime_unavailable', 'native_resume_timeout', 'native_history_timeout', 'session_in_use', 'local_execution_policy'])
+  ('preserves the safe recovery reason %s after Host registration', async code => {
+    const { broker, native } = await restoredFixture();
+    native.onMessage(data => {
+      const message = JSON.parse(data);
+      if (message.type === 'rpc_request') native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId,
+        status: code === 'session_in_use' ? 409 : code === 'local_execution_policy' ? 403 : 503,
+        body: JSON.stringify({ code, error: 'untrusted native details arc_secret /private/path' }) }));
+    });
+    const response = await broker.handleRequest(new Request('https://relay.example/v1/sessions/agent/snapshot'));
+    const error = await response!.json();
+    expect(error.code).toBe(code);
+    expect(error.error).not.toMatch(/arc_secret|private\/path/);
+    expect(error.requestId).toEqual(expect.any(String));
+  });

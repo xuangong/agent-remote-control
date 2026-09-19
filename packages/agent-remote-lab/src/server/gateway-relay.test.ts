@@ -69,7 +69,13 @@ it('isolates real Host registration, catalog and session forwarding by gateway u
   expect((await fetch(f.url + alice.state.basePath + 'v1/remote/hosts', { headers: { cookie: bob.cookie } })).status).toBe(403);
   expect((await alice.request(`v1/remote/hosts/${hostId}/attach`, { providerId: 'codex', nativeSessionId: 'native-1' })).status).toBe(200);
   expect(await (await alice.request('v1/sessions/private-agent/snapshot')).json()).toEqual({ private: 'alice' });
-  expect((await bob.request('v1/sessions/private-agent/snapshot')).status).toBe(404);
+  const inaccessible = await bob.request('v1/sessions/private-agent/snapshot');
+  const missing = await bob.request('v1/sessions/missing-agent/snapshot');
+  expect(inaccessible.status).toBe(404); expect(missing.status).toBe(404);
+  const missingError = await missing.json();
+  expect(await inaccessible.json()).toEqual(missingError);
+  expect(missingError).toMatchObject({ code: 'session_binding_unavailable', error: expect.stringContaining('Host session list') });
+  expect(await (await bob.request('v1/unknown-route')).json()).toMatchObject({ code: 'route_not_found' });
   expect(await rejected(f.url + bob.state.basePath + 'v1/sessions/private-agent/events', { cookie: bob.cookie, origin: f.url })).toBe(404);
   const stream = new WebSocket((f.url + alice.state.basePath + 'v1/sessions/private-agent/events').replace('http:', 'ws:'), { headers: { cookie: alice.cookie, origin: f.url } });
   const event = once(stream, 'message');

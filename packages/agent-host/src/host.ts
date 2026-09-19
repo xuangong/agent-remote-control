@@ -5,7 +5,7 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from './operation-cache.js';
 import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
-import { AgentSessionInUseError } from '@agent-remote-controller/agent-provider-sdk';
+import { AgentSessionInUseError, AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
@@ -25,10 +25,19 @@ export interface AgentHostDirectory {
 export interface AgentHostProviderRegistration { adapter: AgentProviderAdapter; directory: AgentHostDirectory }
 export interface AgentHostRuntimeOptions {
   registrations: readonly AgentHostProviderRegistration[];
+  onRequestDiagnostic?: (diagnostic: AgentHostRequestDiagnostic) => void;
   shutdownTimeoutMs?: number;
   cancelTimeoutMs?: number;
   executionPolicy?: HostExecutionPolicy;
   operationCache?: OperationCacheOptions;
+}
+export interface AgentHostRequestDiagnostic {
+  event: 'host_request_started' | 'host_request_completed';
+  requestId: string;
+  operation: 'session_attach' | 'session_create' | 'catalog_read' | 'host_control';
+  elapsedMs: number;
+  status?: number;
+  code?: string;
 }
 export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
@@ -259,6 +268,21 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId))));
   }
   async function control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> {
+    const requestId = request.requestId && /^[a-zA-Z0-9-]{1,80}$/.test(request.requestId) ? request.requestId : randomUUID();
+    const operation = request.path === '/remote/attach' || request.path === '/remote/child/attach' ? 'session_attach'
+      : request.path === '/remote/create' ? 'session_create' : request.method === 'GET' ? 'catalog_read' : 'host_control';
+    const started = Date.now();
+    const diagnostic = (event: AgentHostRequestDiagnostic['event'], status?: number, code?: string) => {
+      try { options.onRequestDiagnostic?.({ event, requestId, operation, elapsedMs: Date.now() - started,
+        ...(status === undefined ? {} : { status }), ...(code ? { code } : {}) }); } catch { /* Diagnostics cannot change request outcomes. */ }
+    };
+    diagnostic('host_request_started');
+    const result = await controlRequest(request);
+    const data = result.status >= 400 ? JSON.parse(result.body) : {};
+    diagnostic('host_request_completed', result.status, typeof data.code === 'string' ? data.code : undefined);
+    return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
+  }
+  async function controlRequest(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> {
     try {
       if (closed) throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
       const url = new URL(request.path, 'http://agent-host.local');
@@ -315,6 +339,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       throw new HostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
     } catch (error) {
+      if (error instanceof AgentRuntimeError) return json(503, { error: error.message, code: error.code });
       if (error instanceof AgentSessionInUseError) return json(409, { error: error.message, code: 'session_in_use' });
       if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
       if (error instanceof WorkspaceFolderError) return json(error.status, { error: error.message, code: error.code });
@@ -322,6 +347,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });
       if (request.method === 'GET') return json(503, { error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' });
+      if (request.path === '/remote/attach' || request.path === '/remote/child/attach') return json(503, { error: 'The Host could not open the native session. Check the Controller log and reopen it from the session list.', code: 'session_attach_failed' });
       return json(503, { error: 'Remote Host operation outcome is unknown.', code: 'mutation_outcome_unknown' });
     }
   }

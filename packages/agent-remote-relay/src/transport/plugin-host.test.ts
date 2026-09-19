@@ -63,7 +63,7 @@ describe('socket-free plugin uplink host', () => {
       expect.objectContaining({ uplinkVersion: 2, type: 'stream_close', streamId: 'foreign', code: 1008 }),
     ])));
     expect(controls).toEqual([{
-      method: 'POST', path: '/remote/attach', sessionId: 'remote-one', body: '{"nativeSessionId":"native-one"}',
+      requestId: 'attach', method: 'POST', path: '/remote/attach', sessionId: 'remote-one', body: '{"nativeSessionId":"native-one"}',
     }]);
     expect(f.failures).toEqual([]);
   });
@@ -139,7 +139,7 @@ describe('socket-free plugin uplink host', () => {
       '/v1/sessions/remote-one/snapshot?protocolVersion=1.4.0',
       '/v1/sessions/remote-one/timeline?protocolVersion=1.4.0&requestId=remote-http-1&direction=tail&limit=10',
     ]);
-    expect(controls).toEqual([{ method: 'POST', path: '/remote/attach', sessionId: 'remote-one', body: '{"nativeSessionId":"native-one"}' }]);
+    expect(controls).toEqual([{ requestId: 'request-1', method: 'POST', path: '/remote/attach', sessionId: 'remote-one', body: '{"nativeSessionId":"native-one"}' }]);
     expect(f.failures).toEqual([]);
   });
 

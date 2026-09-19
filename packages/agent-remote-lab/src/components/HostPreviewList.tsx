@@ -1,3 +1,4 @@
+import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import { usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
 
@@ -10,6 +11,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen }: 
   const controller = supplied ?? inherited;
   const [busy, setBusy] = useState<string>();
   const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Preview', failure ?? controller?.error);
   if (!controller) return null;
   const registrations = controller.registrations.filter(item => item.status === 'active');
 

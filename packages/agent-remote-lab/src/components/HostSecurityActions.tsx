@@ -1,3 +1,4 @@
+import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import type { HostPairingService, RemoteHost, HostStopResult } from './HostPairing.js';
 import { needsReauthentication } from '../security-client.js';
@@ -7,6 +8,7 @@ export function HostSecurityActions({ host, service }: { host: RemoteHost; servi
   const [action, setAction] = useState<'rotate' | 'stop'>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Host action', failure);
   const [reauthenticate, setReauthenticate] = useState(false);
   const [rotation, setRotation] = useState<'pending' | 'rotated'>();
   const [results, setResults] = useState<HostStopResult[]>();

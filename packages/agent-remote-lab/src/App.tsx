@@ -1,3 +1,5 @@
+import { ToastProvider, useFeedbackToast } from './components/Toast.js';
+import { SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
 import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
@@ -102,7 +104,11 @@ export interface AppProps {
   fixtureAction?(agentId: string, action: 'advance' | 'rehydrate' | 'stop-reader'): void | Promise<void>;
 }
 
-export function App({
+export function App(props: AppProps) {
+  return <ToastProvider><AppContent {...props} /></ToastProvider>;
+}
+
+function AppContent({
   baseUrl = window.location.origin,
   transport: injectedTransport,
   directory: injectedDirectory,
@@ -188,7 +194,11 @@ export function App({
   const [status, setStatus] = useState<RemoteSessionStatus>(initialSessionStatus);
   const [attachingAgentId, setAttachingAgentId] = useState<string>();
   const [transitioning, setTransitioning] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState<SessionConnectionMessage>();
   const [failure, setFailure] = useState<string | undefined>(requested.error);
+  useFeedbackToast('Session operation', failure);
+  useFeedbackToast('Session connection', sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
+  useFeedbackToast('Provider catalog', catalogError);
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [traceNavigation, setTraceNavigation] = useState<{ scope: string; key: string; requestId: number; view: 'workbench' | 'trace' }>();
   const traceRequestCounter = useRef(0);
@@ -312,6 +322,7 @@ export function App({
 
   const attach = useCallback((agentId: string): void => {
     navigationGeneration.current += 1;
+    setSessionNotice(undefined);
     setUncertainMutation(false);
     unsubscribeReplicaRef.current?.();
     unsubscribeReplicaRef.current = undefined;
@@ -368,6 +379,7 @@ export function App({
     const target = new SessionDirectoryClient(baseUrl, undefined, hostId);
     setAttachingAgentId(location.agentId ?? nativeSessionId);
     setStatus('connecting');
+    setSessionNotice({ tone: 'status', message: 'Reconnecting to the existing session. Waiting for the Host to open it…' });
     const cancel = restoreSession({
       active: () => navigationGeneration.current === generation,
       open: signal => parentNativeSessionId
@@ -379,11 +391,12 @@ export function App({
           title: openedSessionsRef.current.find(session => session.hostId === hostId && session.providerId === restoredProvider && session.nativeSessionId === nativeSessionId)?.title ?? 'Session' });
         if (hostId === 'local') setLocalProviderId(restoredProvider);
         setProviderName(providerConnectionName(hostId, restoredProvider));
-        setFailure(undefined);
+        setFailure(undefined); setSessionNotice(undefined);
         attach(result.agentId);
       },
       failed: (error, retrying) => {
-        setFailure(message(error, 'Session could not be reconnected.') + (retrying ? ' Reconnecting automatically…' : ''));
+        setFailure(undefined);
+        setSessionNotice(sessionConnectionFailure(error, retrying));
         if (!retrying) { setAttachingAgentId(undefined); setStatus('idle'); if (compactLayoutRef.current) setContextOpen(true); }
       },
     });
@@ -443,7 +456,7 @@ export function App({
     // Existing windows keep their connections; remembered views still revalidate their Host binding below.
     if (visible && (visible.agentId !== activeAgentId || status === 'ready')) {
       setSideFocus(key);
-      setFailure(undefined);
+      setFailure(undefined); setSessionNotice(undefined);
       setActiveView('workbench');
       if (compactLayoutRef.current) { setContextOpen(false); setInspectorOpen(false); }
       return true;
@@ -451,7 +464,9 @@ export function App({
     const generation = navigationGeneration.current;
     transitionRef.current = true;
     setTransitioning(true);
+    setActiveView('workbench');
     setFailure(undefined);
+    setSessionNotice({ tone: 'status', message: 'Opening the existing session. Waiting for the Host to confirm it is ready…' });
     try {
       const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
       const result = item.parentNativeSessionId
@@ -465,7 +480,10 @@ export function App({
       setSideFocus(undefined);
       attach(result.agentId);
       return true;
-    } catch (error) { setFailure(message(error, 'Session could not be connected.')); return false; }
+    } catch (error) {
+      if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false));
+      return false;
+    }
     finally { transitionRef.current = false; setTransitioning(false); }
   }
 
@@ -484,6 +502,7 @@ export function App({
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined);
+    setSessionNotice({ tone: 'status', message: 'Opening the existing child session. Waiting for the Host to confirm it is ready…' });
     try {
       const saved = openedSessions.find((item) => item.agentId === parent.id);
       const hostId = saved?.hostId ?? 'local';
@@ -494,6 +513,9 @@ export function App({
       rememberSession({ agentId: result.agentId, providerId: parent.providerId, nativeSessionId: result.nativeSessionId,
         title: child.title, createdAt: child.createdAt, hostId, parentAgentId: parent.id, parentNativeSessionId });
       attach(result.agentId);
+    } catch (error) {
+      if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false));
+      throw error;
     } finally {
       transitionRef.current = false;
       setTransitioning(false);
@@ -504,7 +526,7 @@ export function App({
     if (!providerId || creationUnavailableReason || transitionRef.current) return;
     transitionRef.current = true;
     setTransitioning(true);
-    setFailure(undefined);
+    setFailure(undefined); setSessionNotice(undefined);
     const agentId = createAgentId();
     try {
       if (directory) {
@@ -540,7 +562,7 @@ export function App({
     if (!persistence || session?.parentAgentId || session?.parentNativeSessionId || transitionRef.current) return;
     transitionRef.current = true;
     setTransitioning(true);
-    setFailure(undefined);
+    setFailure(undefined); setSessionNotice(undefined);
     const generation = navigationGeneration.current;
     try {
       if (directory) {
@@ -964,6 +986,7 @@ export function App({
         onStopReader={clientActions.stopReader}
       /> : null}
       </div>
+      {sessionNotice && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} /> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       {compactLayout && sessionPanel === 'list' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}>New session</button></footer> : null}
       </div>
@@ -972,6 +995,7 @@ export function App({
     <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
       <section
         ref={workbenchPanelRef}
+        className={sessionNotice && !(compactLayout && contextOpen) ? 'lab-workbench-with-notice' : undefined}
         id="lab-workbench"
         data-testid="workbench"
         role="tabpanel"
@@ -979,6 +1003,7 @@ export function App({
         tabIndex={-1}
         hidden={activeView !== 'workbench'}
       >
+        {sessionNotice && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />

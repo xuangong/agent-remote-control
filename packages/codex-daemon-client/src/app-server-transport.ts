@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import readline from 'node:readline';
+import { randomUUID } from 'node:crypto';
 import { connect } from 'node:net';
 import { WebSocket } from 'ws';
 
@@ -21,6 +22,11 @@ export interface CodexAppServerTransportOptions {
   requestTimeoutMs?: number;
   gracefulShutdownMs?: number;
   onDiagnostic?: (line: string) => void;
+}
+
+export class CodexTransportUnavailableError extends Error {}
+export class CodexRequestTimeoutError extends Error {
+  constructor(readonly method: string) { super(`Codex app-server request timed out for ${method}`); }
 }
 
 export class CodexServerRequestCanceled extends Error {}
@@ -47,6 +53,7 @@ export class CodexAppServerTransport {
   private terminationHandler: TerminationHandler | undefined;
   private terminationError: Error | undefined;
   private nextId = 1;
+  private readonly diagnosticId = randomUUID();
   private closed = false;
   private disposePromise: Promise<void> | undefined;
   private stderr = '';
@@ -93,7 +100,7 @@ export class CodexAppServerTransport {
     try { await once(socket, 'open'); return transport; }
     catch (error) {
       socket.terminate();
-      throw new Error('Could not connect to the shared Codex app-server. Start the native daemon or check its local socket path.', { cause: error });
+      throw new CodexTransportUnavailableError('Could not connect to the shared Codex app-server. Start the native daemon or check its local socket path.', { cause: error });
     }
   }
 
@@ -116,12 +123,20 @@ export class CodexAppServerTransport {
   }
 
   request(method: string, params?: unknown, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
-    if (this.closed) return Promise.reject(new Error('Codex app-server transport is closed'));
+    if (this.closed) return Promise.reject(new CodexTransportUnavailableError('Codex app-server transport is closed'));
     const id = this.nextId++;
+    const started = Date.now();
+    const phase = method === 'thread/resume' ? 'resume' : method === 'thread/read' ? 'history' : method === 'thread/list' ? 'catalog' : method === 'initialize' ? 'initialize' : undefined;
+    const diagnostic = (outcome: 'started' | 'completed' | 'timeout' | 'unavailable' | 'rejected') => {
+      if (!phase) return;
+      try { this.onDiagnostic(JSON.stringify({ event: 'codex_request', connectionId: this.diagnosticId, requestId: id,
+        phase, outcome, elapsedMs: Date.now() - started })); } catch { /* Diagnostics cannot change native request outcomes. */ }
+    };
+    diagnostic('started');
     const result = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex app-server request timed out for ${method}`));
+        reject(new CodexRequestTimeoutError(method));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
     });
@@ -135,7 +150,10 @@ export class CodexAppServerTransport {
         pending.reject(error instanceof Error ? error : new Error(String(error)));
       }
     }
-    return result;
+    return result.then(value => { diagnostic('completed'); return value; }, error => {
+      diagnostic(error instanceof CodexRequestTimeoutError ? 'timeout' : error instanceof CodexTransportUnavailableError ? 'unavailable' : 'rejected');
+      throw error;
+    });
   }
 
   notify(method: string, params?: unknown): void {
@@ -154,7 +172,7 @@ export class CodexAppServerTransport {
     this.closed = true;
     this.notificationHandler = undefined;
     this.terminationHandler = undefined;
-    this.rejectPending(new Error('Codex app-server transport is closed'));
+    this.rejectPending(new CodexTransportUnavailableError('Codex app-server transport is closed'));
     this.lines?.close();
     if (this.socket) {
       if (this.socket.readyState === WebSocket.CLOSED) return;
@@ -183,6 +201,7 @@ export class CodexAppServerTransport {
 
   private handleTermination(error: Error): void {
     if (this.closed) return;
+    error = new CodexTransportUnavailableError(error.message, { cause: error });
     this.closed = true;
     this.lines?.close();
     this.socket?.terminate();

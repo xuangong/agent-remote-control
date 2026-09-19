@@ -31,5 +31,5 @@ it('requires explicit shared mode, an absolute socket and a compatible local pol
 it('reports an unavailable shared socket without starting a private writer', async () => {
   const root = await mkdtemp(join(tmpdir(), 'codex-shared-missing-')); roots.push(root);
   const provider = new CodexAppServerProvider({ connectionMode: 'shared', socketPath: join(root, 'missing.sock'), executable: '/must-not-execute', requestTimeoutMs: 500 });
-  await expect(provider.listSessions()).rejects.toThrow('Could not connect to the shared Codex');
+  await expect(provider.listSessions()).rejects.toMatchObject({ code: 'native_runtime_unavailable' });
 });

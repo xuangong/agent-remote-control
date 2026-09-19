@@ -15,7 +15,7 @@ export interface WorkspaceFolderPage { path: string; parentPath: string | null; 
 export interface CreateSessionOptions { workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
 export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string; createdAt?: string }
 export class DirectoryError extends Error {
-  constructor(message: string, readonly code?: string, readonly status?: number) { super(message); }
+  constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string) { super(message); }
 }
 export class SessionDirectoryClient {
   readonly cachedPages = new Map<string, SessionCatalogPage>();
@@ -26,7 +26,7 @@ export class SessionDirectoryClient {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status);
+    if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined);
     return data as T;
   }
   list(providerId: string, cursor?: string): Promise<SessionCatalogPage> {
@@ -59,7 +59,7 @@ export class RemoteHostClient implements HostPairingService {
     const response = await fetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method,
       ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
     const body = await response.json();
-    if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', response.status === 403 ? body.code : undefined);
+    if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
     return body as T;
   }
   async hosts(): Promise<{ hosts: RemoteHost[] }> {

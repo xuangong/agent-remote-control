@@ -1,3 +1,4 @@
+import { useFeedbackToast } from './Toast.js';
 import { useEffect, useState } from 'react';
 import { HostSecurityActions } from './HostSecurityActions.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
@@ -31,6 +32,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
   const quotaExhausted = quota !== undefined && quota.used >= quota.limit;
   const [reauthenticate, setReauthenticate] = useState(false);
   const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Host connection', failure ?? hostError);
   const [invitation, setInvitation] = useState<PairingInvitation | undefined>(service.invitation);
   const [pairing, setPairing] = useState(false);
   const [showPairing, setShowPairing] = useState(service.invitation !== undefined);

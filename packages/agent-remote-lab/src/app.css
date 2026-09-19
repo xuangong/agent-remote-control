@@ -1114,3 +1114,34 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 @media (max-width: 600px) { .lab-folder-dialog { padding: 14px; gap: 10px; } .lab-folder-filters { flex-wrap: wrap; } .lab-folder-filters > label:first-child { flex-basis: 100%; } }
 
 @media (max-width: 600px) { .lab-folder-dialog input:not([type="checkbox"]) { font-size: 16px; } .lab-folder-dialog button { min-height: 40px; } }
+
+
+.lab-workbench-with-notice:not([hidden]) { display: flex; flex-direction: column; }
+.lab-workbench-with-notice > .lab-conversation-split { flex: 1; height: auto; }
+.lab-session-notice { flex: 0 0 auto; margin: 8px 12px; overflow-wrap: anywhere; }
+.lab-session-notice p { margin: 0; }
+.lab-session-notice details { margin-top: 4px; }
+.lab-session-notice summary { cursor: pointer; }
+.lab-session-notice dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; margin: 6px 0; }
+.lab-session-notice dd { margin: 0; }
+
+
+.lab-toast-region { position: fixed; z-index: 150; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: min(400px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 10px; pointer-events: none; max-height: 45dvh; overflow-y: auto; }
+.lab-toast { pointer-events: auto; flex: 0 0 auto; padding: 12px 14px 0; border: 1px solid var(--obs-border-strong); border-radius: var(--obs-radius-md); background: var(--obs-surface); color: var(--obs-text); box-shadow: var(--obs-overlay-shadow); overflow: hidden; overflow-wrap: anywhere; animation: lab-toast-enter 140ms ease-out; }
+.lab-toast[data-tone="error"] { border-left: 3px solid var(--obs-danger); }
+.lab-toast[data-tone="info"] { border-left: 3px solid var(--obs-signal); }
+.lab-toast-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.lab-toast-heading strong { font-size: 13px; line-height: 24px; }
+.lab-toast-heading button { flex: 0 0 auto; width: 32px; height: 32px; margin: -5px -6px 0 0; padding: 0; font-size: 21px; border: 0; background: transparent; color: var(--obs-text-secondary); cursor: pointer; }
+.lab-toast-heading button:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -2px; }
+.lab-toast p { margin: 4px 0 8px; font-size: 13px; line-height: 1.5; }
+.lab-toast-countdown { display: block; margin-bottom: 8px; color: var(--obs-text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.lab-toast-progress { height: 2px; margin-inline: -14px; background: var(--obs-border); }
+.lab-toast-progress span { display: block; height: 100%; background: var(--obs-signal); }
+.lab-toast[data-tone="error"] .lab-toast-progress span { background: var(--obs-danger); }
+@keyframes lab-toast-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 1180px) {
+  .lab-toast-region { right: max(12px, env(safe-area-inset-right)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + max(0px, 100dvh - var(--lab-viewport-height, 100dvh) - var(--lab-viewport-top, 0px))); width: calc(100vw - 24px); max-height: min(35dvh, calc(var(--lab-viewport-height, 100dvh) - 24px)); }
+  .lab-toast-heading button { width: 44px; height: 44px; margin-top: -10px; margin-bottom: -7px; }
+}
+@media (prefers-reduced-motion: reduce) { .lab-toast { animation: none; } }

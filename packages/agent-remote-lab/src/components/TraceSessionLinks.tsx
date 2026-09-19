@@ -1,3 +1,4 @@
+import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
 import type { SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
@@ -5,6 +6,7 @@ import { traceSessionReferences } from '../trace-model.js';
 
 export function TraceSessionLinks({ item, resolveSessionLink }: { item: AgentTimelineItem; resolveSessionLink?: SessionLinkResolver }) {
   const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Session link', failure);
   const references = traceSessionReferences(item);
   if (!references.length) return null;
   return <div className="lab-trace-session-links">

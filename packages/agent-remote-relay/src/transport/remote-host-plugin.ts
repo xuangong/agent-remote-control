@@ -9,6 +9,7 @@ import { createSessionWire, type SessionWire, type SessionWireAgent, type Sessio
 import { agentRemoteHttpError, agentRemoteHttpFailure, executeAgentRemoteHttpRequest, type AgentRemoteHttpResult } from './http-executor.js';
 
 export interface RemoteHostControlRequest {
+  readonly requestId?: string;
   readonly method: 'GET' | 'POST';
   readonly path: string;
   readonly sessionId?: string;
@@ -127,7 +128,7 @@ export function createRemoteHostPluginHost(
 
   async function dispatch(request: Extract<RemoteHostUplinkMessage, { type: 'rpc_request' }>): Promise<AgentRemoteHttpResult> {
     if (request.path.startsWith('/remote/')) {
-      return options.control({ method: request.method, path: request.path,
+      return options.control({ requestId: request.requestId, method: request.method, path: request.path,
         ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
         ...(request.body === undefined ? {} : { body: request.body }) });
     }

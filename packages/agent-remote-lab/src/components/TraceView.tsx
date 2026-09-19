@@ -1,3 +1,4 @@
+import { useFeedbackToast } from './Toast.js';
 import { sessionActivity } from '../session-activity.js';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
@@ -15,6 +16,7 @@ export function TraceView({ state, visible = true, revealEntry, onShowConversati
   const [type, setType] = useState('all');
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Conversation history', failure);
   const loadingRef = useRef(false);
   const listRef = useRef<HTMLOListElement>(null);
   const detailRef = useRef<HTMLElement>(null);

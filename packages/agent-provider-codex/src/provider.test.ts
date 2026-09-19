@@ -186,3 +186,10 @@ it.each(['create', 'resume'] as const)('applies locally required sandbox and app
     .toMatchObject({ sandbox: 'workspace-write', approvalPolicy: 'never' }); }
   finally { await session.dispose(); }
 });
+
+
+it('classifies an unavailable shared socket without disclosing the socket path', async () => {
+  const provider = new CodexAppServerProvider({ connectionMode: 'shared', socketPath: `/tmp/arc-missing-${process.pid}.sock`, requestTimeoutMs: 100 });
+  await expect(provider.resumeSession({ providerId: 'codex', sessionId: 'native', opaque: '{}' }))
+    .rejects.toMatchObject({ code: 'native_runtime_unavailable' });
+});

@@ -1,4 +1,5 @@
-import { act } from 'react';
+import { ToastProvider } from './Toast.js';
+import { act, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { render } from '../test/setup.js';
@@ -173,4 +174,27 @@ it('collapses the input dock while preserving its draft and timeline', async () 
   expect(body.hidden).toBe(false);
   expect(container.querySelector('textarea')).toBe(input);
   expect(input.value).toBe('Keep my draft');
+});
+
+
+it('does not notify a late action failure in a different session', async () => {
+  let reject!: (error: Error) => void;
+  const sendMessage = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+  function Sessions() {
+    const [id, setId] = useState('first');
+    return <ToastProvider><button onClick={() => setId('second')}>Switch session</button>
+      <LabWorkbench state={{ ...replicaState, agent: { ...replicaState.agent!, id } }} sessionStatus="ready" actions={{ sendMessage }} />
+    </ToastProvider>;
+  }
+  const container = await render(<Sessions />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Pending message');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  await act(async () => reject(new Error('Previous session failed.')));
+  expect(container.querySelector('.lab-toast')).toBeNull();
+  expect(sendMessage).toHaveBeenCalledTimes(1);
 });

@@ -1,3 +1,4 @@
+import { useFeedbackToast } from './Toast.js';
 import { WorkspaceFolderPicker } from './WorkspaceFolderPicker.js';
 import { useEffect, useRef, useState } from 'react';
 import { openedEntry, sessionForest, sessionKey, sessionStatusLabel, type SessionEntry } from '../session-tree.js';
@@ -26,6 +27,7 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
   const [page, setPage] = useState<SessionCatalogPage | undefined>(directory.cachedPages.get(providerId));
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Session list', failure);
   const [expired, setExpired] = useState(false);
   const [updates, setUpdates] = useState(false);
   const generation = useRef(0);
@@ -147,6 +149,7 @@ export function SessionConfiguration({ directory, providerId, disabled, value, o
   const [picking, setPicking] = useState(false);
   const [workspaces, setWorkspaces] = useState<SessionWorkspace[]>([]);
   const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Workspace list', failure);
   const [loading, setLoading] = useState(false);
   const [retry, setRetry] = useState(0);
   useEffect(() => {

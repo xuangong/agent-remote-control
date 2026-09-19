@@ -41,7 +41,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       if (result) return writeResponse(response, result);
       response.setHeader('cache-control', 'no-store'); response.setHeader('referrer-policy', 'no-referrer'); response.setHeader('x-content-type-options', 'nosniff');
       if (await options.servePage?.(request, response)) return;
-      response.writeHead(404, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'Route or session is unavailable.' }));
+      response.writeHead(404, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: 'route_not_found', error: 'This route is unavailable. Check the URL and refresh the page.' }));
     })().catch(error => {
       if (response.headersSent) response.destroy();
       else { response.writeHead(error instanceof InvalidHttpRequest ? 400 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'Relay request failed.' })); }

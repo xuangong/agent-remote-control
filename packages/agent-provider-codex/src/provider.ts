@@ -10,7 +10,9 @@ import type {
   AgentSessionConfig,
 } from '@agent-remote-controller/agent-provider-sdk';
 
-import { CodexAppServerTransport } from './app-server-transport.js';
+import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
+
+import { CodexAppServerTransport, CodexTransportUnavailableError, CodexRequestTimeoutError } from './app-server-transport.js';
 import { spawnCodexAppServer } from './native.js';
 import { CodexAppServerSession } from './session.js';
 import { initializeCodexTransport } from './initialize.js';
@@ -60,7 +62,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
         limit, ...(options.cursor ? { cursor: options.cursor } : {}),
         sortKey: 'updated_at', modelProviders: [], sourceKinds: ['cli', 'vscode', 'appServer'], archived: false,
       }));
-    } finally { await transport.dispose(); }
+    } catch (error) { throw runtimeError(error); } finally { await transport.dispose(); }
   }
 
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
@@ -88,7 +90,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       return session;
     } catch (error) {
       await transport.dispose();
-      throw error;
+      throw runtimeError(error);
     }
   }
 
@@ -105,7 +107,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       const home = this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
       return CodexAppServerTransport.connectShared(this.options.socketPath ?? join(home, 'app-server-control', 'app-server-control.sock'), {
         requestTimeoutMs: this.options.requestTimeoutMs, onDiagnostic: this.options.onDiagnostic,
-      });
+      }).catch(error => { throw runtimeError(error); });
     }
     const child = this.options.spawn
       ? await this.options.spawn({ cwd })
@@ -136,4 +138,17 @@ function readPersistenceCwd(opaque: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function runtimeError(error: unknown): unknown {
+  if (error instanceof CodexTransportUnavailableError) return new AgentRuntimeError('native_runtime_unavailable',
+    'The Codex runtime connection is unavailable. Check the native daemon and the configured local socket, then reopen the session.');
+  if (error instanceof CodexRequestTimeoutError) {
+    if (error.method === 'thread/resume') return new AgentRuntimeError('native_resume_timeout',
+      'Codex did not finish resuming the session before the native request deadline. Check the Controller log, then reopen the session.');
+    if (error.method === 'thread/read') return new AgentRuntimeError('native_history_timeout',
+      'Codex did not finish reading session history before the native request deadline. Check the Controller log, then reopen the session.');
+    return new AgentRuntimeError('native_request_timeout', 'Codex did not answer a native request before its deadline. Check the Controller log and try again.');
+  }
+  return error;
 }

@@ -86,6 +86,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
     preview: { stateDirectory: stateDir, ttlMs: Number(environment.AGENT_HOST_PREVIEW_TTL_MS ?? 3_600_000),
       protectedPorts: (environment.AGENT_HOST_PREVIEW_PROTECTED_PORTS ?? '').split(',').filter(Boolean).map(Number),
       diagnostic: event => { writeDiagnostic(JSON.stringify({ event, time: new Date().toISOString() }), diagnosticSecrets); } },
+    onRequestDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
     onDiagnostic: diagnostic => { writeDiagnostic(uplinkDiagnosticLine(diagnostic), diagnosticSecrets); },
     executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey, onCredential: credential => {
       diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);

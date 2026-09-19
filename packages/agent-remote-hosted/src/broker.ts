@@ -1,24 +1,25 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@agent-remote-controller/agent-remote-protocol';
+import { sessionAttachFailure } from './session-errors.js';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { createHostPreviews, type HostPreviewState } from './host-previews.js';
 import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 
-type RpcResponse = { status: number; body: string };
+type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string };
 type DeviceCredential = { expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
   tunnelToken?: string;
   ready?: boolean; credentialRotation?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
-  pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown }>;
+  pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown; method: 'GET' | 'POST'; path: string }>;
   streams: Map<string, { socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
 };
 type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
   creatorSubject?: string; parentNativeSessionId?: string; recovery?: Promise<void> };
 class BrokerError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false) { super(message); }
+  constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string) { super(message); }
 }
 export interface RemoteHostBrokerState {
   previews?: HostPreviewState[];
@@ -180,9 +181,13 @@ export function createHostBroker(options: HostBrokerOptions) {
       const timer = setTimeout(() => {
         host.pending.delete(requestId);
         try { send(host, { uplinkVersion: 2, type: 'rpc_cancel', requestId }); } catch { /* An offline host has no request to cancel. */ }
-        reject(new BrokerError(504, 'host_timeout', 'The Remote Host did not answer; the operation outcome may be unknown.'));
+        const attach = path === '/remote/attach' || path === '/remote/child/attach';
+        reject(new BrokerError(504, attach ? 'session_attach_timeout' : method === 'GET' ? 'host_read_timeout' : 'host_timeout', attach
+          ? 'The Host did not confirm opening the session before the Relay deadline. It may still be opening; wait briefly and reopen the same session.'
+          : method === 'GET' ? 'The Host did not return the requested data before the Relay deadline. Try reading it again.'
+          : 'The Host did not confirm the operation before the Relay deadline. Its outcome is unknown; check the session before retrying.', false, requestId));
       }, options.rpcTimeoutMs ?? 30_000);
-      host.pending.set(requestId, { resolve, reject, timer });
+      host.pending.set(requestId, { resolve, reject, timer, method, path });
       try { send(host, { uplinkVersion: 2, type: 'rpc_request', requestId, method, path, ...(sessionId ? { sessionId } : {}), ...(body === undefined ? {} : { body }) }); }
       catch (error) { clearTimeout(timer); host.pending.delete(requestId); reject(error); }
     });
@@ -192,7 +197,14 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (host.socket !== socket) return;
     previews.disconnect(host.id); host.tunnelToken = undefined;
     host.socket = undefined; host.ready = false;
-    for (const pending of host.pending.values()) { clearTimeout(pending.timer); pending.reject(new BrokerError(503, 'host_offline', 'The Remote Host disconnected; the operation outcome may be unknown.')); }
+    for (const [requestId, pending] of host.pending) {
+      clearTimeout(pending.timer);
+      const attach = pending.path === '/remote/attach' || pending.path === '/remote/child/attach';
+      pending.reject(new BrokerError(503, 'host_offline', attach
+        ? 'The Host disconnected while opening the session. Wait for it to reconnect, then reopen the same session.'
+        : pending.method === 'GET' ? 'The Host disconnected while reading data. Wait for it to reconnect and try again.'
+        : 'The Host disconnected before confirming the operation. Its outcome is unknown; check the session before retrying.', false, requestId));
+    }
     host.pending.clear();
     for (const stream of host.streams.values()) { clearTimeout(stream.timer); stream.socket.close(1012, 'Remote Host disconnected'); }
     host.streams.clear();
@@ -366,7 +378,10 @@ export function createHostBroker(options: HostBrokerOptions) {
           ...(binding.parentNativeSessionId ? { parentNativeSessionId: binding.parentNativeSessionId } : {}),
         };
         const result = await rpc(host, 'POST', path, binding.agentId, JSON.stringify(body));
-        if (result.status >= 300) throw new BrokerError(result.status, 'session_unavailable', 'The native session could not be reattached after the host reconnected.');
+        if (result.status >= 300) {
+          const failure = sessionAttachFailure(result.body);
+          throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId);
+        }
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session was reattaching.');
         if (!host.legacyDsh) {
           let returned: Record<string, unknown>;
@@ -408,12 +423,16 @@ export function createHostBroker(options: HostBrokerOptions) {
         const result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
         if (result.status >= 300) {
+          if (attaching) {
+            const failure = sessionAttachFailure(result.body);
+            throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId);
+          }
           let detail: Record<string, unknown> = {};
           try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
           throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.', result.status < 500 && [
             'invalid_request', 'invalid_provider', 'unsupported_configuration', 'invalid_operation_id',
             'operation_capacity_exceeded', 'operation_result_too_large', 'operation_rejected',
-          ].includes(String(detail.code)));
+          ].includes(String(detail.code)), result.requestId);
         }
         let returned: Record<string, unknown> = {};
         try { returned = JSON.parse(result.body); } catch {
@@ -837,7 +856,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!handlesRequest(url)) return undefined;
       try { return await handle(request, context, url); }
       catch (error) {
-        if (error instanceof BrokerError || error instanceof SharingError) return json(error.status, { code: error.code, error: error.message });
+        if (error instanceof BrokerError || error instanceof SharingError) return json(error.status, { code: error.code, error: error.message, ...(error instanceof BrokerError && error.requestId ? { requestId: error.requestId } : {}) });
         return json(503, { code: 'host_operation_failed', error: error instanceof Error ? error.message : 'Remote Host operation failed.' });
       }
     },

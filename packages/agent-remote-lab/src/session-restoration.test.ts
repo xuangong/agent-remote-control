@@ -36,3 +36,20 @@ it('does not restore an obsolete selection after navigation and does not retry d
   expect(failed).toHaveBeenCalledWith(expect.any(DirectoryError), false);
   cleanup();
 });
+
+
+it('reports a browser wait deadline and retries only the existing session', async () => {
+  vi.useFakeTimers();
+  const failed = vi.fn(), restored = vi.fn();
+  const open = vi.fn((signal: AbortSignal) => new Promise<string>((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+  }));
+  const stop = restoreSession({ active: () => true, open, failed, restored });
+  try {
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(failed).toHaveBeenCalledWith(expect.objectContaining({ code: 'session_attach_wait_timeout', status: 408 }), true);
+    expect(restored).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(open).toHaveBeenCalledTimes(2);
+  } finally { stop(); }
+});

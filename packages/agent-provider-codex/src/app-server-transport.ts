@@ -1,1 +1,1 @@
-export { CodexAppServerTransport, CodexAppServerRpcError, CodexServerRequestCanceled, type CodexAppServerTransportOptions } from '@agent-remote-controller/codex-daemon-client';
+export { CodexAppServerTransport, CodexTransportUnavailableError, CodexRequestTimeoutError, CodexAppServerRpcError, CodexServerRequestCanceled, type CodexAppServerTransportOptions } from '@agent-remote-controller/codex-daemon-client';

@@ -1,6 +1,7 @@
+import { useFeedbackToast } from './Toast.js';
 import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
-import { useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -32,7 +33,8 @@ export interface LabWorkbenchActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
-export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+  const actions = useActionFeedback(suppliedActions, state?.agent?.id);
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
   const readingPositions = recoveryPositions ?? localPositions;
@@ -65,6 +67,9 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
       : runtimeConnection?.state === 'unavailable'
         ? 'Native runtime is unavailable. Changes are unavailable.'
         : undefined;
+  useFeedbackToast('Session runtime', visible ? agentFailure ?? connectionFailure?.message ?? runtimeNotice
+    ?? (sessionStatus === 'disconnected' ? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
+    agentFailure || connectionFailure || runtimeConnection?.state === 'unavailable' ? 'error' : 'info');
   const activity = sessionActivity(state);
   const activityLabel = agentFailure ? 'Agent failed'
     : connectionFailure ? 'Connection failed'
@@ -169,4 +174,31 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
       resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
   </div>;
+}
+
+
+function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): LabWorkbenchActions {
+  const activeSession = useRef(sessionId);
+  activeSession.current = sessionId;
+  const [failure, setFailure] = useState<{ title: string; message: string }>();
+  useFeedbackToast(failure?.title ?? 'Session action', failure?.message);
+  useEffect(() => setFailure(undefined), [sessionId]);
+  function report<Args extends unknown[], Result>(title: string, action: ((...args: Args) => Result) | undefined) {
+    return action ? async (...args: Args): Promise<Awaited<Result>> => {
+      setFailure(undefined);
+      try { return await action(...args); }
+      catch (error) {
+        if (activeSession.current === sessionId) setFailure({ title, message: error instanceof Error ? error.message : 'The action could not be confirmed. Check its status before retrying.' });
+        throw error;
+      }
+    } : undefined;
+  }
+  return useMemo(() => ({ ...actions,
+    sendMessage: report('Send message', actions.sendMessage), retryMessage: report('Retry message', actions.retryMessage),
+    steer: report('Steer session', actions.steer), cancel: report('Stop work', actions.cancel),
+    respondToInteraction: report('Submit response', actions.respondToInteraction),
+    setPlanning: report('Change session mode', actions.setPlanning), setSessionSetting: report('Change session setting', actions.setSessionSetting),
+    listCommands: report('Load commands', actions.listCommands), executeCommand: report('Run command', actions.executeCommand),
+    loadOlder: report('Load conversation history', actions.loadOlder),
+  }), [actions, sessionId]);
 }

@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createLaunchdAutostart, prepareLaunchdConnection, resolveLaunchdConnection } from './launchd.js';
+import { createLaunchdAutostart } from './launchd.js';
+import { prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
 import { saveIssuedCredential, saveRegisteredConnection } from './connection-config.js';
 
 const roots: string[] = [];
@@ -49,7 +50,7 @@ describe('Agent Host login startup', () => {
 
   it('writes a private direct supervisor definition with restored paths and no pairing credential', async () => {
     const { manager, stateDir } = await setup();
-    await prepareLaunchdConnection(stateDir, { serverUrl: 'https://relay.test', remoteKey: 'pairing-secret', environment: {
+    await prepareAutostartConnection(stateDir, { serverUrl: 'https://relay.test', remoteKey: 'pairing-secret', environment: {
       HOME: '/private/home', PATH: '/private/bin', AGENT_HOST_WORKSPACE: '/work/project', COPILOT_AUTO_UPDATE: 'false', PRIVATE_SECRET: 'unrelated-secret',
     } });
     await manager.install();
@@ -62,8 +63,8 @@ describe('Agent Host login startup', () => {
     expect(contents).not.toContain('pairing-secret');
     expect(contents).not.toContain('unrelated-secret');
     expect((await stat(plist)).mode & 0o777).toBe(0o600);
-    expect((await stat(join(stateDir, 'launchd-start.json'))).mode & 0o777).toBe(0o600);
-    const resolved = await resolveLaunchdConnection(stateDir, { HOME: '/runtime/home', PATH: '/runtime/bin' });
+    expect((await stat(join(stateDir, 'autostart-start.json'))).mode & 0o777).toBe(0o600);
+    const resolved = await resolveAutostartConnection(stateDir, { HOME: '/runtime/home', PATH: '/runtime/bin' });
     expect(resolved.connection.remoteKey).toBe('pairing-secret');
     expect(resolved.connection.environment.AGENT_HOST_WORKSPACE).toBe('/work/project');
     expect(resolved.connection.environment.COPILOT_AUTO_UPDATE).toBe('false');
@@ -73,14 +74,14 @@ describe('Agent Host login startup', () => {
   it('never reapplies an initial pairing key after a credential rotation changes saved settings', async () => {
     const { stateDir } = await setup();
     const initial = { serverUrl: 'https://relay.test', remoteKey: 'initial', environment: { AGENT_HOST_WORKSPACE: '/work' } };
-    await prepareLaunchdConnection(stateDir, initial);
+    await prepareAutostartConnection(stateDir, initial);
     await saveIssuedCredential(stateDir, initial, 'rotated');
-    const restarted = await resolveLaunchdConnection(stateDir, {});
+    const restarted = await resolveAutostartConnection(stateDir, {});
     expect(restarted.connection.remoteKey).toBe('rotated');
     expect(restarted.pendingId).toBeUndefined();
-    await prepareLaunchdConnection(stateDir, { ...initial, remoteKey: 'replacement' });
-    expect((await resolveLaunchdConnection(stateDir, {})).connection.remoteKey).toBe('replacement');
+    await prepareAutostartConnection(stateDir, { ...initial, remoteKey: 'replacement' });
+    expect((await resolveAutostartConnection(stateDir, {})).connection.remoteKey).toBe('replacement');
     await saveRegisteredConnection(stateDir, { ...initial, remoteKey: 'paired-elsewhere' }, Promise.resolve());
-    expect((await resolveLaunchdConnection(stateDir, {})).connection.remoteKey).toBe('paired-elsewhere');
+    expect((await resolveAutostartConnection(stateDir, {})).connection.remoteKey).toBe('paired-elsewhere');
   });
 });

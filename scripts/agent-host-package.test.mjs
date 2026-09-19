@@ -5,7 +5,8 @@ import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -23,6 +24,9 @@ test('installs the tarball independently and manages a paired daemon from a path
   const env = { PATH: process.env.PATH, HOME: home, TMPDIR: process.env.TMPDIR, AGENT_HOST_STATE_DIR: state,
     AGENT_HOST_PROVIDERS: 'codex,claude,copilot', AGENT_HOST_WORKSPACE: directory,
     AGENT_HOST_CLAUDE_HOME: join(home, 'claude'), AGENT_HOST_COPILOT_HOME: join(home, 'copilot') };
+  if (process.platform === 'linux') Object.assign(env, { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+    DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config') });
   const run = async (args, overrides = {}) => {
     try { return await exec(bin, args, { cwd: directory, env: { ...env, ...overrides }, timeout: 60000 }); }
     catch (error) {
@@ -32,7 +36,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   };
   t.after(async () => {
     const daemon = JSON.parse(await readFile(join(state, 'daemon.json'), 'utf8').catch(() => 'null'));
-    if (process.platform === 'darwin') { try { await run(['autostart', 'disable']); } catch {} }
+    if (process.platform === 'darwin' || process.platform === 'linux') { try { await run(['autostart', 'disable']); } catch {} }
     try { await run(['stop']); } catch {}
     if (daemon) {
       try { process.kill(daemon.pid, 'SIGTERM'); } catch {}
@@ -130,7 +134,9 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.match((await run(['start'])).stdout, /daemon started/);
   await waitFor(async () => /uplink: registered/.test((await run(['status'])).stdout));
   assert.equal(JSON.parse(await readFile(join(state, 'connection.json'), 'utf8')).remoteKey, 'replacement-package-test-key');
-  if (process.platform === 'darwin') {
+  const supervised = JSON.parse(await readFile(join(state, 'daemon.json'), 'utf8')).supervisor;
+  if (process.env.AGENT_HOST_TEST_REQUIRE_SYSTEMD === '1') assert.equal(supervised, 'systemd');
+  if (supervised === 'launchd' || supervised === 'systemd') {
     assert.match((await run(['autostart', 'status'])).stdout, /enabled/i);
     const crashed = JSON.parse(await readFile(join(state, 'daemon.json'), 'utf8'));
     process.kill(crashed.pid, 'SIGKILL');
@@ -152,15 +158,22 @@ test('installs the tarball independently and manages a paired daemon from a path
     assert.match((await run(['autostart', 'status'])).stdout, /enabled/i);
     await new Promise(resolve => setTimeout(resolve, 11000));
     await assert.rejects(run(['status']), /not running/);
-    const launchAgents = join(home, 'Library/LaunchAgents');
-    const installedJobs = (await readdir(launchAgents)).filter(name => name.endsWith('.plist'));
-    assert.equal(installedJobs.length, 1);
-    const plist = join(launchAgents, installedJobs[0]);
-    const metadata = await readFile(plist, 'utf8');
+    let serviceFile;
+    if (supervised === 'launchd') {
+      const launchAgents = join(home, 'Library/LaunchAgents');
+      const installedJobs = (await readdir(launchAgents)).filter(name => name.endsWith('.plist'));
+      assert.equal(installedJobs.length, 1);
+      serviceFile = join(launchAgents, installedJobs[0]);
+    } else {
+      const name = `agent-remote-controller-${createHash('sha256').update(state).digest('hex').slice(0, 16)}.service`;
+      serviceFile = join(env.XDG_CONFIG_HOME, 'systemd/user', name);
+    }
+    const metadata = await readFile(serviceFile, 'utf8');
     assert.ok(!metadata.includes(connection.AGENT_HOST_REMOTE_KEY));
     assert.ok(!metadata.includes('replacement-package-test-key'));
     // Load the persisted job directly, as login does, without running the CLI setup again.
-    await exec('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, plist], { timeout: 15000 });
+    if (supervised === 'launchd') await exec('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, serviceFile], { timeout: 15000 });
+    else await exec('systemctl', ['--user', 'start', serviceFile.split('/').at(-1)], { env: { ...process.env, ...env }, timeout: 15000 });
     await waitFor(async () => /uplink: registered/.test((await run(['status'])).stdout));
     await run(['autostart', 'disable']);
     assert.match((await run(['autostart', 'status'])).stdout, /disabled/i);
@@ -172,6 +185,14 @@ test('installs the tarball independently and manages a paired daemon from a path
     await run(['autostart', 'enable']);
     await waitFor(async () => /uplink: registered/.test((await run(['status'])).stdout));
     assert.match((await run(['autostart', 'status'])).stdout, /enabled/i);
+  } else if (process.platform === 'linux') {
+    assert.match((await run(['autostart', 'status'])).stdout, /systemd user manager unavailable/);
+    await assert.rejects(run(['autostart', 'enable']), /systemd user manager is unavailable/);
+    await run(['autostart', 'disable']);
+    assert.match((await run(['status'])).stdout, /supervisor: manual/);
+    await run(['stop']);
+    await run(['start']);
+    assert.match((await run(['autostart', 'status'])).stdout, /disabled/i);
   }
 });
 

@@ -3,7 +3,7 @@
 The `@agent-remote-controller/agent-remote-controller` package provides the
 `agent-remote-controller` command. It runs the local Agent Host and connects
 Codex, Claude Code and GitHub Copilot sessions to a Relay for the browser
-controller. Requires Node.js 22 or newer. No repository checkout or pnpm is
+controller. Supports macOS and Linux with Node.js 22 or newer. No repository checkout or pnpm is
 needed after installation. The package contains the latest bundled provider
 implementation, including Codex Default-mode structured questions.
 
@@ -59,8 +59,9 @@ export AGENT_HOST_SERVER=https://agents.xianliao.de5.net
 export AGENT_HOST_PROVIDERS=codex,claude,copilot
 export AGENT_HOST_WORKSPACE="$HOME/projects"
 export AGENT_HOST_NAME="My development machine"
-# Read the key without putting its value in shell history (macOS zsh):
-read -rs 'AGENT_HOST_REMOTE_KEY?Pairing key: '; echo
+# Bash (Linux): read the key without putting it in shell history.
+read -rsp "Pairing key: " AGENT_HOST_REMOTE_KEY; echo
+# In macOS zsh, use: read -rs 'AGENT_HOST_REMOTE_KEY?Pairing key: '; echo
 export AGENT_HOST_REMOTE_KEY
 agent-remote-controller start
 unset AGENT_HOST_REMOTE_KEY AGENT_HOST_SERVER
@@ -107,17 +108,34 @@ Do not share this directory or its connection file.
 agent-remote-controller status            # Check daemon and uplink state
 agent-remote-controller stop              # Stop this Host and release its owned resources
 agent-remote-controller start             # Start using saved connection settings
-agent-remote-controller autostart status  # Check macOS login startup and service state
+agent-remote-controller autostart status  # Check login startup and service state
 agent-remote-controller autostart disable # Disable login startup and stop the managed service
 agent-remote-controller autostart enable  # Enable login startup and start the managed service
 agent-remote-controller foreground        # Run in this terminal instead; Ctrl+C stops it
 ```
 
-On macOS, the first `start` enables login startup by default. A per-user LaunchAgent starts the Controller after login and restarts it if the process exits. This runs in the logged-in user's session, not before login. Saved connection and provider settings are reused, and the heartbeat mechanism reconnects when the network returns. `foreground` does not configure login startup. Other platforms retain the manually started background daemon.
+On macOS, the first `start` enables login startup by default. A per-user LaunchAgent starts the Controller after login and restarts it if the process exits. This runs in the logged-in user's session, not before login. Saved connection and provider settings are reused, and the heartbeat mechanism reconnects when the network returns. `foreground` does not configure login startup.
 
 `stop` unloads the running service before shutting down, so it stays stopped for the current login session and releases the Controller's connections and owned native resources. The login-startup preference remains enabled: a later `start` or the next login can start it again. Shared native daemons remain owned by their original applications and are not terminated. Stopping or restarting the Controller can interrupt active work; persisted native history is retained.
 
-`autostart disable` stops a launchd-managed Controller and persistently disables login startup. Later `start` commands respect that choice and run a manual background daemon until `autostart enable` is used. If a manual daemon is already running, enabling login startup preserves it and takes effect on the next login; stop it and start again to use launchd immediately. Keep the same `AGENT_HOST_STATE_DIR` when managing an installation.
+`autostart disable` stops a supervisor-managed Controller and persistently disables login startup. Later `start` commands respect that choice and run a manual background daemon until `autostart enable` is used. If a manual daemon is already running, enabling login startup preserves it and takes effect on the next login; stop it and start again to use the system supervisor immediately. Keep the same `AGENT_HOST_STATE_DIR` when managing an installation.
+
+### Linux
+
+On Linux, `start` uses a **systemd user service** by default when `systemctl --user` can reach the current user's manager. It installs `agent-remote-controller-<state-directory-hash>.service` under `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user`, enables login startup, and starts the service. Use the same user, `HOME`, `XDG_CONFIG_HOME`, and `AGENT_HOST_STATE_DIR` for all lifecycle commands; the configuration directory must be one that the user's systemd manager searches. Do not run the CLI with `sudo`. Install Node and the Controller in persistent locations: the service stores absolute executable paths and the current PATH, and does not source shell startup files. Reinstall the service with `start` after changing those paths.
+
+The service restarts an exited Controller after ten seconds. `stop` stops it without disabling future startup; `autostart disable` removes the service and persists the opt-out. `status` identifies `supervisor: systemd`; `autostart status` separately reports the saved preference, installed unit, user-manager availability, and enabled service. Unit metadata contains paths, not pairing credentials. Credentials and provider settings stay in the private state directory. The same bounded `agent-host.log` is used on both operating systems. systemd gives the Controller time to release its resources and then kills any remaining processes in the service's cgroup; external shared daemons are outside this ownership boundary.
+
+A user service normally starts when the user logs in. For a server that must start at boot without login and keep running after logout, an administrator can enable lingering for that account:
+
+```sh
+sudo loginctl enable-linger "$(id -un)"
+loginctl show-user "$(id -un)" --property=Linger
+```
+
+The Controller does not modify lingering or install a root service. Enabling it affects the account's other user services too. See the [systemd loginctl documentation](https://www.freedesktop.org/software/systemd/man/latest/loginctl.html#enable-linger%20%5BUSER%E2%80%A6%5D).
+
+Without an accessible systemd user manager (including most containers), `start` prints a warning and starts a manual daemon, which has no login startup or crash recovery. Explicit `autostart enable` fails with an actionable message in that environment. An existing systemd installation is never silently replaced with a manual process while its manager is inaccessible. For Docker or another supervisor, run `agent-remote-controller foreground` as the container command, persist the state directory and native profiles, and let that supervisor provide restart policy and signal forwarding. Install and authenticate Linux-native provider CLIs inside that environment; macOS executables cannot be reused there. systemd 240 or newer is needed for direct append logging. Provider architecture and libc requirements still apply to their own binaries.
 
 `status` reports the uplink state; process startup alone does not prove registration succeeded. A rejected/expired pairing requires a new key. With a running daemon, set `AGENT_HOST_SERVER` and `AGENT_HOST_REMOTE_KEY` together and run `agent-remote-controller pair` to replace the connection without restarting sessions.
 
@@ -128,7 +146,7 @@ requests and active work may be interrupted by a restart.
 
 ## Connection diagnostics
 
-The background Controller appends connection diagnostics to `agent-host.log` in its state directory. The active log and its three numbered archives retain at most 5 MiB each after successful cleanup. Cleanup runs at daemon startup, before an owned diagnostic when the active file is already over its threshold, and once per second for output written directly through inherited stdout or stderr descriptors. Rotation preserves the active inode so append descriptors installed by manual startup or launchd keep writing to the active log. One owned diagnostic can take the active file up to 64 KiB over its threshold until the next owned write or polling pass. An inherited burst has no finite instantaneous overshoot bound; the next pass archives only its latest 5 MiB and discards the earlier excess. Inherited bytes appended after the retained tail is captured and before the active inode is truncated can also be lost even when archive creation succeeds. If an archive cannot be retained, the Controller still truncates the active file when possible and retries cleanup later without logging the cleanup failure recursively.
+The background Controller appends connection diagnostics to `agent-host.log` in its state directory. The active log and its three numbered archives retain at most 5 MiB each after successful cleanup. Cleanup runs at daemon startup, before an owned diagnostic when the active file is already over its threshold, and once per second for output written directly through inherited stdout or stderr descriptors. Rotation preserves the active inode so append descriptors installed by manual startup, launchd, or systemd keep writing to the active log. One owned diagnostic can take the active file up to 64 KiB over its threshold until the next owned write or polling pass. An inherited burst has no finite instantaneous overshoot bound; the next pass archives only its latest 5 MiB and discards the earlier excess. Inherited bytes appended after the retained tail is captured and before the active inode is truncated can also be lost even when archive creation succeeds. If an archive cannot be retained, the Controller still truncates the active file when possible and retries cleanup later without logging the cleanup failure recursively.
 
 Each owned diagnostic is redacted before being limited to 64 KiB and remains one line. Connection JSON includes a UTC timestamp, process ID, uplink generation, and connection ID. These fields correlate retries, pairing replacements, and process restarts. In foreground mode, the same diagnostics go to standard error without daemon archive management.
 

@@ -107,3 +107,57 @@ test('shares sidebar and title favorites while retaining only local activity tra
   expect(errors).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('favorites.png') });
 });
+
+
+test('uses consistent status colors for mobile titles and grouped tracking counts', async ({ page }, testInfo) => {
+  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: route.request().postDataJSON().nativeSessionId } }));
+  await page.addInitScript(() => {
+    const sessions = ['working-session', 'pending-session', 'idle-one', 'idle-two', 'recorded-session'].map(nativeSessionId => ({
+      hostId: 'host', providerId: 'recorded', nativeSessionId, title: nativeSessionId, starredAt: 1,
+    }));
+    localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify(sessions));
+  });
+  const mobile = testInfo.project.name.includes('mobile');
+  if (mobile) await page.setViewportSize({ width: 320, height: 740 });
+  for (const status of ['running', 'waiting', 'idle']) {
+    await page.goto(`/e2e/fixtures/session-stars.html?status=${status}`);
+    const counts = page.locator('.lab-tracking-counts');
+    await expect(counts.locator('[data-session-status="idle"]')).toHaveText('4');
+    for (const [agentId, activity] of [['working-session', 'running'], ['pending-session', 'waiting']]) {
+      await page.evaluate(detail => window.dispatchEvent(new CustomEvent('fixture-activity', { detail })), { agentId, status: activity });
+    }
+    await expect(counts.locator('.lab-tracking-count')).toHaveText(['1', '1', '2']);
+    const colors: Record<string, string> = {};
+    for (const activity of ['running', 'waiting', 'idle']) {
+      colors[activity] = await counts.locator(`[data-session-status="${activity}"]`).evaluate(el => getComputedStyle(el).color);
+    }
+    expect(colors.running).toBe('rgb(35, 112, 73)');
+    expect(colors.waiting).toBe('oklch(0.52 0.108 87)');
+    expect(colors.idle).toBe('oklch(0.243 0.024 248.8)');
+    if (mobile) {
+      const title = page.locator('.lab-favorites-title');
+      await expect(title).toHaveCSS('color', colors[status]!);
+      const trigger = page.getByRole('button', { name: 'Favorites', exact: true });
+      await trigger.hover();
+      await expect(title).toHaveCSS('color', colors[status]!);
+      await expect(trigger).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await expect(trigger).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
+      expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await trigger.click();
+      await expect(page.locator('.lab-title-favorites section')).toBeVisible();
+      await page.getByRole('button', { name: 'Close Favorites', exact: true }).click();
+      await expect(trigger).toBeFocused();
+    }
+    await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+    const panel = page.locator('.lab-tracking-floating section');
+    for (const [title, activity] of [['working-session', 'running'], ['pending-session', 'waiting'], ['idle-one', 'idle'], ['idle-two', 'idle']] as const) {
+      await expect(panel.locator('strong', { hasText: title })).toHaveCSS('color', colors[activity]!);
+    }
+    await expect(panel).not.toContainText('recorded-session');
+    await page.screenshot({ path: testInfo.outputPath(`status-colors-${status}.png`) });
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-activity', { detail: { agentId: 'working-session', status: 'idle' } })));
+    await expect(counts.locator('[data-session-status="running"]')).toHaveCount(0);
+    await expect(counts.locator('[data-session-status="idle"]')).toHaveText('3');
+  }
+});

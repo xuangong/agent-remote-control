@@ -1,3 +1,4 @@
+import type { AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
 import type { SessionStars } from '../hooks/useSessionStars.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
@@ -34,8 +35,8 @@ export function FavoritesList({ favorites, tracking, activeKey, busy, onOpen }: 
     {tracking.error ? <p className="lab-control-note" role="alert">{tracking.error}</p> : null}
   </>;
 }
-export function FavoritesMenu({ title, currentSession, favorites, tracking, activeKey, busy, onOpen }: { title: string; currentSession?: Parameters<typeof starInput>[0]; favorites: SessionStars; tracking: SessionTracking; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
-  return <SessionPopover label="Favorites" className="lab-title-favorites" trigger={<><span className="lab-favorites-title">{title}</span><span aria-hidden="true">▾</span></>} onOpen={() => void favorites.refresh()}>
+export function FavoritesMenu({ title, status, currentSession, favorites, tracking, activeKey, busy, onOpen }: { title: string; status?: AgentStatus; currentSession?: Parameters<typeof starInput>[0]; favorites: SessionStars; tracking: SessionTracking; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
+  return <SessionPopover label="Favorites" className="lab-title-favorites" trigger={<><span className="lab-favorites-title agent-session-title" data-session-status={status}>{title}</span><span className="lab-favorites-chevron" aria-hidden="true">▾</span></>} onOpen={() => void favorites.refresh()}>
     {close => <>{currentSession ? <div className="lab-favorites-current"><span>Current: {currentSession.title}</span><StarButton session={currentSession} favorites={favorites} /></div> : null}<FavoritesList favorites={favorites} tracking={tracking} activeKey={activeKey} busy={busy} onOpen={item => { close(); onOpen(item); }} /></>}
   </SessionPopover>;
 }

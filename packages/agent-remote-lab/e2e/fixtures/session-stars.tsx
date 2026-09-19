@@ -13,7 +13,7 @@ const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'reco
 directory.list = async () => ({ items: [session], hasMore: false, revision: '1' });
 directory.workspaces = async () => ({ workspaces: [] });
 directory.attach = async () => ({ agentId: 'agent-1', nativeSessionId: session.nativeSessionId });
-const observers = new Set<RemoteTransportListener>();
+const observers = new Map<RemoteTransportListener, string>();
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
   createAgent: async () => { throw new Error('Creation is not used'); },
@@ -22,7 +22,7 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
   fetchTimeline: async () => { throw new Error('Tracking must not request content'); },
   onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
   connect(agentId, listener) {
-    observers.add(listener); queueMicrotask(() => listener.onOpen());
+    observers.set(listener, agentId); queueMicrotask(() => listener.onOpen());
     return { close: () => { observers.delete(listener); }, send: message => {
       if (message.type !== 'negotiate' || message.observation !== 'activity') throw new Error('Tracking requested a content subscription');
       listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
@@ -31,10 +31,16 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
   },
 };
 window.addEventListener('fixture-activity', event => {
-  for (const listener of observers) listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent-1', status: (event as CustomEvent<AgentStatus>).detail } });
+  const detail = (event as CustomEvent<AgentStatus | { agentId: string; status: AgentStatus }>).detail;
+  for (const [listener, agentId] of observers) {
+    if (typeof detail !== 'string' && detail.agentId !== agentId) continue;
+    listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId, status: typeof detail === 'string' ? detail : detail.status } });
+  }
 });
 localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...session, agentId: 'agent-1' }]));
 const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Work Mac', online: true, providers: [{ providerId: 'recorded', displayName: 'Recorded' }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
+const requestedStatus = new URLSearchParams(location.search).get('status');
+const status = requestedStatus === 'waiting' || requestedStatus === 'idle' ? requestedStatus : 'running';
 createRoot(document.getElementById('root')!).render(<App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
-  initialState={{ ...replicaState, agent: { ...replicaState.agent!, status: 'running' }, timeline: { ...replicaState.timeline, hasOlder: false } }} initialSessionStatus="ready"
+  initialState={{ ...replicaState, agent: { ...replicaState.agent!, status }, timeline: { ...replicaState.timeline, hasOlder: false } }} initialSessionStatus="ready"
   accountAction={<><span className="gateway-account-identity">Alice Example</span><button>Security</button><button>Sign out</button></>} />);

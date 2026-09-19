@@ -1165,14 +1165,19 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-session-popover-panel .lab-directory-heading { margin-bottom: 8px; }
 .lab-session-popover-panel .lab-directory-heading > button { width: 36px; height: 36px; }
 .lab-title-favorites { flex: 1; }
-.lab-title-favorites > button { width: 100%; border-color: transparent; background: transparent; }
+.lab-title-favorites > button,
+.lab-title-favorites > button:hover:not(:disabled) { width: 100%; padding-inline: 4px; border-color: transparent; background: transparent; box-shadow: none; color: var(--obs-text); }
+.lab-title-favorites > button:active:not(:disabled) { transform: none; }
+.lab-favorites-chevron { color: var(--obs-text-secondary); font-size: 11px; }
 .lab-favorites-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-tracking-floating { position: fixed; right: 12px; top: calc(60px + env(safe-area-inset-top, 0px)); z-index: 140; }
 .lab-tracking-floating .lab-session-popover-trigger { border-radius: 24px; box-shadow: 0 2px 10px color-mix(in oklab, var(--obs-text) 10%, transparent); padding: 8px 12px; touch-action: none; user-select: none; cursor: grab; }
 .lab-tracking-floating .lab-session-popover-trigger:active { cursor: grabbing; }
 .lab-tracking-floating .lab-session-popover-panel { position: fixed; left: var(--tracking-panel-left); right: auto; top: var(--tracking-panel-top); bottom: var(--tracking-panel-bottom); width: var(--tracking-panel-width); max-height: var(--tracking-panel-height); }
+.lab-tracking-floating .agent-session-title[data-session-status="unknown"] { color: var(--agent-muted); }
+.lab-tracking-counts { display: inline-flex; align-items: center; gap: 8px; }
 .lab-tracking-count { font-size: 12px; font-variant-numeric: tabular-nums; }
-.lab-tracking-badge { position: absolute; top: -5px; right: -4px; min-width: 18px; padding: 2px 4px; border-radius: 12px; color: white; background: var(--obs-action); font-size: 11px; }
+.lab-tracking-badge { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border: 2px solid var(--obs-surface); border-radius: 50%; background: var(--obs-text); }
 .lab-tracking-attention { position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--obs-warning); }
 .lab-tracking-floating[data-attention="true"] .lab-session-popover-trigger { border-color: var(--obs-warning); }
 .lab-tracked-row { display: flex; align-items: center; gap: 6px; }

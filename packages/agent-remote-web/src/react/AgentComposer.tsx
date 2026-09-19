@@ -6,6 +6,7 @@ import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBin
 import { AgentCommandDetails } from './AgentCommandDetails.js';
 import { useAgentCommands } from './useAgentCommands.js';
 import { AgentActivityStatus } from './AgentActivityStatus.js';
+import { useSendButtonPress } from './useSendButtonPress.js';
 
 export interface AgentComposerProps {
   state?: AgentReplicaState;
@@ -88,6 +89,18 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
     || (pending === 'command' && currentDraft.commandInterrupted === true);
   const canInterrupt = ready && capabilities?.cancel === true && (activeTurnId !== undefined || pending === 'command')
     && state?.agent?.status !== 'failed' && state?.agent?.status !== 'closed' && !interruptRequested;
+
+  const sendButtonPress = useSendButtonPress(agentId, ready && !readOnly && !busy, () => {
+    const input = inputRef.current;
+    if (!input || input.disabled || composing.current) return;
+    input.setRangeText('\n', input.selectionStart, input.selectionEnd, 'end');
+    setText(input.value);
+    currentDraft.commandIndex = 0;
+    currentDraft.commandsDismissed = false;
+    currentDraft.feedback = undefined;
+    refresh(value => value + 1);
+    input.focus({ preventScroll: true });
+  }, () => void run('send'));
 
   useEffect(() => {
     mounted.current = true;
@@ -291,7 +304,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
     />
     </div>
-    <p id={`${controlId}-hint`} className={`agent-composer-note${readOnly ? '' : ' agent-visually-hidden'}`}>{readOnly ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter for a new line · / for commands</>}</p>
+    <p id={`${controlId}-hint`} className={`agent-composer-note${readOnly ? '' : ' agent-visually-hidden'}`}>{readOnly ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
     <div className="agent-composer-actions">
       <div className="agent-composer-secondary-controls">
         <button type="button" aria-label="Open chat commands" disabled={!ready || busy || (readOnly && consoleCommands.length === 0)} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); inputRef.current?.focus(); }}>/</button>
@@ -306,7 +319,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
         onInterrupt={() => void run('cancel')} /> : null}
-      <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} disabled={!ready || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !text.trim() || (!isCommand && (capabilities?.sendMessage !== true || !onSendMessage)))} onClick={() => void run('send')}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
+      <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={`${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!ready || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !text.trim() || (!isCommand && (capabilities?.sendMessage !== true || !onSendMessage)))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
     </div>
     {runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
       : !ready ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}

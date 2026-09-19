@@ -358,10 +358,19 @@ export class CodexAppServerSession implements AgentSession {
       throw error;
     });
     session.setThreadFromResponse(resumed, 'thread/resume');
+    const statusRevision = session.statusRevision;
     const history = await transport.request('thread/read', {
       threadId: handle.sessionId,
       includeTurns: true,
     });
+    if (session.statusRevision === statusRevision && isRecord(history) && isRecord(history.thread)) {
+      const thread = history.thread;
+      const active = Array.isArray(thread.turns)
+        ? [...thread.turns].reverse().find(turn => isRecord(turn) && turn.status === 'inProgress') : undefined;
+      session.activeTurnId = isRecord(active) ? readString(active.id) : undefined;
+      session.runtimeStatus = readThreadRuntimeStatus(thread.status)
+        ?? (session.activeTurnId ? 'running' : session.runtimeStatus);
+    }
     session.runtime.inspectHistory(handle.sessionId, history);
     session.finishBootstrap(
       projectCodexThreadHistory(history, handle.sessionId, { images: session.images, cwd: session.config.cwd }),

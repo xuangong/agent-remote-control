@@ -21,12 +21,12 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
   fetchSnapshot: async () => ({ protocolVersion: '1.4.0', type: 'agent_snapshot', payload: replicaState.agent! }),
   fetchTimeline: async () => { throw new Error('Tracking must not request content'); },
   onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
-  connect(_id, listener) {
+  connect(agentId, listener) {
     observers.add(listener); queueMicrotask(() => listener.onOpen());
     return { close: () => { observers.delete(listener); }, send: message => {
       if (message.type !== 'negotiate' || message.observation !== 'activity') throw new Error('Tracking requested a content subscription');
       listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
-      listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent-1', status: 'idle' } });
+      listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId, status: 'idle' } });
     } };
   },
 };
@@ -36,5 +36,5 @@ window.addEventListener('fixture-activity', event => {
 localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...session, agentId: 'agent-1' }]));
 const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Work Mac', online: true, providers: [{ providerId: 'recorded', displayName: 'Recorded' }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
 createRoot(document.getElementById('root')!).render(<App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
-  initialState={{ ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false } }} initialSessionStatus="ready"
+  initialState={{ ...replicaState, agent: { ...replicaState.agent!, status: 'running' }, timeline: { ...replicaState.timeline, hasOlder: false } }} initialSessionStatus="ready"
   accountAction={<><span className="gateway-account-identity">Alice Example</span><button>Security</button><button>Sign out</button></>} />);

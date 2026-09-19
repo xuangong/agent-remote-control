@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-export function SessionPopover({ label, trigger, className = '', children, onOpen }: { label: string; trigger: ReactNode; className?: string; children(close: () => void): ReactNode; onOpen?(): void }) {
+export function SessionPopover({ label, trigger, triggerTitle, className = '', children, onOpen }: { label: string; trigger: ReactNode; triggerTitle?: string; className?: string; children(close: () => void): ReactNode; onOpen?(): void }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -16,7 +16,7 @@ export function SessionPopover({ label, trigger, className = '', children, onOpe
   return <div className={`lab-session-popover ${className}`} ref={root}
     onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
     onKeyDown={event => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close(); } }}>
-    <button type="button" ref={button} className="lab-session-popover-trigger" aria-label={label} aria-expanded={open} aria-controls={id}
+    <button type="button" ref={button} className="lab-session-popover-trigger" title={triggerTitle} aria-label={label} aria-expanded={open} aria-controls={id}
       onClick={() => { if (!open) onOpen?.(); setOpen(value => !value); }}>{trigger}</button>
     {open ? <section ref={panel} tabIndex={-1} id={id} className="lab-session-popover-panel" aria-label={label}>
       <div className="lab-directory-heading"><h2>{label}</h2><button type="button" aria-label={`Close ${label}`} onClick={close}>×</button></div>

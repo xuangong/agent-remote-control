@@ -5,8 +5,40 @@ import { render } from '../test/setup.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';
 import { readTrackedSessions } from '../tracking-state.js';
+import { sessionKey } from '../session-tree.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+it('observes only background sessions while preserving the current session tracking choice', async () => {
+  vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockResolvedValue({ agentId: 'agent' });
+  const connections = new Set<string>();
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot: async () => { throw new Error('Activity must not fetch snapshots'); },
+    fetchTimeline: async () => { throw new Error('Activity must not fetch content'); },
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect: (id, listener) => {
+    connections.add(id); queueMicrotask(() => listener.onOpen());
+    return { send: () => {}, close: () => { connections.delete(id); } };
+  } };
+  let tracking!: SessionTracking;
+  let select!: (key: string | undefined) => void;
+  function Fixture() {
+    const [key, setKey] = useState<string | undefined>(sessionKey(star)); select = setKey;
+    tracking = useSessionTracking('alice', transport, key);
+    return <>{tracking.observers}</>;
+  }
+  await render(<Fixture />);
+  await act(async () => tracking.toggle(star));
+  expect(tracking.sessions).toEqual([star]);
+  expect(connections.size).toBe(0);
+  expect(tracking.backgroundSessions).toEqual([]);
+  await act(async () => select(undefined));
+  expect(connections.size).toBe(1);
+  expect(tracking.backgroundSessions).toEqual([star]);
+  await act(async () => select(sessionKey(star)));
+  expect(connections.size).toBe(0);
+  expect(tracking.observations).toEqual({});
+  expect(readTrackedSessions('alice')).toEqual([star]);
+});
 it('restores local selections, stops observations on untrack and logout, and never stops the native session', async () => {
   vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockResolvedValue({ agentId: 'agent' });
   const start = vi.spyOn(RemoteActivityClient.prototype, 'start').mockImplementation(() => {});

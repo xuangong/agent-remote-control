@@ -44,6 +44,44 @@ function respond(harness: ReturnType<typeof createSessionHarness>, id: number, r
 }
 
 describe('CodexAppServerSession', () => {
+  it.each([
+    { native: { type: 'active', activeFlags: [] }, expected: 'running' },
+    { native: { type: 'active', activeFlags: ['waitingOnApproval'] }, expected: 'waiting' },
+    { native: { type: 'idle' }, expected: 'idle' },
+  ])('restores $expected from a resumed snapshot without a turn notification', async ({ native, expected }) => {
+    const harness = createSessionHarness();
+    const starting = CodexAppServerSession.resume(harness.transport, { providerId: 'codex', sessionId: 'thread-1', opaque: '{}' });
+    respond(harness, (await waitForRequest(harness, 'initialize')).id, {});
+    respond(harness, (await waitForRequest(harness, 'thread/resume')).id, { thread: { id: 'thread-1' } });
+    respond(harness, (await waitForRequest(harness, 'thread/read')).id, {
+      thread: { id: 'thread-1', status: native, turns: expected === 'idle' ? [] : [{ id: 'active-turn', status: 'inProgress', items: [] }] },
+    });
+    const session = await starting;
+    try {
+      expect((await session.runtimeInfo()).status).toBe(expected);
+      if (expected === 'running') {
+        const sending = session.sendMessage('Continue with this detail');
+        const request = await waitForRequest(harness, 'turn/steer');
+        expect(request.params).toMatchObject({ expectedTurnId: 'active-turn' });
+        respond(harness, request.id, {});
+        await sending;
+      }
+    } finally { await session.dispose(); }
+  });
+
+  it('keeps a newer native status when a resumed snapshot arrives late', async () => {
+    const harness = createSessionHarness();
+    const starting = CodexAppServerSession.resume(harness.transport, { providerId: 'codex', sessionId: 'thread-1', opaque: '{}' });
+    respond(harness, (await waitForRequest(harness, 'initialize')).id, {});
+    respond(harness, (await waitForRequest(harness, 'thread/resume')).id, { thread: { id: 'thread-1' } });
+    const request = await waitForRequest(harness, 'thread/read');
+    harness.child.stdout.write(`${JSON.stringify({ method: 'thread/status/changed', params: { threadId: 'thread-1', status: { type: 'active', activeFlags: [] } } })}\n`);
+    respond(harness, request.id, { thread: { id: 'thread-1', status: { type: 'idle' }, turns: [] } });
+    const session = await starting;
+    try { expect((await session.runtimeInfo()).status).toBe('running'); }
+    finally { await session.dispose(); }
+  });
+
   it('drains observations accepted before an unexpected transport exit', async () => {
     const harness = createSessionHarness();
     const starting = CodexAppServerSession.create(harness.transport, {

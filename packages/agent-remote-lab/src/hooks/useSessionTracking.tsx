@@ -6,13 +6,19 @@ import type { SessionStar } from '../session-stars-client.js';
 import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessions, saveTrackedSessions, type SessionObservation } from '../tracking-state.js';
 import { useFeedbackToast } from '../components/Toast.js';
 
-export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport) {
+export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   const [observations, setObservations] = useState<Record<string, SessionObservation>>({});
   const [retries, setRetries] = useState<Record<string, number>>({});
   const [error, setError] = useState<string>();
+  const backgroundSessions = useMemo(() => sessions.filter(session => sessionKey(session) !== currentSessionKey), [sessions, currentSessionKey]);
   const current = useRef(sessions); current.current = sessions;
+  const observed = useRef(backgroundSessions); observed.current = backgroundSessions;
+  useEffect(() => { if (currentSessionKey) setObservations(values => {
+    if (!values[currentSessionKey]) return values;
+    const next = { ...values }; delete next[currentSessionKey]; return next;
+  }); }, [currentSessionKey]);
   useEffect(() => { setSelection({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }); setObservations({}); setError(undefined); }, [baseUrl]);
   function toggle(session: SessionStar) {
     const key = sessionKey(session), previous = current.current;
@@ -25,7 +31,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     setObservations(values => { const next = { ...values }; delete next[key]; return next; });
   }
   const update = useCallback((key: string, value: SessionObservation) => {
-    if (!current.current.some(item => sessionKey(item) === key)) return;
+    if (!observed.current.some(item => sessionKey(item) === key)) return;
     setObservations(previous => {
       const next = nextObservation(previous[key], value), old = previous[key];
       return old && old.connection === next.connection && old.activity === next.activity && old.error === next.error && old.changed === next.changed && old.agentId === next.agentId ? previous : { ...previous, [key]: next };
@@ -34,9 +40,9 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const acknowledge = useCallback(() => setObservations(previous => Object.values(previous).some(value => value.changed)
     ? Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, { ...value, changed: false }])) : previous), []);
   const retry = (key: string) => { setObservations(values => { const next = { ...values }; delete next[key]; return next; }); setRetries(values => ({ ...values, [key]: (values[key] ?? 0) + 1 })); };
-  const observers = useMemo(() => sessions.map(session => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} baseUrl={baseUrl} transport={transport} update={update} />), [sessions, baseUrl, transport, update, retries]);
+  const observers = useMemo(() => backgroundSessions.map(session => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} baseUrl={baseUrl} transport={transport} update={update} />), [backgroundSessions, baseUrl, transport, update, retries]);
   useFeedbackToast('Session tracking', error);
-  return { sessions, observations, error, toggle, retry, acknowledge, observers };
+  return { sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 

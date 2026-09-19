@@ -238,6 +238,30 @@ async function drainAvailable(iterator: AsyncIterator<ProviderStreamItem>, quiet
 }
 
 describe('shared Codex recovery', () => {
+  it('opens an already running native turn as working in both content and activity connections', async () => {
+    const { server, provider } = await harness();
+    server.thread.status = { type: 'active', activeFlags: [] };
+    server.thread.turns = [{ id: 'existing-turn', status: 'inProgress', items: [] }];
+    const resumed = await provider.resumeSession({ providerId: 'codex', sessionId: 'root', opaque: '{}' });
+    sessions.push(resumed);
+    const manager = await AgentManager.attach({ agentId: 'remote', provider: provider.descriptor, session: resumed, epoch: 'initial' });
+    const content: string[] = [], activity: string[] = [];
+    const contentWire = createSessionWire(manager, json => content.push(json));
+    const activityWire = createSessionWire(manager, json => activity.push(json));
+    managerCleanups.push(async () => { contentWire.close(); activityWire.close(); await manager.close(); });
+    await manager.ready;
+    await contentWire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    await activityWire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }));
+    expect(content.map(json => JSON.parse(json))).toContainEqual(expect.objectContaining({ type: 'agent_snapshot', payload: expect.objectContaining({ status: 'running' }) }));
+    expect(activity.map(json => JSON.parse(json))).toEqual([
+      { protocolVersion: '1.4.0', type: 'negotiated' },
+      { protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running' } },
+    ]);
+    server.notify('turn/completed', { threadId: 'root', turn: { id: 'existing-turn', status: 'completed' } });
+    await expect.poll(() => manager.snapshot().payload.status).toBe('idle');
+    expect(JSON.parse(activity.at(-1)!)).toMatchObject({ type: 'agent_activity', payload: { status: 'idle' } });
+  });
+
   it.each(['resume', 'repeated read'])('removes a resolved interaction before the authoritative cutoff during %s', async interval => {
     const { server, session, iterator } = await harness({ initialDelayMs: 10, maximumDelayMs: 10 });
     const entered = deferred();

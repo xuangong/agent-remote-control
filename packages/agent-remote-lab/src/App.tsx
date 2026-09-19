@@ -131,7 +131,6 @@ function AppContent({
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
   const favorites = useSessionStars(baseUrl, userScoped);
-  const tracking = useSessionTracking(baseUrl, transport);
   const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
     try {
       const target = readControllerLocation(new URLSearchParams(window.location.search));
@@ -711,6 +710,7 @@ function AppContent({
   const focusedWindow = stackPath[stackRange.end];
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
+  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined);
   const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
   useEffect(() => {
     if (addressSession && state?.agent && !initialState) saveLastSession(baseUrl, { ...addressSession, hostId: addressSession.hostId ?? 'local' });

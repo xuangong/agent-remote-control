@@ -1,12 +1,61 @@
 import { expect, test } from '@playwright/test';
 
+test('moves the tracking button without opening it and keeps the menu inside the viewport', async ({ page }, testInfo) => {
+  if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
+  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.goto('/e2e/fixtures/session-stars.html');
+  const button = page.getByRole('button', { name: 'Tracked sessions', exact: true });
+  const initial = (await button.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  if (testInfo.project.name.includes('mobile')) {
+    const input = await page.context().newCDPSession(page);
+    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: initial.x + initial.width / 2, y: initial.y + initial.height / 2 }] });
+    await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 45, y: viewport.height - 50 }] });
+    await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await input.detach();
+  } else {
+    await page.mouse.move(initial.x + initial.width / 2, initial.y + initial.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(45, viewport.height - 50, { steps: 12 });
+    await page.mouse.up();
+  }
+  const moved = (await button.boundingBox())!;
+  expect(moved.y).toBeGreaterThan(initial.y + 100);
+  expect(moved.x).toBeLessThan(60);
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await button.click();
+  const panel = page.locator('.lab-tracking-floating section');
+  await expect(panel).toBeVisible();
+  const bounds = (await panel.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+  await page.screenshot({ path: testInfo.outputPath('tracking-moved.png') });
+  await page.goto('/e2e/fixtures/session-stars.html');
+  const restored = (await button.boundingBox())!;
+  expect(Math.abs(restored.x - moved.x)).toBeLessThan(2);
+  expect(Math.abs(restored.y - moved.y)).toBeLessThan(2);
+  await page.setViewportSize({ width: 280, height: 400 });
+  await expect.poll(async () => {
+    const box = (await button.boundingBox())!;
+    const bottom = await page.evaluate(() => visualViewport ? visualViewport.offsetTop + visualViewport.height : innerHeight);
+    return box.y + box.height <= bottom;
+  }).toBe(true);
+  await button.focus();
+  const before = (await button.boundingBox())!;
+  await button.press('ArrowUp');
+  expect((await button.boundingBox())!.y).toBeLessThan(before.y);
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('shares sidebar and title favorites while retaining only local activity tracking', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  let stars: Record<string, unknown>[] = [];
+  let stars: Record<string, unknown>[] = [{ hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1, available: true, online: true, hostName: 'Work Mac' }];
   await page.route('**/v1/stars', route => {
     const method = route.request().method();
-    if (method === 'POST') stars = [{ ...route.request().postDataJSON(), starredAt: 1, available: true, online: true, hostName: 'Work Mac' }];
-    if (method === 'DELETE') stars = [];
+    if (method === 'POST') stars = [...stars, { ...route.request().postDataJSON(), starredAt: 1, available: true, online: true, hostName: 'Work Mac' }];
+    if (method === 'DELETE') stars = stars.filter(item => item.nativeSessionId !== route.request().postDataJSON().nativeSessionId);
     return route.fulfill({ json: { stars } });
   });
   await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: 'agent-1' } }));
@@ -16,6 +65,7 @@ test('shares sidebar and title favorites while retaining only local activity tra
   if (mobile) await page.setViewportSize({ width: 320, height: 740 });
   await page.goto('/e2e/fixtures/session-stars.html');
   await expect(page.getByRole('region', { name: 'Opened sessions' })).toHaveCount(0);
+  await expect(page.locator('.lab-primary-conversation .lab-conversation-status')).toHaveText('Working');
   await page.getByTestId('prompt-input').fill('Keep my draft');
   const title = page.getByRole('button', { name: 'Favorites', exact: true });
   if (mobile) await title.click();
@@ -25,7 +75,15 @@ test('shares sidebar and title favorites while retaining only local activity tra
   await favorites.getByRole('button', { name: 'Track Research notes', exact: true }).click();
   if (mobile) { await page.getByRole('button', { name: 'Close Favorites', exact: true }).click(); await expect(title).toBeFocused(); }
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+  await expect(page.locator('.lab-tracking-floating section')).not.toContainText('Research notes');
+  await expect(page.locator('.lab-tracking-count')).toHaveText('0');
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  if (mobile) await title.click();
+  await favorites.getByRole('button', { name: 'Track Build checks', exact: true }).click();
+  if (mobile) await page.getByRole('button', { name: 'Close Favorites', exact: true }).click();
+  await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   await expect(page.locator('.lab-tracking-floating section')).toContainText('Ready');
+  await expect(page.locator('.lab-tracking-count')).toHaveText('1');
   await expect(page.getByTestId('prompt-input')).toHaveValue('Keep my draft');
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-activity', { detail: 'waiting' })));
@@ -36,15 +94,15 @@ test('shares sidebar and title favorites while retaining only local activity tra
   await page.screenshot({ path: testInfo.outputPath('tracking.png') });
   await page.goto('/e2e/fixtures/session-stars.html');
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-  await expect(page.locator('.lab-tracking-floating section')).toContainText('Research notes');
-  await page.locator('.lab-tracking-floating section').getByRole('button', { name: 'Untrack Research notes', exact: true }).click();
-  await expect(page.locator('.lab-tracking-floating section')).toContainText('Choose Track');
-  expect(stars).toHaveLength(1);
+  await expect(page.locator('.lab-tracking-floating section')).toContainText('Build checks');
+  await page.locator('.lab-tracking-floating section').getByRole('button', { name: 'Untrack Build checks', exact: true }).click();
+  await expect(page.locator('.lab-tracking-floating section')).toContainText('current session');
+  expect(stars).toHaveLength(2);
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
   if (mobile) await title.click();
   await favorites.getByRole('button', { name: 'Unstar Research notes', exact: true }).last().click();
-  await expect(favorites).toContainText('Star a session');
-  expect(stars).toEqual([]);
+  await expect(favorites.locator('.lab-favorite-list')).not.toContainText('Research notes');
+  expect(stars).toHaveLength(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('favorites.png') });

@@ -28,6 +28,7 @@ export interface RemoteHostPluginHostOptions {
   send(json: string): void;
   onFailure(error: Error): void;
   executeOperation?: SessionWireOperationExecutor;
+  imageScope?: () => string;
   maxPendingRpcs?: number;
   maxStreams?: number;
   maxPendingPerStream?: number;
@@ -99,6 +100,7 @@ export function createRemoteHostPluginHost(
       }
     }, {
       authorize: () => true,
+      ...(options.imageScope ? { imageScope: options.imageScope } : {}),
       ...(options.executeOperation ? { executeOperation: options.executeOperation } : {}),
       onFailure: () => closeStream(streamId, 1011, 'Remote Session delivery failed.'),
     });

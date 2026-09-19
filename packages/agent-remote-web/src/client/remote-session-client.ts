@@ -1,5 +1,7 @@
 import {
   PROTOCOL_VERSION,
+  type ImageUploadResult,
+  type MessagePart,
   type AgentInteractionResponse,
   type AgentMessageOptions,
   type ClientMessage,
@@ -17,6 +19,7 @@ import {
   type TimelineDirection,
 } from '@agent-remote-controller/agent-remote-protocol';
 
+import { uploadImage, checkUploadAborted, type ImageUploadOptions, type ImageUploadRequest } from './image-upload.js';
 import type { AgentReplica } from '../replica/store.js';
 import type { TimelineReduction } from '../replica/types.js';
 import {
@@ -39,7 +42,7 @@ export interface RemoteSessionClientOptions {
   readonly operationId?: () => string;
 }
 
-type RemoteOperationResult = CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
+type RemoteOperationResult = ImageUploadResult | CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
 
 interface PendingOperation {
   readonly matches: (message: RemoteServerMessage) => message is RemoteOperationResult;
@@ -66,6 +69,8 @@ export class RemoteSessionClient {
   private recovery: AbortController | undefined;
   private olderHistory?: { controller: AbortController; promise: Promise<void> };
   private generation = 0;
+  private uploadQueue: Promise<unknown> = Promise.resolve();
+  private readonly imageDigests = new Map<string, string>();
   private requestCounter = 0;
   private reconnectAttempt = 0;
   private cancelReconnect: (() => void) | undefined;
@@ -164,6 +169,52 @@ export class RemoteSessionClient {
     return this.sendOutgoingMessage(outgoingId, operationId, text, options);
   }
 
+  sendMessageContent(content: readonly MessagePart[], options?: AgentMessageOptions & { operationId?: string; imageDigests?: Readonly<Record<string, string>> }): Promise<CommandAcknowledgementMessage> {
+    const parts = content.map(part => ({ ...part }));
+    const operationId = options?.operationId ?? this.createOperationId();
+    const text = parts.map(part => part.type === 'text' ? part.text : part.label).join('');
+    const imageDigests: Record<string, string> = {};
+    for (const part of parts) if (part.type === 'image') {
+      const digest = options?.imageDigests?.[part.attachmentId] ?? this.imageDigests.get(part.attachmentId);
+      if (digest) imageDigests[part.attachmentId] = digest;
+    }
+    const outgoingId = this.replica.beginMessage(this.agentId, text, options?.delivery, operationId, { content: parts, imageDigests });
+    return this.sendOutgoingMessage(outgoingId, operationId, text, options, parts);
+  }
+
+  uploadImage(file: Blob, uploadId: string, options: ImageUploadOptions = {}) {
+    const generation = this.generation;
+    const assertActive = () => {
+      checkUploadAborted(options.signal);
+      if (generation !== this.generation || this.currentStatus !== 'ready') throw new Error('Image upload paused. Wait for the session to reconnect, then retry.');
+    };
+    const request = async (input: ImageUploadRequest) => {
+      assertActive();
+      const requestId = this.createRequestId();
+      const { type, ...payload } = input;
+      const operation = this.sendOperation<ImageUploadResult>({ protocolVersion: PROTOCOL_VERSION, type,
+        payload: { ...payload, requestId, agentId: this.agentId, uploadId } } as Extract<ClientMessage, { type: ImageUploadRequest['type'] }>,
+      'image_upload_result', (response): response is ImageUploadResult => response.type === 'image_upload_result' && response.payload.agentId === this.agentId && response.payload.uploadId === uploadId);
+      const abort = () => this.rejectPendingOperation(requestId, 'image_upload_result', new RemoteOperationError('upload_paused', 'Image upload paused.', true, requestId));
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.signal?.aborted) abort();
+      try {
+        const result = await operation;
+        assertActive();
+        return result.payload;
+      } finally { options.signal?.removeEventListener('abort', abort); }
+    };
+    const result = this.uploadQueue.catch(() => undefined).then(async () => {
+      assertActive();
+      const attachment = await uploadImage(file, uploadId, request, options);
+      assertActive();
+      this.imageDigests.set(attachment.attachmentId, attachment.sha256);
+      return attachment;
+    });
+    this.uploadQueue = result;
+    return result;
+  }
+
   retryMessage(id: string): Promise<CommandAcknowledgementMessage> {
     const state = this.replica.getState();
     const message = state.outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
@@ -172,7 +223,7 @@ export class RemoteSessionClient {
     const operationId = message.status === 'unconfirmed' && !message.retryRequiresNewOperation && message.epoch === state.timeline.epoch && message.operationId
       ? message.operationId : this.createOperationId();
     this.replica.retryMessage(id, operationId);
-    return this.sendOutgoingMessage(id, operationId, message.text, { delivery: message.delivery });
+    return this.sendOutgoingMessage(id, operationId, message.text, { delivery: message.delivery }, message.content);
   }
 
   deleteMessage(id: string): void {
@@ -180,11 +231,11 @@ export class RemoteSessionClient {
     if (message && ['failed', 'unconfirmed'].includes(message.status)) this.replica.deleteMessage(id);
   }
 
-  private sendOutgoingMessage(outgoingId: string, operationId: string, text: string, options?: AgentMessageOptions): Promise<CommandAcknowledgementMessage> {
+  private sendOutgoingMessage(outgoingId: string, operationId: string, text: string, options?: AgentMessageOptions, content?: readonly MessagePart[]): Promise<CommandAcknowledgementMessage> {
     const message = {
       protocolVersion: PROTOCOL_VERSION,
       type: 'send_message',
-      payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, text,
+      payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, ...(content ? { content: [...content] } : { text }),
         ...(options?.delivery === undefined ? {} : { delivery: options.delivery }) },
     } as const;
     // Native compaction can delay acceptance. Connection teardown and native errors
@@ -314,6 +365,7 @@ export class RemoteSessionClient {
         return;
       case 'command_acknowledged':
       case 'command_list':
+      case 'image_upload_result':
       case 'command_result':
         this.resolvePendingOperation(message.payload.requestId, message);
         return;

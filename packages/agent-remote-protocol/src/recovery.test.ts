@@ -18,7 +18,7 @@ describe('native runtime recovery contracts', () => {
       },
     } as const;
     const invalidated = {
-      protocolVersion: '1.4.0',
+      protocolVersion: '1.5.0',
       type: 'interaction_invalidated',
       payload: {
         agentId: 'agent-one',

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as protocol from './index.js';
 import type { SessionChannelSocket } from './session-channel-wire.js';
 
-const protocolVersion = '1.4.0' as const;
+const protocolVersion = '1.5.0' as const;
 const negotiate = { protocolVersion, type: 'negotiate' as const };
 const negotiated = { protocolVersion, type: 'negotiated' as const };
 const tick = async () => { for (let index = 0; index < 10; index++) await Promise.resolve(); };
@@ -35,6 +35,22 @@ function setup(mode: 'session' | 'activity' = 'session') {
 }
 
 describe('session channel server adapter', () => {
+  it('forwards a maximum-size image preview and keeps the channel open', async () => {
+    const { socket, streams, cleanup } = setup();
+    try {
+      socket.subscribe(1, 'a'); await tick();
+      const contentBase64 = Buffer.alloc(10 * 1024 * 1024).toString('base64');
+      streams.get('a')!.send(JSON.stringify({ protocolVersion, type: 'resource_response', payload: {
+        requestId: 'r', agentId: 'a', resourceId: 'image', state: { status: 'available',
+          mediaType: 'image/png', byteLength: 10 * 1024 * 1024, sha256: 'a'.repeat(64), contentBase64 },
+      } }));
+      expect(socket.sent.at(-1)).toMatchObject({ type: 'message', subscriptionId: 1,
+        message: { type: 'resource_response', payload: { state: { contentBase64 } } } });
+      expect(socket.closed).toEqual([]);
+      socket.receive('ping');
+      expect(socket.sent.at(-1)).toMatchObject({ type: 'pong' });
+    } finally { cleanup(); }
+  });
   it('exports a pure socket adapter', () => { expect(protocol.acceptSessionChannel).toBeTypeOf('function'); });
   it('announces ready immediately and answers ping without opening a session', () => {
     const { socket } = setup();

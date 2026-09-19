@@ -1,3 +1,5 @@
+import type { MessagePart, ImageUploadReceipt } from '@agent-remote-controller/agent-remote-protocol';
+import { InputImageError, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
 import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions, AgentStreamEvent } from '@agent-remote-controller/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
@@ -25,6 +27,11 @@ export interface SessionWireAgent {
   fetchTimeline(request: TimelinePageRequest): HistoryPage;
   subscribe(listener: AgentManagerListener): () => void;
   sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
+  sendMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void>;
+  validateMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void>;
+  beginImageUpload?(input: ImageUploadDeclaration, scope?: string): Promise<ImageUploadReceipt>;
+  chunkImageUpload?(input: ImageUploadChunk, scope?: string): Promise<ImageUploadReceipt>;
+  finishImageUpload?(uploadId: string, scope?: string): Promise<ImageUploadReceipt>;
   validateInteractionResponse?(requestId: string, response: AgentInteractionResponse): Promise<void> | void;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
   steer?(text: string): Promise<void>;
@@ -33,8 +40,8 @@ export interface SessionWireAgent {
   setSessionSetting?(id: string, value: string): Promise<void>;
   listCommands?(): Promise<AgentCommand[]>;
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
-  readResource?(requestId: string, resourceId: string): Promise<ResourceResponse>;
-  resolveResource?(requestId: string, locator: string, sourceLocator?: string): Promise<ResourceResolveResponse>;
+  readResource?(requestId: string, resourceId: string, scope?: string): Promise<ResourceResponse>;
+  resolveResource?(requestId: string, locator: string, sourceLocator?: string, scope?: string): Promise<ResourceResolveResponse>;
 }
 
 export interface SessionWire {
@@ -47,7 +54,8 @@ export type SessionWireFailure =
   | { kind: 'manager_event_delivery'; error: Error };
 
 export interface SessionWireOptions {
-  authorize?: (action: 'read_resource' | 'resolve_resource') => boolean | Promise<boolean>;
+  imageScope?: () => string;
+  authorize?: (action: 'read_resource' | 'resolve_resource' | 'image_upload' | 'send_message') => boolean | Promise<boolean>;
   executeOperation?: SessionWireOperationExecutor;
   maxBufferedManagerEvents?: number;
   onFailure?: (failure: SessionWireFailure) => void;
@@ -213,17 +221,53 @@ export function createSessionWire(
             message.payload.requestId,
           ));
           return;
-        case 'send_message':
+        case 'image_upload_begin':
+        case 'image_upload_chunk':
+        case 'image_upload_finish': {
+          if (options.authorize && !await options.authorize('image_upload')) {
+            sendMessage(protocolError('forbidden', 'Image uploads are not permitted for this session.', true, requestId));
+            return;
+          }
+          const snapshot = boundAgent.snapshot();
+          if (!snapshot.payload.capabilities.sendMessage || !snapshot.payload.capabilities.imageInput) throw new UnsupportedSessionCommandError('image_upload');
+          const scope = options.imageScope?.();
+          let receipt: ImageUploadReceipt;
+          if (message.type === 'image_upload_begin' && boundAgent.beginImageUpload) receipt = await boundAgent.beginImageUpload(message.payload, scope);
+          else if (message.type === 'image_upload_chunk' && boundAgent.chunkImageUpload) receipt = await boundAgent.chunkImageUpload(message.payload, scope);
+          else if (message.type === 'image_upload_finish' && boundAgent.finishImageUpload) receipt = await boundAgent.finishImageUpload(message.payload.uploadId, scope);
+          else throw new UnsupportedSessionCommandError('image_upload');
+          sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'image_upload_result', payload: { requestId: message.payload.requestId, agentId: boundAgent.agentId, ...receipt } });
+          return;
+        }
+        case 'send_message': {
+          const payload = message.payload;
+          if ('content' in payload && options.authorize && !await options.authorize('send_message')) {
+            sendMessage(protocolError('forbidden', 'Image messages are not permitted for this session.', true, requestId));
+            return;
+          }
+          if ('content' in payload && !boundAgent.sendMessageContent) throw new UnsupportedSessionCommandError('send_message_content');
+          const delivery = payload.delivery === undefined ? undefined : { delivery: payload.delivery };
+          const imageScope = 'content' in payload ? options.imageScope?.() : undefined;
           await executeOperation(boundAgent, {
-            operationId: message.payload.operationId, kind: 'send_message',
-            parameters: { text: message.payload.text, delivery: message.payload.delivery ?? null }, maximumResultBytes: 1_024,
-          }, { dispatch: async () => {
-            if (message.payload.delivery === undefined) await boundAgent.sendMessage(message.payload.text);
-            else await boundAgent.sendMessage(message.payload.text, { delivery: message.payload.delivery });
+            operationId: payload.operationId, kind: 'send_message',
+            parameters: { ...('content' in payload ? { content: payload.content } : { text: payload.text }), delivery: payload.delivery ?? null }, maximumResultBytes: 1_024,
+          }, { validate: async () => {
+            if ('content' in payload) {
+              try { await boundAgent.validateMessageContent?.(payload.content, delivery, imageScope); }
+              catch (error) {
+                if (error instanceof InputImageError) throw Object.assign(new Error(error.message), { code: 'invalid_image_input' });
+                throw error;
+              }
+            }
+          }, dispatch: async () => {
+            if ('content' in payload) await boundAgent.sendMessageContent!(payload.content, delivery, imageScope);
+            else if (delivery === undefined) await boundAgent.sendMessage(payload.text);
+            else await boundAgent.sendMessage(payload.text, delivery);
             return { accepted: true };
           } });
-          sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'send_message'));
+          sendMessage(commandAcknowledgement(payload.requestId, boundAgent.agentId, 'send_message'));
           return;
+        }
         case 'steer':
           if (!boundAgent.steer) throw new UnsupportedSessionCommandError('steer');
           await executeOperation(boundAgent, {
@@ -305,7 +349,7 @@ export function createSessionWire(
             return;
           }
           if (!boundAgent.readResource) throw new UnsupportedSessionCommandError('resource_request');
-          sendMessage(await boundAgent.readResource(message.payload.requestId, message.payload.resourceId));
+          sendMessage(await boundAgent.readResource(message.payload.requestId, message.payload.resourceId, ...(options.imageScope ? [options.imageScope()] : [])));
           return;
         case 'resource_resolve_request':
           if (options.authorize && !await options.authorize('resolve_resource')) {
@@ -322,6 +366,7 @@ export function createSessionWire(
             message.payload.requestId,
             message.payload.locator,
             message.payload.sourceLocator,
+            ...(options.imageScope ? [options.imageScope()] : []),
           ));
           return;
       }
@@ -343,7 +388,8 @@ export function createSessionWire(
         sendMessage(protocolError(error.code, error.message, error.code === 'operation_capacity_exceeded', requestId));
         return;
       }
-      sendMessage(protocolError('command_failed', 'Agent command failed.', true, requestId));
+      const imageOperation = message.type.startsWith('image_upload_') || (message.type === 'send_message' && 'content' in message.payload);
+      sendMessage(protocolError('command_failed', imageOperation && error instanceof InputImageError ? error.message : 'Agent command failed.', true, requestId));
     }
   }
 
@@ -580,7 +626,7 @@ function isOperationExecutionError(error: unknown): error is Error & { code: str
     && 'code' in error
     && typeof error.code === 'string'
     && ['invalid_operation_id', 'invalid_operation_intent', 'operation_cache_closed', 'operation_capacity_exceeded',
-      'operation_conflict', 'operation_outcome_unknown', 'operation_rejected', 'operation_result_too_large'].includes(error.code);
+      'operation_conflict', 'operation_outcome_unknown', 'operation_rejected', 'operation_result_too_large', 'invalid_image_input'].includes(error.code);
 }
 
 class UnsupportedSessionCommandError extends Error {

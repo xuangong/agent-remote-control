@@ -27,7 +27,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
       const body = JSON.parse(control.body!);
       creations.push(body);
       const nativeSessionId = `native-${creations.length}`;
-      await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
+      await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: {
         requestId: control.sessionId!, operationId: body.operationId, agentId: control.sessionId!, providerId: 'recorded', config: { sessionId: nativeSessionId, cwd: '/native/project' },
       } });
       agents.add(control.sessionId!);

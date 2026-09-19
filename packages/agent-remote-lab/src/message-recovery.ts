@@ -27,5 +27,7 @@ function validMessage(value: unknown): value is OutgoingMessage {
     && (message.retryRequiresNewOperation === undefined || typeof message.retryRequiresNewOperation === 'boolean')
     && (message.operationId === undefined || typeof message.operationId === 'string')
     && (message.delivery === undefined || ['immediate', 'next_turn'].includes(message.delivery))
+    && (message.content === undefined || (Array.isArray(message.content) && message.content.every(part => part && (part.type === 'text' ? typeof part.text === 'string' : part.type === 'image' && typeof part.attachmentId === 'string' && typeof part.label === 'string'))))
+    && (message.imageDigests === undefined || (message.imageDigests !== null && typeof message.imageDigests === 'object' && Object.values(message.imageDigests).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))))
     && (message.error === undefined || typeof message.error === 'string');
 }

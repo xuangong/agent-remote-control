@@ -112,7 +112,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     const wire = createSessionWire(manager, (json) => output.push(JSON.parse(json)));
     try {
       await manager.ready;
-      await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
       mutableCapabilities.sendMessage = false;
       const child = { nativeSessionId: 'child', title: 'Review', createdAt: '2026-09-10T00:00:00.000Z', status: 'waiting' as const, observation: 'live' as const };
       stream.push({ type: 'observation', sourceKey: 'children:1', occurredAt: Date.now(), delivery: 'live', event: {
@@ -142,8 +142,8 @@ describe('AgentManager Timeline and Snapshot', () => {
       expect(command.documentation).toMatchObject({ locator: 'skill:inspect', status: 'pending' });
       const output: unknown[] = [];
       const wire = createSessionWire(manager, (json) => output.push(JSON.parse(json)));
-      await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
-      await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'resource_request', payload: { requestId: 'r', agentId: 'docs', resourceId: command.documentation!.resourceId } }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'resource_request', payload: { requestId: 'r', agentId: 'docs', resourceId: command.documentation!.resourceId } }));
       expect(output).toContainEqual(expect.objectContaining({ type: 'resource_response', payload: expect.objectContaining({ resourceId: command.documentation!.resourceId,
         state: expect.objectContaining({ status: 'available', contentBase64: Buffer.from('# Inspect').toString('base64') }) }) }));
       expect(reads).toEqual(['skill:inspect']);
@@ -431,7 +431,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     ]);
     const snapshot = manager.snapshot();
     expect(snapshot).toMatchObject({
-      protocolVersion: '1.4.0', type: 'agent_snapshot',
+      protocolVersion: '1.5.0', type: 'agent_snapshot',
       payload: { id: 'agent-1', providerId: 'codex', pendingInteractions: [] },
     });
     expect(snapshot.payload).not.toHaveProperty('timeline');
@@ -590,10 +590,10 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const output: Array<Record<string, unknown>> = [];
     const freshClient = createSessionWire(manager, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await freshClient.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    await freshClient.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     output.length = 0;
     await freshClient.receive(JSON.stringify({
-      protocolVersion: '1.4.0', type: 'resource_request',
+      protocolVersion: '1.5.0', type: 'resource_request',
       payload: { requestId: 'resource-read', agentId: 'agent-1', resourceId },
     }));
 
@@ -680,9 +680,9 @@ describe('AgentManager Timeline and Snapshot', () => {
     });
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.4.0', type: 'timeline_subscription',
+      protocolVersion: '1.5.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resource', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -718,7 +718,7 @@ describe('AgentManager Timeline and Snapshot', () => {
       state: { status: 'unavailable', reason: 'The generated file expired.' },
     })]);
     expect(wireOutput.slice(1)).toEqual([expect.objectContaining({
-      protocolVersion: '1.4.0',
+      protocolVersion: '1.5.0',
       type: 'resource_update',
       payload: expect.objectContaining({
         agentId: 'agent-1', resourceId: pendingBinding!.resourceId,
@@ -756,9 +756,9 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.4.0', type: 'timeline_subscription',
+      protocolVersion: '1.5.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resources', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -795,7 +795,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     secondRead.resolve({ status: 'available', mediaType: 'image/png', bytes: pngBytes });
     await nextEventLoopTurn();
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.4.0', type: 'timeline_request',
+      protocolVersion: '1.5.0', type: 'timeline_request',
       payload: { requestId: 'tail-after-settlement', agentId: 'agent-1', direction: 'tail', limit: 10 },
     }));
 
@@ -1374,7 +1374,7 @@ it('anchors an activity transition to canonical content already committed by the
   const wire = createSessionWire(manager, json => output.push(JSON.parse(json)));
   try {
     await manager.ready;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' }));
     expect(output.at(-1).payload.cursor).toEqual({ epoch: 'content-epoch', seq: 0 });
     stream.push({ type: 'observation', sourceKey: 'answer', occurredAt: Date.now(), delivery: 'live', event: {
       type: 'timeline', provider: 'codex', item: { type: 'assistant_message', text: 'Please review the answer.' },

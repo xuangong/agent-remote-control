@@ -11,16 +11,23 @@ export const forkCommands = [
 export function forkActions(actions: LabWorkbenchActions, store: ForkStore, record: SessionFork | undefined, transport: RemoteAgentTransport): LabWorkbenchActions {
   if (!record?.target) return actions;
   const target = record.target;
-  async function withContext<T>(text: string, send: (input: string) => Promise<T>): Promise<T | undefined> {
+  async function withContext<T>(text: string, send: (input: string) => Promise<T>, identity?: string): Promise<T | undefined> {
     await inheritSettings(actions, store, record!, transport);
     return store.send(record!.id, text, send, async () => {
       const context = await captureForkContext(transport, target);
       const rows = JSON.parse(context.text) as { role: string; text: string }[];
       return rows.some((row) => row.role === 'user' && row.text.includes(contextPrefix(record!)));
-    });
+    }, identity);
   }
   return { ...actions,
     sendMessage: actions.sendMessage ? (text, options) => withContext(text, (input) => actions.sendMessage!(input, options)) : undefined,
+    sendMessageContent: actions.sendMessageContent ? (content, options) => {
+      const text = content.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join('');
+      return withContext(text, input => {
+        const prefix = input.slice(0, input.length - text.length);
+        return actions.sendMessageContent!(prefix ? [{ type: 'text', text: prefix }, ...content] : content, options);
+      }, JSON.stringify(content));
+    } : undefined,
     executeCommand: actions.executeCommand ? async (id, args): Promise<AgentCommandResult> => {
       const command = (await actions.listCommands?.())?.find((item) => item.id === id);
       return command?.kind === 'skill' || command?.kind === 'prompt'

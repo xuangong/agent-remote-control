@@ -1,3 +1,4 @@
+import { UserMessagePart } from './image-input.js';
 import { AgentToolResult } from './tool-result.js';
 import { type Static, Type } from '@sinclair/typebox';
 
@@ -41,6 +42,7 @@ export type AgentToolCallTimelineItem = Static<typeof AgentToolCallTimelineItem>
 export const AgentTimelineItem = Type.Union([
   Strict({
     type: Type.Literal('user_message'),
+    content: Type.Optional(Type.Array(UserMessagePart)),
     text: Type.String(),
     messageId: Type.Optional(NonEmptyString),
     clientMessageId: Type.Optional(NonEmptyString),

@@ -1,13 +1,16 @@
-import { type Static, Type } from '@sinclair/typebox';
+import { FormatRegistry, type Static, Type } from '@sinclair/typebox';
 
 import { SafeNonNegativeInteger } from './cursor.js';
 import { ProtocolVersionSchema } from './version.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const NonNegativeInteger = Type.Integer({ minimum: 0 });
+// A repeated four-character regex group over multi-megabyte images can overflow
+// the JavaScript regexp stack. Check alphabet and length independently instead.
+FormatRegistry.Set('base64', value => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value));
 const CanonicalBase64 = Type.String({
   minLength: 4,
-  pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
+  format: 'base64',
 });
 const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => Type.Object(
   properties,

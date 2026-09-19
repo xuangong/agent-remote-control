@@ -43,6 +43,23 @@ function state(
 }
 
 describe('AgentTimeline', () => {
+  it('preserves Markdown and image order in rich user messages', async () => {
+    const container = await render(<AgentTimeline state={state([entry(1, {
+      type: 'user_message', text: '**Before** [image #1] after', content: [
+        { type: 'text', text: '**Before** [docs](https://example.com) ' },
+        { type: 'image', locator: 'input-image:first', label: 'image #1' },
+        { type: 'text', text: '\n```ts\nconst answer = 42;\n```\n- after' },
+      ],
+    })])} />);
+    const message = container.querySelector('.agent-message-user')!;
+    expect(message.querySelector('strong')?.textContent).toBe('Before');
+    expect(message.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
+    expect(message.querySelector('pre code')?.textContent).toContain('const answer = 42;');
+    expect(message.querySelector('li')?.textContent).toBe('after');
+    expect(message.textContent!.indexOf('Before')).toBeLessThan(message.textContent!.indexOf('[image #1]'));
+    expect(message.textContent!.indexOf('[image #1]')).toBeLessThan(message.textContent!.indexOf('const answer'));
+  });
+
   it('adds explicit preview actions for message and tool text while preserving transcript rendering', async () => {
     const register = vi.fn(async () => ({
       id: 'preview-one', target: 'http://localhost:5173', status: 'active' as const,
@@ -424,7 +441,7 @@ describe('AgentTimeline', () => {
     const updated = applyResourceUpdate(
       state([entry(1, { type: 'assistant_message', text: 'Generated output' }, [binding])]),
       {
-        protocolVersion: '1.4.0',
+        protocolVersion: '1.5.0',
         type: 'resource_update',
         payload: {
           agentId: 'agent-one', resourceId: binding.resourceId,

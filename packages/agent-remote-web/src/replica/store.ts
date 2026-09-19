@@ -48,8 +48,8 @@ export class AgentReplica {
     return () => this.historyListeners.delete(listener);
   }
 
-  beginMessage(agentId: string, text: string, delivery?: OutgoingMessage['delivery'], operationId?: string): string {
-    const message = this.outbox.create(this.state, agentId, text, delivery, operationId);
+  beginMessage(agentId: string, text: string, delivery?: OutgoingMessage['delivery'], operationId?: string, rich?: Pick<OutgoingMessage, 'content' | 'imageDigests'>): string {
+    const message = this.outbox.create(this.state, agentId, text, delivery, operationId, rich);
     this.replace({ ...this.state, outgoingMessages: [...(this.state.outgoingMessages ?? []), message] });
     return message.id;
   }

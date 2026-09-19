@@ -112,6 +112,6 @@ export class ClaudeChildren {
       if (view.descriptor.status !== 'failed') view.descriptor.status = 'closed';
       view.descriptor.observation = 'saved_history'; view.changed();
     }
-    await Promise.all([...this.children.values()].map(({ view }) => view.dispose()));
+    await Promise.all([...this.children.values()].map(({ view }) => view.close()));
   }
 }

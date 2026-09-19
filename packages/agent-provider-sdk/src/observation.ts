@@ -25,7 +25,7 @@ export type AgentToolCallTimelineItem = AgentToolCallBase & (
 );
 
 export type AgentTimelineItem =
-  | { type: 'user_message'; text: string; messageId?: string; clientMessageId?: string }
+  | { type: 'user_message'; text: string; content?: import('./image-input.js').AgentUserMessagePart[]; messageId?: string; clientMessageId?: string }
   | { type: 'assistant_message'; text: string; messageId?: string }
   | { type: 'reasoning'; text: string }
   | AgentToolCallTimelineItem

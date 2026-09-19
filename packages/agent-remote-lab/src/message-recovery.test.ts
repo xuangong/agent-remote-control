@@ -17,3 +17,14 @@ it('retains unconfirmed input across page restarts and deletes it only when requ
   recoverMessages(next, 'relay', 'native-session', 'new-agent')();
   expect(next.getState().outgoingMessages ?? []).toEqual([]);
 });
+
+it('restores the ordered image content and identity needed for an exact retry', () => {
+  const first = new AgentReplica();
+  const stop = recoverMessages(first, 'relay', 'rich-session', 'old-agent');
+  const content = [{ type: 'text' as const, text: 'before' }, { type: 'image' as const, attachmentId: 'a', label: 'image #1' }];
+  const imageDigests = { a: 'a'.repeat(64) };
+  first.beginMessage('old-agent', 'before[image #1]', undefined, 'operation-image', { content, imageDigests }); stop();
+  const restored = new AgentReplica();
+  recoverMessages(restored, 'relay', 'rich-session', 'new-agent')();
+  expect(restored.getState().outgoingMessages).toMatchObject([{ content, imageDigests, agentId: 'new-agent', status: 'unconfirmed' }]);
+});

@@ -1,5 +1,5 @@
 export const RELAY_SOCKET_OPEN = 1;
-export const BROKER_MAX_FRAME_BYTES = 8 * 1024 * 1024;
+export const BROKER_MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const BROKER_MAX_BODY_BYTES = 64 * 1024;
 
 /** Runtime adapters deliver validated frames and own their native socket lifecycle. */

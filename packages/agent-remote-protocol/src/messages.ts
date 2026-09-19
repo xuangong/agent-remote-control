@@ -1,3 +1,4 @@
+import { MessagePart, ImageUploadBeginRequest, ImageUploadChunkRequest, ImageUploadFinishRequest, ImageUploadResult } from './image-input.js';
 import { type Static, Type } from '@sinclair/typebox';
 
 import { AgentStreamMessage } from './envelope.js';
@@ -57,7 +58,10 @@ export type ProviderListResponse = Static<typeof ProviderListResponse>;
 export const SendMessageRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('send_message'),
-  payload: Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, text: Type.String(), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
+  payload: Type.Union([
+    Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, text: Type.String(), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
+    Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, content: Type.Array(MessagePart, { minItems: 1, maxItems: 1024 }), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
+  ]),
 });
 export type SendMessageRequest = Static<typeof SendMessageRequest>;
 export type AgentMessageOptions = Pick<SendMessageRequest['payload'], 'delivery'>;
@@ -211,6 +215,7 @@ export const IncompatibleProtocolVersionErrorMessage = Strict({
 export type IncompatibleProtocolVersionErrorMessage = Static<typeof IncompatibleProtocolVersionErrorMessage>;
 
 export const ClientMessage = Type.Union([
+  ImageUploadBeginRequest, ImageUploadChunkRequest, ImageUploadFinishRequest,
   ListCommandsRequest,
   ExecuteCommandRequest,
   NegotiateRequest,
@@ -230,6 +235,7 @@ export const ClientMessage = Type.Union([
 export type ClientMessage = Static<typeof ClientMessage>;
 
 export const ServerMessage = Type.Union([
+  ImageUploadResult,
   CommandListResponse,
   CommandResultResponse,
   NegotiateResponse,

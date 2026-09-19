@@ -17,7 +17,7 @@ export interface AgentRemotePrincipal {
   [claim: string]: unknown;
 }
 
-export type AgentRemoteAuthorizationAction = 'attach' | 'read_resource' | 'resolve_resource';
+export type AgentRemoteAuthorizationAction = 'attach' | 'read_resource' | 'resolve_resource' | 'image_upload' | 'send_message';
 
 export interface AgentRemoteAuthorizationContext {
   principal: AgentRemotePrincipal;
@@ -150,6 +150,7 @@ export function attachAgentRemoteWebSocketStream(
     const wire = createSessionWire(() => relay.requireAgent(agentId), json => {
       if (socket.readyState === WebSocket.OPEN) socket.send(json);
     }, {
+      imageScope: () => principal.subject,
       authorize: async action => {
         try { return await options.authorizer!.authorize({ principal, agentId, action, request }); }
         catch { return false; }

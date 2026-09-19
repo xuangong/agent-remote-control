@@ -18,6 +18,8 @@ export interface SessionFork extends ForkContext {
   configured?: boolean;
   pendingInput?: string;
   firstInput?: string;
+  pendingInputIdentity?: string;
+  firstInputIdentity?: string;
   creationKey?: string;
   delivery: 'pending' | 'uncertain' | 'sent';
   options: CreateSessionOptions;
@@ -65,7 +67,7 @@ export function forkDisplayState(state: AgentReplicaState | undefined, record?: 
   const prefix = contextPrefix(record);
   return { ...state, timeline: { ...state.timeline, entries: state.timeline.entries.map((entry): ProjectedTimelineEntry =>
     (entry.item.type === 'user_message' || entry.item.type === 'assistant_message') && entry.item.text.includes(prefix)
-      ? { ...entry, item: { ...entry.item, text: entry.item.text.replace(prefix, '') } } : entry) } };
+      ? { ...entry, item: { ...entry.item, text: entry.item.text.replace(prefix, ''), ...(entry.item.type === 'user_message' && entry.item.content ? { content: entry.item.content.map(part => part.type === 'text' ? { ...part, text: part.text.replace(prefix, '') } : part) } : {}) } } : entry) } };
 }
 
 /** Browser-local attachment ledger, independent of the disposable opened-session list. */
@@ -117,32 +119,32 @@ export class ForkStore {
     catch { throw new Error('The fork context could not be saved. Free browser storage before continuing.'); }
     for (const listener of this.listeners) listener();
   }
-  async send<T>(id: string, text: string, send: (input: string) => Promise<T>, delivered: () => Promise<boolean>): Promise<T | undefined> {
+  async send<T>(id: string, text: string, send: (input: string) => Promise<T>, delivered: () => Promise<boolean>, identity = text): Promise<T | undefined> {
     const started = this.get(id).delivery;
     const run = () => {
       const latest = this.get(id);
-      if (started !== 'sent' && latest.delivery === 'sent' && latest.firstInput === text) return Promise.resolve(undefined);
-      return this.sendInput(id, text, send, delivered);
+      if (started !== 'sent' && latest.delivery === 'sent' && (latest.firstInputIdentity ?? latest.firstInput) === identity) return Promise.resolve(undefined);
+      return this.sendInput(id, text, send, delivered, identity);
     };
     return globalThis.navigator?.locks ? navigator.locks.request(this.key + id, { signal: AbortSignal.timeout(30_000) }, run) : run();
   }
-  private async sendInput<T>(id: string, text: string, send: (input: string) => Promise<T>, delivered: () => Promise<boolean>): Promise<T | undefined> {
+  private async sendInput<T>(id: string, text: string, send: (input: string) => Promise<T>, delivered: () => Promise<boolean>, identity = text): Promise<T | undefined> {
     let record = this.get(id);
     if (record.delivery === 'uncertain') {
       if (!await delivered()) throw new Error('The first input has an unknown delivery status. Reconnect and check its native history before sending again.');
-      const sameInput = record.pendingInput === text;
+      const sameInput = (record.pendingInputIdentity ?? record.pendingInput) === identity;
       this.update(id, { delivery: 'sent', pendingInput: undefined });
       if (sameInput) return undefined;
       record = this.get(id);
     }
     if (record.delivery === 'sent') return send(text);
-    this.update(id, { delivery: 'uncertain', pendingInput: text, firstInput: text });
+    this.update(id, { delivery: 'uncertain', pendingInput: text, firstInput: text, pendingInputIdentity: identity, firstInputIdentity: identity });
     try {
       const result = await send(contextPrefix(record) + text);
       this.update(id, { delivery: 'sent', pendingInput: undefined });
       return result;
     } catch (error) {
-      if (error instanceof RemoteOperationError && ['session_changed', 'invalid_request', 'unsupported_capability', 'agent_busy', 'invalid_command', 'invalid_session_setting'].includes(error.code)) {
+      if (error instanceof RemoteOperationError && ['session_changed', 'invalid_request', 'invalid_image_input', 'unsupported_capability', 'agent_busy', 'invalid_command', 'invalid_session_setting'].includes(error.code)) {
         this.update(id, { delivery: 'pending' });
       }
       throw error;

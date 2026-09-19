@@ -1,5 +1,7 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { AgentProviderAdapter } from '@agent-remote-controller/agent-provider-sdk';
-import { createAgentRemoteHttpServer, createAgentRemoteRelay } from '@agent-remote-controller/agent-remote-relay';
+import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore } from '@agent-remote-controller/agent-remote-relay';
 
 import { createRemoteHostBroker } from './server/remote-host-broker.js';
 import { createSessionDirectory, type SessionDirectorySource } from './server/session-directory.js';
@@ -9,12 +11,13 @@ import { createLocalLabAuthorizer, createLocalLabMutationPolicy } from './server
 export interface ProtocolValidationServerOptions {
   providers: readonly AgentProviderAdapter[];
   labOrigin: string;
+  imageDirectory?: string;
   directories?: readonly SessionDirectorySource[];
 }
 
 export function createProtocolValidationServer(options: ProtocolValidationServerOptions) {
   const directory = createSessionDirectory(options.providers, options.directories);
-  const relay = createAgentRemoteRelay({ providers: directory.providers });
+  const relay = createAgentRemoteRelay({ providers: directory.providers, inputImageStore: new InputImageStore({ directory: options.imageDirectory ?? join(homedir(), '.agent-remote-control', 'lab-input-images') }) });
   const http = createAgentRemoteHttpServer(relay, {
     websocketAuthorizer: createLocalLabAuthorizer(options.labOrigin),
     mutationPolicy: createLocalLabMutationPolicy(options.labOrigin),

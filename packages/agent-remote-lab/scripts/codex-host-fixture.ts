@@ -78,7 +78,7 @@ async function waitForBackend(url: string): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (backend.exitCode !== null) throw new Error(`Backend exited with ${backend.exitCode}.`);
-    try { if ((await fetch(`${url}/v1/providers?protocolVersion=1.4.0`)).ok) return; } catch {}
+    try { if ((await fetch(`${url}/v1/providers?protocolVersion=1.5.0`)).ok) return; } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('Backend did not become ready.');

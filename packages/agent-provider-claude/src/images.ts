@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import type { AgentResourceReadResult, AgentTimelineItem, ProviderResourceReference } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult, AgentTimelineItem, AgentUserMessagePart, ProviderResourceReference } from '@agent-remote-controller/agent-provider-sdk';
 
 interface ImageProjection {
   item: Extract<AgentTimelineItem, { type: 'assistant_message' }>;
@@ -46,6 +46,18 @@ export class ClaudeImageRegistry {
     this.retainedBytes += bytes.length;
     this.entries.set(locator, { projection, bytes, mediaType });
     return cloneProjection(projection);
+  }
+
+  projectUser(messageId: string, index: number, image: unknown, label: string): {
+    part: AgentUserMessagePart; resourceReferences: ProviderResourceReference[];
+  } {
+    const identity = `user:${messageId}`;
+    const projection = this.project(identity, index, image);
+    const locator = `claude-image:${createHash('sha256').update(JSON.stringify([this.sessionId, identity, index])).digest('hex')}`;
+    const entry = this.entries.get(locator);
+    return { part: { type: 'image', locator, label,
+      ...(entry ? { sha256: createHash('sha256').update(entry.bytes).digest('hex') } : {}) },
+      resourceReferences: projection?.resourceReferences ?? [] };
   }
 
   async readResource(locator: string): Promise<AgentResourceReadResult> {

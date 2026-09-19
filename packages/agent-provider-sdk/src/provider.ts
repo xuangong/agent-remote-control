@@ -1,7 +1,9 @@
+import type { AgentInputPart, ImageInputCapabilities } from './image-input.js';
 import type { AgentInteractionResponse } from './control.js';
 import type { AgentRuntimeInfo, ProviderStreamItem } from './observation.js';
 
 export interface AgentCapabilities {
+  imageInput?: ImageInputCapabilities;
   history: boolean;
   sendMessage: boolean;
   queueMessage?: boolean;
@@ -74,6 +76,7 @@ export interface AgentSession {
 
   observe(): AsyncIterable<ProviderStreamItem>;
   sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
+  sendMessageContent?(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;

@@ -4,7 +4,7 @@
 
 ## Boundary
 
-The package owns strict TypeBox schemas plus JSON codecs for Agent creation and resumption, current state, projected Timeline history, live Timeline delivery, interactions, resource reads, command acknowledgement, and protocol errors. Every public behavior-bearing object rejects additional properties, and every top-level message requires protocol version `1.4.0`.
+The package owns strict TypeBox schemas plus JSON codecs for Agent creation and resumption, current state, projected Timeline history, live Timeline delivery, interactions, resource reads, command acknowledgement, and protocol errors. Every public behavior-bearing object rejects additional properties, and every top-level message requires protocol version `1.5.0`.
 
 Provider-native values and server-internal `AgentStreamEvent` or `AgentManagerEvent` unions do not cross this boundary. Public stream values are independently declared even where a server-internal event currently has the same fields.
 
@@ -32,7 +32,7 @@ Timeline entries bind visible locators to Borgee resource identities. Resource r
 `/v1/session-channel?observation=session|activity` multiplexes independent existing
 session wires over one WebSocket per observation mode. The direct
 `/v1/sessions/:id/events` endpoint remains supported. Every outer frame uses
-`protocolVersion: "1.4.0"`; nested session messages retain their existing schemas.
+`protocolVersion: "1.5.0"`; nested session messages retain their existing schemas.
 
 | Direction | Type | Additional fields |
 | --- | --- | --- |
@@ -66,14 +66,18 @@ issuing commands.
 per-message authorization, credential expiry, revocation, and session semantics.
 The returned cleanup function closes the owned channel and removes listeners.
 
-The adapter limits frames to 8 MiB of UTF-8, concurrent subscriptions and
+The adapter limits frames to 16 MiB of UTF-8, concurrent subscriptions and
 unsettled work to 128, open attempts to 120 per minute, and opening time to
 35 seconds. Unresolved open factories retain their capacity reservation after
-cancellation or timeout. Pending input is limited to 64 frames / 8 MiB per stream
+cancellation or timeout. Pending input is limited to 64 frames / 16 MiB per stream
 and 16 MiB across the channel; physical outbound buffering is limited to 16 MiB.
 Stream preparation, response validation, mode, and pending-queue failures close
 only the affected stream. Invalid outer frames, binary input, oversized inbound
 frames, physical errors, and shared outbound backpressure close the channel.
+
+The frame limit accommodates a 10 MiB input image encoded as a base64 resource
+response. Hosted Worker and Node sockets use the same 16 MiB frame limit;
+the Host uplink retains its 32 MiB limit. HTTP mutation body limits are unchanged.
 
 The package exports `SessionChannelClientMessage` and `SessionChannelServerMessage`
 as schemas and types, with matching `decodeSessionChannel*Message` and

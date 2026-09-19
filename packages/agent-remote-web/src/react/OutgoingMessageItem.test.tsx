@@ -14,3 +14,13 @@ it('keeps failed text visible with manual retry and delete controls', async () =
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Delete message"]')!.click());
   expect(remove).toHaveBeenCalledWith('failed');
 });
+
+it('renders pending images in their original positions and uses authorized preview locators', async () => {
+  const resolve = vi.fn(async () => { throw new Error('not authorized'); });
+  const container = await render(<OutgoingMessageItem message={{ id: 'images', agentId: 'one', text: 'before after', content: [{ type: 'text', text: 'before ' }, { type: 'image', attachmentId: 'opaque', label: 'image #9' }, { type: 'text', text: ' after' }], status: 'unconfirmed', epoch: 'epoch', afterSeq: 1 }}
+    resourceContext={{ scopeKey: 'one', bindings: [], resources: {}, resolveResource: resolve, requestResource: async () => {} }} />);
+  expect(container.querySelector('.agent-message-ordered-content')?.textContent).toBe('before [image #9] after');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Preview image #9"]')!.click());
+  expect(resolve).toHaveBeenCalledWith('input-image:opaque', undefined);
+  expect(container.textContent).toContain('not authorized');
+});

@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
 import { captureForkContext, ForkStore, contextPrefix } from './session-forks.js';
+import { RemoteOperationError } from '@agent-remote-controller/agent-remote-web';
 
 const source = { agentId: 'parent', nativeSessionId: 'native-parent', providerId: 'codex', title: 'Parent', hostId: 'local' };
 const entry = (seq: number, text: string): ProjectedTimelineEntry => ({ providerId: 'codex', item: { type: 'user_message', text }, timestamp: '2026-09-11T00:00:00Z', seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }], resources: [], collapsed: [] });
@@ -8,6 +9,17 @@ function page(entries: ProjectedTimelineEntry[], hasOlder = false, epoch = 'one'
   return { protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: { requestId: 'r', agentId: 'parent', direction: 'tail', epoch, entries, hasOlder, hasNewer: false, reset: false, staleCursor: false, gap: false, error: null, window: { minSeq: 1, maxSeq: 9, nextSeq: 10 }, startCursor: entries[0] ? { epoch, seq: entries[0].seqStart } : null, endCursor: entries.at(-1) ? { epoch, seq: entries.at(-1)!.seqEnd } : null } };
 }
 afterEach(() => localStorage.clear());
+it('allows replacement after the first image input is rejected before native dispatch', async () => {
+  const store = new ForkStore('rejected-image');
+  const record = store.prepare(await captureForkContext({ fetchTimeline: async () => page([]) }, source));
+  await expect(store.send(record.id, '[image #1]', async () => {
+    throw new RemoteOperationError('invalid_image_input', 'Image attachment expired.', true);
+  }, async () => false, 'expired-attachment')).rejects.toThrow(/expired/);
+  const send = vi.fn(async () => {});
+  await new ForkStore('rejected-image').send(record.id, '[image #2]', send, async () => false, 'replacement-attachment');
+  expect(send).toHaveBeenCalledWith(contextPrefix(record) + '[image #2]');
+  expect(store.get(record.id).delivery).toBe('sent');
+});
 it('captures spanning tool results and the canonical boundary in one response', async () => {
   const tool: ProjectedTimelineEntry = { ...entry(1, ''), seqEnd: 9, item: { type: 'tool_call', callId: 'long-running', name: 'shell', detail: { type: 'shell', command: 'pwd' }, status: 'completed', error: null, result: { content: [{ type: 'text', text: 'late result' }] } } };
   const fetchTimeline = vi.fn().mockResolvedValueOnce(page([tool, entry(3, 'captured')])).mockResolvedValueOnce(page([entry(10, 'later mutation')]));

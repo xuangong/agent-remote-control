@@ -5,7 +5,7 @@ import * as remote from '../index.js';
 
 const closeables: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of closeables.splice(0).reverse()) await close(); });
-const negotiate = JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' });
+const negotiate = JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' });
 
 async function fixture(options: Record<string, unknown> = {}) {
   const { agentId = 'agent-one', ...hostOptions } = options;
@@ -23,7 +23,7 @@ async function fixture(options: Record<string, unknown> = {}) {
   const relay = remote.createAgentRemoteRelay({ providers: [{ descriptor: { providerId: 'test', displayName: 'Test' },
     async createSession() { return session; }, async resumeSession() { return session; } }], epoch: () => 'epoch-one' });
   closeables.push(() => relay.close());
-  await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
+  await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: {
     requestId: 'create', operationId: '00000000-0000-4000-8000-000000000001', agentId, providerId: 'test', config: { sessionId: 'native-one' },
   } });
   expect(remote.createAgentRemotePluginHost).toBeTypeOf('function');
@@ -135,9 +135,9 @@ describe('socket-free plugin uplink host', () => {
     await expect(transport.fetchSnapshot('remote-one')).resolves.toMatchObject({ payload: { id: 'remote-one' } });
     await expect(transport.fetchTimeline('remote-one', 'tail', undefined, 10)).resolves.toMatchObject({ payload: { agentId: 'remote-one' } });
     expect(requests).toEqual([
-      '/remote/attach', 'negotiate', '/v1/providers?protocolVersion=1.4.0',
-      '/v1/sessions/remote-one/snapshot?protocolVersion=1.4.0',
-      '/v1/sessions/remote-one/timeline?protocolVersion=1.4.0&requestId=remote-http-1&direction=tail&limit=10',
+      '/remote/attach', 'negotiate', '/v1/providers?protocolVersion=1.5.0',
+      '/v1/sessions/remote-one/snapshot?protocolVersion=1.5.0',
+      '/v1/sessions/remote-one/timeline?protocolVersion=1.5.0&requestId=remote-http-1&direction=tail&limit=10',
     ]);
     expect(controls).toEqual([{ requestId: 'request-1', method: 'POST', path: '/remote/attach', sessionId: 'remote-one', body: '{"nativeSessionId":"native-one"}' }]);
     expect(f.failures).toEqual([]);
@@ -160,7 +160,7 @@ describe('socket-free plugin uplink host', () => {
 
   it('rejects foreign Agent HTTP routes and native-session import', async () => {
     const f = await fixture();
-    f.receive({ type: 'rpc_request', requestId: 'foreign', method: 'GET', path: '/v1/sessions/other/snapshot?protocolVersion=1.4.0' });
+    f.receive({ type: 'rpc_request', requestId: 'foreign', method: 'GET', path: '/v1/sessions/other/snapshot?protocolVersion=1.5.0' });
     f.receive({ type: 'rpc_request', requestId: 'resume', method: 'POST', path: '/v1/sessions/resume', body: '{}' });
     await vi.waitFor(() => expect(f.sent).toHaveLength(2));
     expect(f.sent).toEqual(expect.arrayContaining([
@@ -172,9 +172,9 @@ describe('socket-free plugin uplink host', () => {
     const f = await fixture();
     f.receive({ type: 'stream_open', streamId: 'one' });
     f.receive({ type: 'stream_message', streamId: 'one', message: negotiate });
-    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message',
+    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message',
       payload: { requestId: 'hold', operationId: '00000000-0000-4000-8000-000000000002', agentId: 'agent-one', text: 'hold' } }) });
-    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.4.0', type: 'timeline_request',
+    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'timeline_request',
       payload: { requestId: 'history-after-send', agentId: 'agent-one', direction: 'tail', limit: 10 } }) });
     f.receive({ type: 'stream_open', streamId: 'two' });
     f.receive({ type: 'stream_message', streamId: 'two', message: negotiate });
@@ -187,11 +187,11 @@ describe('socket-free plugin uplink host', () => {
 
   it('retires cancelled RPC delivery without replaying or undoing its Provider action', async () => {
     const f = await fixture();
-    f.receive({ type: 'rpc_request', requestId: 'cancelled', method: 'GET', path: '/v1/providers?protocolVersion=1.4.0' });
+    f.receive({ type: 'rpc_request', requestId: 'cancelled', method: 'GET', path: '/v1/providers?protocolVersion=1.5.0' });
     f.receive({ type: 'rpc_cancel', requestId: 'cancelled' });
     await new Promise((resolve) => setImmediate(resolve));
     expect(f.sent).toEqual([]);
-    f.receive({ type: 'rpc_request', requestId: 'next', method: 'GET', path: '/v1/providers?protocolVersion=1.4.0' });
+    f.receive({ type: 'rpc_request', requestId: 'next', method: 'GET', path: '/v1/providers?protocolVersion=1.5.0' });
     await vi.waitFor(() => expect(f.sent).toEqual([expect.objectContaining({ requestId: 'next', status: 200 })]));
   });
 
@@ -199,7 +199,7 @@ describe('socket-free plugin uplink host', () => {
     const f = await fixture();
     f.receive({ type: 'stream_open', streamId: 'one' });
     f.receive({ type: 'stream_message', streamId: 'one', message: negotiate });
-    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message',
+    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message',
       payload: { requestId: 'old-command', operationId: '00000000-0000-4000-8000-000000000003', agentId: 'agent-one', text: 'hold' } }) });
     await vi.waitFor(() => expect(f.commands).toEqual(['hold']));
     f.receive({ type: 'stream_close', streamId: 'one', code: 1000, reason: 'Reattach' });

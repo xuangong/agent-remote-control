@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { createServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart } from '@agent-remote-controller/agent-provider-sdk';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRemoteHostBroker } from './remote-host-broker.js';
@@ -137,7 +141,7 @@ describe('Remote Host broker', () => {
     const repeated = await (await f.post(base + '/attach', { nativeSessionId: 'cold' })).json();
     expect(repeated).toEqual(attached); expect(attached.agentId).toBeTruthy();
     expect(calls.find((call) => call.path === '/remote/attach')).toMatchObject({ sessionId: attached.agentId });
-    expect((await fetch(f.url + `/v1/sessions/${attached.agentId}/snapshot?protocolVersion=1.4.0`)).status).toBe(200);
+    expect((await fetch(f.url + `/v1/sessions/${attached.agentId}/snapshot?protocolVersion=1.5.0`)).status).toBe(200);
   });
   it('bounds RPC waits and never repeats an uncertain creation', async () => {
     const f = await setup({ rpcTimeoutMs: 40 }); const pair = await (await f.post('/v1/remote/pairings')).json(); const native = await host(f.url, pair.key);
@@ -213,24 +217,28 @@ describe('Remote Host broker', () => {
       reconnected.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId, status: 200,
         body: request.path.startsWith('/remote/') ? JSON.stringify({ agentId, nativeSessionId: body.nativeSessionId }) : '{}' }));
     });
-    expect((await fetch(f.url + `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.4.0`)).status).toBe(200);
-    expect(recovery).toEqual(['/remote/attach', '/remote/child/attach', `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.4.0`]);
+    expect((await fetch(f.url + `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.5.0`)).status).toBe(200);
+    expect(recovery).toEqual(['/remote/attach', '/remote/child/attach', `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.5.0`]);
   });
 });
 
 it('carries native-host discovery, creation, snapshots, and chat through the production uplink client', async () => {
-  const { createAgentRemoteRelay, createRemoteHostUplinkClient } = await import('@agent-remote-controller/agent-remote-relay');
+  const { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } = await import('@agent-remote-controller/agent-remote-relay');
   const { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@agent-remote-controller/agent-remote-web/headless');
   const { createRecordedLabProvider } = await import('./recorded.js');
   const { vi } = await import('vitest');
   const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json();
-  const provider = createRecordedLabProvider({ capabilities: { queueMessage: true } }).provider;
+  const provider = createRecordedLabProvider({ capabilities: { queueMessage: true, imageInput: IMAGE_INPUT_CAPABILITIES } }).provider;
+  const imageDeliveries: AgentInputPart[][] = [];
+  const imageDirectory = await mkdtemp(join(tmpdir(), 'uplink-images-'));
+  cleanup.push(() => rm(imageDirectory, { recursive: true, force: true }));
   const nativeSessions: AgentSession[] = [];
   const deliveries: Array<{ text: string; options?: AgentMessageOptions }> = [];
   const createSession = provider.createSession.bind(provider);
   provider.createSession = async (config) => {
     const session = await createSession(config);
     nativeSessions.push(session);
+    session.sendMessageContent = async parts => { imageDeliveries.push([...parts]); };
     const send = session.sendMessage.bind(session);
     session.sendMessage = async (text, options) => {
       deliveries.push({ text, options });
@@ -238,7 +246,7 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
     };
     return session;
   };
-  const relay = createAgentRemoteRelay({ providers: [provider] });
+  const relay = createAgentRemoteRelay({ providers: [provider], inputImageStore: new InputImageStore({ directory: imageDirectory }) });
   cleanup.push(() => relay.close());
   const sessions = new Set(['cold-session']); const agents = new Set<string>(); const nativeBindings = new Map<string, string>();
   const connect = () => createRemoteHostUplinkClient({
@@ -255,7 +263,7 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
       if (request.path === '/remote/create') sessions.add(body.nativeSessionId);
       if (!sessions.has(body.nativeSessionId)) return { status: 404, body: '{}' };
       let existing = false; try { relay.requireAgent(request.sessionId!); existing = true; } catch {}
-      if (!existing) await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
+      if (!existing) await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: {
         requestId: request.sessionId!, operationId: request.path === '/remote/create' ? '00000000-0000-4000-8000-000000000007' : '00000000-0000-4000-8000-000000000006',
         agentId: request.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId },
       } });
@@ -288,6 +296,16 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
   for (const session of nativeSessions) delete session.capabilities.queueMessage;
   await expect(client.sendMessage('Unsupported queue', { delivery: 'next_turn' })).rejects.toMatchObject({ code: 'unsupported_command', recoverable: true });
   expect(deliveries).toHaveLength(2);
+  const imageBytes = await readFile(new URL('../../../agent-remote-relay/src/resources/fixtures/dimensions.png', import.meta.url));
+  const attachment = await client.uploadImage(new Blob([new Uint8Array(imageBytes)], { type: 'image/png' }), 'uplink-image');
+  expect((await client.sendMessageContent([
+    { type: 'text', text: 'before' }, { type: 'image', attachmentId: attachment.attachmentId, label: 'image #1' }, { type: 'text', text: 'after' },
+  ])).type).toBe('command_acknowledged');
+  expect(imageDeliveries[0]?.map(part => part.type)).toEqual(['text', 'image', 'text']);
+  const deliveredImage = imageDeliveries[0]![1]!;
+  if (deliveredImage.type !== 'image') throw new Error('Expected native image input.');
+  expect(await readFile(deliveredImage.path)).toEqual(imageBytes);
+  expect(await client.resolveResource(`input-image:${attachment.attachmentId}`)).toMatchObject({ status: 'available' });
   client.stop();
   await uplink.close();
   agents.clear(); nativeBindings.clear();

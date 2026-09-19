@@ -1,3 +1,4 @@
+import { codexMessageInput, type CodexInput } from './message-content.js';
 import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -7,6 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import type {
   AgentCapabilities,
+  AgentInputPart,
   AgentCommand,
   AgentCommandResult,
   AgentMessageOptions,
@@ -22,7 +24,7 @@ import type {
   ProviderStreamItem,
 } from '@agent-remote-controller/agent-provider-sdk';
 
-import { AgentSessionInUseError, CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, AgentSessionInUseError, CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
 import { mapCodexQuestion, mapCodexQuestionResponse } from './questions.js';
 import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.js';
 import { mapCodexPermissions } from './permissions.js';
@@ -40,6 +42,7 @@ import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
 const PROVIDER_ID = 'codex';
 
 export const CODEX_CAPABILITIES: AgentCapabilities = {
+  imageInput: IMAGE_INPUT_CAPABILITIES,
   history: true,
   sendMessage: true,
   steer: true,
@@ -266,6 +269,8 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private refreshInputCapabilities(): void {
+    if (this.acceptsDirectInput) this.capabilities.imageInput = IMAGE_INPUT_CAPABILITIES;
+    else delete this.capabilities.imageInput;
     for (const key of ['sendMessage', 'steer', 'cancel', 'sessionSettings', 'commands'] as const) this.capabilities[key] = this.acceptsDirectInput;
     this.capabilities.planning = this.acceptsDirectInput && this.planningModes !== undefined && (this.ownsRuntime || !!this.config.model);
     this.capabilities.interactions.planApproval = this.acceptsDirectInput && this.planningModes !== undefined && (this.ownsRuntime || !!this.config.model);
@@ -394,18 +399,22 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
+    return this.sendMessageContent([{ type: 'text', text }], options);
+  }
+
+  async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
     this.assertMessageReady();
     if (options?.delivery === 'next_turn') throw new Error('Codex does not support next-turn message delivery.');
     if (this.sendingMessage) throw new Error('A Codex message is already being submitted.');
-    if (!text.trim()) throw new Error('Codex message must not be empty.');
+    const input = codexMessageInput(parts);
     this.sendingMessage = true;
     try {
-      if (!this.activeTurnId) return await this.startTurn(text);
+      if (!this.activeTurnId) return await this.startTurn(input);
       let expectedTurnId = this.activeTurnId;
       for (let attempt = 0; ; attempt += 1) {
         const revision = this.statusRevision;
         try {
-          await this.steerTurn(text, expectedTurnId);
+          await this.steerTurn(input, expectedTurnId);
           return;
         } catch (error) {
           if (!(error instanceof CodexAppServerRpcError) || error.code !== -32602) throw error;
@@ -419,7 +428,7 @@ export class CodexAppServerSession implements AgentSession {
             this.runtimeStatus = 'idle';
             this.statusRevision += 1;
             this.assertMessageReady();
-            await this.startTurn(text);
+            await this.startTurn(input);
             return;
           }
           const mismatch = /^expected active turn id `([^`]+)` but found `([^`]+)`$/.exec(error.message);
@@ -444,13 +453,13 @@ export class CodexAppServerSession implements AgentSession {
     this.assertDirectInput();
     if (!this.activeTurnId) throw new Error('Codex has no active turn.');
     if (!text.trim()) throw new Error('Codex message must not be empty.');
-    await this.steerTurn(text, this.activeTurnId);
+    await this.steerTurn(codexMessageInput([{ type: 'text', text }]), this.activeTurnId);
   }
 
-  private async steerTurn(text: string, expectedTurnId: string): Promise<void> {
+  private async steerTurn(input: CodexInput[], expectedTurnId: string): Promise<void> {
     await this.transport.request('turn/steer', {
       threadId: this.threadId, expectedTurnId,
-      input: [{ type: 'text', text, text_elements: [] }],
+      input,
     });
   }
 
@@ -460,10 +469,12 @@ export class CodexAppServerSession implements AgentSession {
     await this.transport.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId });
   }
 
-  private async startTurn(text: string, skill?: { name: string; path: string }): Promise<void> {
+  private async startTurn(message: string | CodexInput[], skill?: { name: string; path: string }): Promise<void> {
     this.assertDirectInput();
     if (!this.threadId) throw new Error('Codex session has no thread');
-    if (!text.trim() && !skill) throw new Error('Codex message must not be empty');
+    if (typeof message === 'string' && !message.trim() && !skill) throw new Error('Codex message must not be empty');
+    const input: CodexInput[] = typeof message === 'string' ? (message ? [{ type: 'text', text: message, text_elements: [] }] : []) : message;
+    if (!input.length && !skill) throw new Error('Codex message must not be empty');
     if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new Error('A Codex turn is already active');
     const collaborationMode = this.buildCollaborationMode();
     const statusRevision = this.statusRevision;
@@ -471,7 +482,7 @@ export class CodexAppServerSession implements AgentSession {
     try {
       const result = await this.transport.request('turn/start', {
         threadId: this.threadId,
-        input: [...(skill ? [{ type: 'skill', ...skill }] : []), ...(text ? [{ type: 'text', text, text_elements: [] }] : [])],
+        input: [...(skill ? [{ type: 'skill', ...skill }] : []), ...input],
         ...(this.config.model ? { model: this.config.model } : {}),
         ...(this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
         ...(collaborationMode ? { collaborationMode } : {}),

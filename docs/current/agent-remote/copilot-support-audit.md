@@ -1,6 +1,6 @@
 # Copilot support audit
 
-This records core admission on `feat/copilot-provider`, with final native integration and launcher lifecycle validation through `2fd9c1a`. It is not a full-parity or published-release claim. The [baseline](provider-support.md) includes all 40 Copilot S/I/T/X/C/R/A/H cells. Public protocol remains 1.4.0 and Host uplink remains 2.
+This records core admission on `feat/copilot-provider`, with final native integration and launcher lifecycle validation through `2fd9c1a`. It is not a full-parity or published-release claim. The [baseline](provider-support.md) includes all 40 Copilot S/I/T/X/C/R/A/H cells. Public protocol remains 1.5.0 and Host uplink remains 2.
 
 ## Native boundary and comparison
 

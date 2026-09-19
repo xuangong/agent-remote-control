@@ -79,7 +79,7 @@ local scrolling and full-result access.
 The Provider SDK's `fileChangesResult` helper writes a versioned
 `{ format: 'file_changes', version: 1, files }` presentation value into the
 existing JSON tool-result channel. Each file supplies `path`, `kind`, `diff` and
-an optional `previousPath`. The Remote 1.4.0 wire union remains `text | json`;
+an optional `previousPath`. The Remote 1.5.0 wire union remains `text | json`;
 older clients can display the JSON without understanding this presentation.
 
 The Codex adapter normalizes native file changes on live completion and history

@@ -21,3 +21,4 @@ export type {
   AgentRemotePrincipal,
   AgentRemoteWebSocketAuthorizer,
 } from './transport/websocket-stream.js';
+export * from './resources/input-image-store.js';

@@ -94,8 +94,8 @@ it('acknowledges only the selected session and clears reminders when that sessio
       listeners.set(id, listener); queueMicrotask(() => listener.onOpen());
       return { close: () => { listeners.delete(id); }, send: message => {
         if (message.type !== 'negotiate') return;
-        listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
-        listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
+        listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
+        listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
       } };
     },
   };
@@ -110,7 +110,7 @@ it('acknowledges only the selected session and clears reminders when that sessio
   const second = { ...star, nativeSessionId: 'second' };
   await act(async () => { tracking.toggle(star); tracking.toggle(second); });
   const emit = (id: string, status: 'waiting' | 'idle') => act(async () => {
-    listeners.get(id)!.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: id, status } });
+    listeners.get(id)!.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: id, status } });
   });
   await emit('native', 'waiting'); await emit('second', 'idle');
   expect(tracking.observations[sessionKey(star)]?.attention).toBe('pending');
@@ -134,8 +134,8 @@ it('observes open windows without attachment or history and preserves subscripti
     return { close: () => { listeners.delete(id); }, send: message => {
       if (message.type !== 'negotiate') return;
       expect(message.observation).toBe('activity');
-      listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
-      listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
+      listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
+      listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
     } };
   });
   const fetchSnapshot = vi.fn(), fetchTimeline = vi.fn();
@@ -158,7 +158,7 @@ it('observes open windows without attachment or history and preserves subscripti
   await act(async () => tracking.toggle(side));
   await act(async () => focus(sessionKey(side)));
   expect(tracking.backgroundSessions).toEqual([]);
-  await act(async () => listeners.get('side')!.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'side', status: 'waiting' } }));
+  await act(async () => listeners.get('side')!.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'side', status: 'waiting' } }));
   expect(tracking.observations[sessionKey(side)]).toMatchObject({ activity: 'waiting', changed: false, attention: undefined });
   await act(async () => tracking.toggle(side));
   expect(listeners.size).toBe(2);

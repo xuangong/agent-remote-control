@@ -1,3 +1,7 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import type { ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
@@ -193,4 +197,51 @@ it('revokes native image reads after transport failure', async () => {
     await expect.poll(async () => (await session.runtimeInfo()).status).toBe('failed');
     expect(await session.readResource(locator)).toMatchObject({ status: 'unavailable' });
   } finally { await session.dispose(); }
+});
+
+it('sends ordered base64 image blocks and rejects busy rich input', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'claude-input-'));
+  const native = runtime();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+  try {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
+    const jpg = Buffer.from([255, 216, 255, 224]);
+    const paths = [join(root, 'one.png'), join(root, 'two.jpg')];
+    await writeFile(paths[0]!, png); await writeFile(paths[1]!, jpg);
+    const parts = [
+      { type: 'text', text: 'before ' },
+      { type: 'image', path: paths[0]!, mediaType: 'image/png', sha256: createHash('sha256').update(png).digest('hex'), label: 'image #1' },
+      { type: 'text', text: ' between ' },
+      { type: 'image', path: paths[1]!, mediaType: 'image/jpeg', sha256: createHash('sha256').update(jpg).digest('hex'), label: 'image #2' },
+      { type: 'text', text: ' after' },
+    ] as const;
+    await session.sendMessageContent(parts);
+    const sent = (await native.nextInput()).value;
+    expect(sent.message.content.map((part: any) => part.type)).toEqual(['text', 'image', 'text', 'image', 'text']);
+    expect(sent.message.content[1].source).toEqual({ type: 'base64', media_type: 'image/png', data: png.toString('base64') });
+    expect(sent.message.content[3].source.data).toBe(jpg.toString('base64'));
+    await expect(session.sendMessageContent([parts[1]])).rejects.toThrow(/active/);
+    const output = session.observe()[Symbol.asyncIterator]();
+    native.push({ type: 'result', subtype: 'success', session_id: 'native', uuid: 'done-image', usage: {} });
+    await nextEvent(output, 'turn_completed');
+    await session.sendMessageContent([parts[1]]);
+    expect((await native.nextInput()).value.message.content).toHaveLength(1);
+    expect(session.capabilities.imageInput).toMatchObject({ maxImages: 8 });
+  } finally { await session.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
+it('reserves submission during image reads and releases it on a failed image preparation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'claude-race-'));
+  const native = runtime();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+  try {
+    const path = join(root, 'missing.png');
+    const sending = session.sendMessageContent([{ type: 'image', path, sha256: 'a'.repeat(64), mediaType: 'image/png', label: 'image #1' }]);
+    await expect(session.sendMessage('racing')).rejects.toThrow(/active/);
+    await expect(session.setPlanning(true)).rejects.toThrow(/idle/);
+    await expect(sending).rejects.toThrow(/ENOENT/);
+    expect((await session.runtimeInfo()).status).toBe('idle');
+    await session.sendMessage('after failure');
+    expect((await native.nextInput()).value.message.content).toBe('after failure');
+  } finally { await session.dispose(); await rm(root, { recursive: true, force: true }); }
 });

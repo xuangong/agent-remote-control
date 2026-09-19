@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { BROKER_MAX_FRAME_BYTES } from '@agent-remote-controller/agent-remote-hosted';
 import { event, fixture, origin, send } from './fixture.js';
 
 it('serves hosted assets and health, authenticates browser login, and transports Host RPC and Controller frames', async () => {
@@ -177,7 +178,7 @@ it('rejects oversized native frames and closes registration when its asynchronou
   const f = await fixture(); const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
   const oversized = await f.upgrade('/ws/remote-host', { authorization: `Bearer ${pairing.key}` });
-  const oversizedClosed = event(oversized, 'close'); oversized.send('x'.repeat(8 * 1024 * 1024 + 1));
+  const oversizedClosed = event(oversized, 'close'); oversized.send('x'.repeat(BROKER_MAX_FRAME_BYTES + 1));
   expect((await oversizedClosed).code).toBe(1009);
   const registering = await f.upgrade('/ws/remote-host', { authorization: `Bearer ${pairing.key}` });
   const frames: unknown[] = []; registering.addEventListener('message', message => frames.push(message.data));

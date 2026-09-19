@@ -775,18 +775,24 @@ export function createHostBroker(options: HostBrokerOptions) {
       const opening = setTimeout(() => client.close(1013, 'Remote stream opening timed out'), options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
       client.onError(() => undefined);
-      let messageWindow = now(); let messageCount = 0;
+      let messageWindow = now(); let messageCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0;
       client.onMessage((raw, binary) => {
-        if (now()-messageWindow >= 60_000) {messageWindow=now();messageCount=0;}
-        if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');
+        if (binary) return client.close(1003, 'Text protocol required');
+        if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; imageChunkCount=0; imageChunkBytes=0; }
+        let publicMessage: { type?: string; payload?: { locator?: unknown } };
+        try { publicMessage = JSON.parse(raw.toString()); } catch { return client.close(1008, 'Invalid session message'); }
+        if (publicMessage?.type === 'image_upload_chunk') {
+          const bytes = Buffer.byteLength(raw.toString());
+          imageChunkBytes += bytes;
+          if (bytes > 48 * 1024 || ++imageChunkCount > 2048 || imageChunkBytes > 48 * 1024 * 1024) return client.close(1008, 'Image upload rate exceeded');
+        } else if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');
         if (context.authorizeMessage?.(raw.toString()) === false) return client.close(1008, 'Recent authentication is required');
         if (!owner(subject)) {
-          try { if (JSON.parse(raw).type === 'resource_resolve_request') return client.close(1008, 'Only the Host owner can resolve local files'); }
+          try { if (publicMessage.type === 'resource_resolve_request' && !(typeof publicMessage.payload?.locator === 'string' && /^input-image:[a-f0-9-]{36}$/.test(publicMessage.payload.locator))) return client.close(1008, 'Only the Host owner can resolve local files'); }
           catch { return client.close(1008, 'Invalid session message'); }
         }
         const expiresAt = expiry();
         if (expiresAt !== undefined && expiresAt <= now()) return client.close(1008, 'Credential expired');
-        if (binary) return client.close(1003, 'Text protocol required');
         if (!stream.ready) {
           if (stream.buffered.length >= 32 || stream.buffered.reduce((sum, value) => sum + Buffer.byteLength(value), 0) + Buffer.byteLength(raw.toString()) > 1024 * 1024) return client.close(1013, 'Remote stream is not ready');
           stream.buffered.push(raw.toString()); return;

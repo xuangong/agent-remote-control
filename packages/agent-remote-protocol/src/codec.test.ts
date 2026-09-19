@@ -37,7 +37,7 @@ import {
   encodeResumeAgentRequest,
 } from './index.js';
 
-const version = '1.4.0';
+const version = '1.5.0';
 
 it.each([null, 'native-active-turn'])('round trips authoritative active turn %s on runtime updates', activeTurnId => {
   const message = { protocolVersion: version, type: 'agent_stream', payload: {
@@ -632,16 +632,16 @@ describe('resource and session messages', () => {
 });
 
 it('round-trips strict activity observation without accepting content fields', () => {
-  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
-  const activity = { protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting' } };
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const activity = { protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting' } };
   expect(decodeServerMessage(JSON.stringify(activity))).toMatchObject({ status: 'ok', value: activity });
   expect(decodeServerMessage(JSON.stringify({ ...activity, payload: { ...activity.payload, text: 'private' } })).status).toBe('rejected');
 });
 
 
 it('round-trips an activity content cursor and rejects invalid cursor values', () => {
-  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
-  const message = { protocolVersion: '1.4.0', type: 'agent_activity', payload: {
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const message = { protocolVersion: '1.5.0', type: 'agent_activity', payload: {
     agentId: 'agent', status: 'waiting', cursor: { epoch: 'epoch', seq: 42 },
   } };
   expect(decodeServerMessage(JSON.stringify(message))).toMatchObject({ status: 'ok', value: message });

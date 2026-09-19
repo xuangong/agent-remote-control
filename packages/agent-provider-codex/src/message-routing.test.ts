@@ -180,3 +180,30 @@ describe('Codex immediate message delivery', () => {
     expect(h.requests.filter(({ method }) => method === 'turn/start')).toHaveLength(1);
   });
 });
+
+const richParts = [
+  { type: 'text', text: 'before ' },
+  { type: 'image', path: '/managed/one.png', mediaType: 'image/png', sha256: 'a'.repeat(64), label: 'image #1' },
+  { type: 'text', text: ' between ' },
+  { type: 'image', path: '/managed/two.png', mediaType: 'image/png', sha256: 'b'.repeat(64), label: 'image #2' },
+  { type: 'text', text: ' after' },
+] as const;
+it('preserves ordered images for both turn start and steer, including image-only input', async () => {
+  const h = await harness();
+  await h.session.sendMessageContent!(richParts);
+  await h.session.sendMessageContent!(richParts);
+  const expected = richParts.map(part => part.type === 'text'
+    ? { type: 'text', text: part.text, text_elements: [] } : { type: 'localImage', path: part.path });
+  expect(h.requests.find(r => r.method === 'turn/start')?.params.input).toEqual(expected);
+  expect(h.requests.find(r => r.method === 'turn/steer')?.params.input).toEqual(expected);
+  await h.session.sendMessageContent!([richParts[1]]);
+  expect(h.requests.at(-1)?.params.input).toEqual([{ type: 'localImage', path: '/managed/one.png' }]);
+  expect(h.session.capabilities.imageInput).toMatchObject({ maxImages: 8 });
+});
+it('preserves rich input when an explicitly rejected stale steer becomes a start', async () => {
+  const h = await harness(() => { throw new NativeFailure('no active turn to steer'); });
+  await h.session.sendMessage('Start');
+  await h.session.sendMessageContent!(richParts);
+  expect(h.requests.filter(r => r.method === 'turn/start').at(-1)?.params.input)
+    .toEqual(h.requests.find(r => r.method === 'turn/steer')?.params.input);
+});

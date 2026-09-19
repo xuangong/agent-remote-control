@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { ClaudeImageRegistry } from './images.js';
 import { ClaudeEventProjector } from './projector.js';
@@ -96,4 +97,24 @@ it('keeps native image metadata in tool results while retaining arbitrary user J
   const arbitrary = { base64: 'User data', nested: { base64: 'Other data' } };
   const ordinary = new ClaudeEventProjector('session').project({ ...frame, tool_use_result: arbitrary });
   expect(ordinary[0]!.event).toMatchObject({ item: { result: { content: expect.arrayContaining([{ type: 'json', value: arbitrary }]) } } });
+});
+
+it('replays ordered native user images with digests and readable resources from a fresh registry', async () => {
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
+  const secondBytes = Buffer.from([255, 216, 255, 224]);
+  const registry = new ClaudeImageRegistry('session');
+  const blocks = [{ type: 'text', text: 'before ' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } },
+    { type: 'text', text: ' between ' }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: secondBytes.toString('base64') } }, { type: 'text', text: ' after' }];
+  const project = (content: unknown[], id: string) => new ClaudeEventProjector('session', 'history', registry).project({ uuid: id, type: 'user', message: { content } })[0];
+  const observation = project(blocks, 'user-one')!;
+  const item = observation.event.type === 'timeline' ? observation.event.item : undefined;
+  expect(item).toMatchObject({ type: 'user_message', messageId: 'user-one', text: 'before [image #1] between [image #2] after' });
+  if (item?.type !== 'user_message') throw new Error('Missing user message');
+  expect(item.content?.map(part => part.type)).toEqual(['text', 'image', 'text', 'image', 'text']);
+  expect(item.content?.[1]).toMatchObject({ sha256: createHash('sha256').update(bytes).digest('hex') });
+  expect(item.content?.[3]).toMatchObject({ sha256: createHash('sha256').update(secondBytes).digest('hex') });
+  expect(observation.resourceReferences).toHaveLength(2);
+  for (const [index, reference] of observation.resourceReferences!.entries()) expect(await registry.readResource(reference.readLocator))
+    .toMatchObject({ status: 'available', bytes: index === 0 ? bytes : secondBytes });
+  expect(project([blocks[1]], 'image-only')?.event).toMatchObject({ item: { type: 'user_message', content: [{ type: 'image' }] } });
 });

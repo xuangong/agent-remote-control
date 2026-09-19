@@ -1,7 +1,7 @@
 # Inline image input design
 
 Date: 2026-09-20
-Status: Approved by the user on 2026-09-20; implementation in progress.
+Status: Implemented and locally verified on 2026-09-20; not published. See the implementation plan for verification boundaries.
 Branch: `feat/inline-image-input`
 Baseline: `b61a56e`
 

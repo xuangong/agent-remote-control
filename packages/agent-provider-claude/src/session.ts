@@ -1,8 +1,9 @@
+import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentCapabilities, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
+import type { AgentCapabilities, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
   AgentStreamEvent, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
-import { validateSessionSetting, type AgentSessionSetting } from '@agent-remote-controller/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@agent-remote-controller/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
 import { ClaudeInteractions } from './interactions.js';
 import { ClaudeUsage } from './usage.js';
@@ -27,7 +28,7 @@ export interface ClaudeSessionOptions {
 export interface ClaudeSessionConfig extends AgentSessionConfig { permissionMode?: PermissionMode }
 
 export class ClaudeAgentSession implements AgentSession {
-  readonly capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
+  readonly capabilities: AgentCapabilities = { imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
     planning: true, commands: true, sessionSettings: true, interactions: { question: true, toolApproval: true, planApproval: true } };
   private readonly input = new Channel<SDKUserMessage>();
   private readonly output = new Channel<ProviderStreamItem>();
@@ -49,6 +50,7 @@ export class ClaudeAgentSession implements AgentSession {
   private resumePermissionMode: PermissionMode = 'default';
   private models: ModelInfo[] = [];
   private changingSetting = false;
+  private preparingMessage = false;
   private observing = false;
   private disposed = false;
   private failure: Error | undefined;
@@ -116,16 +118,36 @@ export class ClaudeAgentSession implements AgentSession {
   }
 
   async sendMessage(text: string, options: AgentMessageOptions = {}): Promise<void> {
-    this.requireOpen();
+    this.assertMessageReady(options);
     if (!text.trim()) throw new Error('Claude message cannot be empty.');
+    this.dispatchMessage(text);
+  }
+
+  async sendMessageContent(parts: readonly AgentInputPart[], options: AgentMessageOptions = {}): Promise<void> {
+    this.assertMessageReady(options);
+    if (!parts.some(part => part.type === 'image' || part.text.trim())) throw new Error('Claude message cannot be empty.');
+    const snapshot = parts.map(part => ({ ...part }));
+    this.preparingMessage = true;
+    try {
+      const content = await claudeMessageContent(snapshot);
+      this.requireOpen();
+      this.dispatchMessage(content);
+    } finally { this.preparingMessage = false; }
+  }
+
+  private assertMessageReady(options: AgentMessageOptions): void {
+    this.requireOpen();
     if (options.delivery === 'next_turn') throw new Error('Claude queued delivery is not supported.');
-    if (this.turnId || this.changingSetting) throw new Error('Claude already has an active turn or setting change.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude already has an active turn or setting change.');
+  }
+
+  private dispatchMessage(content: SDKUserMessage['message']['content']): void {
     this.turnId = randomUUID();
     this.usage.startTurn();
     this.status = 'running';
     this.cancelRequested = false;
     const message: SDKUserMessage = { type: 'user', uuid: this.turnId, session_id: this.config.sessionId,
-      parent_tool_use_id: null, message: { role: 'user', content: text } };
+      parent_tool_use_id: null, message: { role: 'user', content } };
     this.emit({ type: 'turn_started', provider: 'claude', turnId: this.turnId });
     for (const observation of this.projector.project(message)) this.output.push({ ...observation, event: this.withTurn(observation.event) });
     this.runtimeUpdated();
@@ -145,7 +167,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async executeCommand(id: string, args: string) {
     this.requireOpen();
-    if (this.turnId || this.changingSetting) throw new Error('Claude commands require an idle session.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude commands require an idle session.');
     this.changingSetting = true;
     try {
       const command = (await this.listCommands()).find((entry) => entry.id === id);
@@ -167,7 +189,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async setSessionSetting(id: string, value: string): Promise<void> {
     this.requireOpen();
-    if (this.turnId || this.changingSetting) throw new Error('Claude settings can only change while idle.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude settings can only change while idle.');
     this.changingSetting = true;
     try {
       if (id === 'model') this.models = await deadline(this.native.supportedModels(), this.timeout, 'Claude model discovery');
@@ -184,7 +206,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async setPlanning(active: boolean): Promise<void> {
     this.requireOpen();
-    if (this.turnId || this.changingSetting) throw new Error('Claude planning can only change while idle.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude planning can only change while idle.');
     this.changingSetting = true;
     try {
       await this.updatePermissionMode(active ? 'plan' : this.resumePermissionMode);

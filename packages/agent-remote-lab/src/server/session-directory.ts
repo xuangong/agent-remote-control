@@ -79,7 +79,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
         const entry = requireEntry(providerId);
         if (parentNativeSessionId === undefined && !await entry.catalog.session(nativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The native session is unavailable.');
         const agentId = randomUUID();
-        await relay.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
+        await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: {
           requestId: randomUUID(), operationId: randomUUID(), agentId, providerId,
           config: { sessionId: agentId, nativeSessionId, ...(parentNativeSessionId === undefined ? {} : { parentNativeSessionId }) } as AgentSessionConfig,
         } });

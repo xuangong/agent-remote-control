@@ -20,7 +20,7 @@ async function setup({ used = 0, limit = 1, outcome = 'success', empty = false, 
   vi.stubGlobal('fetch', async (input: URL | string, init?: RequestInit) => {
     const url = new URL(String(input));
     requests.push({ path: url.pathname, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
-    if (url.pathname === '/v1/providers') return Response.json({ protocolVersion: '1.4.0', type: 'provider_list', payload: { providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] } });
+    if (url.pathname === '/v1/providers') return Response.json({ protocolVersion: '1.5.0', type: 'provider_list', payload: { providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] } });
     if (url.pathname.endsWith('/hosts')) return Response.json({ hosts: empty ? [] : [
       { id: 'owner', name: 'Owner Host', online: true, managed: true, access: 'owner', providers: [{ providerId: 'codex', displayName: 'Codex CLI' }] },
       { id: 'shared', name: 'Shared Studio', online: true, managed: false, access: 'shared', sessionQuota: quota, providers: [{ providerId: 'codex', displayName: 'Codex CLI' }] },

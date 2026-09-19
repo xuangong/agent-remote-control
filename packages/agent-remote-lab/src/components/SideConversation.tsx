@@ -46,6 +46,8 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   const title = record?.firstInput?.trim().slice(0, 72) || session.title;
   const active = client.current;
   const actions: LabWorkbenchActions = active && status === 'ready' && !initialInput?.pending ? {
+    sendMessageContent: async (content, options) => { await active.sendMessageContent(content, options); },
+    uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
     retryMessage: async (id) => { await active.retryMessage(id); }, deleteMessage: (id) => active.deleteMessage(id),
     loadOlder: () => active.loadOlder(), sendMessage: async (text, options) => { await active.sendMessage(text, options); }, cancel: async () => { await active.cancel(); },
     setPlanning: async (value) => { await active.setPlanning(value); }, setSessionSetting: async (id, value) => { await active.setSessionSetting(id, value); },
@@ -54,7 +56,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
     resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
   } : { deleteMessage: (id) => active?.deleteMessage(id) };
   return <aside className="lab-side-conversation" aria-label="Side conversation" ref={panel} onFocusCapture={onFocus} hidden={!expanded} style={{ order: position }}>
-    <LabWorkbench state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
+    <LabWorkbench draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       conversationPath={<span className="lab-side-title" title={title}><span className="lab-window-number">{position + 1}</span><span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}

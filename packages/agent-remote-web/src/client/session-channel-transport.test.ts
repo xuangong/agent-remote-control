@@ -7,7 +7,7 @@ import type { RemoteConnection, RemoteServerMessage } from './transport.js';
 import { AgentReplica } from '../replica/store.js';
 import { RemoteSessionClient } from './remote-session-client.js';
 
-const version = '1.4.0';
+const version = '1.5.0';
 const negotiate: ClientMessage = { protocolVersion: version, type: 'negotiate' };
 const response: RemoteServerMessage = {
   protocolVersion: version, type: 'protocol_error',

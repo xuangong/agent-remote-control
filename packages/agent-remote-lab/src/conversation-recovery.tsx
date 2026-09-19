@@ -1,5 +1,6 @@
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
+import { clearImageDraftScope } from '@agent-remote-controller/agent-remote-web/react';
 import type { TimelineReadingPosition } from '@agent-remote-controller/agent-remote-web/react';
 
 const prefix = 'agent-remote:recovery:';
@@ -32,10 +33,11 @@ export function saveDrafts(scope: string, drafts: Record<string, string>): void 
   catch { /* Storage can be unavailable or full; in-memory editing remains usable. */ }
 }
 
-export function clearConversationRecovery(): void {
+export function clearConversationRecovery(scope?: string): void {
+  if (scope) void clearImageDraftScope(scope).catch(() => { /* Signout still completes when browser storage is unavailable. */ });
   try {
     for (const storage of [sessionStorage, localStorage]) {
-      for (const key of Object.keys(storage)) if (key.startsWith(prefix)) storage.removeItem(key);
+      for (const key of Object.keys(storage)) if (key.startsWith(scope ? `${prefix}${scope}:` : prefix)) storage.removeItem(key);
     }
   } catch { /* Signing out must also work when storage is disabled. */ }
 }

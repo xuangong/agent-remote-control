@@ -18,3 +18,4 @@ export * from './operations.js';
 export * from './vscode-tunnel.js';
 export * from './session-channel.js';
 export * from './session-channel-wire.js';
+export * from './image-input.js';

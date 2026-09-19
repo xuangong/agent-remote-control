@@ -1,6 +1,6 @@
 # Inline Image Input Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Paste/upload inline image atoms and preserve ordered multimodal input through native delivery, replay, and recovery.
 
@@ -73,9 +73,9 @@ snapshot/version; Relay agent-manager/session-wire; Host injection in host.ts.
 **Produces:** shared types above, scoped begin/chunk/finish storage, manager
 `sendMessageContent`, upload response routing, persisted immutable files.
 
-- [ ] Add failing schema tests for text-only input, image-only content, mixed
+- [x] Add failing schema tests for text-only input, image-only content, mixed
   text+content rejection, path/URL injection, malformed chunks, and capability.
-- [ ] Add store tests using temporary directories and actual PNG/JPEG bytes:
+- [x] Add store tests using temporary directories and actual PNG/JPEG bytes:
 
 ```ts
 await store.begin(scope, request);
@@ -85,17 +85,17 @@ await expect(store.finish(otherScope, uploadId)).rejects.toThrow();
 expect((await reopened.finish(scope, uploadId)).attachment.sha256).toBe(digest);
 ```
 
-- [ ] Implement sequential file writes, offset conflict checks, receipt recovery,
+- [x] Implement sequential file writes, offset conflict checks, receipt recovery,
   byte/digest/MIME/dimension validation, global quota, unsubmitted expiry, and
   pinning before native dispatch. Never use client paths as filesystem paths.
-- [ ] Integrate uploads without holding the message command lock; capability and
+- [x] Integrate uploads without holding the message command lock; capability and
   identity rejection occur before storage/provider side effects.
-- [ ] Include canonical content in operation parameters and resolve every image
+- [x] Include canonical content in operation parameters and resolve every image
   before dispatch. Expose safe resource reads for retained images.
-- [ ] Bump exact public protocol version and synchronize versioned fixtures.
-- [ ] Run focused schema/store/wire suites with 10-second test and 120-second
+- [x] Bump exact public protocol version and synchronize versioned fixtures.
+- [x] Run focused schema/store/wire suites with 10-second test and 120-second
   outer deadlines, then build SDK/protocol/Relay in dependency order.
-- [ ] Review and commit the complete contract/storage slice.
+- [x] Review and commit the complete contract/storage slice.
 
 ## Task 2: Codex and Claude input and history
 
@@ -104,7 +104,7 @@ expect((await reopened.finish(scope, uploadId)).attachment.sha256).toBe(digest);
 **Consumes:** `AgentInputPart`, `AgentUserMessagePart`, image capability.
 **Produces:** ordered multimodal send/replay using the existing session lifecycle.
 
-- [ ] Add failing tests asserting ordered input arrays with two different images
+- [x] Add failing tests asserting ordered input arrays with two different images
   and three text spans, image-only input, and active-turn Codex steering.
 
 ```ts
@@ -113,15 +113,15 @@ expect(nativeInput.map(part => part.type)).toEqual(['text','localImage','text','
 expect(projectedUser.content.map(part => part.type)).toEqual(['text','image','text','image','text']);
 ```
 
-- [ ] Refactor text routing minimally so text and rich sends share busy, race,
+- [x] Refactor text routing minimally so text and rich sends share busy, race,
   cancellation, and native-error behavior. Claude reads managed files into SDK
   image blocks; Codex supplies localImage paths in order.
-- [ ] Project native user images with resource references and content digests;
+- [x] Project native user images with resource references and content digests;
   retain native message IDs and recover from an empty client cache.
-- [ ] Refuse unsupported/read-only image sends and keep child capabilities honest.
-- [ ] Run provider unit/native fixture tests with explicit deadlines; coordinate
+- [x] Refuse unsupported/read-only image sends and keep child capabilities honest.
+- [x] Run provider unit/native fixture tests with explicit deadlines; coordinate
   builds with Task 1. Record native vision verification separately.
-- [ ] Review and commit provider changes.
+- [x] Review and commit provider changes.
 
 ## Task 3: Client upload, outbox, and application integration
 
@@ -132,7 +132,7 @@ expect(projectedUser.content.map(part => part.type)).toEqual(['text','image','te
 **Produces:** cancellable sequential uploader; immutable multimodal outbox;
 correct application callbacks and stable recovery scope.
 
-- [ ] Test receipt-driven offsets, repeated chunks, disconnect rejection,
+- [x] Test receipt-driven offsets, repeated chunks, disconnect rejection,
   abort/session switch, native send failure, and exact-content retries.
 
 ```ts
@@ -142,14 +142,14 @@ expect(replica.getState().outgoingMessages[0].content).toEqual(parts);
 expect(reconcile(differentImageEcho).outgoingMessages).toHaveLength(1);
 ```
 
-- [ ] Route image results through existing request correlation and operation
+- [x] Route image results through existing request correlation and operation
   errors. Compute browser digest once per upload, resume from accepted offset,
   and yield between acknowledged chunks.
-- [ ] Snapshot immutable content/digests in the outbox; canonical ordered matching
+- [x] Snapshot immutable content/digests in the outbox; canonical ordered matching
   consumes only matching new echoes. Unknown image identity remains unconfirmed.
-- [ ] Wire primary and side views through their own active session clients.
+- [x] Wire primary and side views through their own active session clients.
   Signout clears scoped image drafts without touching unrelated storage.
-- [ ] Run client/recovery tests with per-test and outer deadlines; commit after review.
+- [x] Run client/recovery tests with per-test and outer deadlines; commit after review.
 
 ## Task 4: Inline editor and durable image drafts
 
@@ -159,19 +159,19 @@ MessageItem, OutgoingMessageItem and public exports; add ProseMirror deps.
 **Consumes:** composer callbacks from shared interfaces; UserMessagePart for replay.
 **Produces:** atomic image editing, upload UI, IndexedDB persistence and inline previews.
 
-- [ ] Test pure document serialization so literal tag-looking text stays text,
+- [x] Test pure document serialization so literal tag-looking text stays text,
   stable labels survive deletion, adjacent text merges, and image-only is nonempty.
-- [ ] Implement minimal ProseMirror schema, history/keymaps, image atom NodeView,
+- [x] Implement minimal ProseMirror schema, history/keymaps, image atom NodeView,
   file-picker selection mapping, paste interception, and validated internal copy.
-- [ ] Keep command handling, IME, Send hold newline, disabled/read-only behavior,
+- [x] Keep command handling, IME, Send hold newline, disabled/read-only behavior,
   existing height cap and text-only callback compatibility.
-- [ ] Persist blobs/document in IndexedDB; guard late hydration with draft
+- [x] Persist blobs/document in IndexedDB; guard late hydration with draft
   revisions. Missing bytes and storage errors remain visible and recoverable.
-- [ ] Show upload state on fixed-size tags; Preview opens an overlay. Add image
+- [x] Show upload state on fixed-size tags; Preview opens an overlay. Add image
   selection actions for Remove/Replace/Retry as appropriate.
-- [ ] Render native and outgoing ordered user content using the same tag preview
+- [x] Render native and outgoing ordered user content using the same tag preview
   conventions and existing authorized resource requests.
-- [ ] Run unit tests with deadlines, then coordinate build/browser tests. Review
+- [x] Run unit tests with deadlines, then coordinate build/browser tests. Review
   and commit this slice without touching protocol/client files owned elsewhere.
 
 ## Task 5: Whole-flow verification and documentation
@@ -180,16 +180,16 @@ MessageItem, OutgoingMessageItem and public exports; add ProseMirror deps.
 docs/current/agent-remote/web.md, protocol docs, compatibility.json.
 **Consumes:** all completed slices. **Produces:** integrated evidence and clean branch.
 
-- [ ] Build/package before browser tests. Check all changed packages' types.
-- [ ] Test real WebSocket upload/send/replay plus reconnect and cross-session
+- [x] Build/package before browser tests. Check all changed packages' types.
+- [x] Test real WebSocket upload/send/replay plus reconnect and cross-session
   denial; do not replace protocol acceptance with mocked callback assertions.
-- [ ] Test Chromium desktop/mobile and WebKit: paste/upload at selection,
+- [x] Test Chromium desktop/mobile and WebKit: paste/upload at selection,
   atom selection/deletion/undo, reload, upload retry, switching, and composer
   stability. Run existing workbench/command/message-delivery regressions.
 - [ ] Use a supported local native runtime and available vision endpoint to
   distinguish two test images. Do not silently substitute fixtures for a live
   model result or modify the user's existing native services.
-- [ ] Update docs, run compatibility:update/check and git diff --check, perform
+- [x] Update docs, run compatibility:update/check and git diff --check, perform
   final review, commit changes, and report verified/unverified boundaries.
 
 ## Verification commands
@@ -207,3 +207,40 @@ Relay/Web ports. Runtime builds are serialized by the coordinating agent.
 - Task 1, Task 2, and Task 4 have disjoint ownership and explicit shared types;
   their source work can proceed independently. The coordinator implements Task 3
   and runs integration after dependency builds. Reviews precede final acceptance.
+
+
+## Acceptance notes
+
+Implementation and slice reviews are complete. Slice commits are consolidated into
+one reviewed implementation commit because the shared contract and consumers must
+remain coherent. No publication or production process changes are included.
+
+The live vision acceptance item remains unverified: the installed isolated Codex
+runtime is 0.155.1, while the declared supported fixture version is 0.148.0. A private
+app-server with a loopback Responses fixture verifies ordered model input, distinct
+image digests, and fresh native history. This is transport/replay evidence only,
+not a live model vision result. Physical iOS clipboard and keyboard behavior also
+remain unverified; Chromium and WebKit mobile emulation cover the browser UI.
+
+
+## Verification results
+
+- All workspace builds and type checks passed. The changed Hosted/Cloudflare and
+  Lab packages were rebuilt after their final review fixes.
+- 1,704 tests passed across the non-Lab packages; the final Lab run passed 493
+  tests with 6 existing skips. Local native suites were excluded, along with
+  `codex-host-process.test.ts`, which requires the unavailable pinned Codex 0.148.0.
+- The isolated Codex 0.155.1 image transport/replay acceptance passed separately.
+- Image browser acceptance passed 12 cases across Chromium and WebKit, desktop
+  and mobile. Existing workbench, message delivery, and Send hold regressions
+  passed 29 cases with 3 platform-specific skips.
+- Real session WebSocket and production Host uplink tests cover upload, offset
+  recovery, scoped access, ordered provider input, and image resource resolution.
+  Protocol/channel/Worker adapter tests cover the 10 MiB resource response limit.
+- Final slice/cross-layer review passed; compatibility update/check, diff check,
+  and documentation lint passed.
+
+Local test setup used `NODE_OPTIONS=--no-experimental-webstorage` and the repository
+Node toolchain. On this Mac, `DEVELOPER_DIR=/Library/Developer/CommandLineTools` was
+set only for test processes so the existing system Python advisory-lock tests ran
+without changing the machine's developer-tool selection.

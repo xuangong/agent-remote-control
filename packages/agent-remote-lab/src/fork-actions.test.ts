@@ -27,3 +27,15 @@ it('hides only the exact attachment in the conversation view while preserving th
   expect(forkDisplayState(state, record)!.timeline.entries[0]!.item).toMatchObject({ text: 'question' });
   expect(state.timeline.entries[0]!.item.text).toContain('<session-context');
 });
+it('prepends first-branch context once without changing ordered image parts', async () => {
+  const store = new ForkStore('image-fork');
+  const record = store.prepare({ source, text: '[]', itemCount: 0, capturedAt: new Date().toISOString(), boundary: { epoch: 'one', seq: 0 } });
+  store.bind(record.id, { ...source, agentId: 'target', nativeSessionId: 'native-target' });
+  const sendMessageContent = vi.fn(async () => {});
+  const actions = forkActions({ sendMessageContent }, store, store.get(record.id), {} as RemoteAgentTransport);
+  const content = [{ type: 'text' as const, text: 'Compare ' }, { type: 'image' as const, attachmentId: 'a', label: 'image #1' }];
+  await actions.sendMessageContent!(content);
+  expect(sendMessageContent).toHaveBeenLastCalledWith([{ type: 'text', text: contextPrefix(record) }, ...content], undefined);
+  await actions.sendMessageContent!(content);
+  expect(sendMessageContent).toHaveBeenLastCalledWith(content, undefined);
+});

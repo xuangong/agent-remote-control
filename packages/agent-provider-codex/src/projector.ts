@@ -4,6 +4,8 @@ import { codexToolResult } from './tool-result.js';
 import { CodexImageRegistry } from './images.js';
 import type {
   AgentStreamEvent,
+  AgentUserMessagePart,
+  ProviderResourceReference,
   AgentTaskItem,
   AgentTimelineItem,
   AgentToolCallTimelineItem,
@@ -183,6 +185,7 @@ export class CodexEventProjector {
     if (id && (item.type === 'imageView' || item.type === 'imageGeneration')) {
       return this.projectImage(item, id, turnId, occurredAt);
     }
+    if (id && item.type === 'userMessage') return this.projectUserMessage(item, id, `item:${id}:completed`, turnId, occurredAt);
     const timelineItem = this.mapItem(item, 'completed');
     if (!timelineItem || !id) return null;
     return this.observation(`item:${id}:completed`, {
@@ -233,12 +236,9 @@ export class CodexEventProjector {
     }
     if (itemType === 'userMessage') {
       if (this.emittedUserItems.has(itemId)) return null;
-      const mapped = this.mapItem(item, lifecycle);
-      if (!mapped) return null;
-      this.emittedUserItems.add(itemId);
-      return this.observation(`item:${itemId}:user`, {
-        type: 'timeline', provider: PROVIDER_ID, turnId, item: mapped,
-      });
+      const projected = this.projectUserMessage(item, itemId, `item:${itemId}:user`, turnId);
+      if (projected) this.emittedUserItems.add(itemId);
+      return projected;
     }
     const mapped = this.mapItem(item, lifecycle);
     if (!mapped) return null;
@@ -387,13 +387,6 @@ export class CodexEventProjector {
     const type = readString(item.type);
     const id = readString(item.id);
     if (!type || !id) return null;
-    if (type === 'userMessage') {
-      const text = this.readUserMessageText(item);
-      return text ? {
-        type: 'user_message', text, messageId: id,
-        ...(readString(item.clientId) ? { clientMessageId: readString(item.clientId) } : {}),
-      } : null;
-    }
     if (type === 'agentMessage') {
       const text = readString(item.text);
       return text ? { type: 'assistant_message', text, messageId: id } : null;
@@ -506,13 +499,26 @@ export class CodexEventProjector {
     return { type: 'tool_call', callId, name, detail, status, error: null, ...(result ? { result } : {}) };
   }
 
-  private readUserMessageText(item: JsonObject): string {
-    if (!Array.isArray(item.content)) return '';
-    return item.content.flatMap((entry) => {
-      if (!isRecord(entry) || entry.type !== 'text') return [];
-      const text = readString(entry.text);
-      return text ? [text] : [];
-    }).join('');
+  private projectUserMessage(item: JsonObject, id: string, key: string, turnId?: string, occurredAt?: number): ProviderObservation | null {
+    if (!Array.isArray(item.content)) return null;
+    const content: AgentUserMessagePart[] = [];
+    const resourceReferences: ProviderResourceReference[] = [];
+    let imageIndex = 0;
+    for (const [index, entry] of item.content.entries()) {
+      if (!isRecord(entry)) continue;
+      if (entry.type === 'text' && typeof entry.text === 'string') content.push({ type: 'text', text: entry.text });
+      else if (entry.type === 'image' || entry.type === 'localImage') {
+        const image = this.images.projectUser(id, index, entry, `image #${++imageIndex}`, this.cwd);
+        content.push(image.part);
+        resourceReferences.push(...image.resourceReferences);
+      }
+    }
+    const text = content.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join('');
+    if (!text) return null;
+    return { ...this.observation(key, { type: 'timeline', provider: PROVIDER_ID, turnId,
+      item: { type: 'user_message', text, messageId: id, ...(imageIndex ? { content } : {}),
+        ...(readString(item.clientId) ? { clientMessageId: readString(item.clientId) } : {}) } }, occurredAt),
+      ...(imageIndex ? { resourceReferences } : {}) };
   }
 
   private readReasoningText(item: JsonObject): string {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as protocol from './index.js';
 
-const version = '1.4.0' as const;
+const version = '1.5.0' as const;
 const negotiate = { protocolVersion: version, type: 'negotiate' as const };
 const frame = (type: string, rest = {}) => ({ protocolVersion: version, type, ...rest });
 

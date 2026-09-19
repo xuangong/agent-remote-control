@@ -3,11 +3,12 @@ import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type 
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from './operation-cache.js';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
 import { AgentSessionInUseError, AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
+import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type SessionWireAgent, type SessionWireOperationExecutor } from '@agent-remote-controller/agent-remote-relay';
 
@@ -30,6 +31,7 @@ export interface AgentHostRuntimeOptions {
   cancelTimeoutMs?: number;
   executionPolicy?: HostExecutionPolicy;
   operationCache?: OperationCacheOptions;
+  inputImages?: InputImageStoreOptions;
 }
 export interface AgentHostRequestDiagnostic {
   event: 'host_request_started' | 'host_request_completed';
@@ -63,7 +65,8 @@ export interface AgentHost {
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
-  const runtime = createAgentHostRuntime(options);
+  const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
+  const runtime = createAgentHostRuntime({ ...options, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
   const previews = options.preview ? createControllerPreviews(options.preview) : undefined;
   const vscodeTunnel = options.vscodeTunnel ? createVscodeTunnelManager({ ...options.vscodeTunnel, installationId: options.installationId }) : undefined;
   let state: AgentHost['state'] = 'connecting';
@@ -141,7 +144,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     resumeSession: adapter.resumeSession.bind(adapter),
   }));
-  const relay = createAgentRemoteRelay({ providers: relayAdapters });
+  const relay = createAgentRemoteRelay({ providers: relayAdapters, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}) });
   const operationCache = createOperationCache(options.operationCache);
   const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list })]));
   const bindingsByNative = new Map<string, Binding>();

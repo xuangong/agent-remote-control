@@ -17,7 +17,7 @@ it('reuses Worker session channels and releases their Host streams on logout', a
     }
     if (frame.type === 'stream_close') streams.delete(frame.streamId);
     if (frame.type === 'stream_message') send(host, { type: 'stream_message', streamId: frame.streamId,
-      message: JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiated' }) });
+      message: JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiated' }) });
   });
   expect((await f.json(alice.basePath + `v1/remote/hosts/${hostId}/attach`, alice.cookie,
     { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
@@ -25,12 +25,12 @@ it('reuses Worker session channels and releases their Host streams on logout', a
   expect(await event(channel, 'message')).toMatchObject({ type: 'ready' });
   for (const subscriptionId of [1, 2]) {
     const negotiated = event(channel, 'message');
-    channel.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'subscribe', subscriptionId, agentId: 'agent',
-      message: { protocolVersion: '1.4.0', type: 'negotiate' } }));
+    channel.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'subscribe', subscriptionId, agentId: 'agent',
+      message: { protocolVersion: '1.5.0', type: 'negotiate' } }));
     expect(await negotiated).toMatchObject({ type: 'message', subscriptionId, message: { type: 'negotiated' } });
     expect(streams.size).toBe(1);
     if (subscriptionId === 1) {
-      channel.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'unsubscribe', subscriptionId }));
+      channel.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'unsubscribe', subscriptionId }));
       await expect.poll(() => streams.size, { timeout: 1500 }).toBe(0);
     }
   }

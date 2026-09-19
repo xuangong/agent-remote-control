@@ -54,7 +54,7 @@ import { ViewOptions } from './components/ViewOptions.js';
 import { PreviewProvider, PreviewWorkspace, TimelineDisplay, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
-import { LabWorkbench } from './components/LabWorkbench.js';
+import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
 import { captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
@@ -78,7 +78,7 @@ export interface LabTransport extends RemoteAgentTransport {
   resumeAgent(agentId: string, persistence: AgentPersistenceHandle): Promise<AgentSessionResponse>;
 }
 
-export interface AppActions {
+export interface AppActions extends LabWorkbenchActions {
   loadOlder?(): void | Promise<void>;
   retryMessage?(id: string): Promise<void>;
   deleteMessage?(id: string): void;
@@ -884,6 +884,8 @@ function AppContent({
   const clientActions: AppActions = actions ?? {
     loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
     sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
+    sendMessageContent: async (content, options) => { await commandClient().sendMessageContent(content, options); },
+    uploadImage: (file, uploadId, options) => commandClient().uploadImage(file, uploadId, options),
     retryMessage: async (id) => { await commandClient().retryMessage(id); },
     deleteMessage: (id) => commandClient().deleteMessage(id),
     steer: async (text) => { await runMutation(() => commandClient().steer(text)); },
@@ -1058,6 +1060,7 @@ function AppContent({
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <div className="lab-primary-conversation" hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
         <LabWorkbench
+          draftSessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
           revealEntry={traceRequest?.view === 'workbench' ? traceRequest : undefined}
           state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && status === 'ready' ? conversationActions : { deleteMessage: conversationActions.deleteMessage }} visible={activeView === 'workbench' && primaryExpanded}

@@ -10,10 +10,10 @@ import { render } from '../test/setup.js';
 function fixture() {
   const listeners = new Map<string, RemoteTransportListener>();
   const closes: string[] = [];
-  const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.4.0', type: 'agent_snapshot', payload: {
+  const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.5.0', type: 'agent_snapshot', payload: {
     ...replicaState.agent!, id, status: 'running', runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id },
   } });
-  const page = (id: string): HistoryPage => ({ protocolVersion: '1.4.0', type: 'timeline_page', payload: {
+  const page = (id: string): HistoryPage => ({ protocolVersion: '1.5.0', type: 'timeline_page', payload: {
     agentId: id, requestId: 'history', direction: 'tail', epoch: `epoch-${id}`, reset: false, staleCursor: false, gap: false,
     window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: `epoch-${id}`, seq: 1 }, endCursor: { epoch: `epoch-${id}`, seq: 1 },
     entries: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-20T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'assistant_message', text: `Conversation ${id}` } }],
@@ -25,7 +25,7 @@ function fixture() {
     listeners.set(id, listener);
     if (!paused) queueMicrotask(() => { listener.onOpen(); listener.onMessage(snapshot(id)); });
     return { close: () => { closes.push(id); listeners.delete(id); }, send: message => {
-      if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.4.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
+      if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
     } };
   });
   const transport: RemoteAgentTransport = { connect, fetchSnapshot: async id => snapshot(id), fetchTimeline, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };

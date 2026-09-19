@@ -36,6 +36,11 @@ export function discoverMarkdownLocators(markdown: string): MarkdownLocator[] {
 }
 
 export function discoverTimelineLocators(item: AgentTimelineItem): MarkdownLocator[] {
+  if (item.type === 'user_message') return (item.content ?? []).flatMap(part => {
+    if (part.type !== 'image') return [];
+    const normalizedLocator = normalizeFileLocator(part.locator);
+    return normalizedLocator ? [{ locator: part.locator, normalizedLocator }] : [];
+  });
   if (item.type === 'assistant_message') return discoverMarkdownLocators(item.text);
   if (item.type !== 'tool_call' || item.status !== 'completed') return [];
   if (item.detail.type === 'write' || item.detail.type === 'edit') {

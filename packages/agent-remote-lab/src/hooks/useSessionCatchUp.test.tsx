@@ -8,7 +8,7 @@ import { render } from '../test/setup.js';
 import { useSessionCatchUp } from './useSessionCatchUp.js';
 
 function page(seq: number, epoch = 'epoch'): HistoryPage {
-  return { protocolVersion: '1.4.0', type: 'timeline_page', payload: {
+  return { protocolVersion: '1.5.0', type: 'timeline_page', payload: {
     requestId: 'history', agentId: 'agent', direction: 'tail', epoch, reset: false, staleCursor: false, gap: false, error: null,
     window: { minSeq: seq ? 1 : 0, maxSeq: seq, nextSeq: seq + 1 },
     startCursor: seq ? { epoch, seq: 1 } : null, endCursor: seq ? { epoch, seq } : null,
@@ -18,7 +18,7 @@ function page(seq: number, epoch = 'epoch'): HistoryPage {
   } };
 }
 function live(seq: number, epoch = 'epoch'): AgentStreamMessage {
-  return { protocolVersion: '1.4.0', type: 'agent_stream', payload: {
+  return { protocolVersion: '1.5.0', type: 'agent_stream', payload: {
     agentId: 'agent', epoch, seq, timestamp: '2026-09-20T00:00:00Z',
     event: { type: 'timeline', providerId: 'recorded', resources: [], item: { type: 'assistant_message', text: 'More' } },
   } };
@@ -90,10 +90,10 @@ it('closes at the frozen boundary while the full session continues fetching newe
       queueMicrotask(() => listener.onOpen());
       return { close: () => {}, send: message => {
         if (message.type === 'negotiate') {
-          listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
-          listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: 'agent' } });
+          listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
+          listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: 'agent' } });
         } else if (message.type === 'timeline_subscription') {
-          listener.onMessage({ protocolVersion: '1.4.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: ['agent'] } });
+          listener.onMessage({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: ['agent'] } });
         }
       } };
     },

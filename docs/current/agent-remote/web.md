@@ -183,3 +183,41 @@ Desktop layouts expand the latest two windows; compact layouts expand one. Earli
 Visited side views remain mounted while hidden, preserving replicas, reading positions, question drafts and composer drafts during branch changes. Per-parent request ordering prevents a slow older attachment from replacing a newer selection. The existing browser-local fork ledger persists the parent/side relationships; expanded windows and selected routes belong to the current mounted workbench and reset on reload. This is a client layout feature, without changes to native subagent ownership, fork semantics or the public Remote protocol (`packages/agent-remote-lab/src/side-tree.ts`, `components/CollapsedConversations.tsx`, `components/SideConversation.tsx`).
 
 The conversation Sessions menu highlights running subagent rows and reports the working subagent count for the current native family even while collapsed. Parent activity and unrelated families do not affect this count. Indicators follow status changes and disappear when no subagents are running.
+
+## Ordered image input
+
+Image-capable Codex and Claude sessions use a minimal inline editor: text, newlines,
+and indivisible `[image #N]` atoms. Pasting an image or choosing files inserts at the
+current selection. Labels remain stable after removal, and literal text that looks
+like a label stays ordinary text. Selection actions expose preview, replace, remove,
+and explicit upload retry. Previews use an overlay and do not resize the composer.
+Text-only providers retain the existing textarea. Native slash commands and skills
+remain text commands; an image draft cannot be silently converted to a command.
+
+The client uploads through its authenticated full-session connection, one acknowledged
+32 KiB chunk at a time. A reconnect or hidden conversation pauses its queue; a new
+attempt asks the Host for the accepted offset. The editor remains writable while the
+session reconnects or an image uploads, but Send requires a ready session and verified
+attachments. The state channel never carries image bytes.
+
+IndexedDB retains ordered documents and image bytes under the host application's
+account/relay scope and stable session identity. Browsers that cannot store Blob
+records use binary ArrayBuffer records and recreate the Blob on read. Storage failure
+is visible. Signing out clears only that scope and invalidates pending writes. Image
+labels and upload receipts are persisted; a late upload result cannot alter another
+conversation. The application supplies `draftScope`, `sessionKey`, `onUploadImage`,
+`onSendMessageContent`, and visibility to the shared composer. Restored and reactivated
+ready images revalidate their Host receipts before Send becomes available. A definite
+`invalid_image_input` rejection keeps the draft and marks the referenced tags failed;
+explicit upload retry replaces stale receipts. It never resends a message automatically.
+Normal interrupted chunk uploads retain their upload ID and resume from the Host offset.
+
+The outgoing-message ledger retains immutable ordered parts and attachment digests.
+A native echo confirms an image send only when its ordered text and image digests
+match; same-text messages with different images do not confirm one another. Unknown
+identity remains visible and unconfirmed. Explicit retry retains the exact image
+references and the existing operation-identity rules. Native history supplies image
+locators independently of browser cache, and previews use the ordinary authorized
+resource path.
+
+Ordered user messages retain Markdown rendering in each text segment around image tags.

@@ -1,10 +1,10 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
-import type { AgentResourceReadResult, AgentTimelineItem, ProviderResourceReference } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult, AgentTimelineItem, AgentUserMessagePart, ProviderResourceReference } from '@agent-remote-controller/agent-provider-sdk';
 
 import { isRecord, readString } from './native.js';
 
@@ -21,6 +21,7 @@ interface ImageEntry {
   projection: CodexImageProjection;
   source: ImageSource;
   materialized?: Promise<AgentResourceReadResult>;
+  sha256?: string;
 }
 
 /** Resolves only image sources explicitly named by this session's native image items. */
@@ -58,6 +59,33 @@ export class CodexImageRegistry {
     };
     this.entries.set(locator, { source, projection });
     return cloneProjection(projection);
+  }
+
+  projectUser(messageId: string, index: number, image: Record<string, unknown>, label: string, cwd?: string): {
+    part: AgentUserMessagePart; resourceReferences: ProviderResourceReference[];
+  } {
+    const id = `user:${JSON.stringify([messageId, index])}`;
+    const projection = this.project(image.type === 'localImage'
+      ? { type: 'imageView', id, path: image.path }
+      : { type: 'imageGeneration', id, result: image.url }, cwd);
+    const locator = `codex-image:${createHash('sha256').update(this.sessionId).update('\0').update(id).digest('hex')}`;
+    const entry = this.entries.get(locator);
+    if (entry && !entry.materialized) {
+      let result: AgentResourceReadResult;
+      try {
+        if ('unavailable' in entry.source) throw new ImageReadError(entry.source.unavailable);
+        const bytes = 'path' in entry.source ? readImageFileSync(entry.source.path) : decodeImageData(entry.source.data);
+        const mediaType = rasterMediaType(bytes);
+        if (!mediaType) throw new ImageReadError('Native image is not a supported raster image.');
+        if (this.retainedBytes + bytes.length > maxSessionImageBytes) throw new ImageReadError('Session image storage exceeds the configured byte limit.');
+        this.retainedBytes += bytes.length;
+        entry.sha256 = createHash('sha256').update(bytes).digest('hex');
+        result = { status: 'available', bytes, mediaType };
+      } catch (error) { result = unavailable(error instanceof ImageReadError ? error.message : 'Native image file is unavailable.'); }
+      entry.materialized = Promise.resolve(result);
+    }
+    return { part: { type: 'image', locator, label, ...(entry?.sha256 ? { sha256: entry.sha256 } : {}) },
+      resourceReferences: projection?.resourceReferences ?? [] };
   }
 
   async readResource(locator: string): Promise<AgentResourceReadResult> {
@@ -173,4 +201,21 @@ function rasterMediaType(bytes: Buffer): string | undefined {
   if (bytes.length >= 13 && /^GIF8[79]a$/.test(bytes.toString('ascii', 0, 6)) && bytes.readUInt16LE(6) > 0 && bytes.readUInt16LE(8) > 0) return 'image/gif';
   if (bytes.length >= 16 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
   return undefined;
+}
+
+function readImageFileSync(path: string): Buffer {
+  const file = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(file);
+    if (!stat.isFile() || stat.size < 1 || stat.size > maxImageBytes) throw new ImageReadError('Native image path is not a bounded regular file.');
+    const bytes = Buffer.alloc(stat.size + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(file, bytes, offset, bytes.length - offset, offset);
+      if (!count) break;
+      offset += count;
+    }
+    if (offset !== stat.size) throw new ImageReadError('Native image changed while being read.');
+    return bytes.subarray(0, offset);
+  } finally { closeSync(file); }
 }

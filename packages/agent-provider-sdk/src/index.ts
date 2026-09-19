@@ -6,3 +6,4 @@ export * from './tool-result.js';
 export * from './file-changes.js';
 export * from './session-settings.js';
 export * from './commands.js';
+export * from './image-input.js';

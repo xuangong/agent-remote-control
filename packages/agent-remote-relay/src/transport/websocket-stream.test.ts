@@ -34,10 +34,10 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(manager, (action) => { actions.push(action); return true; });
     const inbox = socketInbox(socket);
     try {
-      socket.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+      socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
       await inbox.next('agent_snapshot');
       socket.send(JSON.stringify({
-        protocolVersion: '1.4.0', type: 'resource_resolve_request',
+        protocolVersion: '1.5.0', type: 'resource_resolve_request',
         payload: {
           requestId: 'resolve-one', agentId: 'agent-1', locator: './images/result.png',
           sourceLocator: join(workspace, 'docs', 'report.md'),
@@ -46,7 +46,7 @@ describe('Agent Remote WebSocket session failures', () => {
       const resolved = await inbox.next('resource_resolve_response');
       const binding = (resolved.payload as { binding: { resourceId: string } }).binding;
       socket.send(JSON.stringify({
-        protocolVersion: '1.4.0', type: 'resource_request',
+        protocolVersion: '1.5.0', type: 'resource_request',
         payload: { requestId: 'read-one', agentId: 'agent-1', resourceId: binding.resourceId },
       }));
       const read = await inbox.next('resource_response');
@@ -71,7 +71,7 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(controlled.agent);
     const closed = socketClose(socket);
 
-    socket.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
 
     await expect(closed).resolves.toEqual({ code: 1011, reason: 'Agent Remote event delivery failed' });
     expect(controlled.unsubscribeCount()).toBe(1);
@@ -86,7 +86,7 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(controlled.agent);
     const closed = socketClose(socket);
 
-    socket.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
 
     await expect(closed).resolves.toEqual({ code: 1013, reason: 'Agent event buffer overflowed' });
     expect(controlled.unsubscribeCount()).toBe(1);
@@ -123,7 +123,7 @@ function controlledAgent(onSnapshot: (emit: (event: AgentManagerEvent) => void) 
 
 function validSnapshot() {
   return {
-    protocolVersion: '1.4.0' as const,
+    protocolVersion: '1.5.0' as const,
     type: 'agent_snapshot' as const,
     payload: {
       id: 'agent-1', providerId: 'fake', createdAt: '2026-09-03T00:00:00.000Z',
@@ -236,9 +236,9 @@ it('streams only distinct activity over a real socket and keeps normal content s
   const inbox = socketInbox(tracking), full = socketInbox(content);
   const received: Array<{ type: string; payload?: unknown }> = [];
   tracking.on('message', data => received.push(JSON.parse(data.toString())));
-  tracking.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }));
+  tracking.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' }));
   expect((await inbox.next('agent_activity')).payload).toEqual({ agentId: 'agent-1', status: 'idle' });
-  content.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+  content.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
   await full.next('agent_snapshot');
   for (let index = 0; index < 10; index++) for (const emit of listeners) {
     emit({ type: 'agent_state', agentId: 'agent-1', snapshot: current });
@@ -247,7 +247,7 @@ it('streams only distinct activity over a real socket and keeps normal content s
   const waiting = { ...current, payload: { ...current.payload, status: 'waiting' as const } };
   for (const emit of listeners) emit({ type: 'agent_state', agentId: 'agent-1', snapshot: waiting });
   expect((await inbox.next('agent_activity')).payload).toEqual({ agentId: 'agent-1', status: 'waiting' });
-  tracking.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'timeline_subscription', payload: { requestId: 'no-content', agentIds: ['agent-1'] } }));
+  tracking.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'timeline_subscription', payload: { requestId: 'no-content', agentIds: ['agent-1'] } }));
   expect((await inbox.next('protocol_error')).payload).toMatchObject({ code: 'activity_only' });
   expect(received.map(item => item.type)).toEqual(['negotiated', 'agent_activity', 'agent_activity', 'protocol_error']);
   expect(JSON.stringify(received)).not.toContain('private output');

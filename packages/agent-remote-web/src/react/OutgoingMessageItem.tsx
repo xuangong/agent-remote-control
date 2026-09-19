@@ -1,9 +1,11 @@
+import type { MarkdownResourceContext } from './markdown-resources.js';
 import { useState } from 'react';
 import type { OutgoingMessage } from '../replica/types.js';
 import { UserMessageItem } from './items/MessageItem.js';
 
-export function OutgoingMessageItem({ message, onRetry, onDelete }: {
+export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContext }: {
   readonly message: OutgoingMessage;
+  readonly resourceContext?: MarkdownResourceContext;
   readonly onRetry?: (id: string) => Promise<void>;
   readonly onDelete?: (id: string) => void;
 }) {
@@ -24,7 +26,7 @@ export function OutgoingMessageItem({ message, onRetry, onDelete }: {
   }
   return <div className="agent-timeline-entry agent-outgoing-message" data-entry-key={message.id}
     data-delivery-state={settled ? message.status : 'pending'} aria-busy={!settled}>
-    <UserMessageItem item={{ type: 'user_message', text: message.text }} />
+    <UserMessageItem item={{ type: 'user_message', text: message.text, ...(message.content ? { content: message.content.map(part => part.type === 'text' ? part : { type: 'image' as const, locator: `input-image:${part.attachmentId}`, label: part.label }) } : {}) }} resourceContext={resourceContext} />
     <div className="agent-message-delivery" role={settled ? 'alert' : 'status'}>
       {settled ? <button type="button" className="agent-delivery-error-toggle" aria-label="Delivery error" aria-expanded={details} title={error || message.error || label} onClick={() => setDetails(value => !value)}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="10" r="8" /><path d="M10 5v6m0 3v1" /></svg></button>
         : <span className="agent-delivery-dot" aria-hidden="true" />}

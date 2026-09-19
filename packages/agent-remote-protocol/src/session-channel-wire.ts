@@ -17,7 +17,7 @@ export interface SessionChannelSocket {
 export type SessionChannelMode = 'session' | 'activity';
 export type SessionChannelOpenResult = { accept(socket: SessionChannelSocket): void } | { code: number; reason: string };
 
-export const SESSION_CHANNEL_MAX_FRAME_BYTES = 8 * 1024 * 1024;
+export const SESSION_CHANNEL_MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const SESSION_CHANNEL_MAX_SUBSCRIPTIONS = 128;
 export const SESSION_CHANNEL_MAX_PENDING_FRAMES = 64;
 export const SESSION_CHANNEL_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;

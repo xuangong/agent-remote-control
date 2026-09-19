@@ -18,21 +18,21 @@ describe('AgentRemoteRelay manager ownership', () => {
     const relay = createAgentRemoteRelay({ providers: [provider], epoch: () => `epoch-${calls.length}` });
 
     const created = await relay.createAgent({
-      protocolVersion: '1.4.0', type: 'create_agent',
+      protocolVersion: '1.5.0', type: 'create_agent',
       payload: {
         requestId: 'create-1', operationId: operationId(), agentId: 'agent-created', providerId: 'codex',
         config: { sessionId: 'session-1', cwd: '/workspace' },
       },
     });
     expect(created).toMatchObject({
-      protocolVersion: '1.4.0', type: 'agent_session',
+      protocolVersion: '1.5.0', type: 'agent_session',
       payload: { requestId: 'create-1', agentId: 'agent-created', providerId: 'codex', sessionId: 'session-1' },
     });
     expect(relay.requireAgent('agent-created').snapshot().payload.id).toBe('agent-created');
     await relay.close();
     const restoredRelay = createAgentRemoteRelay({ providers: [provider] });
     const resumed = await restoredRelay.resumeAgent({
-      protocolVersion: '1.4.0', type: 'resume_agent',
+      protocolVersion: '1.5.0', type: 'resume_agent',
       payload: {
         requestId: 'resume-1', agentId: 'agent-resumed',
         persistence: { providerId: 'codex', sessionId: 'session-1', opaque: 'resume-1' },
@@ -207,7 +207,7 @@ describe('AgentRemoteRelay manager ownership', () => {
     };
     const relay = createAgentRemoteRelay({ providers: [provider] });
     const request = {
-      protocolVersion: '1.4.0' as const, type: 'create_agent' as const,
+      protocolVersion: '1.5.0' as const, type: 'create_agent' as const,
       payload: {
         requestId: 'create-1', operationId: operationId(), agentId: 'agent-1', providerId: 'codex', config: { sessionId: 'session-1' },
       },
@@ -230,7 +230,7 @@ describe('AgentRemoteRelay manager ownership', () => {
     const relay = createAgentRemoteRelay({ providers: [provider], resourceStore, epoch: () => 'epoch-1' });
 
     await relay.createAgent({
-      protocolVersion: '1.4.0', type: 'create_agent',
+      protocolVersion: '1.5.0', type: 'create_agent',
       payload: {
         requestId: 'create-resource', operationId: operationId(), agentId: 'agent-resource', providerId: 'codex',
         config: { sessionId: 'session-resource' },
@@ -262,14 +262,14 @@ describe('AgentRemoteRelay manager ownership', () => {
       try {
         const request = operation === 'create'
           ? relay.createAgent({
-              protocolVersion: '1.4.0', type: 'create_agent',
+              protocolVersion: '1.5.0', type: 'create_agent',
               payload: {
                 requestId: 'create-failed', operationId: operationId(), agentId, providerId: 'codex',
                 config: { sessionId: 'session-failed' },
               },
             })
           : relay.resumeAgent({
-              protocolVersion: '1.4.0', type: 'resume_agent',
+              protocolVersion: '1.5.0', type: 'resume_agent',
               payload: {
                 requestId: 'resume-failed', agentId,
                 persistence: { providerId: 'codex', sessionId: 'session-failed', opaque: 'resume-failed' },
@@ -287,14 +287,14 @@ describe('AgentRemoteRelay manager ownership', () => {
 
 function createRequest(agentId: string, sessionId: string) {
   return {
-    protocolVersion: '1.4.0' as const, type: 'create_agent' as const,
+    protocolVersion: '1.5.0' as const, type: 'create_agent' as const,
     payload: { requestId: `create-${agentId}`, operationId: operationId(), agentId, providerId: 'codex', config: { sessionId } },
   };
 }
 
 function resumeRequest(agentId: string, persistence: AgentPersistenceHandle) {
   return {
-    protocolVersion: '1.4.0' as const, type: 'resume_agent' as const,
+    protocolVersion: '1.5.0' as const, type: 'resume_agent' as const,
     payload: { requestId: `resume-${agentId}`, agentId, persistence },
   };
 }

@@ -1,3 +1,4 @@
+import type { InputImageStore } from './resources/input-image-store.js';
 import { randomUUID } from 'node:crypto';
 
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentProviderDescriptor } from '@agent-remote-controller/agent-provider-sdk';
@@ -25,6 +26,7 @@ export interface AgentRemoteRelayOptions {
   providers: readonly AgentProviderAdapter[];
   epoch?: () => string;
   resourceStore?: ResourceStore;
+  inputImageStore?: InputImageStore;
 }
 
 export class AgentAlreadyExistsError extends Error {
@@ -59,6 +61,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
     providers: readonly AgentProviderAdapter[],
     private readonly createEpoch: () => string,
     private readonly resourceStore: ResourceStore,
+    private readonly inputImageStore?: InputImageStore,
   ) {
     this.providers = new ProviderRegistry(providers);
   }
@@ -78,6 +81,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         config: request.payload.config,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
+        ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
       });
       await manager.ready;
       this.ensureOpen();
@@ -133,6 +137,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         handle: request.payload.persistence,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
+        ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
       });
       await manager.ready;
       this.ensureOpen();
@@ -184,6 +189,7 @@ export function createAgentRemoteRelay(options: AgentRemoteRelayOptions): AgentR
     options.providers,
     options.epoch ?? randomUUID,
     options.resourceStore ?? new InMemoryResourceStore(),
+    options.inputImageStore,
   );
 }
 

@@ -52,7 +52,7 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 
 ## Invariants
 
-- Protocol negotiation requires exactly version `1.4.0`; planning controls and completed interaction history belong to this public contract rather than an implicit fallback (`packages/agent-remote-protocol/src/version.ts:3-6`, `packages/agent-remote-protocol/src/messages.ts:74-82`, `packages/agent-remote-protocol/src/timeline.ts:54`).
+- Protocol negotiation requires exactly version `1.5.0`; planning controls and completed interaction history belong to this public contract rather than an implicit fallback (`packages/agent-remote-protocol/src/version.ts:3-6`, `packages/agent-remote-protocol/src/messages.ts:74-82`, `packages/agent-remote-protocol/src/timeline.ts:54`).
 - Planning is an optional capability with an explicit creation preference and authoritative runtime state; clients cannot infer planning support or activity from permission settings or a command acknowledgement (`packages/agent-remote-protocol/src/snapshot.ts:19-55`, `packages/agent-remote-protocol/src/messages.ts:71-87`, `packages/agent-remote-protocol/src/messages.ts:124-135`).
 - `AgentSnapshot` contains current Agent state and pending interactions, not Timeline entries (`packages/agent-remote-protocol/src/snapshot.ts:47-72`).
 - Timeline recovery uses `timeline_page` with an epoch and cursors; a stale or forward cursor is represented explicitly rather than inferred from Snapshot (`packages/agent-remote-protocol/src/history.ts:13-48`, `packages/agent-remote-relay/src/timeline-projector.ts:50-88`).
@@ -62,7 +62,7 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 - Public resource bindings expose a visible locator, resource ID, and lifecycle state; Provider read identities are absent from the schema (`packages/agent-remote-protocol/src/resources.ts:22-30`).
 - Available resource metadata and byte responses can carry `imageDimensions` with positive integer `width` and `height`. Local resource resolution returns optional `state` metadata without content bytes, allowing an authenticated client to reserve image space before requesting the payload (`packages/agent-remote-protocol/src/resources.ts`).
 - Uplink envelopes reject undeclared fields, unsupported transport versions, invalid response statuses, and invalid stream-close values without parsing their nested public JSON. Remote Host catalog reads, including a current native-session summary, carry neither a binding target nor a request body; content reads and mutations retain their binding target (`packages/agent-remote-protocol/src/uplink.ts:42-69`, `packages/agent-remote-protocol/src/remote-host-uplink.ts:59-73`).
-- Remote Host uplink version 2 accepts either the legacy single DSH registration or a nonempty unique Provider descriptor list. The broker catalog reports every descriptor under its Host and retains `providerId` only for single-Provider compatibility. Create and attach controls carry the selected `providerId`; native child attachment uses its distinct route. Public session protocol stays at `1.4.0` (`packages/agent-remote-protocol/src/remote-host-uplink.ts`, `packages/agent-remote-lab/src/server/remote-host-broker.ts`).
+- Remote Host uplink version 2 accepts either the legacy single DSH registration or a nonempty unique Provider descriptor list. The broker catalog reports every descriptor under its Host and retains `providerId` only for single-Provider compatibility. Create and attach controls carry the selected `providerId`; native child attachment uses its distinct route. Public session protocol stays at `1.5.0` (`packages/agent-remote-protocol/src/remote-host-uplink.ts`, `packages/agent-remote-lab/src/server/remote-host-broker.ts`).
 - Every uplink version 2 `registered` message includes `heartbeat: { intervalMs, timeoutMs }`. Both values are positive integers bounded at 600,000 milliseconds, with `timeoutMs < intervalMs`. Relay `heartbeat` and Controller `heartbeat_ack` frames carry the same nonempty nonce of at most 128 characters. These frames remain outside the public session protocol (`packages/agent-remote-protocol/src/remote-host-uplink.ts`).
 
 ## Non-Goals
@@ -101,11 +101,11 @@ Sensitive question answers and form fields travel to the Provider only in the re
 
 ## Session settings
 
-The unshipped protocol `1.4.0` includes optional `sessionSettings` capability, typed selection descriptors in `runtimeInfo.settings`, and `set_session_setting { requestId, operationId, agentId, settingId, value }`. Choice IDs are opaque Provider values, not native RPC method names. The existing `command_acknowledged`, runtime stream and Agent Snapshot carry completion and confirmed state. The independent uplink envelope versions stay unchanged. All public protocol participants must upgrade together because negotiation and object schemas are strict (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-protocol/src/messages.ts`).
+The unshipped protocol `1.5.0` includes optional `sessionSettings` capability, typed selection descriptors in `runtimeInfo.settings`, and `set_session_setting { requestId, operationId, agentId, settingId, value }`. Choice IDs are opaque Provider values, not native RPC method names. The existing `command_acknowledged`, runtime stream and Agent Snapshot carry completion and confirmed state. The independent uplink envelope versions stay unchanged. All public protocol participants must upgrade together because negotiation and object schemas are strict (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-protocol/src/messages.ts`).
 
 ## Provider commands
 
-The same unshipped `1.4.0` contract adds optional `commands` capability and Provider-owned descriptors containing opaque `id`, slash-free `name`, `description`, `kind` (`command`, `skill`, or `prompt`), and optional `inputHint`, `shortDescription`, and `documentation` resource binding. Names and IDs are unique within a directory. Native operation names and payloads remain private to adapters (`packages/agent-remote-protocol/src/commands.ts`, `packages/agent-provider-sdk/src/commands.ts`).
+The same unshipped `1.5.0` contract adds optional `commands` capability and Provider-owned descriptors containing opaque `id`, slash-free `name`, `description`, `kind` (`command`, `skill`, or `prompt`), and optional `inputHint`, `shortDescription`, and `documentation` resource binding. Names and IDs are unique within a directory. Native operation names and payloads remain private to adapters (`packages/agent-remote-protocol/src/commands.ts`, `packages/agent-provider-sdk/src/commands.ts`).
 
 | Request | Matching reply | Payload |
 | --- | --- | --- |
@@ -116,18 +116,18 @@ Each pair has one correlated reply and no additional `command_acknowledged`. Nat
 
 ## Message delivery
 
-The unshipped `1.4.0` send contract accepts optional `delivery: "immediate" | "next_turn"` on `send_message`. Omission means immediate input: the Provider starts idle work or steers active work using its native state. `next_turn` explicitly requests the native follow-up queue and requires optional `queueMessage` capability. Both use the existing `send_message` acknowledgement, which confirms native acceptance rather than message consumption or turn completion. Strict `steer` remains available to automation. No Remote-owned message queue or new message type is introduced (`packages/agent-provider-sdk/src/provider.ts`, `packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).
+The send contract accepts optional `delivery: "immediate" | "next_turn"` on `send_message`. Omission means immediate input: the Provider starts idle work or steers active work using its native state. `next_turn` explicitly requests the native follow-up queue and requires optional `queueMessage` capability. Both use the existing `send_message` acknowledgement, which confirms native acceptance rather than message consumption or turn completion. Strict `steer` remains available to automation. No Remote-owned message queue or new message type is introduced (`packages/agent-provider-sdk/src/provider.ts`, `packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).
 
 Command documentation reuses `ResourceBinding` and `resource_request` / `resource_response`; the command directory does not inline Markdown or native metadata. An unrequested documentation binding is pending. The Relay resolves Provider-owned locators to session-bound resource IDs and materializes documentation on demand. Skill tags and the open detail panel are local client state and introduce no wire operation.
 
 
 ## Active turn reconciliation
 
-The unshipped `1.4.0` `runtime_updated` event accepts optional `activeTurnId: string | null` as authoritative turn reconciliation. Omission leaves the previous active turn unchanged; `null` clears it; a different nonempty ID replaces it using the event timestamp as its first observed start. Repeating the same ID preserves its known start timestamp. This field belongs to the event rather than `runtimeInfo` and does not assert completion, failure, or cancellation. Snapshot `activeTurn` remains the resulting public state. Strict-schema participants must update together (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/envelope.ts`, `packages/agent-remote-relay/src/agent-manager.ts`).
+The unshipped `1.5.0` `runtime_updated` event accepts optional `activeTurnId: string | null` as authoritative turn reconciliation. Omission leaves the previous active turn unchanged; `null` clears it; a different nonempty ID replaces it using the event timestamp as its first observed start. Repeating the same ID preserves its known start timestamp. This field belongs to the event rather than `runtimeInfo` and does not assert completion, failure, or cancellation. Snapshot `activeTurn` remains the resulting public state. Strict-schema participants must update together (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/envelope.ts`, `packages/agent-remote-relay/src/agent-manager.ts`).
 
 ## Native child relationships
 
-The unshipped `1.4.0` contract includes optional `runtimeInfo.childSessions`, a direct-child relationship summary carried by the existing runtime event and Snapshot. Each entry identifies a native child with title, optional role/task description, stable creation or first-discovery time, native status, and observation mode. Optional `parentTurnId` and `parentCallId` preserve creation provenance; subsequent send/wait activity does not change it. Missing provenance is not inferred from adjacent assistant text. The SDK and public strict schema share this shape (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).
+The unshipped `1.5.0` contract includes optional `runtimeInfo.childSessions`, a direct-child relationship summary carried by the existing runtime event and Snapshot. Each entry identifies a native child with title, optional role/task description, stable creation or first-discovery time, native status, and observation mode. Optional `parentTurnId` and `parentCallId` preserve creation provenance; subsequent send/wait activity does not change it. Missing provenance is not inferred from adjacent assistant text. The SDK and public strict schema share this shape (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).
 
 Child metadata does not contain nested transcripts, native control parameters, or a second interaction protocol. An opened child uses normal Agent identity, Snapshot, Timeline, resources, interactions, and commands. Runtime updates refresh the Relay's capability snapshot from the attached native session, so changed native input permissions propagate through `agent_update` and reconnect snapshots. Parent relationship status does not replace the child's authoritative turn state.
 
@@ -136,3 +136,39 @@ Child metadata does not contain nested transcripts, native control parameters, o
 The current contract accepts optional `observation: "activity"` on the first `negotiate` message. This fixes the connection to read-only activity observation. The Host emits `negotiated` followed by `agent_activity { agentId, status }`, then only distinct status changes. Waiting input takes precedence over an active turn; terminal failed/closed states take precedence over both. Each reconnect starts with a fresh status. No snapshot, timeline, interaction payload, resource content, or tool output is delivered on this connection. Content requests and commands are rejected with `activity_only`.
 
 Normal negotiation remains unchanged. Opening a tracked session establishes the usual independent content subscription and history recovery. Tracking does not upgrade or reuse its status socket for content. Older strict-schema Hosts reject the optional negotiation field; clients surface an update-required error and never fall back to a full-content subscription. Relay uplink versions remain unchanged because they carry these public messages opaquely.
+
+## Inline image input (1.5.0)
+
+`capabilities.imageInput` advertises PNG/JPEG/WebP input limits: at most eight image
+parts, 10 MiB per image, and 20 MiB of unique image bytes per message. Missing
+capability means unsupported. The Host also requires configured durable input storage
+before publishing this capability. Codex and Claude implement the optional SDK
+`sendMessageContent`; other adapters keep their existing text contract.
+
+`image_upload_begin`, `image_upload_chunk`, and `image_upload_finish` run only on an
+authorized full-session stream. Each response is `image_upload_result`, correlated by
+request ID and upload ID, with an accepted offset and, on completion, an immutable
+attachment receipt. Chunks contain at most 32 KiB decoded bytes. Begin and repeated
+identical chunks are idempotent, so a disconnected client resumes from the persisted
+offset. MIME, structure, dimensions, byte length, and SHA-256 are verified by the Host.
+
+`send_message` accepts exactly one of `text` or ordered `content: MessagePart[]`.
+Image parts contain an opaque `attachmentId` and a display `label`; paths and arbitrary
+URLs are not accepted. The Host resolves and pins owned images before invoking the
+provider with managed local files. Complete content participates in operation
+identity. Explicit pre-dispatch validation failures are rejected; an uncertain native
+outcome retains the existing manual retry policy.
+
+Uploads and receipts are scoped to the authenticated origin/installation and native
+session. Unsubmitted images expire after 24 hours of inactivity; dispatched or
+uncertain images remain pinned. Default quota is 1 GiB and can be changed with Host
+`inputImages.quotaBytes`. Quota exhaustion fails explicitly instead of deleting
+retained history. The input directory defaults under the Host state directory; the
+standalone Lab uses `~/.agent-remote-control/lab-input-images` unless `imageDirectory`
+is provided. Files and manifests survive Host restart. `input-image:<attachmentId>`
+uses existing authorized resource resolution for outgoing previews.
+
+Native user timeline items retain their display `text` and may include ordered
+`UserMessagePart[]` with resource locators and SHA-256 identities. Public Remote
+version 1.5.0 requires matching browser and Host releases; the Remote Host uplink
+envelope remains version 2. This feature branch has not been deployed.

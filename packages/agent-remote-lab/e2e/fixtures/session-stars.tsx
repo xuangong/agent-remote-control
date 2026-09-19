@@ -21,12 +21,12 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
   createAgent: async () => { throw new Error('Creation is not used'); },
   resumeAgent: async () => { throw new Error('Resume is not used'); },
-  fetchSnapshot: async () => ({ protocolVersion: '1.4.0', type: 'agent_snapshot', payload: replicaState.agent! }),
+  fetchSnapshot: async () => ({ protocolVersion: '1.5.0', type: 'agent_snapshot', payload: replicaState.agent! }),
   fetchTimeline: async agentId => {
     if (!allowContent) throw new Error('Tracking must not request content');
     if (catchUpFixture) await new Promise<void>(resolve => window.addEventListener('fixture-history', () => resolve(), { once: true }));
     performance.mark('tracked-content-loaded');
-    return { protocolVersion: '1.4.0', type: 'timeline_page', payload: {
+    return { protocolVersion: '1.5.0', type: 'timeline_page', payload: {
       requestId: 'history', agentId, direction: 'tail', epoch: 'fixture', reset: false, staleCursor: false, gap: false,
       window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'fixture', seq: 1 }, endCursor: { epoch: 'fixture', seq: 1 },
       hasOlder: false, hasNewer: false, error: null,
@@ -41,19 +41,19 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
       if (allowContent && message.type === 'negotiate' && message.observation !== 'activity') {
         observers.delete(listener);
         contentObservers.set(listener, agentId);
-        listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
-        listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_snapshot', payload: {
+        listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
+        listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_snapshot', payload: {
           ...replicaState.agent!, id: agentId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId },
         } });
         return;
       }
       if (allowContent && message.type === 'timeline_subscription') {
-        listener.onMessage({ protocolVersion: '1.4.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
+        listener.onMessage({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
         return;
       }
       if (message.type !== 'negotiate' || message.observation !== 'activity') throw new Error('Tracking requested a content subscription');
-      listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
-      listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId, status: 'idle', ...(catchUpFixture ? { cursor: { epoch: 'fixture', seq: 3 } } : {}) } });
+      listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
+      listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId, status: 'idle', ...(catchUpFixture ? { cursor: { epoch: 'fixture', seq: 3 } } : {}) } });
     } };
   },
 };
@@ -61,12 +61,12 @@ window.addEventListener('fixture-activity', event => {
   const detail = (event as CustomEvent<AgentStatus | { agentId: string; status: AgentStatus }>).detail;
   for (const [listener, agentId] of observers) {
     if (typeof detail !== 'string' && detail.agentId !== agentId) continue;
-    listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId, status: typeof detail === 'string' ? detail : detail.status } });
+    listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId, status: typeof detail === 'string' ? detail : detail.status } });
   }
 });
 window.addEventListener('fixture-content', event => {
   const seq = (event as CustomEvent<number>).detail;
-  for (const [listener, agentId] of contentObservers) listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_stream', payload: {
+  for (const [listener, agentId] of contentObservers) listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_stream', payload: {
     agentId, epoch: 'fixture', seq, timestamp: '2026-09-20T00:00:00Z',
     event: { type: 'timeline', providerId: 'recorded', resources: [], item: { type: 'assistant_message', text: `Caught-up content ${seq}` } },
   } });

@@ -172,6 +172,8 @@ describe('Codex native children', () => {
       await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.length).toBe(1);
       const child = await h.provider.openChildSession('parent', 'child');
       expect(child.capabilities).toMatchObject({ sendMessage: false, steer: false, cancel: false, sessionSettings: false, commands: false, planning: false });
+      expect(child.capabilities.imageInput).toBeUndefined();
+      await expect(child.sendMessageContent!([{ type: 'image', path: '/managed/image.png', mediaType: 'image/png', sha256: 'a'.repeat(64), label: 'image #1' }])).rejects.toThrow(/direct input/);
       await expect(child.sendMessage('hello')).rejects.toThrow(/direct input/);
       await expect(child.cancel()).rejects.toThrow(/direct input/);
       h.addChild('grandchild', 'child'); h.spawn('grandchild', 'child');

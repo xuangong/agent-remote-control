@@ -378,13 +378,13 @@ describe('Agent Host runtime', () => {
       })).status).toBe(200);
       broker.openStream('lost', 'agent');
       await expect.poll(() => broker.streamOpened('lost')).toBe(true);
-      broker.sendStream('lost', { protocolVersion: '1.4.0', type: 'negotiate' });
+      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('lost', 'agent_snapshot')).toBeDefined();
 
-      broker.sendStream('lost', { protocolVersion: '1.4.0', type: 'send_message', payload: {
+      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'send_message', payload: {
         requestId: 'send-lost', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('lost', { protocolVersion: '1.4.0', type: 'interaction_response', payload: {
+      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'interaction_response', payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-lost',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -392,7 +392,7 @@ describe('Agent Host runtime', () => {
       await expect.poll(() => session?.interactionResponses.length).toBe(1);
       await expect.poll(() => broker.streamMessage('lost', 'interaction_resolved', approval.requestId)).toBeDefined();
 
-      const fullCacheRead = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.4.0', 'agent');
+      const fullCacheRead = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.5.0', 'agent');
       expect(fullCacheRead.status).toBe(200);
       expect(JSON.parse(fullCacheRead.body).payload.pendingInteractions).toEqual([]);
       broker.issueCredential('rotated-key');
@@ -401,12 +401,12 @@ describe('Agent Host runtime', () => {
       await host.replaceUplink({ url: broker.url, remoteKey: 'rotated-key', async onCredential(credential) { savedCredentials.push(credential); } });
       broker.openStream('retry', 'agent');
       await expect.poll(() => broker.streamOpened('retry')).toBe(true);
-      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'negotiate' });
+      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('retry', 'agent_snapshot')).toBeDefined();
-      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'send_message', payload: {
+      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', payload: {
         requestId: 'send-retry', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'interaction_response', payload: {
+      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'interaction_response', payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-retry',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -415,7 +415,7 @@ describe('Agent Host runtime', () => {
       expect(session?.sentMessages).toEqual(['Run once.']);
       expect(session?.interactionResponses).toHaveLength(1);
 
-      broker.sendStream('retry', { protocolVersion: '1.4.0', type: 'send_message', payload: {
+      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', payload: {
         requestId: 'capacity', operationId: operationId('capacity-send'), agentId: 'agent', text: 'Do not dispatch.',
       } });
       await expect.poll(() => broker.streamMessage('retry', 'protocol_error', 'capacity')).toMatchObject({

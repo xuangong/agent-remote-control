@@ -135,6 +135,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     const host = createRemoteHostPluginHost(options.relay, {
       resolveSession: options.resolveSession,
+      imageScope: () => { if (!operationScope) throw new Error('Image scope is unavailable before Host registration.'); return operationScope; },
       control: request => options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
       ...(options.operationExecutor ? { executeOperation: (agent, operation, work) => {
         if (!operationScope) throw new Error('Remote Host operation scope is unavailable before registration.');

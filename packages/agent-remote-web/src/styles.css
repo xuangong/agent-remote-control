@@ -684,3 +684,24 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-delivery-actions button:disabled { opacity: .45; cursor: default; }
 
 .agent-composer button[data-testid="prompt-submit"] { touch-action: none; user-select: none; -webkit-touch-callout: none; }
+
+.agent-composer-editor-container { min-width: 0; position: relative; }
+.agent-composer-editor { min-height: 24px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; padding: 8px 0; font: inherit; line-height: 1.6; }
+.agent-composer-editor:empty::before { content: attr(data-placeholder); color: var(--agent-text-muted, #888); pointer-events: none; }
+.agent-composer-editor[aria-disabled="true"] { opacity: .65; }
+.agent-image-tag { display: inline-block; box-sizing: border-box; width: 7.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: text-bottom; border: 1px solid currentColor; border-radius: 5px; padding: 0 5px; line-height: 1.5; font: inherit; font-size: .9em; color: inherit; background: transparent; cursor: pointer; }
+.agent-image-tag[data-state="pending"], .agent-image-tag[data-state="uploading"] { border-style: dashed; opacity: .75; }
+.agent-image-tag[data-state="failed"], .agent-image-tag[data-state="unavailable"] { color: #b34238; }
+.agent-image-tag.ProseMirror-selectednode { outline: 2px solid Highlight; outline-offset: 2px; }
+.agent-image-actions { position: absolute; bottom: 100%; right: 0; z-index: 4; display: flex; gap: 6px; align-items: center; max-width: 100%; padding: 6px; background: var(--agent-surface, Canvas); color: var(--agent-text, CanvasText); border: 1px solid var(--agent-border, #bbb); border-radius: 8px; box-shadow: 0 4px 20px #0002; }
+.agent-image-actions [role="status"] { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.agent-image-preview-backdrop { position: fixed; inset: 0; background: #000a; z-index: 10000; display: grid; place-items: center; padding: 24px; }
+.agent-image-preview { max-width: 96vw; max-height: 94dvh; display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
+.agent-image-preview img { display: block; max-width: 90vw; max-height: 82dvh; object-fit: contain; }
+.agent-message-ordered-content { overflow-wrap: anywhere; }
+.agent-message-part-space { white-space: pre-wrap; }
+.agent-message-text-part { display: contents; }
+.agent-message-text-part > p { display: inline; white-space: pre-wrap; }
+.agent-message-text-part > p + p::before { content: "\A\A"; white-space: pre; }
+.agent-image-upload-status { height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-image-tag[data-state="uploading"] { background: linear-gradient(to right, color-mix(in srgb, currentColor 12%, transparent) var(--image-upload-progress, 0%), transparent 0); }

@@ -429,6 +429,24 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.11
         version: 6.43.11
+      prosemirror-commands:
+        specifier: ^1.7.2
+        version: 1.7.2
+      prosemirror-history:
+        specifier: ^1.5.0
+        version: 1.5.0
+      prosemirror-keymap:
+        specifier: ^1.2.3
+        version: 1.2.3
+      prosemirror-model:
+        specifier: ^1.25.11
+        version: 1.25.11
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      prosemirror-view:
+        specifier: ^1.42.3
+        version: 1.42.3
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@18.3.31)(react@18.3.1)
@@ -448,6 +466,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
@@ -3721,6 +3742,37 @@ packages:
   w3c-keyname@2.2.8:
     resolution: {integrity: sha1-exfIxog9TouGrIq6edOeiA+IacU=}
 
+  fake-indexeddb@6.2.5:
+    resolution: {integrity: sha1-dChbaCFGfWwQKvCS8KRRetVSFhM=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/fake-indexeddb/-/fake-indexeddb-6.2.5.tgz}
+    engines: {node: '>=18'}
+
+  orderedmap@2.1.1:
+    resolution: {integrity: sha1-YUgSacRAMcRJkVSXv1pK0nPFEtI=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/orderedmap/-/orderedmap-2.1.1.tgz}
+
+  prosemirror-commands@1.7.2:
+    resolution: {integrity: sha1-y+87DXItxR5xzJNsh8TKJ9gd86Y=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/prosemirror-commands/-/prosemirror-commands-1.7.2.tgz}
+
+  prosemirror-history@1.5.0:
+    resolution: {integrity: sha1-7iH8XehaFHPj43UgFf/W1kmgaFk=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/prosemirror-history/-/prosemirror-history-1.5.0.tgz}
+
+  prosemirror-keymap@1.2.3:
+    resolution: {integrity: sha1-wParlfdcC4LJfkTraq8py/wVBHI=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/prosemirror-keymap/-/prosemirror-keymap-1.2.3.tgz}
+
+  prosemirror-model@1.25.11:
+    resolution: {integrity: sha1-KsAdzlF2CUpSzBuInCDzhJVjq6k=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/prosemirror-model/-/prosemirror-model-1.25.11.tgz}
+
+  prosemirror-state@1.4.4:
+    resolution: {integrity: sha1-crXpJvnpLc7hK2KgX8yKLeO/Wzk=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/prosemirror-state/-/prosemirror-state-1.4.4.tgz}
+
+  prosemirror-transform@1.12.1:
+    resolution: {integrity: sha1-M11tmx5B+4LKQIFSEeglVQXn7aI=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/prosemirror-transform/-/prosemirror-transform-1.12.1.tgz}
+
+  prosemirror-view@1.42.3:
+    resolution: {integrity: sha1-WxyPGwhPnvK9f2cFfReEOD7mrFU=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/prosemirror-view/-/prosemirror-view-1.42.3.tgz}
+
+  rope-sequence@1.3.4:
+    resolution: {integrity: sha1-34VxGq7NMvHnVvduQ6QVFxI11CU=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/rope-sequence/-/rope-sequence-1.3.4.tgz}
+
 snapshots:
 
   image-size@2.0.2: {}
@@ -6697,3 +6749,47 @@ snapshots:
   style-mod@4.1.3: {}
 
   w3c-keyname@2.2.8: {}
+
+  fake-indexeddb@6.2.5: {}
+
+  orderedmap@2.1.1: {}
+
+  prosemirror-commands@1.7.2:
+    dependencies:
+      prosemirror-model: 1.25.11
+      prosemirror-state: 1.4.4
+      prosemirror-transform: 1.12.1
+
+  prosemirror-history@1.5.0:
+    dependencies:
+      prosemirror-state: 1.4.4
+      prosemirror-transform: 1.12.1
+      prosemirror-view: 1.42.3
+      rope-sequence: 1.3.4
+
+  prosemirror-keymap@1.2.3:
+    dependencies:
+      prosemirror-state: 1.4.4
+      w3c-keyname: 2.2.8
+
+  prosemirror-model@1.25.11:
+    dependencies:
+      orderedmap: 2.1.1
+
+  prosemirror-state@1.4.4:
+    dependencies:
+      prosemirror-model: 1.25.11
+      prosemirror-transform: 1.12.1
+      prosemirror-view: 1.42.3
+
+  prosemirror-transform@1.12.1:
+    dependencies:
+      prosemirror-model: 1.25.11
+
+  prosemirror-view@1.42.3:
+    dependencies:
+      prosemirror-model: 1.25.11
+      prosemirror-state: 1.4.4
+      prosemirror-transform: 1.12.1
+
+  rope-sequence@1.3.4: {}

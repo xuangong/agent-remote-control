@@ -14,7 +14,7 @@ const snapshots = {
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
 afterEach(() => { vi.restoreAllMocks(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean } = {}) {
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean } = {}) {
   let connections = 0;
   let releaseChild: (() => void) | undefined;
   const childReady = options.deferChild ? new Promise<void>((resolve) => { releaseChild = resolve; }) : Promise.resolve();
@@ -22,6 +22,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   const sessionSnapshots = { ...snapshots, parent: options.navigation ? { ...parent, runtimeInfo: { ...parent.runtimeInfo, childSessions: [child, sibling] } } : parent,
     sibling: { ...snapshots.child, id: 'sibling', runtimeInfo: { ...snapshots.child.runtimeInfo, sessionId: 'native-sibling' } }, child: options.restricted ? { ...snapshots.child, capabilities: { ...snapshots.child.capabilities, sendMessage: false, cancel: false }, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'child-plan', plan: 'Review the child plan', allowedActions: ['approve' as const] }] } : snapshots.child };
   if (options.nested) sessionSnapshots.child = { ...sessionSnapshots.child, runtimeInfo: Object.assign({}, sessionSnapshots.child.runtimeInfo, { childSessions: [{ ...child, nativeSessionId: 'native-grandchild', title: '/root/review/evidence', status: 'running' as const }] }) };
+  if (options.images) sessionSnapshots.parent = { ...sessionSnapshots.parent, capabilities: { ...sessionSnapshots.parent.capabilities, imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } };
   Object.assign(sessionSnapshots, { grandchild: { ...snapshots.child, id: 'grandchild', runtimeInfo: { providerId: 'codex', sessionId: 'native-grandchild', status: 'idle' } } });
   const attachments: unknown[] = [];
   const directory = new SessionDirectoryClient('http://localhost/', async (input, init) => {
@@ -65,7 +66,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
       <App baseUrl="http://localhost/" directory={directory} transport={activeTransport}
         hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Not used'); } }}
         initialState={options.live ? undefined : { ...replicaState, agent: sessionSnapshots.parent, timeline: { ...replicaState.timeline, hasOlder: false, entries: options.navigation ? [activityEntry('native-child')] : [] } }} initialSessionStatus="ready"
-        actions={{ sendMessage, respondToInteraction, listCommands: async () => [{ id: 'inspect', name: 'inspect', kind: 'skill', description: 'Inspect code' }] }} />
+        actions={{ sendMessage, respondToInteraction, uploadImage: async () => ({ attachmentId: 'parent-image', sha256: 'a'.repeat(64), mediaType: 'image/png', byteLength: 1, imageDimensions: { width: 1, height: 1 } }), listCommands: async () => [{ id: 'inspect', name: 'inspect', kind: 'skill', description: 'Inspect code' }] }} />
     </>;
   }
   const container = await render(<Harness />);
@@ -123,6 +124,22 @@ it('keeps a selected skill with its parent draft and restores it after returning
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
   expect(f.container.querySelector('[aria-label="Selected skill"]')?.textContent).toContain('inspect');
   expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Review this implementation');
+});
+
+it('keeps the initial native parent image draft when returning after directory registration', async () => {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+  const f = await setup(false, { images: true });
+  const paste = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, 'clipboardData', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })], getData: () => '' } });
+  await act(async () => f.container.querySelector('[data-testid="prompt-input"]')!.dispatchEvent(paste));
+  const originalId = f.container.querySelector('[data-image-id]')?.getAttribute('data-image-id');
+  expect(originalId).toBeTruthy();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
+  expect(f.container.querySelector('[data-image-id]')).toBeNull();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
+  expect(f.container.querySelector('[data-image-id]')?.getAttribute('data-image-id')).toBe(originalId);
+  expect(f.container.querySelector('[data-image-id]')?.textContent).toBe('[image #1]');
 });
 
 it('does not replace a newly connected parent when an older child attach finishes', async () => {

@@ -1,6 +1,6 @@
 # Claude support audit against the Provider baseline
 
-Audit date: **2026-09-11**. Initial runtime implementation: **`614d9fe`**, updated by native parity work following **`821d1c6`**, `feat/claude-provider`; public protocol **1.4.0**, SDK **0.3.247**, native Claude Code **2.1.247**. This is a source and test audit of the implemented adapter, not a proposal to implement the entire SDK and not a main/release claim.
+Audit date: **2026-09-11**. Initial runtime implementation: **`614d9fe`**, updated by native parity work following **`821d1c6`**, `feat/claude-provider`; public protocol **1.5.0**, SDK **0.3.247**, native Claude Code **2.1.247**. This is a source and test audit of the implemented adapter, not a proposal to implement the entire SDK and not a main/release claim.
 
 Target and degree definitions: [Provider support baseline](provider-support.md). New Provider acceptance procedure: [onboarding checklist](provider-onboarding.md).
 

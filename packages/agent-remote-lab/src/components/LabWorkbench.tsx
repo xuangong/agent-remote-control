@@ -1,5 +1,5 @@
 import { useFeedbackToast } from './Toast.js';
-import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
@@ -22,6 +22,8 @@ export interface LabWorkbenchActions {
   retryMessage?(id: string): Promise<void>;
   deleteMessage?(id: string): void;
   sendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
+  sendMessageContent?(content: readonly MessagePart[], options?: AgentMessageOptions & { imageDigests?: Readonly<Record<string, string>> }): Promise<void>;
+  uploadImage?(file: Blob, uploadId: string, options?: { signal?: AbortSignal; onProgress?(loaded: number, total: number): void }): Promise<NonNullable<ImageUploadReceipt['attachment']>>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;
   respondToInteraction?(requestId: string, response: AgentInteractionResponse): Promise<void>;
@@ -33,7 +35,7 @@ export interface LabWorkbenchActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
-export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const actions = useActionFeedback(sessionStatus === 'ready' ? suppliedActions : { deleteMessage: suppliedActions.deleteMessage }, state?.agent?.id);
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
@@ -155,7 +157,11 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
           onExecuteConsoleCommand={sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
           sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
           state={state}
-          sessionKey={state?.agent?.id}
+          sessionKey={draftSessionKey ?? state?.agent?.id}
+          draftScope={recoveryPositions?.scope}
+          visible={visible}
+          onSendMessageContent={actions.sendMessageContent}
+          onUploadImage={visible ? actions.uploadImage : undefined}
           draft={messageDraft}
           onDraftChange={onMessageDraftChange}
           disabled={sessionStatus !== 'ready'}
@@ -195,7 +201,7 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): La
     } : undefined;
   }
   return useMemo(() => ({ ...actions,
-    sendMessage: report('Send message', actions.sendMessage), retryMessage: report('Retry message', actions.retryMessage),
+    sendMessage: report('Send message', actions.sendMessage), sendMessageContent: report('Send message', actions.sendMessageContent), retryMessage: report('Retry message', actions.retryMessage),
     steer: report('Steer session', actions.steer), cancel: report('Stop work', actions.cancel),
     respondToInteraction: report('Submit response', actions.respondToInteraction),
     setPlanning: report('Change session mode', actions.setPlanning), setSessionSetting: report('Change session setting', actions.setSessionSetting),

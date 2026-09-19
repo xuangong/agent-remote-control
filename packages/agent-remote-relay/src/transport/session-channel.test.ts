@@ -29,7 +29,7 @@ function inbox(socket: WebSocket) {
 async function fixture() {
   const listeners = new Map<string, Set<(event: AgentManagerEvent) => void>>();
   const snapshot = (id: string, status: 'running' | 'idle' = 'idle') => ({
-    protocolVersion: '1.4.0' as const, type: 'agent_snapshot' as const,
+    protocolVersion: '1.5.0' as const, type: 'agent_snapshot' as const,
     payload: { id, providerId: 'fake', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status,
       activeTurn: null, pendingInteractions: [], runtimeInfo: { providerId: 'fake', sessionId: id, status },
       capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
@@ -52,7 +52,7 @@ async function fixture() {
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/v1/session-channel?observation=${mode}`);
     const next = inbox(socket);
     await once(socket, 'open'); await next(value => value.type === 'ready');
-    return { socket, next, send: (value: object) => socket.send(JSON.stringify({ protocolVersion: '1.4.0', ...value })) };
+    return { socket, next, send: (value: object) => socket.send(JSON.stringify({ protocolVersion: '1.5.0', ...value })) };
   };
   return { connect, authorized, listeners, update(id: string) {
     for (const listener of listeners.get(id) ?? []) listener({ type: 'agent_state', agentId: id, snapshot: snapshot(id, 'running'), cursor: { epoch: id + '-epoch', seq: 8 } });
@@ -61,7 +61,7 @@ async function fixture() {
 
 it('keeps simultaneous full sessions isolated while reusing one real socket across subscription changes', async () => {
   const f = await fixture(); const c = await f.connect();
-  const subscribe = (subscriptionId: number, agentId: string) => c.send({ type: 'subscribe', subscriptionId, agentId, message: { protocolVersion: '1.4.0', type: 'negotiate' } });
+  const subscribe = (subscriptionId: number, agentId: string) => c.send({ type: 'subscribe', subscriptionId, agentId, message: { protocolVersion: '1.5.0', type: 'negotiate' } });
   subscribe(1, 'a'); subscribe(2, 'b');
   expect((await c.next(v => v.subscriptionId === 1 && v.message?.type === 'agent_snapshot')).message.payload.id).toBe('a');
   expect((await c.next(v => v.subscriptionId === 2 && v.message?.type === 'agent_snapshot')).message.payload.id).toBe('b');
@@ -82,9 +82,9 @@ it('keeps simultaneous full sessions isolated while reusing one real socket acro
 
 it('keeps activity subscriptions separate from content and rejects content on the activity channel', async () => {
   const f = await fixture(); const c = await f.connect('activity');
-  c.send({ type: 'subscribe', subscriptionId: 1, agentId: 'a', message: { protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' } });
+  c.send({ type: 'subscribe', subscriptionId: 1, agentId: 'a', message: { protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' } });
   expect((await c.next(v => v.message?.type === 'agent_activity')).message.payload).toEqual({ agentId: 'a', status: 'idle', cursor: { epoch: 'a-epoch', seq: 3 } });
-  c.send({ type: 'message', subscriptionId: 1, message: { protocolVersion: '1.4.0', type: 'timeline_subscription', payload: { requestId: 'forbidden', agentIds: ['a'] } } });
+  c.send({ type: 'message', subscriptionId: 1, message: { protocolVersion: '1.5.0', type: 'timeline_subscription', payload: { requestId: 'forbidden', agentIds: ['a'] } } });
   await c.next(v => v.type === 'closed' && v.subscriptionId === 1);
   expect(c.socket.readyState).toBe(WebSocket.OPEN);
   c.socket.close();
@@ -94,7 +94,7 @@ it('keeps activity subscriptions separate from content and rejects content on th
 it('delivers the activity content boundary over a real channel on status changes', async () => {
   const f = await fixture(); const c = await f.connect('activity');
   c.send({ type: 'subscribe', subscriptionId: 1, agentId: 'a', message: {
-    protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity',
+    protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity',
   } });
   expect((await c.next(v => v.message?.type === 'agent_activity')).message.payload.cursor).toEqual({ epoch: 'a-epoch', seq: 3 });
   f.update('a');

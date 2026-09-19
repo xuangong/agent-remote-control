@@ -1,3 +1,5 @@
+import { InputImageStore, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
+import type { MessagePart, ImageUploadReceipt } from '@agent-remote-controller/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@agent-remote-controller/agent-provider-sdk';
 import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
@@ -37,6 +39,7 @@ export interface AgentManagerAttachOptions {
   epoch: string;
   clock?: () => Date;
   resourceStore?: ResourceStore;
+  inputImageStore?: InputImageStore;
 }
 
 export interface AgentManagerCreateOptions {
@@ -46,6 +49,7 @@ export interface AgentManagerCreateOptions {
   epoch: string;
   clock?: () => Date;
   resourceStore?: ResourceStore;
+  inputImageStore?: InputImageStore;
 }
 
 export interface AgentManagerResumeOptions {
@@ -55,6 +59,7 @@ export interface AgentManagerResumeOptions {
   epoch: string;
   clock?: () => Date;
   resourceStore?: ResourceStore;
+  inputImageStore?: InputImageStore;
 }
 
 export type AgentManagerListener = (event: AgentManagerEvent) => void;
@@ -69,7 +74,7 @@ export class InteractionResponseError extends Error {
 }
 
 export class UnsupportedAgentCapabilityError extends Error {
-  constructor(readonly capability: 'send_message' | 'queue_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'list_commands' | 'execute_command') {
+  constructor(readonly capability: 'image_input' | 'send_message' | 'queue_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'list_commands' | 'execute_command') {
     super(`Provider does not support ${capability}.`);
     this.name = 'UnsupportedAgentCapabilityError';
   }
@@ -100,6 +105,7 @@ export class AgentManager {
   private closed = false;
   private commandTail: Promise<void> = Promise.resolve();
   private pendingCommandExecutions = 0;
+  private readonly imageResourceScopes = new Map<string, string>();
   private commandResources = new Map<string, { commandId: string; locator: string }>();
   private readonly localResourceReader: Promise<LocalFileResourceReader | undefined>;
 
@@ -112,6 +118,7 @@ export class AgentManager {
     runtimeInfo: Awaited<ReturnType<AgentSession['runtimeInfo']>>,
     private readonly clock: () => Date,
     private readonly resourceIngestor: ResourceIngestor,
+    private readonly inputImageStore?: InputImageStore,
   ) {
     this.timeline = new TimelineStore(epoch);
     this.localResourceReader = runtimeInfo.cwd
@@ -129,7 +136,7 @@ export class AgentManager {
         updatedAt: createdAt,
         status: runtimeInfo.status,
         activeTurn: null,
-        capabilities: structuredClone(session.capabilities),
+        capabilities: this.effectiveCapabilities(),
         pendingInteractions: [],
         runtimeInfo: structuredClone(runtimeInfo),
         ...(runtimeInfo.persistence === undefined ? {} : { persistence: structuredClone(runtimeInfo.persistence) }),
@@ -157,6 +164,7 @@ export class AgentManager {
       runtimeInfo,
       options.clock ?? (() => new Date()),
       new ResourceIngestor({ store: options.resourceStore ?? new InMemoryResourceStore() }),
+      options.inputImageStore,
     );
   }
 
@@ -187,6 +195,7 @@ export class AgentManager {
         epoch: options.epoch,
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.resourceStore === undefined ? {} : { resourceStore: options.resourceStore }),
+        ...(options.inputImageStore === undefined ? {} : { inputImageStore: options.inputImageStore }),
       });
       await manager.ready;
       return manager;
@@ -229,6 +238,49 @@ export class AgentManager {
       if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
       if (options === undefined) await this.session.sendMessage(text);
       else await this.session.sendMessage(text, options);
+    });
+  }
+
+  private effectiveCapabilities(): AgentSession['capabilities'] {
+    const capabilities = structuredClone(this.session.capabilities);
+    if (!this.inputImageStore || !this.session.sendMessageContent || !capabilities.sendMessage) delete capabilities.imageInput;
+    return capabilities;
+  }
+
+  private imageScope(scope = 'standalone'): string {
+    const nativeSessionId = this.state.payload.runtimeInfo.sessionId;
+    if (!nativeSessionId) throw new Error('Image uploads require a durable native session identity.');
+    return JSON.stringify([scope, this.provider.providerId, nativeSessionId]);
+  }
+
+  private requireImageStore(): InputImageStore {
+    if (!this.session.capabilities.sendMessage || !this.session.capabilities.imageInput || !this.session.sendMessageContent || !this.inputImageStore) throw new UnsupportedAgentCapabilityError('image_input');
+    return this.inputImageStore;
+  }
+
+  beginImageUpload(input: ImageUploadDeclaration, scope?: string): Promise<ImageUploadReceipt> {
+    return this.requireImageStore().begin(this.imageScope(scope), input);
+  }
+  chunkImageUpload(input: ImageUploadChunk, scope?: string): Promise<ImageUploadReceipt> {
+    return this.requireImageStore().chunk(this.imageScope(scope), input);
+  }
+  finishImageUpload(uploadId: string, scope?: string): Promise<ImageUploadReceipt> {
+    return this.requireImageStore().finish(this.imageScope(scope), uploadId);
+  }
+  async validateMessageContent(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void> {
+    if (!parts.some(part => part.type === 'image')) return;
+    const store = this.requireImageStore();
+    if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
+    await store.resolveAndPin(this.imageScope(scope), parts);
+  }
+  async sendMessageContent(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void> {
+    if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
+    if (!parts.some(part => part.type === 'image')) return this.sendMessage(parts.map(part => part.type === 'text' ? part.text : '').join(''), options);
+    return this.serializeCommand(async () => {
+      const store = this.requireImageStore();
+      if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
+      const resolved = await store.resolveAndPin(this.imageScope(scope), parts);
+      await this.session.sendMessageContent!(resolved, options);
     });
   }
 
@@ -337,7 +389,9 @@ export class AgentManager {
     }
   }
 
-  async readResource(requestId: string, resourceId: string): Promise<ResourceResponse> {
+  async readResource(requestId: string, resourceId: string, scope?: string): Promise<ResourceResponse> {
+    const imageScope = this.imageResourceScopes.get(resourceId);
+    if (imageScope !== undefined && imageScope !== this.imageScope(scope)) throw new Error('Image attachment belongs to another session scope.');
     const document = this.commandResources.get(resourceId);
     if (document && !this.closed) {
       const commands = await this.listCommands();
@@ -358,20 +412,24 @@ export class AgentManager {
     requestId: string,
     locator: string,
     sourceLocator?: string,
+    scope?: string,
   ): Promise<ResourceResolveResponse> {
     const reader = await this.localResourceReader;
-    const identity = `local:${sourceLocator?.length ?? 0}:${sourceLocator ?? ''}:${locator.length}:${locator}`;
+    const identity = `${locator.startsWith('input-image:') ? this.imageScope(scope) : 'local'}:${sourceLocator?.length ?? 0}:${sourceLocator ?? ''}:${locator.length}:${locator}`;
     const acquisition = this.resourceIngestor.acquire({
       agentId: this.agentId,
       locator,
       normalizedLocator: identity,
       readLocator: identity,
-      reader: async () => reader
+      reader: async () => locator.startsWith('input-image:') && this.inputImageStore
+        ? this.inputImageStore.read(this.imageScope(scope), locator)
+        : reader
         ? reader.read(locator, sourceLocator)
         : { status: 'unavailable', reason: 'This Agent session has no authorized local resource root.' },
     });
     if (!acquisition) throw new Error('Local resource locator could not be registered.');
     const binding = await acquisition.settled;
+    if (locator.startsWith('input-image:')) this.imageResourceScopes.set(binding.resourceId, this.imageScope(scope));
     return {
       protocolVersion: PROTOCOL_VERSION,
       type: 'resource_resolve_response',
@@ -602,7 +660,7 @@ export class AgentManager {
         state.lastUsage = structuredClone(event.usage);
         break;
       case 'runtime_updated':
-        state.capabilities = structuredClone(this.session.capabilities);
+        state.capabilities = this.effectiveCapabilities();
         state.runtimeInfo = structuredClone(event.runtimeInfo);
         state.status = event.runtimeInfo.status;
         if (event.activeTurnId === null) state.activeTurn = null;

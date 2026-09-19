@@ -1,4 +1,5 @@
 import type {
+  MessagePart,
   AgentInteractionRequest,
   AgentSnapshotPayload,
   AgentStreamMessage,
@@ -38,6 +39,8 @@ export interface OutgoingMessage {
   readonly id: string;
   readonly agentId: string;
   readonly text: string;
+  readonly content?: readonly MessagePart[];
+  readonly imageDigests?: Readonly<Record<string, string>>;
   readonly delivery?: 'immediate' | 'next_turn';
   readonly status: 'sending' | 'awaiting_echo' | 'unconfirmed' | 'failed';
   readonly error?: string;

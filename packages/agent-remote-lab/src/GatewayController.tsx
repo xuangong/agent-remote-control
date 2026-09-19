@@ -97,7 +97,7 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
   }, [attempt]);
   function signedOut(): void {
     stop.current(); setSecurityOpen(false);
-    clearConversationRecovery();
+    clearConversationRecovery(access ? new URL(access.basePath, window.location.origin).href : undefined);
   }
   async function logout(): Promise<void> {
     signedOut();

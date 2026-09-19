@@ -199,3 +199,13 @@ it('prevents permission command escalation under the local native policy while p
   await h.session.respondToInteraction(question.requestId, {kind:'question', answers:[{questionId:'model', selectedValues:['b']}]});
   expect(h.server.requests.find(request => request.method === 'thread/settings/update')?.params).toMatchObject({model:'b'});
 });
+
+it('preserves whitespace-only skill arguments when starting native skill input', async () => {
+  const h = await harness();
+  const skill = (await h.session.listCommands!()).find(({ kind }) => kind === 'skill')!;
+  await h.session.executeCommand!(skill.id, '  ');
+  expect(h.server.requests.find(({ method }) => method === 'turn/start')?.params.input).toEqual([
+    { type: 'skill', name: 'inspect', path: '/work/skills/inspect/SKILL.md' },
+    { type: 'text', text: '  ', text_elements: [] },
+  ]);
+});

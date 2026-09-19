@@ -323,7 +323,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (action) await security.record(grant.subject, action, result.ok ? 'allowed' : 'denied', /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)?.[1]);
     }
     return result ?? (path === '/v1/providers' && request.method === 'GET'
-      ? json(200, { protocolVersion: '1.4.0', type: 'provider_list', payload: { providers: [] } })
+      ? json(200, { protocolVersion: '1.5.0', type: 'provider_list', payload: { providers: [] } })
       : json(404, unavailableRoute(path)));
   }
   async function prepare(request: Request): Promise<{ accept(socket: RelaySocket): void } | Response | undefined> {

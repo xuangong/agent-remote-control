@@ -209,7 +209,9 @@ it('manages browser sessions without unmounting drafts and clears private state 
   });
   const view = await render(<GatewayController>{() => <input aria-label="Draft" defaultValue="unsent" />}</GatewayController>);
   const draft = view.querySelector('input')!;
-  sessionStorage.setItem('agent-remote:recovery:test:drafts', 'private draft');
+  const recoveryKey = `agent-remote:recovery:${new URL('/u/' + 'a'.repeat(64) + '/', window.location.origin).href}:drafts`;
+  sessionStorage.setItem(recoveryKey, 'private draft');
+  sessionStorage.setItem('agent-remote:recovery:another-account:drafts', 'other draft');
   const button = (label: string) => [...view.querySelectorAll('button')].find(value => value.textContent === label)!;
   expect(button('Security')).toBeDefined();
   await act(async () => button('Security').click());
@@ -224,7 +226,9 @@ it('manages browser sessions without unmounting drafts and clears private state 
   await act(async () => button('Confirm sign out').click());
   expect(requests).toContainEqual({ url: '/auth/sessions/revoke', body: JSON.stringify({ id: 'this-browser' }) });
   expect(requests.some(value => value.url === '/auth/logout')).toBe(false);
-  expect(sessionStorage.getItem('agent-remote:recovery:test:drafts')).toBeNull();
+  expect(sessionStorage.getItem(recoveryKey)).toBeNull();
+  expect(sessionStorage.getItem('agent-remote:recovery:another-account:drafts')).toBe('other draft');
+  sessionStorage.removeItem('agent-remote:recovery:another-account:drafts');
   expect(view.querySelector('input')).toBeNull();
 });
 

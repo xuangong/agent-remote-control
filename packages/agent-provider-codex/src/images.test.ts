@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -215,4 +216,43 @@ describe('CodexImageRegistry', () => {
       await session.dispose();
     }
   });
+});
+
+it('replays ordered native user images with digests and readable resources from a fresh registry', async () => {
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
+  const secondBytes = Buffer.from([255, 216, 255, 224]);
+  const registry = new CodexImageRegistry('session');
+  const blocks = [{ type: 'text', text: 'before ' }, { type: 'image', url: `data:image/png;base64,${bytes.toString('base64')}` },
+    { type: 'text', text: ' between ' }, { type: 'image', url: `data:image/jpeg;base64,${secondBytes.toString('base64')}` }, { type: 'text', text: ' after' }];
+  const project = (content: unknown[], id: string) => new CodexEventProjector('session', { images: registry, delivery: 'history' }).projectHistoryItem({ id, type: 'userMessage', content });
+  const observation = project(blocks, 'user-one')!;
+  const item = observation.event.type === 'timeline' ? observation.event.item : undefined;
+  expect(item).toMatchObject({ type: 'user_message', messageId: 'user-one', text: 'before [image #1] between [image #2] after' });
+  if (item?.type !== 'user_message') throw new Error('Missing user message');
+  expect(item.content?.map(part => part.type)).toEqual(['text', 'image', 'text', 'image', 'text']);
+  expect(item.content?.[1]).toMatchObject({ sha256: createHash('sha256').update(bytes).digest('hex') });
+  expect(item.content?.[3]).toMatchObject({ sha256: createHash('sha256').update(secondBytes).digest('hex') });
+  expect(observation.resourceReferences).toHaveLength(2);
+  for (const [index, reference] of observation.resourceReferences!.entries()) expect(await registry.readResource(reference.readLocator))
+    .toMatchObject({ status: 'available', bytes: index === 0 ? bytes : secondBytes });
+  expect(project([blocks[1]], 'image-only')?.event).toMatchObject({ item: { type: 'user_message', content: [{ type: 'image' }] } });
+});
+
+it('restores local input image paths from saved history and retains their first digest and bytes', async () => {
+  const cwd = await directory();
+  const path = join(cwd, 'input.png');
+  await writeFile(path, png);
+  const nativeItem = { type: 'userMessage', id: 'input', content: [{ type: 'localImage', path }] };
+  const server = createScriptedAppServer({
+    'thread/resume': () => ({ thread: { id: 'thread-one', cwd } }),
+    'thread/read': () => ({ thread: { id: 'thread-one', turns: [{ id: 'turn', items: [nativeItem] }] } }),
+  });
+  const session = await new CodexAppServerProvider({ spawn: () => server.child }).resumeSession({ providerId: 'codex', sessionId: 'thread-one', opaque: '{}' });
+  try {
+    const observation = (await session.observe()[Symbol.asyncIterator]().next()).value;
+    if (observation?.type !== 'observation') throw new Error('Missing history');
+    expect(observation.event).toMatchObject({ item: { type: 'user_message', content: [{ type: 'image', sha256: createHash('sha256').update(png).digest('hex') }] } });
+    await writeFile(path, 'changed');
+    expect(await session.readResource!(observation.resourceReferences![0]!.readLocator)).toMatchObject({ status: 'available', bytes: png });
+  } finally { await session.dispose(); }
 });

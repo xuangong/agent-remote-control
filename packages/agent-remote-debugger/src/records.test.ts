@@ -11,7 +11,7 @@ const capabilities = {
 
 function snapshot(status: 'idle' | 'running' = 'idle'): AgentSnapshot {
   return {
-    protocolVersion: '1.4.0', type: 'agent_snapshot',
+    protocolVersion: '1.5.0', type: 'agent_snapshot',
     payload: {
       id: 'agent-one', providerId: 'provider-one', createdAt: '2026-09-03T00:00:00.000Z',
       updatedAt: '2026-09-03T00:00:01.000Z', status, activeTurn: null, capabilities,
@@ -30,7 +30,7 @@ function entry(seq: number, text: string): ProjectedTimelineEntry {
 
 function page(entries: ProjectedTimelineEntry[], epoch = 'epoch-one'): HistoryPage {
   return {
-    protocolVersion: '1.4.0', type: 'timeline_page',
+    protocolVersion: '1.5.0', type: 'timeline_page',
     payload: {
       requestId: 'page-one', agentId: 'agent-one', direction: 'tail', epoch, reset: false, staleCursor: false, gap: false,
       window: { minSeq: entries[0]?.seqStart ?? 0, maxSeq: entries.at(-1)?.seqEnd ?? 0, nextSeq: (entries.at(-1)?.seqEnd ?? 0) + 1 },
@@ -138,17 +138,17 @@ describe('observeReplica', () => {
     status.set('ready');
     records.length = 0;
     const request: InteractionRequestedMessage = {
-      protocolVersion: '1.4.0', type: 'interaction_requested',
+      protocolVersion: '1.5.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'approval-one', plan: 'A plan', allowedActions: ['approve'] } },
     };
     const resource: ResourceResponse = {
-      protocolVersion: '1.4.0', type: 'resource_response',
+      protocolVersion: '1.5.0', type: 'resource_response',
       payload: { requestId: 'resource-request', agentId: 'agent-one', resourceId: 'resource-one', state: {
         status: 'available', mediaType: 'text/plain', byteLength: 3, sha256: 'digest', contentBase64: 'YWJj',
       } },
     };
     const resolved: InteractionResolvedMessage = {
-      protocolVersion: '1.4.0', type: 'interaction_resolved',
+      protocolVersion: '1.5.0', type: 'interaction_resolved',
       payload: { agentId: 'agent-one', requestId: 'approval-one', response: { kind: 'plan_approval', action: 'approve' } },
     };
 
@@ -170,11 +170,11 @@ describe('observeReplica', () => {
     const status = new StatusSource();
     const records: DebuggerRecord[] = [];
     const request: InteractionRequestedMessage = {
-      protocolVersion: '1.4.0', type: 'interaction_requested',
+      protocolVersion: '1.5.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'approval-one', plan: 'A plan', allowedActions: ['approve'] } },
     };
     const resource: ResourceResponse = {
-      protocolVersion: '1.4.0', type: 'resource_response',
+      protocolVersion: '1.5.0', type: 'resource_response',
       payload: { requestId: 'resource-request', agentId: 'agent-one', resourceId: 'resource-one', state: {
         status: 'available', mediaType: 'text/plain', byteLength: 3, sha256: 'digest', contentBase64: 'YWJj',
       } },
@@ -219,7 +219,7 @@ describe('observeReplica', () => {
     const original = snapshot();
     const reordered: AgentSnapshot = {
       type: 'agent_snapshot',
-      protocolVersion: '1.4.0',
+      protocolVersion: '1.5.0',
       payload: {
         runtimeInfo: {
           status: original.payload.runtimeInfo.status,

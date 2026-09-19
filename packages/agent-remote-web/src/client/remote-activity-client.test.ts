@@ -11,8 +11,8 @@ it('negotiates activity only, reconnects without replaying content, and releases
   const values: RemoteActivityState[] = [];
   const client = new RemoteActivityClient('agent', transport, state => values.push(state));
   client.start(); listener.onOpen();
-  expect(send.mock.calls).toEqual([[{ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }]]);
-  listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'running' } });
+  expect(send.mock.calls).toEqual([[{ protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' }]]);
+  listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'running' } });
   expect(values.at(-1)).toEqual({ connection: 'ready', activity: 'running' });
   listener.onDisconnect();
   expect(values.at(-1)).toEqual({ connection: 'disconnected' });
@@ -32,7 +32,7 @@ it('shows an unsupported Host without falling back to content or retrying foreve
   const values: RemoteActivityState[] = [];
   const client = new RemoteActivityClient('agent', { connect } as unknown as RemoteAgentTransport, state => values.push(state));
   client.start(); listener.onOpen();
-  listener.onMessage({ protocolVersion: '1.4.0', type: 'protocol_error', payload: { code: 'invalid_shape', message: 'Unknown field', recoverable: false } });
+  listener.onMessage({ protocolVersion: '1.5.0', type: 'protocol_error', payload: { code: 'invalid_shape', message: 'Unknown field', recoverable: false } });
   expect(values.at(-1)?.error).toContain('Update the Controller');
   await vi.advanceTimersByTimeAsync(60000);
   expect(connect).toHaveBeenCalledOnce();
@@ -45,9 +45,9 @@ it('passes the observed content cursor without inferring one when absent', () =>
   const values: RemoteActivityState[] = [];
   const client = new RemoteActivityClient('agent', transport, value => values.push(value));
   client.start(); listener.onOpen();
-  listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting', cursor: { epoch: 'e', seq: 8 } } });
+  listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting', cursor: { epoch: 'e', seq: 8 } } });
   expect(values.at(-1)?.cursor).toEqual({ epoch: 'e', seq: 8 });
-  listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'idle' } });
+  listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'idle' } });
   expect(values.at(-1)?.cursor).toBeUndefined();
   client.stop();
 });

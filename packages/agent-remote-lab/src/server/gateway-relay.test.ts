@@ -276,7 +276,7 @@ it('drops buffered user commands when sharing is revoked before the Host acknowl
   expect((await f.create('first')).status).toBe(200);
   const browser = new WebSocket((f.url + f.user.state.basePath + 'v1/sessions/buffered/events').replace('http:', 'ws:'), { headers: { cookie: f.user.cookie, origin: f.url } });
   await once(browser, 'open'); await opening;
-  browser.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'send_message', payload: { agentId: 'buffered', requestId: 'message', operationId: '00000000-0000-4000-8000-000000000003', text: 'queued command' } }));
+  browser.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message', payload: { agentId: 'buffered', requestId: 'message', operationId: '00000000-0000-4000-8000-000000000003', text: 'queued command' } }));
   const ended = once(browser, 'close');
   expect((await control(f.url, { subject: 'owner', operation: 'revoke-share', hostId: f.hostId, targetSubject: 'user' })).status).toBe(200);
   f.host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId }));
@@ -306,17 +306,17 @@ it('reuses a hosted channel for isolated session subscriptions and rechecks user
     }
     if (message.type === 'stream_close') active.delete(message.streamId);
     if (message.type === 'stream_message') host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId: message.streamId,
-      message: JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiated' }) }));
+      message: JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiated' }) }));
   });
   for (const id of ['channel-a', 'channel-b']) expect((await alice.request(`v1/remote/hosts/${hostId}/attach`, { providerId: 'codex', nativeSessionId: id })).status).toBe(200);
   const channel = async (user: typeof alice) => {
     const socket = new WebSocket((f.url + user.state.basePath + 'v1/session-channel?observation=session').replace('http:', 'ws:'), { headers: { cookie: user.cookie, origin: f.url } });
     const received: any[] = []; socket.on('message', raw => received.push(JSON.parse(raw.toString())));
     await once(socket, 'open'); await expect.poll(() => received.some(v => v.type === 'ready')).toBe(true);
-    return { socket, received, send: (value: object) => socket.send(JSON.stringify({ protocolVersion: '1.4.0', ...value })) };
+    return { socket, received, send: (value: object) => socket.send(JSON.stringify({ protocolVersion: '1.5.0', ...value })) };
   };
   const a = await channel(alice), b = await channel(bob);
-  const subscribe = (subscriptionId: number, agentId: string) => ({ type: 'subscribe', subscriptionId, agentId, message: { protocolVersion: '1.4.0', type: 'negotiate' } });
+  const subscribe = (subscriptionId: number, agentId: string) => ({ type: 'subscribe', subscriptionId, agentId, message: { protocolVersion: '1.5.0', type: 'negotiate' } });
   a.send(subscribe(1, 'channel-a')); a.send(subscribe(2, 'channel-b'));
   await expect.poll(() => a.received.filter(v => v.message?.type === 'negotiated').length).toBe(2);
   expect(active.size).toBe(2);

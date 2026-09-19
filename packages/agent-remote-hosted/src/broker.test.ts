@@ -300,8 +300,8 @@ it('does not open or retain a virtual stream when its credential expires after p
     return prepared;
   });
   close.push(dispose);
-  browser.native.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'subscribe', subscriptionId: 1, agentId: 'agent',
-    message: { protocolVersion: '1.4.0', type: 'negotiate' } }));
+  browser.native.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'subscribe', subscriptionId: 1, agentId: 'agent',
+    message: { protocolVersion: '1.5.0', type: 'negotiate' } }));
   await expect.poll(() => received.find(message => message.type === 'closed')?.code, { timeout: 1500 }).toBe(1008);
   expect(opened).toEqual([]);
   expect(broker.activeStreamCount('alice')).toBe(0);
@@ -645,3 +645,31 @@ it.each(['native_runtime_unavailable', 'native_resume_timeout', 'native_history_
     expect(error.error).not.toMatch(/arc_secret|private\/path/);
     expect(error.requestId).toEqual(expect.any(String));
   });
+
+it('allows bounded image chunks without consuming the session control message budget', async () => {
+  const { broker, native } = await restoredFixture();
+  let received = 0;
+  let opened!: () => void;
+  const ready = new Promise<void>(resolve => { opened = resolve; });
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type === 'rpc_request') native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: '{"agentId":"agent","nativeSessionId":"native-session"}' }));
+    if (message.type === 'stream_open') { native.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId })); queueMicrotask(opened); }
+    if (message.type === 'stream_message') received += 1;
+  });
+  const prepared = await broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/agent/events', { headers: { origin: 'https://relay.example' } }));
+  if (!prepared || prepared instanceof Response) throw new Error('Session unavailable');
+  const browser = transportPair(); prepared.accept(browser.server); await ready;
+  const contentBase64 = Buffer.alloc(32768).toString('base64');
+  for (let index = 0; index < 320; index += 1) {
+    browser.native.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'image_upload_chunk', payload: { requestId: String(index), agentId: 'agent', uploadId: 'u', offset: index * 32768, contentBase64 } }));
+    await Promise.resolve();
+  }
+  browser.native.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'cancel', payload: { requestId: 'cancel', agentId: 'agent', operationId: operationOne } }));
+  await Promise.resolve(); await Promise.resolve();
+  expect(browser.native.readyState).toBe(1);
+  expect(received).toBe(321);
+  browser.native.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'image_upload_chunk', payload: { contentBase64: 'a'.repeat(48 * 1024) } }));
+  await Promise.resolve();
+  expect(browser.native.closeCode).toBe(1008);
+}, 10_000);

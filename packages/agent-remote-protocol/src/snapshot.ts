@@ -1,3 +1,4 @@
+import { ImageInputCapabilities } from './image-input.js';
 import { type Static, Type } from '@sinclair/typebox';
 
 import { AgentInteractionRequest } from './interactions.js';
@@ -18,6 +19,7 @@ export const AgentStatus = Type.Union([
 export type AgentStatus = Static<typeof AgentStatus>;
 
 export const AgentCapabilities = Strict({
+  imageInput: Type.Optional(ImageInputCapabilities),
   history: Type.Boolean(),
   sendMessage: Type.Boolean(),
   queueMessage: Type.Optional(Type.Boolean()),

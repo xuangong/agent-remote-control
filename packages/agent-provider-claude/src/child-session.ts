@@ -1,4 +1,5 @@
-import type { AgentChildSession, AgentSession, AgentRuntimeInfo, ProviderObservation, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentCapabilities, AgentChildSession, AgentSession, AgentRuntimeInfo, ProviderObservation, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import { ClaudeImageRegistry } from './images.js';
 import { Channel } from './channel.js';
 import { ClaudeEventProjector, record } from './projector.js';
 
@@ -7,9 +8,10 @@ const blockKey = (messageId: string, index: number): string => JSON.stringify([m
 
 /** A view of a root-owned native task; releasing it never controls the native process. */
 export class ClaudeChildSession implements AgentSession {
-  readonly capabilities = { history: true, sendMessage: false, steer: false, cancel: false, readResource: false,
+  readonly capabilities: AgentCapabilities = { history: true, sendMessage: false, steer: false, cancel: false, readResource: true,
     interactions: { question: false, toolApproval: false, planApproval: false } };
   private history: ProviderObservation[] = [];
+  private readonly images: ClaudeImageRegistry;
   private projector: ClaudeEventProjector;
   private historyProjector: ClaudeEventProjector;
   private nativeMessages: Record<string, unknown>[] = [];
@@ -22,8 +24,9 @@ export class ClaudeChildSession implements AgentSession {
   private model?: string;
 
   constructor(readonly descriptor: AgentChildSession, private readonly cwd?: string) {
-    this.projector = new ClaudeEventProjector(descriptor.nativeSessionId);
-    this.historyProjector = new ClaudeEventProjector(descriptor.nativeSessionId);
+    this.images = new ClaudeImageRegistry(descriptor.nativeSessionId);
+    this.projector = new ClaudeEventProjector(descriptor.nativeSessionId, 'live', this.images);
+    this.historyProjector = new ClaudeEventProjector(descriptor.nativeSessionId, 'history', this.images);
   }
   get hasHistory(): boolean { return this.history.length > 0; }
 
@@ -70,7 +73,7 @@ export class ClaudeChildSession implements AgentSession {
       ? blocks.get(blockKey(frame.streamMessageId, frame.blockIndex))
       : typeof frame.message.uuid === 'string' ? uuids.get(frame.message.uuid) : undefined;
     const anchor = this.lastDelivered ? position(this.lastDelivered) ?? Infinity : -1;
-    this.historyProjector = new ClaudeEventProjector(this.descriptor.nativeSessionId);
+    this.historyProjector = new ClaudeEventProjector(this.descriptor.nativeSessionId, 'live', this.images);
     this.history = messages.flatMap((message) => this.project(this.historyProjector, message));
     this.pending = this.pending.filter((frame) => position(frame) === undefined);
     for (const frame of this.pending) this.history.push(...this.project(this.historyProjector, frame.message));
@@ -85,7 +88,7 @@ export class ClaudeChildSession implements AgentSession {
       if (record(message.message) && typeof message.message.model === 'string') this.model = message.message.model;
     });
     if (replace) {
-      this.projector = new ClaudeEventProjector(this.descriptor.nativeSessionId);
+      this.projector = new ClaudeEventProjector(this.descriptor.nativeSessionId, 'live', this.images);
       this.lastDelivered = undefined;
       for (const message of messages) {
         if (this.project(this.projector, message).length) this.lastDelivered = { message };
@@ -113,6 +116,7 @@ export class ClaudeChildSession implements AgentSession {
     } finally { if (this.output === output) this.output = undefined; output.close(); }
   }
 
+  async readResource(locator: string) { return this.images.readResource(locator); }
   async sendMessage(): Promise<void> { throw new Error('Claude child views are read-only.'); }
   async respondToInteraction(): Promise<void> { throw new Error('Claude child views are read-only; respond in the parent session.'); }
   async runtimeInfo(): Promise<AgentRuntimeInfo> {
@@ -124,6 +128,12 @@ export class ClaudeChildSession implements AgentSession {
         providerId: 'claude', sessionId: this.descriptor.nativeSessionId, status: this.descriptor.status, cwd: this.cwd, model: this.model ?? null } } });
   }
   async dispose(): Promise<void> { this.output?.close(); this.output = undefined; }
+
+  /** The owning parent has ended; ordinary view release keeps resources available for reopening. */
+  async close(): Promise<void> {
+    this.images.stop();
+    await this.dispose();
+  }
 }
 
 /** Preserve forwarded inputs omitted by the SDK chain, anchored to their next persisted message. */

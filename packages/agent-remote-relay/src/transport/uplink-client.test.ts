@@ -94,7 +94,7 @@ describe('outbound Agent Remote uplink client', () => {
     b.connections[0]!.send(JSON.stringify({ uplinkVersion: 1, type: 'registered', agentId: 'agent-one' }));
     await client.ready;
     b.connections[0]!.send(JSON.stringify({ uplinkVersion: 1, type: 'rpc_request', requestId: 'providers', method: 'GET',
-      path: '/v1/providers?protocolVersion=1.4.0' }));
+      path: '/v1/providers?protocolVersion=1.5.0' }));
     await vi.waitFor(() => expect(b.messages).toContainEqual(expect.objectContaining({ type: 'rpc_response', requestId: 'providers', status: 200 })));
     b.connections[0]!.terminate();
     await vi.waitFor(() => expect(b.connections).toHaveLength(2));
@@ -102,7 +102,7 @@ describe('outbound Agent Remote uplink client', () => {
     await vi.waitFor(() => expect(b.messages.filter((m) => m.type === 'register')).toHaveLength(2));
     expect(b.messages.filter((m) => m.type === 'rpc_response')).toHaveLength(1);
     await client.close();
-    expect(await remote.executeAgentRemoteHttpRequest(b.relay, { method: 'GET', path: '/v1/providers?protocolVersion=1.4.0' }))
+    expect(await remote.executeAgentRemoteHttpRequest(b.relay, { method: 'GET', path: '/v1/providers?protocolVersion=1.5.0' }))
       .toMatchObject({ status: 200 });
   });
 

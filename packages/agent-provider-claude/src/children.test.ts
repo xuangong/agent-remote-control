@@ -17,7 +17,7 @@ async function harness(parent = 'root', saved: any[] = []) {
     tool_use_id: `tool-${id}`, description: 'Review implementation', subagent_type: 'Explore', spawn_depth: 1, ...extras });
   const child = async () => { await expect.poll(async () => (await session.runtimeInfo()).childSessions?.length).toBe(1);
     const descriptor = (await session.runtimeInfo()).childSessions![0]!; return { descriptor, view: await session.openChildSession(descriptor.nativeSessionId) }; };
-  return { session, push, start, child, closed: () => closed };
+  return { session, push, start, child, fail: () => events.fail(new Error('Native transport ended')), closed: () => closed };
 }
 
 describe('Claude native child projections', () => {
@@ -36,6 +36,7 @@ describe('Claude native child projections', () => {
       h.start(); const { descriptor, view } = await h.child();
       expect(descriptor).toMatchObject({ title: 'Review implementation', role: 'Explore', status: 'running', observation: 'live', parentCallId: 'tool-task' });
       expect(view.capabilities).toMatchObject({ sendMessage: false, cancel: false });
+      expect(view.capabilities.imageInput).toBeUndefined();
       await expect(view.sendMessage('forged')).rejects.toThrow(/read-only/);
       const output = view.observe()[Symbol.asyncIterator]();
       expect((await output.next()).value).toEqual({ type: 'history_boundary' });
@@ -232,4 +233,44 @@ it('delivers the text suffix before subsequent saved blocks sharing the native m
     expect((await output.next()).value).toMatchObject({ event: { item: { type: 'tool_call' } } });
     expect((await output.next()).value).toMatchObject({ event: { type: 'runtime_updated' } });
   } finally { await view.dispose(); }
+}, 10000);
+
+it('serves read-only child history image resources without advertising image input', async () => {
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
+  const child = new ClaudeChildSession({ nativeSessionId: 'child', title: 'Saved child', status: 'closed', observation: 'saved_history', createdAt: new Date().toISOString() });
+  child.reconcileHistory([{ type: 'user', uuid: 'user', message: { content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } }] } }]);
+  const output = child.observe()[Symbol.asyncIterator]();
+  try {
+    const observation = (await output.next()).value;
+    if (observation?.type !== 'observation') throw new Error('Missing history');
+    expect(child.capabilities.imageInput).toBeUndefined();
+    expect(child.capabilities.readResource).toBe(true);
+    expect(await child.readResource(observation.resourceReferences![0]!.readLocator)).toMatchObject({ status: 'available', bytes });
+  } finally { await child.dispose(); }
+});
+
+it.each(['dispose', 'failure'] as const)('revokes child image resources after parent %s while allowing ordinary view release', async (ending) => {
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
+  const h = await harness();
+  try {
+    h.start();
+    const { descriptor, view } = await h.child();
+    const output = view.observe()[Symbol.asyncIterator]();
+    expect((await output.next()).value).toEqual({ type: 'history_boundary' });
+    h.push({ type: 'user', uuid: 'child-image', parent_tool_use_id: 'tool-task', message: {
+      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } }],
+    } });
+    const observation = (await output.next()).value;
+    if (observation?.type !== 'observation') throw new Error('Missing child image');
+    const locator = observation.resourceReferences![0]!.readLocator;
+    await view.dispose();
+    const reopened = await h.session.openChildSession(descriptor.nativeSessionId);
+    expect(await reopened.readResource!(locator)).toMatchObject({ status: 'available', bytes });
+    if (ending === 'dispose') await h.session.dispose();
+    else {
+      h.fail();
+      await expect.poll(async () => (await h.session.runtimeInfo()).status).toBe('failed');
+    }
+    expect(await reopened.readResource!(locator)).toMatchObject({ status: 'unavailable' });
+  } finally { await h.session.dispose(); }
 }, 10000);

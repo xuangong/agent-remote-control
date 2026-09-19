@@ -17,12 +17,16 @@ describe('createLocalLabAuthorizer', () => {
     expect(await authorizer.authenticate(request('192.0.2.10', 'http://127.0.0.1:5175'))).toBeUndefined();
   });
 
-  it('authorizes only attach and resource reads for the local principal', async () => {
+  it('authorizes session controls and image resources only for the local principal', async () => {
     const local = { subject: 'local-lab' };
     const base = { principal: local, agentId: 'agent-1', request: request('127.0.0.1', 'http://127.0.0.1:5175') };
 
     expect(await authorizer.authorize({ ...base, action: 'attach' })).toBe(true);
     expect(await authorizer.authorize({ ...base, action: 'read_resource' })).toBe(true);
+    for (const action of ['image_upload', 'send_message', 'resolve_resource'] as const) {
+      expect(await authorizer.authorize({ ...base, action })).toBe(true);
+      expect(await authorizer.authorize({ ...base, principal: { subject: 'foreign' }, action })).toBe(false);
+    }
     expect(await authorizer.authorize({ ...base, principal: { subject: '' }, action: 'attach' })).toBe(false);
     expect(await authorizer.authorize({ ...base, principal: { subject: 'someone-else' }, action: 'attach' })).toBe(false);
   });

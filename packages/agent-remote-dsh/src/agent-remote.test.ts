@@ -119,12 +119,12 @@ describe('DSH Remote Host plugin', () => {
     expect(remote.registrations).toEqual([expect.objectContaining({ providers: [{ providerId: 'dsh', displayName: 'DeepSeek Harness' }] })]);
     const parent = await remote.request('/remote/attach', 'parent-binding', JSON.stringify({ providerId: 'dsh', nativeSessionId: 'parent' }));
     expect(await parent.json()).toMatchObject({ agentId: 'parent-binding', nativeSessionId: 'parent' });
-    const snapshot = await remote.request('/v1/sessions/parent-binding/snapshot?protocolVersion=1.4.0', 'parent-binding');
+    const snapshot = await remote.request('/v1/sessions/parent-binding/snapshot?protocolVersion=1.5.0', 'parent-binding');
     expect(JSON.stringify(await snapshot.json())).toContain('child');
     const body = JSON.stringify({ providerId: 'dsh', parentNativeSessionId: 'parent', nativeSessionId: 'child' });
     const attached = await remote.request('/remote/child/attach', 'child-binding', body);
     expect(await attached.json()).toMatchObject({ agentId: 'child-binding', nativeSessionId: 'child' });
-    const childSnapshot = await remote.request('/v1/sessions/child-binding/snapshot?protocolVersion=1.4.0', 'child-binding');
+    const childSnapshot = await remote.request('/v1/sessions/child-binding/snapshot?protocolVersion=1.5.0', 'child-binding');
     const projected = await childSnapshot.json();
     expect(projected.payload.capabilities).toMatchObject({ sendMessage: false, cancel: false, steer: false });
     expect((await remote.request('/remote/child/attach', 'bad-binding', JSON.stringify({ providerId: 'dsh', parentNativeSessionId: 'foreign', nativeSessionId: 'child' }))).status).toBeGreaterThanOrEqual(400);
@@ -232,15 +232,15 @@ describe('DSH Remote Host plugin', () => {
     expect(JSON.parse(await readFile(identityPath, 'utf8'))).toEqual({ installationId: remote.registrations[0] && expect.any(String) });
     expect((await stat(identityPath)).mode & 0o777).toBe(0o600);
     expect((await remote.request('/remote/attach', 'binding-one', JSON.stringify({ nativeSessionId: 'native-one', ...(modern ? { providerId: 'dsh' } : {}) }))).status).toBe(200);
-    expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.4.0', 'binding-one')).status).toBe(200);
+    expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.5.0', 'binding-one')).status).toBe(200);
     expect(native.createCalls).toEqual([]);
 
     const replacement = native.replaceRoot('native-one');
     expect((await remote.request('/remote/attach', 'binding-one', JSON.stringify({ nativeSessionId: 'native-one', ...(modern ? { providerId: 'dsh' } : {}) }))).status).toBe(200);
     native.dispose(oldAgent);
-    expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.4.0', 'binding-one')).status).toBe(200);
+    expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.5.0', 'binding-one')).status).toBe(200);
     native.dispose(replacement);
-    await vi.waitFor(async () => expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.4.0', 'binding-one')).status).toBe(403));
+    await vi.waitFor(async () => expect((await remote.request('/v1/sessions/binding-one/snapshot?protocolVersion=1.5.0', 'binding-one')).status).toBe(403));
     await remote.host.close();
     expect(native.disposed).toEqual(['native-one', 'native-one']);
   });
@@ -252,7 +252,7 @@ describe('DSH Remote Host plugin', () => {
 
     expect((await remote.request('/remote/attach', 'binding-cold', JSON.stringify({ nativeSessionId: 'native-cold' }))).status).toBe(200);
     expect(native.resolveCalls).toEqual(['native-cold']);
-    expect((await remote.request('/v1/sessions/binding-cold/snapshot?protocolVersion=1.4.0', 'binding-cold')).status).toBe(200);
+    expect((await remote.request('/v1/sessions/binding-cold/snapshot?protocolVersion=1.5.0', 'binding-cold')).status).toBe(200);
 
     await remote.host.close();
   });
@@ -310,7 +310,7 @@ describe('DSH Remote Host plugin', () => {
     native.replaceRoot(created.nativeSessionId);
     expect(await (await first.request('/remote/create', 'retry-binding', body)).json()).toEqual(created);
     native.dispose(old);
-    expect((await first.request(`/v1/sessions/${created.agentId}/snapshot?protocolVersion=1.4.0`, created.agentId)).status).toBe(200);
+    expect((await first.request(`/v1/sessions/${created.agentId}/snapshot?protocolVersion=1.5.0`, created.agentId)).status).toBe(200);
     await first.host.close();
     const second = await startRemoteHost(native);
     const repeated = await (await second.request('/remote/create', 'second-binding', body)).json();
@@ -344,11 +344,11 @@ describe('DSH Remote Host plugin', () => {
     await vi.waitFor(() => expect(remote.streamFrames('native-events')).toContainEqual(expect.objectContaining({
       type: 'stream_opened',
     })), { timeout: 3000 });
-    remote.sendStream('native-events', { protocolVersion: '1.4.0', type: 'negotiate' });
+    remote.sendStream('native-events', { protocolVersion: '1.5.0', type: 'negotiate' });
     await vi.waitFor(() => expect(remote.streamFrames('native-events')).toContainEqual(expect.objectContaining({
       type: 'agent_snapshot',
     })), { timeout: 3000 });
-    remote.sendStream('native-events', { protocolVersion: '1.4.0', type: 'timeline_subscription', payload: {
+    remote.sendStream('native-events', { protocolVersion: '1.5.0', type: 'timeline_subscription', payload: {
       requestId: 'subscribe-native-events', agentIds: ['binding-one'],
     } });
     await vi.waitFor(() => expect(remote.streamFrames('native-events')).toContainEqual(expect.objectContaining({
@@ -402,7 +402,7 @@ describe('DSH Remote Host plugin', () => {
     expect(native.eventReads()).toBe(readsBeforeUpdate + 1);
     expect(native.resolveCalls).toEqual([]);
     expect(native.createCalls).toEqual([]);
-    expect((await remote.request('/v1/sessions/unbound/snapshot?protocolVersion=1.4.0', 'unbound')).status).toBe(403);
+    expect((await remote.request('/v1/sessions/unbound/snapshot?protocolVersion=1.5.0', 'unbound')).status).toBe(403);
     const missing = await remote.request('/remote/catalog/session?nativeSessionId=missing');
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ code: 'session_unavailable' });

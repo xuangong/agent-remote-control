@@ -8,7 +8,7 @@ The [support matrix](provider-support.md) remains the per-endpoint comparison ta
 
 Use the Provider's public client or installed native service directly. The adapter translates native facts into existing Remote rails. Bounded projection, identity checks and storage of native-provided output bytes belong in that adapter. A hidden scheduler, Query restart, private SDK method, inferred filesystem authority or text impersonating a typed interaction does not establish support. Workarounds remain outside the supported capability scope.
 
-No public protocol expansion was required: Remote 1.4.0 and Host uplink 2 are unchanged. Codex behavior is unchanged.
+No public protocol expansion was required: Remote 1.5.0 and Host uplink 2 are unchanged. Codex behavior is unchanged.
 
 ## Implemented native paths
 

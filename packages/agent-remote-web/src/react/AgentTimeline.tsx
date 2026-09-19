@@ -134,7 +134,7 @@ export function AgentTimeline({
               <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
             </> : null}
           </TimelineEntry>)}
-      {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
+      {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
     </div>
 
     {!contentOnly ? <AgentChildSessionList childrenFor={childrenFor} key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} /> : null}

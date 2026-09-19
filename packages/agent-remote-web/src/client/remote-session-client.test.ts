@@ -31,7 +31,7 @@ const capabilities = {
 
 function snapshot(): AgentSnapshot {
   return {
-    protocolVersion: '1.4.0',
+    protocolVersion: '1.5.0',
     type: 'agent_snapshot',
     payload: {
       id: 'agent-one', providerId: 'provider-neutral',
@@ -62,7 +62,7 @@ function page(
   const start = entries[0]?.seqStart ?? 0;
   const end = entries.at(-1)?.seqEnd ?? 0;
   return {
-    protocolVersion: '1.4.0', type: 'timeline_page',
+    protocolVersion: '1.5.0', type: 'timeline_page',
     payload: {
       requestId: 'timeline-page', agentId: 'agent-one', direction, epoch: 'epoch-one',
       reset: false, staleCursor: false, gap: false,
@@ -82,7 +82,7 @@ function live(
   resources: ResourceBinding[] = [],
 ): AgentStreamMessage {
   return {
-    protocolVersion: '1.4.0', type: 'agent_stream',
+    protocolVersion: '1.5.0', type: 'agent_stream',
     payload: {
       agentId: 'agent-one', epoch, seq,
       timestamp: `2026-09-02T00:00:0${seq}.000Z`,
@@ -102,7 +102,7 @@ describe('RemoteSessionClient', () => {
     client.subscribeStatus(value => statuses.push(value));
     client.start(); transport.open();
     expect(statuses.at(-1)).toBe('connecting');
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     expect(statuses.at(-1)).toBe('catching_up');
     client.stop();
   });
@@ -113,10 +113,10 @@ describe('RemoteSessionClient', () => {
     const text = '  Keep this\nexact text  ';
     try {
       const pending = delivery === undefined ? client.sendMessage(text) : client.sendMessage(text, { delivery });
-      expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.4.0', type: 'send_message', payload: {
+      expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.5.0', type: 'send_message', payload: {
         requestId: 'message-delivery', operationId: expect.any(String), agentId: 'agent-one', text, ...(delivery === undefined ? {} : { delivery }),
       } });
-      const response = { protocolVersion: '1.4.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-one', command: 'send_message' } } as const;
+      const response = { protocolVersion: '1.5.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-one', command: 'send_message' } } as const;
       transport.emit(response);
       await expect(pending).resolves.toEqual(response);
     } finally { client.stop(); }
@@ -132,7 +132,7 @@ describe('RemoteSessionClient', () => {
       void pending.then(() => { settled = true; }, () => { settled = true; });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(settled).toBe(false);
-      transport.emit({ protocolVersion: '1.4.0', type: 'command_result', payload: { requestId: 'long-command', agentId: 'agent-one', result: { text: 'Native finished' } } });
+      transport.emit({ protocolVersion: '1.5.0', type: 'command_result', payload: { requestId: 'long-command', agentId: 'agent-one', result: { text: 'Native finished' } } });
       await expect(pending).resolves.toEqual({ text: 'Native finished' });
     } finally { client.stop(); vi.useRealTimers(); }
   });
@@ -147,7 +147,7 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     const retry = client.executeCommand('native:ask', '');
-    transport.emit({ protocolVersion: '1.4.0', type: 'command_result', payload: { requestId: 'native-execution', agentId: 'agent-one', result: { text: 'New execution' } } });
+    transport.emit({ protocolVersion: '1.5.0', type: 'command_result', payload: { requestId: 'native-execution', agentId: 'agent-one', result: { text: 'New execution' } } });
     await expect(retry).resolves.toEqual({ text: 'New execution' });
     client.stop();
   });
@@ -162,12 +162,12 @@ describe('RemoteSessionClient', () => {
     expect(request.type).toBe('list_commands');
     if (request.type !== 'list_commands') throw new Error('Expected list');
     const commands = [{ id: 'native:go', name: 'go', description: 'Native', kind: 'command' as const }];
-    transport.emit({ protocolVersion: '1.4.0', type: 'command_list', payload: { ...request.payload, commands } });
+    transport.emit({ protocolVersion: '1.5.0', type: 'command_list', payload: { ...request.payload, commands } });
     await expect(listed).resolves.toEqual(commands);
     const executed = client.executeCommand('native:go', 'args');
     const run = transport.sent.at(-1)!;
     if (run.type !== 'execute_command') throw new Error('Expected execute');
-    transport.emit({ protocolVersion: '1.4.0', type: 'command_result', payload: { requestId: run.payload.requestId, agentId: 'agent-one', result: { text: 'Done' } } });
+    transport.emit({ protocolVersion: '1.5.0', type: 'command_result', payload: { requestId: run.payload.requestId, agentId: 'agent-one', result: { text: 'Done' } } });
     await expect(executed).resolves.toEqual({ text: 'Done' });
     client.stop();
   });
@@ -179,8 +179,8 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     const pending = client.setPlanning(true);
-    expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.4.0', type: 'set_planning', payload: { requestId: 'planning-one', operationId: expect.any(String), agentId: 'agent-one', active: true } });
-    const acknowledgement = { protocolVersion: '1.4.0', type: 'command_acknowledged', payload: { requestId: 'planning-one', agentId: 'agent-one', command: 'set_planning' } } as const;
+    expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.5.0', type: 'set_planning', payload: { requestId: 'planning-one', operationId: expect.any(String), agentId: 'agent-one', active: true } });
+    const acknowledgement = { protocolVersion: '1.5.0', type: 'command_acknowledged', payload: { requestId: 'planning-one', agentId: 'agent-one', command: 'set_planning' } } as const;
     transport.emit(acknowledgement);
     await expect(pending).resolves.toEqual(acknowledgement);
     expect(replica.getState().agent?.runtimeInfo.planning).toEqual({ active: false });
@@ -227,13 +227,13 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     expect(transport.sent.map(({ type }) => type)).toEqual(['negotiate']);
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     expect(transport.sent.map(({ type }) => type)).toEqual(['negotiate', 'timeline_subscription']);
     expect(transport.timelineRequests).toEqual([]);
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     expect(transport.timelineRequests).toMatchObject([{ direction: 'tail', cursor: undefined }]);
@@ -261,10 +261,10 @@ describe('RemoteSessionClient', () => {
 
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.emit(live(2, 'B'));
@@ -276,10 +276,10 @@ describe('RemoteSessionClient', () => {
     expect(transport.connections).toBe(2);
     expect(transport.closedConnections).toBe(1);
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     expect(transport.timelineRequests).toHaveLength(2);
@@ -301,10 +301,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     const pending = client.sendMessage('Reject this when recovery restarts.');
@@ -331,10 +331,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
 
@@ -352,10 +352,10 @@ describe('RemoteSessionClient', () => {
     const client = new RemoteSessionClient('agent-one', transport, replica);
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 2, 'AB')], {
@@ -385,10 +385,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 2, 'AB')], {
@@ -400,12 +400,12 @@ describe('RemoteSessionClient', () => {
     await transport.settle();
     expect(transport.connections).toBe(2);
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     expect(replica.getState().timeline.entries[0]?.item).toMatchObject({ text: 'AB' });
     const subscribe = transport.sent.at(-1);
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: subscribe?.payload.requestId as string, agentIds: ['agent-one'] },
     });
 
@@ -425,10 +425,10 @@ describe('RemoteSessionClient', () => {
     client.subscribeStatus((status) => statuses.push(status));
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -437,10 +437,10 @@ describe('RemoteSessionClient', () => {
     transport.disconnect();
     await transport.settle();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     expect(transport.timelineRequests.at(-1)).toEqual({
@@ -484,10 +484,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -517,10 +517,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -554,10 +554,10 @@ describe('RemoteSessionClient', () => {
     client.subscribeStatus((status) => statuses.push(status));
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -566,10 +566,10 @@ describe('RemoteSessionClient', () => {
     transport.disconnect();
     await transport.settle();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('after', [entry(2, 2, 'B')], {
@@ -600,10 +600,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -612,10 +612,10 @@ describe('RemoteSessionClient', () => {
     transport.disconnect();
     await transport.settle();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('after', [entry(2, 2, 'B')], {
@@ -626,7 +626,7 @@ describe('RemoteSessionClient', () => {
     expect(transport.timelineRequests.at(-1)?.cursor).toEqual({ epoch: 'epoch-one', seq: 2 });
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_replacement',
+      protocolVersion: '1.5.0', type: 'timeline_replacement',
       payload: { agentId: 'agent-one', epoch: 'epoch-two' },
     });
 
@@ -651,10 +651,10 @@ describe('RemoteSessionClient', () => {
     const client = new RemoteSessionClient('agent-one', transport, replica);
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_subscribed',
+      protocolVersion: '1.5.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', []));
@@ -665,14 +665,14 @@ describe('RemoteSessionClient', () => {
     const sentBeforePush = transport.sent.length;
     transport.emit(live(1, 'Generated output', 'epoch-one', [provisional]));
     transport.emit({
-      protocolVersion: '1.4.0', type: 'timeline_resource_binding_replaced',
+      protocolVersion: '1.5.0', type: 'timeline_resource_binding_replaced',
       payload: {
         agentId: 'agent-one', epoch: 'epoch-one', seq: 1,
         previous: provisional, replacement,
       },
     });
     transport.emit({
-      protocolVersion: '1.4.0', type: 'resource_update',
+      protocolVersion: '1.5.0', type: 'resource_update',
       payload: {
         agentId: 'agent-one', resourceId: replacement.resourceId,
         state: { status: 'available', mediaType: 'image/png', byteLength: 42, sha256: 'canonical-digest' },
@@ -699,12 +699,12 @@ describe('RemoteSessionClient', () => {
 
     client.requestResource('resource-one');
     expect(transport.sent.at(-1)).toEqual({
-      protocolVersion: '1.4.0', type: 'resource_request',
+      protocolVersion: '1.5.0', type: 'resource_request',
       payload: { requestId: 'resource-read', agentId: 'agent-one', resourceId: 'resource-one' },
     });
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'resource_response',
+      protocolVersion: '1.5.0', type: 'resource_response',
       payload: {
         requestId: 'resource-read', agentId: 'agent-one', resourceId: 'resource-one',
         state: {
@@ -725,14 +725,14 @@ describe('RemoteSessionClient', () => {
     client.start(); transport.open();
     const pending = client.resolveResource('./images/result.png', '/workspace/docs/report.md');
     expect(transport.sent.at(-1)).toEqual({
-      protocolVersion: '1.4.0', type: 'resource_resolve_request',
+      protocolVersion: '1.5.0', type: 'resource_resolve_request',
       payload: {
         requestId: 'resource-resolve', agentId: 'agent-one', locator: './images/result.png',
         sourceLocator: '/workspace/docs/report.md',
       },
     });
     const response = {
-      protocolVersion: '1.4.0' as const, type: 'resource_resolve_response' as const,
+      protocolVersion: '1.5.0' as const, type: 'resource_resolve_response' as const,
       payload: {
         requestId: 'resource-resolve', agentId: 'agent-one',
         binding: { locator: './images/result.png', resourceId: 'resource-one', status: 'available' as const },
@@ -743,7 +743,7 @@ describe('RemoteSessionClient', () => {
     await expect(pending).resolves.toEqual(response.payload.binding);
     expect(replica.getState().resources['resource-one']).toMatchObject({ imageDimensions: { width: 800, height: 600 } });
     expect(replica.getState().resources['resource-one']).not.toHaveProperty('contentBase64');
-    replica.applyResource({ protocolVersion: '1.4.0', type: 'resource_response', payload: {
+    replica.applyResource({ protocolVersion: '1.5.0', type: 'resource_response', payload: {
       requestId: 'bytes', agentId: 'agent-one', resourceId: 'resource-one',
       state: { ...response.payload.state, contentBase64: 'AAAA' },
     } });
@@ -755,7 +755,7 @@ describe('RemoteSessionClient', () => {
     const transport = new FakeTransport();
     const client = connectedClient(transport, { requestId: () => 'send-one' });
     const acknowledgement = {
-      protocolVersion: '1.4.0' as const,
+      protocolVersion: '1.5.0' as const,
       type: 'command_acknowledged' as const,
       payload: { requestId: 'send-one', agentId: 'agent-one', command: 'send_message' as const },
     };
@@ -780,7 +780,7 @@ describe('RemoteSessionClient', () => {
     const pending = client.steer('Use the new target.');
 
     transport.emit({
-      protocolVersion: '1.4.0',
+      protocolVersion: '1.5.0',
       type: 'protocol_error',
       payload: {
         requestId: 'steer-one', code: 'unsupported_command',
@@ -801,7 +801,7 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_requested',
+      protocolVersion: '1.5.0', type: 'interaction_requested',
       payload: {
         agentId: 'agent-one',
         request: { kind: 'plan_approval', requestId: 'interaction-one', plan: 'Check the evidence.', allowedActions: ['approve'] },
@@ -809,7 +809,7 @@ describe('RemoteSessionClient', () => {
     });
     const pending = client.respondToInteraction('interaction-one', { kind: 'plan_approval', action: 'approve' });
     const resolution = {
-      protocolVersion: '1.4.0' as const,
+      protocolVersion: '1.5.0' as const,
       type: 'interaction_resolved' as const,
       payload: {
         agentId: 'agent-one', requestId: 'interaction-one',
@@ -821,7 +821,7 @@ describe('RemoteSessionClient', () => {
     expect(replica.getState().pendingInteractions).toEqual([]);
     const submission = transport.sent.at(-1);
     if (submission?.type !== 'interaction_response') throw new Error('Expected interaction response');
-    const acknowledgement = { protocolVersion: '1.4.0' as const, type: 'command_acknowledged' as const,
+    const acknowledgement = { protocolVersion: '1.5.0' as const, type: 'command_acknowledged' as const,
       payload: { agentId: 'agent-one', requestId: submission.payload.submissionId, command: 'interaction_response' as const } };
     transport.emit(acknowledgement);
     await expect(pending).resolves.toEqual(acknowledgement);
@@ -834,7 +834,7 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_requested',
+      protocolVersion: '1.5.0', type: 'interaction_requested',
       payload: {
         agentId: 'agent-one',
         request: { kind: 'plan_approval', requestId: 'interaction-one', plan: 'Check the evidence.', allowedActions: ['approve'] },
@@ -844,7 +844,7 @@ describe('RemoteSessionClient', () => {
     const pending = client.respondToInteraction('interaction-one', { kind: 'plan_approval', action: 'approve' });
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_invalidated',
+      protocolVersion: '1.5.0', type: 'interaction_invalidated',
       payload: {
         agentId: 'agent-one', requestId: 'interaction-one',
         reason: 'connection_replaced', turnId: 'turn-one',
@@ -855,7 +855,7 @@ describe('RemoteSessionClient', () => {
     expect(replica.getState().timeline).toBe(timeline);
     const submission = transport.sent.at(-1);
     if (submission?.type !== 'interaction_response') throw new Error('Expected interaction response');
-    const acknowledgement = { protocolVersion: '1.4.0' as const, type: 'command_acknowledged' as const,
+    const acknowledgement = { protocolVersion: '1.5.0' as const, type: 'command_acknowledged' as const,
       payload: { agentId: 'agent-one', requestId: submission.payload.submissionId, command: 'interaction_response' as const } };
     transport.emit(acknowledgement);
     await expect(pending).resolves.toEqual(acknowledgement);
@@ -868,20 +868,20 @@ describe('RemoteSessionClient', () => {
     let settled = false;
     void command.then(() => { settled = true; }, () => { settled = true; });
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_requested',
+      protocolVersion: '1.5.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: {
         kind: 'plan_approval', requestId: 'native-approval', plan: 'Check.', allowedActions: ['approve'],
       } },
     });
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_invalidated',
+      protocolVersion: '1.5.0', type: 'interaction_invalidated',
       payload: { agentId: 'agent-one', requestId: 'native-approval', reason: 'connection_replaced' },
     });
     await transport.settle();
     expect(settled).toBe(false);
 
-    const acknowledgement = { protocolVersion: '1.4.0' as const, type: 'command_acknowledged' as const,
+    const acknowledgement = { protocolVersion: '1.5.0' as const, type: 'command_acknowledged' as const,
       payload: { requestId: 'native-approval', agentId: 'agent-one', command: 'send_message' as const } };
     transport.emit(acknowledgement);
     await expect(command).resolves.toEqual(acknowledgement);
@@ -892,7 +892,7 @@ describe('RemoteSessionClient', () => {
     const client = connectedClient(transport);
     const result = client.respondToInteraction('already-resolved', { kind: 'plan_approval', action: 'approve' });
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_resolved',
+      protocolVersion: '1.5.0', type: 'interaction_resolved',
       payload: { agentId: 'agent-one', requestId: 'already-resolved', response: { kind: 'plan_approval', action: 'approve' } },
     });
     await expect(result).rejects.toMatchObject({ code: 'stale_interaction', requestId: 'already-resolved' });
@@ -906,7 +906,7 @@ describe('RemoteSessionClient', () => {
     transport.open();
     const pending = client.requestResource('resource-one');
     const response = {
-      protocolVersion: '1.4.0' as const,
+      protocolVersion: '1.5.0' as const,
       type: 'resource_response' as const,
       payload: {
         requestId: 'resource-one', agentId: 'agent-one', resourceId: 'resource-one',
@@ -965,7 +965,7 @@ describe('RemoteSessionClient', () => {
     const client = connectedClient(transport, { requestId: () => 'shared-id' });
     const command = client.sendMessage('Continue.');
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_requested',
+      protocolVersion: '1.5.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'shared-id', plan: 'Check.', allowedActions: ['approve'] } },
     });
     const interaction = client.respondToInteraction('shared-id', { kind: 'plan_approval', action: 'approve' });
@@ -973,19 +973,19 @@ describe('RemoteSessionClient', () => {
     void command.then(() => { commandSettled = true; }, () => undefined);
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_resolved',
+      protocolVersion: '1.5.0', type: 'interaction_resolved',
       payload: {
         agentId: 'agent-one', requestId: 'shared-id',
         response: { kind: 'plan_approval', action: 'approve' },
       },
     });
-    transport.emit({ protocolVersion: '1.4.0', type: 'command_acknowledged',
+    transport.emit({ protocolVersion: '1.5.0', type: 'command_acknowledged',
       payload: { agentId: 'agent-one', requestId: 'shared-id', command: 'interaction_response' } });
     await interaction;
     expect(commandSettled).toBe(false);
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'protocol_error',
+      protocolVersion: '1.5.0', type: 'protocol_error',
       payload: { requestId: 'shared-id', code: 'command_failed', message: 'Command failed.', recoverable: true },
     });
     await expect(command).rejects.toMatchObject<Partial<RemoteOperationError>>({
@@ -998,14 +998,14 @@ describe('RemoteSessionClient', () => {
     const client = connectedClient(transport, { requestId: () => 'shared-id' });
     const command = client.sendMessage('Continue.');
     transport.emit({
-      protocolVersion: '1.4.0', type: 'interaction_requested',
+      protocolVersion: '1.5.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'shared-id', plan: 'Check.', allowedActions: ['approve'] } },
     });
     const interaction = client.respondToInteraction('shared-id', { kind: 'plan_approval', action: 'approve' });
     const resource = client.requestResource('resource-one');
 
     transport.emit({
-      protocolVersion: '1.4.0', type: 'protocol_error',
+      protocolVersion: '1.5.0', type: 'protocol_error',
       payload: { requestId: 'shared-id', code: 'command_failed', message: 'Command failed.', recoverable: true },
     });
 
@@ -1126,9 +1126,9 @@ it('loads older pages once without interrupting live readiness and retries histo
   const statuses: string[] = [];
   client.subscribeStatus((status) => statuses.push(status));
   client.start(); transport.open();
-  transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+  transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
   transport.emit(snapshot());
-  transport.emit({ protocolVersion: '1.4.0', type: 'timeline_subscribed', payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] } });
+  transport.emit({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] } });
   transport.resolveTimeline(page('tail', [entry(10, 10, 'Current')], { hasOlder: true }));
   await transport.settle();
   statuses.length = 0;
@@ -1172,7 +1172,7 @@ async function outgoingFixture(options: ConstructorParameters<typeof RemoteSessi
   client.start(); transport.open();
   completeSubscription(transport);
   await Promise.resolve();
-  const acknowledge = (requestId: string) => transport.emit({ protocolVersion: '1.4.0', type: 'command_acknowledged',
+  const acknowledge = (requestId: string) => transport.emit({ protocolVersion: '1.5.0', type: 'command_acknowledged',
     payload: { requestId, agentId: 'agent-one', command: 'send_message' } });
   const echo = (seq: number, text: string) => {
     const message = live(seq, text);
@@ -1268,7 +1268,7 @@ it('reconciles a late echo after a generic command failure', async () => {
   const f = await outgoingFixture({ requestId: () => 'send-one' });
   try {
     const send = f.client.sendMessage('Possibly accepted');
-    f.transport.emit({ protocolVersion: '1.4.0', type: 'protocol_error', payload: {
+    f.transport.emit({ protocolVersion: '1.5.0', type: 'protocol_error', payload: {
       requestId: 'send-one', code: 'command_failed', message: 'Provider request timed out.', recoverable: true,
     } });
     await expect(send).rejects.toThrow('Provider request timed out.');
@@ -1284,7 +1284,7 @@ it('keeps definite rejections until explicitly deleted without adding them to hi
   const f = await outgoingFixture({ requestId: () => 'send-one' });
   try {
     const send = f.client.sendMessage('Rejected input');
-    f.transport.emit({ protocolVersion: '1.4.0', type: 'protocol_error', payload: {
+    f.transport.emit({ protocolVersion: '1.5.0', type: 'protocol_error', payload: {
       requestId: 'send-one', code: 'unsupported_operation', message: 'This session is read-only.', recoverable: false,
     } });
     await expect(send).rejects.toThrow('This session is read-only.');
@@ -1375,7 +1375,7 @@ function completeSubscription(transport: FakeTransport): void {
   transport.emit(snapshot());
   const request = transport.sent.at(-1)!;
   if (request.type !== 'timeline_subscription') throw new Error('Expected subscription');
-  transport.emit({ protocolVersion: '1.4.0', type: 'timeline_subscribed', payload: { requestId: request.payload.requestId, agentIds: ['agent-one'] } });
+  transport.emit({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: request.payload.requestId, agentIds: ['agent-one'] } });
   transport.resolveTimeline(page('tail', []));
 }
 
@@ -1401,7 +1401,7 @@ it.each(['command_failed', 'operation_outcome_unknown'])('allows an explicit new
   try {
     const original = f.client.sendMessage('Try again manually');
     const first = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>;
-    f.transport.emit({ protocolVersion: '1.4.0', type: 'protocol_error', payload: { requestId: first.payload.requestId, code, message: 'The result cannot be recovered.', recoverable: true } });
+    f.transport.emit({ protocolVersion: '1.5.0', type: 'protocol_error', payload: { requestId: first.payload.requestId, code, message: 'The result cannot be recovered.', recoverable: true } });
     await expect(original).rejects.toMatchObject({ code });
     const retry = f.client.retryMessage(f.replica.getState().outgoingMessages![0]!.id);
     const second = f.transport.sent.at(-1) as typeof first;
@@ -1433,4 +1433,90 @@ it.each([false, true])('waits for delayed send acknowledgement after compaction 
     expect(f.replica.getState().outgoingMessages).toEqual([]);
     expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
   } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('retains exact ordered content through failure and retry without mutating its outbox snapshot', async () => {
+  const f = await outgoingFixture();
+  const content = [{ type: 'text' as const, text: 'Compare ' }, { type: 'image' as const, attachmentId: 'image-a', label: '[image #1]' }];
+  try {
+    const first = f.client.sendMessageContent(content, { imageDigests: { 'image-a': 'a'.repeat(64) } });
+    const sent = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>;
+    content[0]!.text = 'Changed';
+    f.transport.emit({ protocolVersion: '1.5.0', type: 'protocol_error', payload: { requestId: sent.payload.requestId, code: 'invalid_image_input', message: 'Native rejected', recoverable: true } });
+    await expect(first).rejects.toThrow('Native rejected');
+    const outgoing = f.replica.getState().outgoingMessages![0]!;
+    expect(outgoing.status).toBe('failed');
+    expect(outgoing.content?.[0]).toEqual({ type: 'text', text: 'Compare ' });
+    const retry = f.client.retryMessage(outgoing.id);
+    const retried = f.transport.sent.at(-1) as typeof sent;
+    expect(retried.payload.operationId).not.toBe(sent.payload.operationId);
+    expect(retried.payload).toMatchObject({ content: outgoing.content });
+    expect(retried.payload).not.toHaveProperty('text');
+    f.acknowledge(retried.payload.requestId); await retry;
+    f.echo(1, 'Compare [image #1]');
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+    for (const [seq, sha256] of [[2, 'b'.repeat(64)], [3, 'a'.repeat(64)]] as const) {
+      const message = live(seq, '');
+      message.payload.event = { type: 'timeline', providerId: 'provider-neutral', resources: [], item: {
+        type: 'user_message', text: 'Compare [image #1]', content: [{ type: 'text', text: 'Compare ' }, { type: 'image', locator: 'native-image', label: 'image', sha256 }],
+      } };
+      f.transport.emit(message);
+      expect(f.replica.getState().outgoingMessages).toHaveLength(seq === 2 ? 1 : 0);
+    }
+  } finally { f.client.stop(); }
+});
+
+it('does not confirm an image send from a plain-text lookalike or a missing image digest', async () => {
+  const f = await outgoingFixture();
+  try {
+    const content = [{ type: 'image' as const, attachmentId: 'a', label: 'image #1' }];
+    const send = f.client.sendMessageContent(content);
+    f.acknowledge((f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>).payload.requestId); await send;
+    f.echo(1, 'image #1');
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+    const echo = live(2, '');
+    echo.payload.event = { type: 'timeline', providerId: 'provider-neutral', resources: [], item: { type: 'user_message', text: 'image #1', content: [{ type: 'image', locator: 'a', label: 'image #1' }] } };
+    f.transport.emit(echo);
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+  } finally { f.client.stop(); }
+});
+
+it('correlates upload receipts and cancels an in-flight chunk without reconnecting the session', async () => {
+  const { Blob } = await import('node:buffer');
+  const { webcrypto, createHash } = await import('node:crypto');
+  vi.stubGlobal('crypto', webcrypto);
+  const f = await outgoingFixture();
+  try {
+    const abort = new AbortController();
+    const pending = f.client.uploadImage(new Blob(['image bytes'], { type: 'image/png' }) as globalThis.Blob, 'upload', { signal: abort.signal });
+    const rejected = expect(pending).rejects.toThrow('paused');
+    await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_begin'));
+    const begin = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'image_upload_begin' }>;
+    expect(begin.payload.sha256).toBe(createHash('sha256').update('image bytes').digest('hex'));
+    f.transport.emit({ protocolVersion: '1.5.0', type: 'image_upload_result', payload: { requestId: begin.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 0 } });
+    await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_chunk'));
+    const chunk = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'image_upload_chunk' }>;
+    abort.abort(); await rejected;
+    f.transport.emit({ protocolVersion: '1.5.0', type: 'image_upload_result', payload: { requestId: chunk.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 11 } });
+    await Promise.resolve();
+    expect(f.transport.sent.some(message => message.type === 'image_upload_finish')).toBe(false);
+    expect(f.transport.connections).toBe(1);
+  } finally { f.client.stop(); vi.unstubAllGlobals(); }
+});
+
+it('does not continue an upload on a new connection generation', async () => {
+  const { Blob } = await import('node:buffer');
+  const { webcrypto } = await import('node:crypto');
+  vi.stubGlobal('crypto', webcrypto);
+  const f = await outgoingFixture({ scheduleReconnect: () => () => undefined });
+  try {
+    const pending = f.client.uploadImage(new Blob(['bytes'], { type: 'image/png' }) as globalThis.Blob, 'upload');
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'connection_disconnected' });
+    await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_begin'));
+    f.transport.disconnect(); await rejected;
+    f.client.start(); f.transport.open(); completeSubscription(f.transport);
+    await Promise.resolve();
+    expect(f.transport.sent.filter(message => message.type === 'image_upload_begin')).toHaveLength(1);
+    expect(f.transport.sent.some(message => message.type === 'image_upload_chunk')).toBe(false);
+  } finally { f.client.stop(); vi.unstubAllGlobals(); }
 });

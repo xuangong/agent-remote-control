@@ -175,7 +175,7 @@ async function startRemoteHost(
       if (closing) { await projection.session?.dispose(); throw new RemoteHostRequestError(503, 'host_closed', 'Remote Host is closing.'); }
       pendingProjections.set(bindingId, projection);
       try {
-        await relay!.createAgent({ protocolVersion: '1.4.0', type: 'create_agent', payload: {
+        await relay!.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: {
           requestId: randomUUID(), operationId: randomUUID(), agentId: bindingId, providerId: 'dsh', config: { sessionId: bindingId },
         } });
         projections.set(bindingId, projection);

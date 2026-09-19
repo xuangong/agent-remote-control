@@ -67,7 +67,7 @@ Implementation follows the native-client-first rule: public native methods and s
 
 **G19 — debugger entry points (C1–C5/I3/A1–A3):** headless and Lab support do not create CLI commands. Add command parsing, capability validation, correlation and bounded execution separately for settings/commands/queue/Host child attachment. The Provider adapter remains the native owner. Missing CLI affordances do not invalidate an otherwise working Web route.
 
-**Shared boundaries (S3/T6/A6/H2):** Paseo does not establish that resuming a transcript attaches to an independently running native terminal, that a read-only child panel provides orchestration, or that replay reconstructs old callbacks. Generic native spawn/stop/resume, PTY control and durable callback recovery require their own scope and contract decisions. Input attachments, rewind and native forks are also outside the current matrix's implemented public surface; file services and client context transfer are not equivalent substitutes.
+**Shared boundaries (S3/T6/A6/H2):** Paseo does not establish that resuming a transcript attaches to an independently running native terminal, that a read-only child panel provides orchestration, or that replay reconstructs old callbacks. Generic native spawn/stop/resume, PTY control and durable callback recovery require their own scope and contract decisions. Generic file attachments, rewind and native forks are outside this matrix's implemented public surface; protocol 1.5.0 separately adds ordered raster image input for Codex and Claude. File services and client context transfer are not equivalent substitutes.
 
 | Order | Candidate scope | Endpoint work and gate |
 | --- | --- | --- |

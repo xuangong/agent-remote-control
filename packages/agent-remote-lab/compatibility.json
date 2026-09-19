@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "1.4.0",
+  "protocolVersion": "1.5.0",
   "borgee": {
     "release": "unreleased",
     "sourceState": "working_tree",
@@ -67,6 +67,7 @@
         "packages/agent-remote-lab/live-dsh.patch.yml",
         "packages/agent-remote-lab/package.json",
         "packages/agent-remote-lab/playwright.config.ts",
+        "packages/agent-remote-lab/playwright.images.config.ts",
         "packages/agent-remote-lab/playwright.markdown.config.ts",
         "packages/agent-remote-lab/public",
         "packages/agent-remote-lab/scripts",
@@ -102,7 +103,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:3a8fddf6855be38817dca24cf045910ddfc9e90277744800a089679d0d26d0db"
+      "digest": "sha256:d331298be8b1bd75cb63d1386d6ee58dbf133f4a0b48ad2892a68b5de2e52ad5"
     }
   },
   "providers": [

@@ -250,12 +250,12 @@ describe('shared Codex recovery', () => {
     const activityWire = createSessionWire(manager, json => activity.push(json));
     managerCleanups.push(async () => { contentWire.close(); activityWire.close(); await manager.close(); });
     await manager.ready;
-    await contentWire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
-    await activityWire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }));
+    await contentWire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+    await activityWire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' }));
     expect(content.map(json => JSON.parse(json))).toContainEqual(expect.objectContaining({ type: 'agent_snapshot', payload: expect.objectContaining({ status: 'running' }) }));
     expect(activity.map(json => JSON.parse(json))).toEqual([
-      { protocolVersion: '1.4.0', type: 'negotiated' },
-      { protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running', cursor: { epoch: 'initial', seq: 0 } } },
+      { protocolVersion: '1.5.0', type: 'negotiated' },
+      { protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running', cursor: { epoch: 'initial', seq: 0 } } },
     ]);
     server.notify('turn/completed', { threadId: 'root', turn: { id: 'existing-turn', status: 'completed' } });
     await expect.poll(() => manager.snapshot().payload.status).toBe('idle');
@@ -353,7 +353,7 @@ describe('shared Codex recovery', () => {
     const wire = createSessionWire(manager, json => wireOutput.push(json));
     managerCleanups.push(async () => { wire.close(); await manager.close(); });
     await manager.ready;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     const events: string[] = [];
     const connections: string[] = [];
     manager.subscribe(message => {

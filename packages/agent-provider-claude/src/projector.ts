@@ -1,5 +1,5 @@
-import { boundToolResult, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
-import type { ClaudeImageRegistry } from './images.js';
+import { boundToolResult, type AgentUserMessagePart, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
+import { ClaudeImageRegistry } from './images.js';
 
 export function record(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -26,7 +26,7 @@ export class ClaudeEventProjector {
   private activeMessage = '';
   private sequence = 0;
 
-  constructor(private readonly sessionId: string, private readonly delivery: 'history' | 'live' = 'live', private readonly images?: ClaudeImageRegistry) {}
+  constructor(private readonly sessionId: string, private readonly delivery: 'history' | 'live' = 'live', private readonly images = new ClaudeImageRegistry(sessionId)) {}
 
   project(value: unknown): ProviderObservation[] {
     if (!record(value) || value.parent_tool_use_id || value.session_id && value.session_id !== this.sessionId) return [];
@@ -45,8 +45,21 @@ export class ClaudeEventProjector {
       : Array.isArray(value.message.content) ? value.message.content : [];
     if (value.type === 'user') {
       const events: ProviderObservation[] = [];
-      const text = content.filter((block: unknown) => record(block) && block.type === 'text').map((block: any) => block.text).join('\n');
-      if (text && !value.isSynthetic) events.push(this.item(key, { type: 'user_message', text, messageId: value.uuid }));
+      const parts: AgentUserMessagePart[] = [];
+      const resourceReferences: ProviderResourceReference[] = [];
+      let imageIndex = 0;
+      for (const [index, block] of content.entries()) {
+        if (!record(block)) continue;
+        if (block.type === 'text' && typeof block.text === 'string') parts.push({ type: 'text', text: block.text });
+        else if (block.type === 'image') {
+          const image = this.images.projectUser(key, index, block, `image #${++imageIndex}`);
+          parts.push(image.part);
+          resourceReferences.push(...image.resourceReferences);
+        }
+      }
+      const text = parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join(imageIndex ? '' : '\n');
+      if (text && !value.isSynthetic) events.push({ ...this.item(key, { type: 'user_message', text, messageId: value.uuid,
+        ...(imageIndex ? { content: parts } : {}) }), ...(imageIndex ? { resourceReferences } : {}) });
       const toolResults = content.filter((block: unknown) => record(block) && block.type === 'tool_result');
       const structured = toolResults.length === 1 ? toolResultJson(imageMetadata(value.tool_use_result, toolResults[0].content)) : undefined;
       for (const block of toolResults) {

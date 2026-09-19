@@ -25,7 +25,8 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   });
   const enter = () => act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   expect(input.disabled).toBe(false);
-  expect(container.textContent).toContain('You can edit your draft. Sending is available when this session is ready.');
+  expect(input.placeholder).toBe('Message…');
+  expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('false');
   expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Waiting for session');
   await type('Draft during synchronization');
   expect(draft).toHaveBeenLastCalledWith('Draft during synchronization');
@@ -38,6 +39,7 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
   await type('Draft during synchronization');
   await rerender(container, view(false));
+  expect(input.placeholder).toBe('Message…');
   expect(input.value).toBe('Draft during synchronization');
   await enter();
   expect(send).toHaveBeenCalledExactlyOnceWith('Draft during synchronization');

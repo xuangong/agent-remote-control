@@ -126,7 +126,7 @@ describe('LiveControlPanel', () => {
     const container = await render(<LiveControlPanel state={state} draft="Keep my recovery draft" onDraftChange={onDraftChange} />);
     const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
 
-    expect(input).toMatchObject({ disabled: false, value: 'Keep my recovery draft', placeholder: message });
+    expect(input).toMatchObject({ disabled: false, value: 'Keep my recovery draft', placeholder: 'Message…' });
     expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
     await type(input, 'Edited while recovering');
     expect(onDraftChange).toHaveBeenLastCalledWith('Edited while recovering');

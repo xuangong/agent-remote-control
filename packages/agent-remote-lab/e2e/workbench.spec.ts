@@ -4,6 +4,30 @@ test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
 test.beforeEach(async ({ page }) => { await page.goto('/e2e/fixtures/workbench.html'); });
 
+test('keeps the composer fixed while an editable draft becomes ready to send', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  const input = page.getByTestId('prompt-input');
+  const send = page.getByTestId('prompt-submit');
+  const geometry = () => page.locator('.lab-composer-dock').evaluate(element => {
+    const box = element.getBoundingClientRect();
+    const input = element.querySelector('textarea')!.getBoundingClientRect();
+    return { top: box.top, height: box.height, inputTop: input.top, inputHeight: input.height };
+  });
+  await input.fill('Keep typing');
+  await expect(send).toBeEnabled();
+  const ready = await geometry();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-synchronizing', { detail: true })));
+  await expect(send).toBeDisabled();
+  await expect(input).toBeEnabled();
+  expect(await geometry()).toEqual(ready);
+  await input.fill('My draft is ready');
+  const syncing = await geometry();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-synchronizing', { detail: false })));
+  await expect(send).toBeEnabled();
+  await expect(input).toHaveValue('My draft is ready');
+  expect(await geometry()).toEqual(syncing);
+});
+
 test('starts at the latest content and follows streaming growth and composer resizing', async ({ page }) => {
   const timeline = page.getByTestId('timeline');
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);

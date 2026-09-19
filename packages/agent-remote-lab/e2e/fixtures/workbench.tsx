@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
@@ -15,6 +15,12 @@ function WorkbenchFixture() {
   const [state, setState] = useState(initial);
   const [visible, setVisible] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [synchronizing, setSynchronizing] = useState(false);
+  useEffect(() => {
+    const update = (event: Event) => setSynchronizing((event as CustomEvent<boolean>).detail);
+    window.addEventListener('fixture-synchronizing', update);
+    return () => window.removeEventListener('fixture-synchronizing', update);
+  }, []);
   const resolveHistory = useRef<() => void>();
   const append = () => setState((current) => ({ ...current, timeline: { ...current.timeline, nextSeq: current.timeline.nextSeq + 1, entries: [...current.timeline.entries, entry(current.timeline.nextSeq)] } }));
   function loadOlder(): Promise<void> {
@@ -35,7 +41,7 @@ function WorkbenchFixture() {
       <button onClick={() => setState((current) => ({ ...current, agent: { ...current.agent!, id: `${current.agent!.id}-next` } }))}>Switch Agent</button>
       <button disabled={!loading} onClick={finishHistory}>Complete history with live</button>
     </nav>
-    <section hidden={!visible} style={{ minHeight: 0 }}><LabWorkbench state={state} sessionStatus="ready" visible={visible} actions={{ loadOlder, sendMessage: async () => {} }} /></section>
+    <section hidden={!visible} style={{ minHeight: 0 }}><LabWorkbench state={state} sessionStatus={synchronizing ? 'catching_up' : 'ready'} visible={visible} actions={{ loadOlder, sendMessage: async () => {} }} /></section>
     <section hidden={visible}>Trace fixture</section>
   </div>;
 }

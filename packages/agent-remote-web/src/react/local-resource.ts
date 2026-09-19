@@ -9,9 +9,15 @@ export interface MarkdownResourceContext {
   readonly requestResource: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
 }
 
-const resolutions = new Map<string, Promise<ResourceBinding>>();
+interface ResourceResolution { promise: Promise<ResourceBinding>; binding?: ResourceBinding }
+const resolutions = new Map<string, ResourceResolution>();
 const requests = new Map<string, Promise<void | ResourceResponseState>>();
 const MAX_CACHE_ENTRIES = 256;
+
+export function cachedLocalResourceBinding(context: MarkdownResourceContext, locator: string, sourceLocator?: string): ResourceBinding | undefined {
+  return (sourceLocator === undefined ? context.bindings.find(binding => binding.locator === locator && binding.status === 'available') : undefined)
+    ?? resolutions.get(JSON.stringify([context.scopeKey, sourceLocator ?? null, locator]))?.binding;
+}
 
 export async function loadLocalResource(
   context: MarkdownResourceContext,
@@ -23,15 +29,17 @@ export async function loadLocalResource(
   const existing = !fresh && sourceLocator === undefined ? context.bindings.find(binding => binding.locator === locator && binding.status === 'available') : undefined;
   const resolveKey = JSON.stringify([context.scopeKey, sourceLocator ?? null, locator]);
   if (fresh) resolutions.delete(resolveKey);
-  let resolution = existing ? Promise.resolve(existing) : resolutions.get(resolveKey);
+  let resolution = existing ? { promise: Promise.resolve(existing), binding: existing } : resolutions.get(resolveKey);
   if (!resolution) {
-    resolution = context.resolveResource(locator, sourceLocator).then(binding => {
+    const created: ResourceResolution = { promise: context.resolveResource(locator, sourceLocator).then(binding => {
       if (binding.status !== 'available') resolutions.delete(resolveKey);
+      else created.binding = binding;
       return binding;
-    }).catch(error => { resolutions.delete(resolveKey); throw error; });
+    }).catch(error => { resolutions.delete(resolveKey); throw error; }) };
+    resolution = created;
     cache(resolutions, resolveKey, resolution);
   }
-  const binding = await resolution;
+  const binding = await resolution.promise;
   onResolved?.(binding);
   const detail = context.resources[binding.resourceId];
   if (detail?.status === 'unavailable' || (detail?.status === 'available' && 'contentBase64' in detail)) return { binding, detail };

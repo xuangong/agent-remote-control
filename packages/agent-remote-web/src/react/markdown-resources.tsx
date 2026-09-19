@@ -6,7 +6,7 @@ import { MarkdownImageFrame } from './MarkdownImageFrame.js';
 import { canPreviewImage } from './ResourceCard.js';
 
 export type { MarkdownResourceContext } from './local-resource.js';
-import { loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
+import { cachedLocalResourceBinding, loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
 interface HastNode {
   type?: string;
   tagName?: string;
@@ -62,7 +62,8 @@ export function MarkdownResourceImage({
     : undefined;
   const key = JSON.stringify([context?.scopeKey, locator, sourceLocator]);
   const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string }>();
-  const binding = result?.key === key ? result.binding : undefined;
+  const binding = (result?.key === key ? result.binding : undefined)
+    ?? (context && locator ? cachedLocalResourceBinding(context, locator, sourceLocator) : undefined);
   const failure = result?.key === key ? result.failure : undefined;
 
   useEffect(() => {

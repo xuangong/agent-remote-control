@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type TouchEvent, type WheelEvent } from 'react';
+import { captureReadingText, readingTextTop, type ReadingTextAnchor } from './reading-text-anchor.js';
 
-interface ReadingAnchor { key: string; offset: number }
+interface ReadingAnchor { key: string; offset: number; text?: ReadingTextAnchor }
 export interface TimelineReadingPosition { following: boolean; anchor?: ReadingAnchor }
 export type TimelineReadingPositions = Map<string, TimelineReadingPosition>;
 export interface TimelineReadingContinuityPosition { following: boolean; scrollTop?: number }
@@ -64,7 +65,8 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   function captureAnchor(): void {
     const viewport = viewportRef.current;
     if (!viewport || !viewport.clientHeight) return;
-    const top = viewport.getBoundingClientRect().top;
+    const bounds = viewport.getBoundingClientRect();
+    const top = bounds.top;
     const entry = Array.from(viewport.querySelectorAll<HTMLElement>('[data-entry-key]')).find((element) => element.getBoundingClientRect().bottom > top);
     if (!entry?.dataset.entryKey) {
       // A reconnect can temporarily remove entries before the same epoch returns.
@@ -72,7 +74,8 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       captureReadingContinuity();
       return;
     }
-    anchor.current = { key: entry.dataset.entryKey, offset: entry.getBoundingClientRect().top - top };
+    anchor.current = { key: entry.dataset.entryKey, offset: entry.getBoundingClientRect().top - top,
+      ...(!following.current ? { text: captureReadingText(entry, bounds) } : {}) };
     if (currentIdentity.current !== undefined) positionsRef.current?.set(currentIdentity.current, {
       following: following.current, anchor: anchor.current,
     });
@@ -90,7 +93,9 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       const saved = anchor.current;
       const entry = Array.from(viewport.querySelectorAll<HTMLElement>('[data-entry-key]')).find((element) => element.dataset.entryKey === saved.key);
       if (entry) {
-        const adjustment = entry.getBoundingClientRect().top - viewport.getBoundingClientRect().top - saved.offset;
+        const textTop = saved.text ? readingTextTop(entry, saved.text) : undefined;
+        const adjustment = (textTop ?? entry.getBoundingClientRect().top) - viewport.getBoundingClientRect().top
+          - (textTop !== undefined ? saved.text!.top : saved.offset);
         if (Math.abs(adjustment) > 1) viewport.scrollTop += adjustment;
       }
     } else if (pendingScrollTop.current !== undefined && viewport.querySelector('[data-entry-key]')) {

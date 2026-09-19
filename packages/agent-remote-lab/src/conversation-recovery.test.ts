@@ -30,6 +30,16 @@ it('bounds anchor retention and clears only conversation recovery on sign out', 
   expect(sessionStorage.getItem('unrelated')).toBe('preserve');
 });
 
+it('persists the visible text anchor even when the containing entry offset is unchanged', () => {
+  const positions = new ReadingPositions('text-reader');
+  const first = { following: false, anchor: { key: 'reply', offset: -800,
+    text: { path: [0, 1, 2], character: 8, sample: 'Visible text', top: -3 } } };
+  positions.set('session', first);
+  const next = { ...first, anchor: { ...first.anchor, text: { ...first.anchor.text, character: 19, sample: 'Next visible line' } } };
+  positions.set('session', next);
+  expect(new ReadingPositions('text-reader').get('session')).toEqual(next);
+});
+
 it('keeps in-memory interaction available when browser storage is denied', () => {
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Denied'); });
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Full'); });

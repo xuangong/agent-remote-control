@@ -67,6 +67,7 @@
         "packages/agent-remote-lab/live-dsh.patch.yml",
         "packages/agent-remote-lab/package.json",
         "packages/agent-remote-lab/playwright.config.ts",
+        "packages/agent-remote-lab/playwright.markdown.config.ts",
         "packages/agent-remote-lab/public",
         "packages/agent-remote-lab/scripts",
         "packages/agent-remote-lab/src",
@@ -101,7 +102,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:b1a9408b485af374490d105acae35e3e7b75295ed789ddf225c22ab1430e11a0"
+      "digest": "sha256:fac1e9c3beb67fc04a44007b75fe1d623618e7e87274978aaad672183bf3e9d1"
     }
   },
   "providers": [

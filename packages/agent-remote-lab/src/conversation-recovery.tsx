@@ -58,7 +58,7 @@ export class ReadingPositions extends Map<string, TimelineReadingPosition> {
   }
   override set(key: string, value: TimelineReadingPosition): this {
     const previous = this.get(key);
-    if (previous?.following === value.following && previous?.anchor?.key === value.anchor?.key && previous?.anchor?.offset === value.anchor?.offset) return this;
+    if (previous?.following === value.following && JSON.stringify(previous?.anchor) === JSON.stringify(value.anchor)) return this;
     super.delete(key);
     super.set(key, value);
     if (this.size > 80) super.delete(this.keys().next().value!);

@@ -14,6 +14,8 @@
   background: oklch(0.975 0.006 255.5);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --obs-canvas: oklch(0.975 0.006 255.5);

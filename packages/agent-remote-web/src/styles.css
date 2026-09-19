@@ -18,6 +18,8 @@
 }
 
 .agent-remote-surface {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--agent-ink);

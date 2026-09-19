@@ -285,3 +285,62 @@ it('drops buffered user commands when sharing is revoked before the Host acknowl
   const pong = once(f.host, 'pong'); f.host.ping(); await pong;
   expect(commands).toBe(0); expect(f.host.readyState).toBe(WebSocket.OPEN); f.host.close();
 }, 10000);
+
+it('reuses a hosted channel for isolated session subscriptions and rechecks user access', async () => {
+  const f = await setup(); const alice = await f.login('alice'); const bob = await f.login('bob');
+  const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  await once(host, 'open'); const registered = once(host, 'message');
+  host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'channel-host', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+  const hostId = JSON.parse((await registered)[0].toString()).hostId as string;
+  const active = new Map<string, string>();
+  host.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type === 'rpc_request') {
+      const native = JSON.parse(message.body).nativeSessionId;
+      host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify({ agentId: native, nativeSessionId: native }) }));
+    }
+    if (message.type === 'stream_open') {
+      active.set(message.streamId, message.sessionId);
+      host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId }));
+    }
+    if (message.type === 'stream_close') active.delete(message.streamId);
+    if (message.type === 'stream_message') host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId: message.streamId,
+      message: JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiated' }) }));
+  });
+  for (const id of ['channel-a', 'channel-b']) expect((await alice.request(`v1/remote/hosts/${hostId}/attach`, { providerId: 'codex', nativeSessionId: id })).status).toBe(200);
+  const channel = async (user: typeof alice) => {
+    const socket = new WebSocket((f.url + user.state.basePath + 'v1/session-channel?observation=session').replace('http:', 'ws:'), { headers: { cookie: user.cookie, origin: f.url } });
+    const received: any[] = []; socket.on('message', raw => received.push(JSON.parse(raw.toString())));
+    await once(socket, 'open'); await expect.poll(() => received.some(v => v.type === 'ready')).toBe(true);
+    return { socket, received, send: (value: object) => socket.send(JSON.stringify({ protocolVersion: '1.4.0', ...value })) };
+  };
+  const a = await channel(alice), b = await channel(bob);
+  const subscribe = (subscriptionId: number, agentId: string) => ({ type: 'subscribe', subscriptionId, agentId, message: { protocolVersion: '1.4.0', type: 'negotiate' } });
+  a.send(subscribe(1, 'channel-a')); a.send(subscribe(2, 'channel-b'));
+  await expect.poll(() => a.received.filter(v => v.message?.type === 'negotiated').length).toBe(2);
+  expect(active.size).toBe(2);
+  b.send(subscribe(1, 'channel-a'));
+  await expect.poll(() => b.received.find(v => v.type === 'closed')?.code).toBe(1008);
+  expect(active.size).toBe(2);
+  a.send({ type: 'unsubscribe', subscriptionId: 1 });
+  await expect.poll(() => active.size).toBe(1);
+  a.send(subscribe(3, 'channel-a'));
+  await expect.poll(() => a.received.some(v => v.subscriptionId === 3 && v.message?.type === 'negotiated')).toBe(true);
+  expect(active.size).toBe(2);
+  expect(a.socket.readyState).toBe(WebSocket.OPEN);
+  expect(b.socket.readyState).toBe(WebSocket.OPEN);
+  a.socket.close(); b.socket.close(); host.close();
+}, 10000);
+
+it('expires an idle hosted channel and rejects unauthenticated channel upgrades', async () => {
+  const f = await setup(); const alice = await f.login('alice');
+  const url = f.url + alice.state.basePath + 'v1/session-channel?observation=session';
+  expect(await rejected(url, { origin: f.url })).toBe(401);
+  expect(await rejected(url, { origin: 'https://evil.example', cookie: alice.cookie })).toBe(403);
+  const short = ticket(f.url, 'alice', { exp: Math.floor(Date.now() / 1000) + 2 });
+  const socket = new WebSocket(url.replace('http:', 'ws:'), { headers: { authorization: `Bearer ${short}`, origin: f.url } });
+  const ended = once(socket, 'close');
+  await once(socket, 'open');
+  expect((await ended)[0]).toBe(1008);
+}, 5000);

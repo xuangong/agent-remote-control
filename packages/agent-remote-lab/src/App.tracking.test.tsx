@@ -42,7 +42,7 @@ async function fixture(target: SessionStar, activityReady = true) {
     connect(agentId, listener) {
       let observing = false;
       queueMicrotask(() => listener.onOpen());
-      return { close: () => { if (observing) activityClosed(); }, send: message => {
+      return { close: () => { if (observing) activityClosed(agentId); }, send: message => {
         if (message.type === 'negotiate') {
           listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
           if (message.observation === 'activity') {
@@ -80,7 +80,7 @@ it.each([
   expect(f.attach).toHaveBeenCalledOnce();
   expect(f.contentConnections).toEqual(['live-agent']);
   expect(f.fetchTimeline).toHaveBeenCalledOnce();
-  expect(f.activityClosed).toHaveBeenCalledOnce();
+  expect(f.activityClosed).not.toHaveBeenCalledWith('live-agent');
   expect(new URLSearchParams(location.search).get('session')).toBe(target.nativeSessionId);
 });
 

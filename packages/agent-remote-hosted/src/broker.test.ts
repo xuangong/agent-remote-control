@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
+import { acceptSessionChannel } from '@agent-remote-controller/agent-remote-protocol';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
 import { createOperationCache, OperationCacheError } from '../../agent-host/dist/operation-cache.js';
 
@@ -274,6 +275,37 @@ it('prepares a browser upgrade only after authorization and native binding recov
   const opened = new Promise<unknown>(resolve => native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'stream_open') resolve(message); }));
   accepted.accept(transportPair().server);
   expect(await opened).toMatchObject({ uplinkVersion: 2, type: 'stream_open', sessionId: 'agent' });
+}, 10_000);
+
+
+it('does not open or retain a virtual stream when its credential expires after preparation', async () => {
+  const { broker, native } = await restoredFixture({ ownerSubject: 'alice' });
+  const opened: unknown[] = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type === 'rpc_request') native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: '{"agentId":"agent","nativeSessionId":"native-session"}' }));
+    if (message.type === 'stream_open') opened.push(message);
+  });
+  let expiresAt = 20_000;
+  const browser = transportPair();
+  const received: Array<{ type: string; subscriptionId?: number; code?: number }> = [];
+  browser.native.onMessage(data => { received.push(JSON.parse(data)); });
+  const dispose = acceptSessionChannel(browser.server, 'session', async () => {
+    const prepared = await broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/agent/events', {
+      headers: { origin: 'https://relay.example' },
+    }), { principalSubject: () => 'alice', authorize: () => expiresAt > 10_000, connectionExpiresAt: () => expiresAt });
+    if (!prepared || prepared instanceof Response) throw new Error('Authorized preparation failed');
+    expiresAt = 0;
+    return prepared;
+  });
+  close.push(dispose);
+  browser.native.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'subscribe', subscriptionId: 1, agentId: 'agent',
+    message: { protocolVersion: '1.4.0', type: 'negotiate' } }));
+  await expect.poll(() => received.find(message => message.type === 'closed')?.code, { timeout: 1500 }).toBe(1008);
+  expect(opened).toEqual([]);
+  expect(broker.activeStreamCount('alice')).toBe(0);
+  expect(browser.native.readyState).toBe(1);
 }, 10_000);
 
 it('returns an explicit rejection when native recovery fails and leaves unowned routes untouched', async () => {

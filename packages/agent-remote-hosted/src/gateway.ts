@@ -1,3 +1,4 @@
+import { acceptSessionChannel } from '@agent-remote-controller/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
 import { unavailableRoute } from './session-errors.js';
 import { createSecurityPolicy } from './security.js';
@@ -33,6 +34,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const auth = { origin: validateGatewayOrigin(options.origin), issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
   if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
   const tenants = new Map<string, Tenant>();
+  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
@@ -60,18 +62,24 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const verifyControl = createGatewayControlVerifier(auth, state);
   function failClosed() {
     failed = true;
+    for (const socket of browserChannels.keys()) socket.close(1013, 'Relay unavailable');
     for (const owned of tenants.values()) owned.broker.close();
     void Promise.resolve(scheduler.cancel()).catch(() => undefined);
   }
   function available() { if (closing || failed) throw new Error('Relay state is unavailable.'); state.assertAvailable(); }
+  function enforceChannels() {
+    for (const [socket, channel] of browserChannels) if (closing || failed || channel.expiresAt() <= Date.now()) socket.close(1008, 'Session expired');
+  }
   function published() {
+    enforceChannels();
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
     void previewAccess.enforce();
     if (initialized && !refreshing) queueSchedule();
   }
   function queueSchedule() {
     if (closing || failed) return;
-    const due = [renewalAt, ...state.read().loginChallenges.map(([, value]) => value.expiresAt), ...state.read().consumedProofs.map(([, expires]) => expires * 1000)];
+    const due = [...browserChannels.values()].map(channel => channel.expiresAt());
+    due.push(renewalAt, ...state.read().loginChallenges.map(([, value]) => value.expiresAt), ...state.read().consumedProofs.map(([, expires]) => expires * 1000));
     for (const owned of tenants.values()) {
       if (!durable) due.push(owned.expiresAt);
       if (owned.authorityUntil > Date.now()) due.push(owned.authorityUntil);
@@ -318,7 +326,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       ? json(200, { protocolVersion: '1.4.0', type: 'provider_list', payload: { providers: [] } })
       : json(404, unavailableRoute(path)));
   }
-  async function prepare(request: Request) {
+  async function prepare(request: Request): Promise<{ accept(socket: RelaySocket): void } | Response | undefined> {
     const url = new URL(request.url);
     if (url.origin !== auth.origin) return json(403, {});
     if (url.pathname === '/ws/remote-host') {
@@ -337,7 +345,34 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (!url.pathname.startsWith(prefix)) return json(403, {});
     const owned = tenants.get(grant.namespace); if (!owned) return json(404, {});
     const relative = relativeRequest(request, prefix);
-    const destination = routeTenant(new URL(relative.url).pathname, grant.subject) ?? owned;
+    const route = new URL(relative.url);
+    if (route.pathname === '/v1/session-channel') {
+      const mode = route.searchParams.get('observation');
+      if (mode !== 'session' && mode !== 'activity') return json(400, {});
+      const count = () => [...browserChannels.values()].filter(channel => channel.subject === grant.subject).length;
+      if (count() >= 16) return json(429, {});
+      return { accept(socket: RelaySocket) {
+        if (closing || failed || sessions.expiresAt(request, grant) <= Date.now()) { socket.close(1008, 'Session expired'); return; }
+        if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
+        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant) });
+        socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
+        queueSchedule();
+        acceptSessionChannel(socket, mode, async agentId => {
+          // Reuse the authenticated per-session route, including cross-Host sharing,
+          // native binding recovery, expiry, and resource/command authorization.
+          const target = new URL(request.url);
+          target.pathname = `${prefix}v1/sessions/${encodeURIComponent(agentId)}/events`;
+          target.search = '';
+          const prepared = await prepare(new Request(target, request));
+          if (!prepared || prepared instanceof Response) {
+            const status = prepared?.status ?? 404;
+            return { code: status >= 500 || status === 429 ? 1013 : 1008, reason: 'Session subscription is unavailable.' };
+          }
+          return prepared;
+        });
+      } };
+    }
+    const destination = routeTenant(route.pathname, grant.subject) ?? owned;
     return await destination.broker.prepareUpgrade(relative, context(request, grant)) ?? json(404, {});
   }
   function isPreviewRequest(url: URL): boolean {
@@ -424,6 +459,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     available();
     const operation = (async () => {
       const now = Date.now(); renewalAt = now + 60_000;
+      enforceChannels();
       for (const [namespace, owned] of tenants) {
         owned.broker.enforceExpiry();
         if (!durable && owned.expiresAt <= now) { tenants.delete(namespace); owned.broker.close(); }
@@ -456,7 +492,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
     refresh,
     async close() {
       if (closing) return;
-      closing = true; previewAccess.close(); sessions.close(); await scheduling.catch(() => undefined); await scheduler.cancel();
+      closing = true;
+      for (const socket of browserChannels.keys()) socket.close(1001, 'Relay stopped');
+      browserChannels.clear();
+      previewAccess.close(); sessions.close(); await scheduling.catch(() => undefined); await scheduler.cancel();
       for (const owned of tenants.values()) owned.broker.close();
       await Promise.all([...tenants.values()].map(owned => owned.broker.settled()));
       await state.close(); tenants.clear();

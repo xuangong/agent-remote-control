@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 
-import { PROTOCOL_VERSION, encodeServerMessage } from '@agent-remote-controller/agent-remote-protocol';
+import { PROTOCOL_VERSION, encodeServerMessage, acceptSessionChannel, type SessionChannelSocket } from '@agent-remote-controller/agent-remote-protocol';
 import { WebSocketServer, WebSocket } from 'ws';
 
 import type { AgentRemoteRelay } from '../relay.js';
@@ -57,6 +57,10 @@ export function attachAgentRemoteWebSocketStream(
     let agentId: string;
     try {
       const url = new URL(request.url ?? '/', 'http://relay.local');
+      if (url.pathname === '/v1/session-channel') {
+        await upgradeChannel(request, socket, head, url);
+        return;
+      }
       const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
       if (!match) {
         rejectUpgrade(socket, 404, 'Not Found');
@@ -83,6 +87,25 @@ export function attachAgentRemoteWebSocketStream(
         rejectUpgrade(socket, 400, 'Bad Request');
       }
     }).catch(() => rejectUpgrade(socket, 403, 'Forbidden'));
+  }
+
+  async function upgradeChannel(request: IncomingMessage, socket: Duplex, head: Buffer, url: URL): Promise<void> {
+    const mode = url.searchParams.get('observation');
+    if (mode !== 'session' && mode !== 'activity') { rejectUpgrade(socket, 400, 'Bad Request'); return; }
+    const principal = await options.authorizer?.authenticate(request);
+    if (!principal?.subject) { rejectUpgrade(socket, 401, 'Unauthorized'); return; }
+    websocketServer.handleUpgrade(request, socket, head, websocket => {
+      sockets.add(websocket);
+      websocket.once('close', () => sockets.delete(websocket));
+      acceptSessionChannel(adaptSocket(websocket), mode, async agentId => {
+        if (!await hasRequestAccess(options.accessPolicy, request)) return { code: 1008, reason: 'Access denied' };
+        const current = await options.authorizer!.authenticate(request);
+        if (current?.subject !== principal.subject || !await options.authorizer!.authorize({ principal: current, agentId, action: 'attach', request })) {
+          return { code: 1008, reason: 'Session access denied' };
+        }
+        return { accept(logical) { acceptSessionSocket(logical, agentId, current, request); } };
+      });
+    });
   }
 
   async function authorizeUpgrade(
@@ -119,40 +142,33 @@ export function attachAgentRemoteWebSocketStream(
     request: IncomingMessage,
   ): void {
     sockets.add(socket);
-    const wire = createSessionWire(() => relay.requireAgent(agentId), (json) => {
+    socket.once('close', () => sockets.delete(socket));
+    acceptSessionSocket(adaptSocket(socket), agentId, principal, request);
+  }
+
+  function acceptSessionSocket(socket: SessionChannelSocket, agentId: string, principal: AgentRemotePrincipal, request: IncomingMessage): void {
+    const wire = createSessionWire(() => relay.requireAgent(agentId), json => {
       if (socket.readyState === WebSocket.OPEN) socket.send(json);
     }, {
-      authorize: async (action) => {
-        try {
-          return await options.authorizer!.authorize({ principal, agentId, action, request });
-        } catch {
-          return false;
-        }
+      authorize: async action => {
+        try { return await options.authorizer!.authorize({ principal, agentId, action, request }); }
+        catch { return false; }
       },
-      onFailure: ({ kind }) => {
-        if (kind === 'manager_event_buffer_overflow') {
-          socket.close(1013, 'Agent event buffer overflowed');
-          return;
-        }
-        socket.close(1011, 'Agent Remote event delivery failed');
-      },
+      onFailure: ({ kind }) => socket.close(kind === 'manager_event_buffer_overflow' ? 1013 : 1011,
+        kind === 'manager_event_buffer_overflow' ? 'Agent event buffer overflowed' : 'Agent Remote event delivery failed'),
     });
     let receiving = Promise.resolve();
-
-    socket.on('message', (data, isBinary) => {
-      if (isBinary) {
-        sendProtocolError(socket, 'binary_message_unsupported', 'Agent Remote messages must be JSON text.', true);
+    socket.onMessage((data, binary) => {
+      if (binary) {
+        const encoded = encodeServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error',
+          payload: { code: 'binary_message_unsupported', message: 'Agent Remote messages must be JSON text.', recoverable: true } });
+        if (encoded.status === 'ok') socket.send(encoded.json);
         return;
       }
-      receiving = receiving
-        .then(() => wire.receive(data.toString()))
-        .catch(() => socket.close(1011, 'Agent Remote session failed'));
+      receiving = receiving.then(() => wire.receive(data)).catch(() => socket.close(1011, 'Agent Remote session failed'));
+      return receiving;
     });
-
-    socket.once('close', () => {
-      wire.close();
-      sockets.delete(socket);
-    });
+    socket.onClose(() => wire.close());
   }
 
   return {
@@ -171,15 +187,12 @@ function rejectUpgrade(socket: Duplex, status: number, reason: string): void {
   );
 }
 
-function sendProtocolError(socket: WebSocket, code: string, message: string, recoverable: boolean): void {
-  const encoded = encodeServerMessage({
-    protocolVersion: PROTOCOL_VERSION,
-    type: 'protocol_error',
-    payload: { code, message, recoverable },
-  });
-  if (encoded.status === 'rejected') {
-    socket.close(1011, 'Agent Remote serialization failed');
-    return;
-  }
-  socket.send(encoded.json);
+function adaptSocket(socket: WebSocket): SessionChannelSocket {
+  return {
+    get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
+    send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
+    onMessage(listener) { const callback = (data: WebSocket.RawData, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', callback); return () => { socket.off('message', callback); }; },
+    onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
+    onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
+  };
 }

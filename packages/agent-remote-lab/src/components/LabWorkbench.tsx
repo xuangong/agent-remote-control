@@ -34,7 +34,7 @@ export interface LabWorkbenchActions {
 }
 
 export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
-  const actions = useActionFeedback(suppliedActions, state?.agent?.id);
+  const actions = useActionFeedback(sessionStatus === 'ready' ? suppliedActions : { deleteMessage: suppliedActions.deleteMessage }, state?.agent?.id);
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
   const readingPositions = recoveryPositions ?? localPositions;
@@ -52,6 +52,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
   }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries]);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
+  const loadingLabel = sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session';
   const connectionFailure = sessionStatus === 'connecting'
     ? state?.diagnostics.find((diagnostic) => !diagnostic.recoverable)
     : undefined;
@@ -74,10 +75,10 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
   const activityLabel = agentFailure ? 'Agent failed'
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
-    : sessionStatus === 'connecting' ? 'Connecting'
+    : sessionStatus === 'connecting' ? 'Opening session'
     : sessionStatus === 'catching_up' ? 'Synchronizing'
     : sessionStatus === 'idle' ? 'Disconnected'
-    : !state?.agent ? 'Connecting'
+    : !state?.agent ? 'Opening session'
     : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
     : runtimeConnection?.state === 'restoring' ? 'Restoring'
     : runtimeConnection?.state === 'unavailable' ? 'Unavailable'
@@ -90,11 +91,11 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
     <header className="lab-workbench-heading">
       <div>
         {conversationPath}
-        <h2 className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `Connecting to ${attachingAgentId}` : 'Ready for a session'}</h2>
+        <h2 className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
       </div>
       {sessionManager}
       <WorkspaceVscodeLink workspace={state?.agent?.cwd} />
-      <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? 'Connecting' : 'Awaiting Agent'}</span>
+      <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span>
     </header>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
     <div className="lab-timeline-stage">
@@ -119,7 +120,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
               resolveSessionLink={resolveSessionLink}
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
-              interactionDisabled={runtimeMutationDisabled}
+              interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
               onResourceRequest={actions.requestResource}
               onResourceResolve={actions.resolveResource}
               questionDrafts={questionDrafts}
@@ -127,7 +128,7 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
             />
           </> : isAttaching ? <div className="lab-empty-state">
             <span className="lab-empty-icon" aria-hidden="true">↗</span>
-            <h3>Connecting to {attachingAgentId}</h3>
+            <h3>{sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} {attachingAgentId}</h3>
             <p>The Timeline will appear when the Agent Snapshot is available.</p>
           </div> : <div className="lab-empty-state">
             <span className="lab-empty-icon" aria-hidden="true">↗</span>
@@ -150,8 +151,8 @@ export function LabWorkbench({ onInspectEntry, revealEntry, state, sessionStatus
         {composerContext}
         {composerNotice}
         <LiveControlPanel
-          consoleCommands={consoleCommands}
-          onExecuteConsoleCommand={onExecuteConsoleCommand}
+          consoleCommands={sessionStatus === 'ready' ? consoleCommands : []}
+          onExecuteConsoleCommand={sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
           sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
           state={state}
           sessionKey={state?.agent?.id}

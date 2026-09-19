@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Session channels acceptance</title></head>
+<body>
+  <main id="fixture">
+    <nav aria-label="Session controls">
+      <button id="primary-a" disabled>Primary A</button><button id="primary-b" disabled>Primary B</button>
+      <button id="side-a" disabled>Open side A</button><button id="close-side" disabled>Close side</button>
+      <button id="advance-a" disabled>Advance A</button><button id="dispose" disabled>Dispose channels</button>
+    </nav>
+    <output id="activity-state"></output><output id="advance-state"></output><output id="error" role="alert"></output>
+    <section aria-label="Primary conversation"><output id="primary-state"></output><button id="send" disabled>Send to primary</button><pre id="primary-timeline"></pre></section>
+    <section aria-label="Side conversation"><output id="side-state"></output><pre id="side-timeline"></pre></section>
+  </main>
+  <script type="module" src="./session-channels.ts"></script>
+</body>
+</html>

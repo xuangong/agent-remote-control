@@ -1,3 +1,4 @@
+import { SessionChannelClientMessage, SessionChannelServerMessage } from './session-channel.js';
 import type { TSchema } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
@@ -212,4 +213,20 @@ export function decodeIncompatibleProtocolVersionError(
 
 export function encodeServerMessage(value: ServerMessageValue): WireEncodeResult {
   return encode(value, ServerMessage);
+}
+
+export function decodeSessionChannelClientMessage(json: string): WireDecodeResult<SessionChannelClientMessage> {
+  return decode(json, SessionChannelClientMessage);
+}
+
+export function encodeSessionChannelClientMessage(value: SessionChannelClientMessage): WireEncodeResult {
+  return encode(value, SessionChannelClientMessage);
+}
+
+export function decodeSessionChannelServerMessage(json: string): WireDecodeResult<SessionChannelServerMessage> {
+  return decode(json, SessionChannelServerMessage);
+}
+
+export function encodeSessionChannelServerMessage(value: SessionChannelServerMessage): WireEncodeResult {
+  return encode(value, SessionChannelServerMessage);
 }

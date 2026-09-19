@@ -8,7 +8,7 @@ import { LabWorkbench } from './LabWorkbench.js';
 
 describe('LabWorkbench', () => {
   it.each([
-    ['starting', 'connecting', 'Connecting'],
+    ['starting', 'connecting', 'Opening session'],
     ['idle', 'catching_up', 'Synchronizing'],
     ['idle', 'idle', 'Disconnected'],
     ['starting', 'ready', 'Starting'],
@@ -90,8 +90,9 @@ describe('LabWorkbench', () => {
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
     expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({
-      disabled: true, value: 'Keep my recovery draft',
+      disabled: false, value: 'Keep my recovery draft',
     });
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);
@@ -110,8 +111,14 @@ describe('LabWorkbench', () => {
   it('names the Agent being attached instead of presenting a session-start empty state', async () => {
     const container = await render(<LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} />);
 
-    expect(container.textContent).toContain('Connecting to remembered-agent');
+    expect(container.textContent).toContain('Opening session remembered-agent');
     expect(container.textContent).not.toContain('Start with a Provider');
+  });
+
+  it('shows content loading after negotiation before the first snapshot', async () => {
+    const container = await render(<LabWorkbench sessionStatus="catching_up" attachingAgentId="remembered-agent" actions={{}} />);
+    expect(container.textContent).toContain('Loading conversation remembered-agent');
+    expect(container.textContent).not.toContain('Connecting');
   });
 
   it('alerts with a generic connection failure before readiness and preserves the diagnostic', async () => {
@@ -197,4 +204,37 @@ it('does not notify a late action failure in a different session', async () => {
   await act(async () => reject(new Error('Previous session failed.')));
   expect(container.querySelector('.lab-toast')).toBeNull();
   expect(sendMessage).toHaveBeenCalledTimes(1);
+});
+
+it.each(['connecting', 'catching_up', 'disconnected', 'idle'] as const)('locks cached-session operations while %s without blocking a separate ready window', async status => {
+  const pending = { kind: 'plan_approval' as const, requestId: 'approval', plan: 'Cached approval', allowedActions: ['approve' as const] };
+  const state = { ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, cancel: true } }, pendingInteractions: [pending] };
+  const send = vi.fn(async () => {}), cancel = vi.fn(async () => {}), approve = vi.fn(async () => {}), fork = vi.fn(async () => ({}));
+  let synchronize!: () => void;
+  function Harness() {
+    const [current, setCurrent] = useState<typeof status | 'ready'>(status); synchronize = () => setCurrent('ready');
+    return <><section data-window="pending"><LabWorkbench state={state} sessionStatus={current} messageDraft="/side"
+      actions={{ sendMessage: send, cancel, respondToInteraction: approve }}
+      consoleCommands={[{ id: 'console:side', name: 'side', kind: 'command', description: 'Side conversation' }]} onExecuteConsoleCommand={fork} /></section>
+      <section data-window="ready"><LabWorkbench state={state} sessionStatus="ready" messageDraft="Ready window input" actions={{ sendMessage: send, respondToInteraction: approve }} /></section></>;
+  }
+  const container = await render(<Harness />);
+  const pendingWindow = container.querySelector('[data-window="pending"]')!;
+  const readyWindow = container.querySelector('[data-window="ready"]')!;
+  expect(pendingWindow.querySelector('[aria-label="Pending interactions"]')).not.toBeNull();
+  expect(pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(pendingWindow.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
+  expect(pendingWindow.querySelector('fieldset')!.disabled).toBe(true);
+  expect(readyWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+  expect(readyWindow.querySelector('fieldset')!.disabled).toBe(false);
+  await act(async () => {
+    pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click();
+    pendingWindow.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.click();
+  });
+  expect(send).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled(); expect(approve).not.toHaveBeenCalled(); expect(fork).not.toHaveBeenCalled();
+  await act(async () => synchronize());
+  expect(pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+  expect(pendingWindow.querySelector('fieldset')!.disabled).toBe(false);
+  await act(async () => pendingWindow.querySelector<HTMLButtonElement>('[role="option"]')!.click());
+  expect(fork).toHaveBeenCalledWith('console:side', '');
 });

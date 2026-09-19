@@ -769,6 +769,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       track(client);
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);
+      if (client.readyState !== RELAY_SOCKET_OPEN) return;
       const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [] };
       host.streams.set(streamId, stream);
       const opening = setTimeout(() => client.close(1013, 'Remote stream opening timed out'), options.rpcTimeoutMs ?? 30_000);

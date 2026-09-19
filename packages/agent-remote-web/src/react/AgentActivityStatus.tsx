@@ -19,7 +19,7 @@ export function AgentActivityStatus({ state, disabled, commandPending = false, i
   const runtimeConnection = agent?.runtimeInfo.connection;
   const runtimeUnavailable = runtimeConnection !== undefined && runtimeConnection.state !== 'connected';
   const unavailable = disabled || runtimeUnavailable;
-  const label = disabled ? 'Connection unavailable'
+  const label = disabled ? 'Waiting for session'
     : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
     : runtimeConnection?.state === 'restoring' ? 'Restoring'
     : runtimeConnection?.state === 'unavailable' ? 'Native runtime unavailable'

@@ -16,3 +16,5 @@ export * from './session-settings.js';
 export * from './commands.js';
 export * from './operations.js';
 export * from './vscode-tunnel.js';
+export * from './session-channel.js';
+export * from './session-channel-wire.js';

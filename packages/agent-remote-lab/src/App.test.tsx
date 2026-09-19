@@ -254,8 +254,8 @@ describe('App', () => {
     try {
       const container = await render(<App transport={labTransport()} />);
       expect(container.querySelector('[data-testid="workbench"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Connecting');
-      expect(container.textContent).toContain('Connecting to remembered-agent');
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Opening session');
+      expect(container.textContent).toContain('Opening session remembered-agent');
       expect(container.textContent).not.toContain('Start with a Provider');
     } finally {
       window.history.replaceState(null, '', '/');
@@ -490,7 +490,7 @@ describe('App', () => {
 
       expect(container.querySelector('#lab-context')).toBeNull();
       expect(document.activeElement).toBe(container.querySelector('[data-testid="workbench"]'));
-      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Connecting');
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Opening session');
     } finally {
       window.matchMedia = originalMatchMedia;
     }

@@ -122,10 +122,14 @@ describe('LiveControlPanel', () => {
         },
       },
     };
-    const container = await render(<LiveControlPanel state={state} draft="Keep my recovery draft" />);
+    const onDraftChange = vi.fn();
+    const container = await render(<LiveControlPanel state={state} draft="Keep my recovery draft" onDraftChange={onDraftChange} />);
     const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
 
-    expect(input).toMatchObject({ disabled: true, value: 'Keep my recovery draft', placeholder: message });
+    expect(input).toMatchObject({ disabled: false, value: 'Keep my recovery draft', placeholder: message });
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+    await type(input, 'Edited while recovering');
+    expect(onDraftChange).toHaveBeenLastCalledWith('Edited while recovering');
     expect(container.textContent).toContain(message);
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(activity);

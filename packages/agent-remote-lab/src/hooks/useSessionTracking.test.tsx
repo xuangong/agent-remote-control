@@ -8,7 +8,7 @@ import { readTrackedSessions } from '../tracking-state.js';
 import { sessionKey } from '../session-tree.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
-it('observes only background sessions while preserving the current session tracking choice', async () => {
+it('keeps current sessions observed while excluding them from the tracking list', async () => {
   vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockResolvedValue({ agentId: 'agent' });
   const connections = new Set<string>();
   const transport: RemoteAgentTransport = {
@@ -29,14 +29,14 @@ it('observes only background sessions while preserving the current session track
   await render(<Fixture />);
   await act(async () => tracking.toggle(star));
   expect(tracking.sessions).toEqual([star]);
-  expect(connections.size).toBe(0);
+  expect(connections.size).toBe(1);
   expect(tracking.backgroundSessions).toEqual([]);
   await act(async () => select(undefined));
   expect(connections.size).toBe(1);
   expect(tracking.backgroundSessions).toEqual([star]);
   await act(async () => select(sessionKey(star)));
-  expect(connections.size).toBe(0);
-  expect(tracking.observations).toEqual({});
+  expect(connections.size).toBe(1);
+  expect(tracking.observations[sessionKey(star)]?.connection).toBe('connecting');
   expect(readTrackedSessions('alice')).toEqual([star]);
 });
 it('restores local selections, stops observations on untrack and logout, and never stops the native session', async () => {
@@ -121,6 +121,54 @@ it('acknowledges only the selected session and clears reminders when that sessio
   await emit('native', 'waiting');
   expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
   await act(async () => select(sessionKey(second)));
-  expect(tracking.observations[sessionKey(second)]).toBeUndefined();
+  expect(tracking.observations[sessionKey(second)]).toMatchObject({ activity: 'idle', changed: false, attention: undefined });
   expect(tracking.backgroundSessions).toEqual([star]);
+});
+
+
+it('observes open windows without attachment or history and preserves subscriptions across focus and tracking changes', async () => {
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(new Error('Open windows already have live bindings'));
+  const listeners = new Map<string, Parameters<RemoteAgentTransport['connect']>[1]>();
+  const connect = vi.fn<RemoteAgentTransport['connect']>((id, listener) => {
+    listeners.set(id, listener); queueMicrotask(() => listener.onOpen());
+    return { close: () => { listeners.delete(id); }, send: message => {
+      if (message.type !== 'negotiate') return;
+      expect(message.observation).toBe('activity');
+      listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
+      listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
+    } };
+  });
+  const fetchSnapshot = vi.fn(), fetchTimeline = vi.fn();
+  const transport = { connect, fetchSnapshot, fetchTimeline, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as RemoteAgentTransport;
+  const primary = { ...star, agentId: 'primary' };
+  const side = { ...star, nativeSessionId: 'side', agentId: 'side' };
+  let tracking!: SessionTracking;
+  let focus!: (key: string) => void;
+  let closeSide!: () => void;
+  function Fixture() {
+    const [key, setKey] = useState(sessionKey(primary)); focus = setKey;
+    const [open, setOpen] = useState([primary, side]); closeSide = () => setOpen([primary]);
+    tracking = useSessionTracking('alice', transport, key, open);
+    return <>{tracking.observers}</>;
+  }
+  await render(<Fixture />);
+  expect(connect).toHaveBeenCalledTimes(2);
+  expect(tracking.observations[sessionKey(primary)]).toMatchObject({ activity: 'running', changed: false });
+  expect(attach).not.toHaveBeenCalled();
+  await act(async () => tracking.toggle(side));
+  await act(async () => focus(sessionKey(side)));
+  expect(tracking.backgroundSessions).toEqual([]);
+  await act(async () => listeners.get('side')!.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'side', status: 'waiting' } }));
+  expect(tracking.observations[sessionKey(side)]).toMatchObject({ activity: 'waiting', changed: false, attention: undefined });
+  await act(async () => tracking.toggle(side));
+  expect(listeners.size).toBe(2);
+  await act(async () => tracking.toggle(side));
+  await act(async () => { focus(sessionKey(primary)); closeSide(); });
+  expect(tracking.backgroundSessions).toEqual([side]);
+  expect(connect).toHaveBeenCalledTimes(2);
+  expect(attach).not.toHaveBeenCalled();
+  await act(async () => tracking.toggle(side));
+  expect(listeners.size).toBe(1);
+  expect(fetchSnapshot).not.toHaveBeenCalled();
+  expect(fetchTimeline).not.toHaveBeenCalled();
 });

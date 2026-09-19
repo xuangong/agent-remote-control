@@ -19,7 +19,8 @@ it('restores mobile conversation actions when its Host reconnects while Context 
     const container = await render(<App baseUrl={baseUrl} directory={directory} hostService={{ hosts, pair: vi.fn() }} initialState={replicaState} initialSessionStatus="ready" actions={{ sendMessage }} />);
     expect(container.querySelector('#lab-context')).toBeNull();
     const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
-    expect(input.disabled).toBe(true);
+    expect(input.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
     online = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(hosts).toHaveBeenCalledTimes(2);
@@ -29,7 +30,8 @@ it('restores mobile conversation actions when its Host reconnects while Context 
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'After the Host reconnects');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
     expect(sendMessage).toHaveBeenCalledWith('After the Host reconnects');
   } finally {
     window.localStorage.removeItem(`agent-remote-opened:${baseUrl}`);

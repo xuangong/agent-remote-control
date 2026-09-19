@@ -304,6 +304,8 @@ export class RemoteSessionClient {
     if (generation !== this.generation) return;
     switch (message.type) {
       case 'negotiated':
+        this.setStatus('catching_up');
+        return;
       case 'provider_list':
       case 'agent_session':
       case 'timeline_page':

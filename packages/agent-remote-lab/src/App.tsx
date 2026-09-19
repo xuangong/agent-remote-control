@@ -129,7 +129,18 @@ function AppContent({
   const shellRef = useVisualViewport();
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
-    ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
+    ?? new HttpWebSocketTransport(baseUrl, { sessionChannels: true }) as LabTransport, [baseUrl, injectedTransport]);
+  const mountedTransport = useRef<LabTransport>();
+  useEffect(() => {
+    mountedTransport.current = transport;
+    return () => {
+      mountedTransport.current = undefined;
+      // StrictMode immediately reuses this transport after its effect cleanup probe.
+      if (!injectedTransport) queueMicrotask(() => {
+        if (mountedTransport.current !== transport) (transport as HttpWebSocketTransport).dispose();
+      });
+    };
+  }, [transport, injectedTransport]);
   const favorites = useSessionStars(baseUrl, userScoped);
   const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
     try {
@@ -169,10 +180,16 @@ function AppContent({
   const [directoryRevision, setDirectoryRevision] = useState(0);
   const creationReservation = useRef<{ operationId: string; options: CreateSessionOptions; providerId: string }>();
   const [creationLocked, setCreationLocked] = useState(false);
-  const replicas = useRef(new Map<string, AgentReplica>());
+  const replicas = useMemo(() => new Map<string, AgentReplica>(), [baseUrl, transport]);
+  const replicaFor = useCallback((agentId: string) => {
+    let replica = replicas.get(agentId);
+    if (!replica) { replica = new AgentReplica(); replicas.set(agentId, replica); }
+    return replica;
+  }, [replicas]);
   const [uncertainMutation, setUncertainMutation] = useState(false);
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>(() => readDrafts(baseUrl));
   const clientRef = useRef<RemoteSessionClient>();
+  const primaryBinding = useRef<{ baseUrl: string; transport: LabTransport; agentId: string }>();
   const replicaRef = useRef<AgentReplica>();
   const unsubscribeReplicaRef = useRef<() => void>();
   const transitionRef = useRef(false);
@@ -340,22 +357,22 @@ function AppContent({
       setInspectorOpen(false);
       setActiveView('workbench');
     }
-    setState(replicas.current.get(agentId)?.getState());
+    setState(replicas.get(agentId)?.getState());
     setStatus('connecting');
     setAttachingAgentId(agentId);
-    const replica = replicas.current.get(agentId) ?? new AgentReplica();
-    replicas.current.set(agentId, replica);
+    const replica = replicaFor(agentId);
     const saved = openedSessionsRef.current.find(item => item.agentId === agentId);
     const stopMessageRecovery = recoverMessages(replica, baseUrl, saved ? sessionKey(saved) : agentId, agentId);
     const client = new RemoteSessionClient(agentId, transport, replica, { historyPageSize: 100 });
     replicaRef.current = replica;
     clientRef.current = client;
+    primaryBinding.current = { baseUrl, transport, agentId };
     const unsubscribe = replica.subscribe(() => { if (replicaRef.current === replica) setState(replica.getState()); });
     unsubscribeReplicaRef.current = () => { unsubscribe(); stopMessageRecovery(); };
     client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
     client.start();
     rememberAgent(agentId);
-  }, [baseUrl, transport]);
+  }, [baseUrl, transport, replicas, replicaFor]);
 
   useEffect(() => {
     if (initialState) return;
@@ -386,7 +403,7 @@ function AppContent({
     const target = new SessionDirectoryClient(baseUrl, undefined, hostId);
     setAttachingAgentId(location.agentId ?? nativeSessionId);
     setStatus('connecting');
-    setSessionNotice({ tone: 'status', message: 'Reconnecting to the existing session. Waiting for the Host to open it…' });
+    setSessionNotice({ tone: 'status', message: 'Opening the existing session. Waiting for the Host…' });
     const cancel = restoreSession({
       active: () => navigationGeneration.current === generation,
       open: signal => parentNativeSessionId
@@ -717,7 +734,10 @@ function AppContent({
   const focusedWindow = stackPath[stackRange.end];
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
-  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined);
+  const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
+    && primaryBinding.current.transport === transport && primaryBinding.current.agentId === stackRoot?.agentId);
+  const openWindows = useMemo(() => [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [stackRoot, primaryIsBound, sideSessions]);
+  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows);
   const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
   useEffect(() => {
     if (addressSession && state?.agent && !initialState) saveLastSession(baseUrl, { ...addressSession, hostId: addressSession.hostId ?? 'local' });
@@ -1032,9 +1052,9 @@ function AppContent({
         <LabWorkbench
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
           revealEntry={traceRequest?.view === 'workbench' ? traceRequest : undefined}
-          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && (status === 'ready' || initialState) ? conversationActions : { deleteMessage: conversationActions.deleteMessage }} visible={activeView === 'workbench' && primaryExpanded}
-          consoleCommands={directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
-          onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
+          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={!hostOffline && !(forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId) && status === 'ready' ? conversationActions : { deleteMessage: conversationActions.deleteMessage }} visible={activeView === 'workbench' && primaryExpanded}
+          consoleCommands={status === 'ready' && !hostOffline && directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
+          onExecuteConsoleCommand={(id, args) => state && status === 'ready' && !hostOffline ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('Wait for this session to finish synchronizing.'))}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
           sessionManager={<>{!compactLayout && addressSession ? <StarButton session={addressSession} favorites={favorites} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
@@ -1060,7 +1080,7 @@ function AppContent({
         />
         </div>
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
-          key={sessionKey(session)} session={session} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
+          key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
           position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}
           expanded={expandedKeys.has(sessionKey(session))}
           focused={focusedWindow !== undefined && sessionKey(focusedWindow) === sessionKey(session)}
@@ -1137,7 +1157,7 @@ function message(error: unknown, fallback: string): string {
 
 function sessionStatusLabel(status: RemoteSessionStatus): string {
   switch (status) {
-    case 'connecting': return 'Connecting';
+    case 'connecting': return 'Opening session';
     case 'catching_up': return 'Synchronizing';
     case 'disconnected': return 'Reconnecting';
     case 'ready': return 'Ready';

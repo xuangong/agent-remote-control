@@ -72,7 +72,7 @@ describe('composer activity', () => {
   it('does not present disconnected state as live or allow interrupt', async () => {
     const cancel = vi.fn();
     const container = await render(<LiveControlPanel state={active} disabled onCancel={cancel} />);
-    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Connection unavailable');
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Waiting for session');
     expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
     const interrupt = container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement;
     expect(interrupt.disabled).toBe(true);

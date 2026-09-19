@@ -95,6 +95,18 @@ function live(
 }
 
 describe('RemoteSessionClient', () => {
+  it('reports content synchronization after negotiation while awaiting its snapshot', () => {
+    const transport = new FakeTransport();
+    const client = new RemoteSessionClient('agent-one', transport, new AgentReplica());
+    const statuses: string[] = [];
+    client.subscribeStatus(value => statuses.push(value));
+    client.start(); transport.open();
+    expect(statuses.at(-1)).toBe('connecting');
+    transport.emit({ protocolVersion: '1.4.0', type: 'negotiated' });
+    expect(statuses.at(-1)).toBe('catching_up');
+    client.stop();
+  });
+
   it.each([undefined, 'immediate', 'next_turn'] as const)('sends %s delivery with the existing message acknowledgement', async (delivery) => {
     const transport = new FakeTransport();
     const client = connectedClient(transport, { requestId: () => 'message-delivery' });

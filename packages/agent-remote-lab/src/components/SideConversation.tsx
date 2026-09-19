@@ -13,7 +13,8 @@ import { RecoveryScope } from '../conversation-recovery.js';
 import { recoverMessages } from '../message-recovery.js';
 import { sessionKey } from '../session-tree.js';
 
-export function SideConversation({ session, transport, store, draft, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild }: {
+  replica?: AgentReplica;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
   initialInput?: { pending: boolean; error?: string };
   session: OpenedSession; transport: RemoteAgentTransport; store: ForkStore; draft: string; onDraftChange(text: string): void;
@@ -22,22 +23,22 @@ export function SideConversation({ session, transport, store, draft, onDraftChan
   onFork(state: AgentReplicaState, session: OpenedSession, id: string, args: string): Promise<AgentCommandResult>; visible?: boolean;
 }) {
   const recoveryScope = useContext(RecoveryScope)?.scope;
-  const [state, setState] = useState<AgentReplicaState>();
+  const [state, setState] = useState<AgentReplicaState | undefined>(() => cachedReplica?.getState().agent ? cachedReplica.getState() : undefined);
   const [status, setStatus] = useState<RemoteSessionStatus>('connecting');
   const [questions, setQuestions] = useState<Record<string, QuestionDraft>>({});
   const client = useRef<RemoteSessionClient>();
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
-    const replica = new AgentReplica();
+    const replica = cachedReplica ?? new AgentReplica();
     const stopRecovery = recoveryScope ? recoverMessages(replica, recoveryScope, sessionKey(session), session.agentId) : () => undefined;
     const connection = new RemoteSessionClient(session.agentId, transport, replica, { historyPageSize: 100 });
     client.current = connection;
-    setState(undefined); setStatus('connecting'); setQuestions({});
+    setState(replica.getState().agent ? replica.getState() : undefined); setStatus('connecting'); setQuestions({});
     const unsubscribe = replica.subscribe(() => setState(replica.getState()));
     const unsubscribeStatus = connection.subscribeStatus(setStatus);
     connection.start();
     return () => { unsubscribe(); unsubscribeStatus(); connection.stop(); stopRecovery(); if (client.current === connection) client.current = undefined; };
-  }, [session.agentId, transport, recoveryScope]);
+  }, [session.agentId, transport, recoveryScope, cachedReplica]);
   useEffect(() => { if (status === 'ready' && focused && expanded && visible) panel.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true }); }, [session.agentId, status, focused, expanded, visible]);
   const activity = sessionActivity(state);
   useEffect(() => { onActivityChange?.(session.agentId, activity); }, [session.agentId, activity, onActivityChange]);
@@ -63,7 +64,7 @@ export function SideConversation({ session, transport, store, draft, onDraftChan
       </button></>}
       composerContext={record ? <ForkReference fork={record} onOpen={onOpenSource} /> : undefined}
       composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.all().filter((fork) => fork.target && sessionKey(fork.source) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} /></>}
-      consoleCommands={!initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
-      onExecuteConsoleCommand={(id, args) => { if (!state) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} />
+      consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
+      onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} />
   </aside>;
 }

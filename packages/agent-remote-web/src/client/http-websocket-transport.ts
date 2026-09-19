@@ -18,6 +18,7 @@ import {
 } from '@agent-remote-controller/agent-remote-protocol';
 
 import { watchPageResume } from './page-resume.js';
+import { SessionChannelPool } from './session-channel-transport.js';
 import { RemoteOperationError } from './transport.js';
 import type {
   RemoteAgentTransport,
@@ -35,6 +36,7 @@ type WebSocketEventHandler<TEvent> = {
 
 export interface WebSocketLike {
   readonly readyState?: number;
+  readonly bufferedAmount?: number;
   onopen: WebSocketEventHandler<unknown> | null;
   onmessage: WebSocketEventHandler<{ data: unknown }> | null;
   onclose: WebSocketEventHandler<unknown> | null;
@@ -44,6 +46,7 @@ export interface WebSocketLike {
 }
 
 export interface HttpWebSocketTransportDependencies {
+  readonly sessionChannels?: boolean;
   readonly fetch?: typeof fetch;
   readonly WebSocket?: new (url: string) => WebSocketLike;
   readonly webSocketFactory?: (url: string) => WebSocketLike;
@@ -59,6 +62,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   private readonly diagnosticListeners = new Set<(diagnostic: RemoteTransportDiagnostic) => void>();
   private readonly protocolListeners = new Set<(observation: RemoteProtocolObservation) => void>();
   private requestCounter = 0;
+  private readonly sessionChannels?: SessionChannelPool;
 
   constructor(
     private readonly baseUrl: string,
@@ -70,6 +74,14 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.createWebSocket = dependencies.webSocketFactory ?? ((url) => new WebSocketImplementation(url));
     this.createRequestId = dependencies.requestId ?? (() => `remote-http-${++this.requestCounter}`);
     this.createOperationId = dependencies.operationId ?? (() => crypto.randomUUID());
+    if (dependencies.sessionChannels) {
+      this.sessionChannels = new SessionChannelPool({
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}`)),
+        connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
+        observe: (observation) => this.observe(observation),
+        diagnostic: (diagnostic) => this.diagnostic(diagnostic),
+      });
+    }
   }
 
   async fetchSnapshot(agentId: string, options?: RemoteRequestOptions) {
@@ -156,6 +168,14 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   }
 
   connect(agentId: string, listener: RemoteTransportListener): RemoteConnection {
+    return this.sessionChannels?.connect(agentId, listener) ?? this.connectDirect(agentId, listener);
+  }
+
+  dispose(): void {
+    this.sessionChannels?.dispose();
+  }
+
+  private connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection {
     const socket = this.createWebSocket(this.websocketUrl(
       `v1/sessions/${encodeURIComponent(agentId)}/events`,
     ));

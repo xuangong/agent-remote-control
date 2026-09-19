@@ -297,8 +297,8 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       onKeyDown={handleKeyDown}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
-      disabled={!ready || readOnly || busy}
-      placeholder={readOnly ? readOnlyHint : runtimeUnavailable ?? (ready ? 'Message the Agent…' : 'Open or attach to an Agent first.')}
+      disabled={!state?.agent || readOnly || busy}
+      placeholder={readOnly ? readOnlyHint : runtimeUnavailable ?? (ready ? 'Message the Agent…' : state?.agent ? 'Draft a message while this session synchronizes…' : 'Open or attach to an Agent first.')}
       aria-describedby={`${controlId}-hint`}
       aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
@@ -322,7 +322,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
       <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={`${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!ready || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !text.trim() || (!isCommand && (capabilities?.sendMessage !== true || !onSendMessage)))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
     </div>
     {runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
-      : !ready ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
+      : !ready ? <p className="agent-composer-note">{state?.agent ? 'You can edit your draft. Sending is available when this session is ready.' : 'Open or attach to an Agent first.'}</p> : null}
     {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}

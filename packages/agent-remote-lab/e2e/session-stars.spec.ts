@@ -290,6 +290,8 @@ test('draws the tracking edge from applied content and closes immediately when t
   await page.goto('/e2e/fixtures/session-stars.html?switching=1&catchup=1');
   await expect(page.locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
   const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
+  await page.mouse.move(0, 0);
+  const normalBorder = await trigger.evaluate(node => getComputedStyle(node).borderTopColor);
   await trigger.click(); await page.locator('.lab-tracking-floating .lab-session-row').click();
   const ring = page.locator('.lab-tracking-catch-up');
   await expect(ring).toHaveAttribute('data-state', 'catching_up');
@@ -299,6 +301,10 @@ test('draws the tracking edge from applied content and closes immediately when t
   await input.fill('Draft while catching up');
   await page.waitForTimeout(1200);
   await expect(ring).toHaveAttribute('aria-valuenow', '0');
+  await expect(trigger).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
+  await expect(ring.locator('rect')).toHaveCSS('stroke-dashoffset', '100px');
+  await expect(ring.locator('rect')).toHaveCSS('stroke', normalBorder);
+  await page.screenshot({ path: testInfo.outputPath('catch-up-empty.png') });
   await page.evaluate(() => window.dispatchEvent(new Event('fixture-history')));
   await expect(ring).toHaveAttribute('aria-valuenow', '33');
   const rect = ring.locator('rect');
@@ -308,19 +314,23 @@ test('draws the tracking edge from applied content and closes immediately when t
   await expect(ring).toHaveAttribute('aria-valuenow', '66');
   await expect.poll(() => rect.evaluate(node => parseFloat(getComputedStyle(node).strokeDashoffset))).toBeCloseTo(100 / 3, 2);
   await page.screenshot({ path: testInfo.outputPath('catch-up-partial.png') });
-  const completion = await page.evaluate(() => new Promise<{ state?: string; offset: string; transition: string }>(resolve => {
+  const completion = await page.evaluate(() => new Promise<{ state?: string; offset: string; transition: string; border: string; visibility: string }>(resolve => {
     window.dispatchEvent(new CustomEvent('fixture-content', { detail: 3 }));
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const ring = document.querySelector<HTMLElement>('.lab-tracking-catch-up')!;
       const style = getComputedStyle(ring.querySelector('rect')!);
-      resolve({ state: ring.dataset.state, offset: style.strokeDashoffset, transition: style.transitionDuration });
+      resolve({ state: ring.dataset.state, offset: style.strokeDashoffset, transition: style.transitionDuration,
+        border: getComputedStyle(ring.closest('button')!).borderTopColor, visibility: getComputedStyle(ring).visibility });
     }));
   }));
-  expect(completion).toEqual({ state: 'complete', offset: '0px', transition: '0s' });
+  expect(completion).toEqual({ state: 'complete', offset: '0px', transition: '0s', border: normalBorder, visibility: 'hidden' });
   await expect(input).toHaveValue('Draft while catching up');
   expect(await composer.boundingBox()).toEqual(geometry);
   await page.screenshot({ path: testInfo.outputPath('catch-up-complete.png') });
-  await expect.poll(() => ring.evaluate(node => getComputedStyle(node).opacity)).toBe('0');
+  await expect(trigger).toHaveCSS('border-top-color', normalBorder);
+  await expect(ring).toHaveCSS('visibility', 'hidden');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(trigger).toHaveCSS('border-top-color', normalBorder);
   // The overlay never intercepts the existing menu or movement controls.
   await trigger.click(); await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   expect(errors).toEqual([]);

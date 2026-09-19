@@ -1184,7 +1184,8 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   --tracking-pending-surface: color-mix(in oklab, oklch(0.8 0.16 87) 40%, var(--obs-surface));
   --tracking-idle-surface: color-mix(in oklab, var(--obs-text-secondary) 24%, var(--obs-surface));
   position: fixed; right: 12px; top: calc(60px + env(safe-area-inset-top, 0px)); z-index: 140; }
-.lab-tracking-floating .lab-session-popover-trigger { border-radius: 24px; box-shadow: 0 2px 10px color-mix(in oklab, var(--obs-text) 10%, transparent); padding: 8px 12px; touch-action: none; user-select: none; cursor: grab; }
+.lab-tracking-floating button.lab-session-popover-trigger { --tracking-edge-color: var(--obs-control-border); border-color: var(--tracking-edge-color); border-radius: 24px; box-shadow: 0 2px 10px color-mix(in oklab, var(--obs-text) 10%, transparent); padding: 8px 12px; touch-action: none; user-select: none; cursor: grab; }
+.lab-tracking-floating button.lab-session-popover-trigger:where(:hover:not(:disabled)) { --tracking-edge-color: var(--obs-action); }
 .lab-tracking-floating .lab-session-popover-trigger:active { cursor: grabbing; }
 .lab-tracking-floating .lab-session-popover-panel { position: fixed; left: var(--tracking-panel-left); right: auto; top: var(--tracking-panel-top); bottom: var(--tracking-panel-bottom); width: var(--tracking-panel-width); max-height: var(--tracking-panel-height); }
 .lab-tracking-floating .agent-session-title[data-session-status="unknown"] { color: var(--agent-muted); }
@@ -1196,14 +1197,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 }
 .lab-tracking-badge { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border: 2px solid var(--obs-surface); border-radius: 50%; background: var(--obs-text); }
 .lab-tracking-attention { position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--obs-warning); }
-.lab-tracking-floating[data-attention="true"] .lab-session-popover-trigger { border-color: var(--obs-warning); }
+.lab-tracking-floating[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
 .lab-tracking-floating[data-alert="pending"] .lab-session-popover-trigger {
   animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite;
-  background: var(--tracking-pending-surface); border-color: oklch(0.52 0.108 87);
+  background: var(--tracking-pending-surface); --tracking-edge-color: oklch(0.52 0.108 87);
 }
 .lab-tracking-floating[data-alert="idle"] .lab-session-popover-trigger {
   animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite;
-  background: var(--tracking-idle-surface); border-color: var(--obs-text-secondary);
+  background: var(--tracking-idle-surface); --tracking-edge-color: var(--obs-text-secondary);
 }
 @keyframes lab-tracking-pending-pulse {
   0%, 100% { background-color: var(--tracking-working-surface); }
@@ -1239,14 +1240,16 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-favorites-current > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--obs-text-secondary); }
 
 /* The edge closes on applied content, never on an animation timer. */
-.lab-tracking-floating .lab-session-popover-trigger { position: relative; }
-.lab-tracking-catch-up { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; color: var(--obs-action); }
+.lab-tracking-floating .lab-session-popover-trigger {
+  position: relative;
+  transition-property: background-color, color, transform;
+}
+.lab-tracking-floating .lab-session-popover-trigger:has(.lab-tracking-catch-up[data-state="catching_up"]) { border-color: transparent; }
+.lab-tracking-catch-up { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; color: var(--tracking-edge-color); }
 .lab-tracking-catch-up svg { display: block; overflow: visible; }
 .lab-tracking-catch-up rect { fill: none; stroke: currentColor; stroke-width: 1px; stroke-linecap: butt; transition: stroke-dashoffset 160ms ease-out; }
-.lab-tracking-catch-up[data-state="complete"] { animation: lab-catch-up-fade 200ms ease-out 800ms forwards; }
+.lab-tracking-catch-up[data-state="complete"] { visibility: hidden; }
 .lab-tracking-catch-up[data-state="complete"] rect { transition: none; }
-@keyframes lab-catch-up-fade { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .lab-tracking-catch-up rect { transition: none; }
-  .lab-tracking-catch-up[data-state="complete"] { animation-duration: 1ms; }
 }

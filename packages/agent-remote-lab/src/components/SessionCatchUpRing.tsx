@@ -8,7 +8,7 @@ export function SessionCatchUpRing({ value }: { value?: SessionCatchUp }) {
     aria-valuemin={0} aria-valuemax={100} aria-valuenow={complete ? 100 : Math.floor(value.progress * 100)}>
     <svg width="100%" height="100%" aria-hidden="true">
       <rect x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="23.5" pathLength="100"
-        strokeDasharray={complete ? 'none' : '100'} strokeDashoffset={complete ? 0 : 100 - Math.max(0.03, value.progress) * 100} />
+        strokeDasharray={complete ? 'none' : '100'} strokeDashoffset={complete ? 0 : 100 - value.progress * 100} />
     </svg>
   </span>;
 }

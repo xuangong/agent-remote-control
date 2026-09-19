@@ -559,8 +559,13 @@ describe('bdb command surface', () => {
 
     const timedOut = harness();
     timedOut.transport.withholdCommandAcknowledgement = true;
-    expect(await runCli(['send', 'agent-one', 'hello', '--json'], timedOut.io, timedOut.environment)).toBe(5);
+    expect(await runCli(['cancel', 'agent-one', '--json'], timedOut.io, timedOut.environment)).toBe(5);
     expect(json(timedOut.stderr())).toMatchObject({ error: { code: 'operation_timeout' } });
+
+    const sendDeadline = harness();
+    sendDeadline.transport.withholdCommandAcknowledgement = true;
+    expect(await runCli(['send', 'agent-one', 'hello', '--timeout', '100', '--json'], sendDeadline.io, sendDeadline.environment)).toBe(5);
+    expect(json(sendDeadline.stderr())).toMatchObject({ error: { code: 'command_timeout' } });
   });
 
   it('classifies local stdout and resource destination failures as invalid local output', async () => {

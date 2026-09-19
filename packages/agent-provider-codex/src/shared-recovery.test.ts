@@ -255,7 +255,7 @@ describe('shared Codex recovery', () => {
     expect(content.map(json => JSON.parse(json))).toContainEqual(expect.objectContaining({ type: 'agent_snapshot', payload: expect.objectContaining({ status: 'running' }) }));
     expect(activity.map(json => JSON.parse(json))).toEqual([
       { protocolVersion: '1.4.0', type: 'negotiated' },
-      { protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running' } },
+      { protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running', cursor: { epoch: 'initial', seq: 0 } } },
     ]);
     server.notify('turn/completed', { threadId: 'root', turn: { id: 'existing-turn', status: 'completed' } });
     await expect.poll(() => manager.snapshot().payload.status).toBe('idle');

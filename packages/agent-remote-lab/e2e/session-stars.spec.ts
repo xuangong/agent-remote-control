@@ -90,6 +90,8 @@ test('shares sidebar and title favorites while retaining only local activity tra
   await expect(page.getByLabel('1 session status changes', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   await expect(page.locator('.lab-tracking-floating section')).toContainText('Waiting');
+  await expect(page.getByLabel('1 session status changes', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New status for Build checks. Mark as seen', exact: true }).click();
   await expect(page.getByLabel('1 session status changes', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('tracking.png') });
   await page.goto('/e2e/fixtures/session-stars.html');
@@ -160,4 +162,82 @@ test('uses consistent status colors for mobile titles and grouped tracking count
     await expect(counts.locator('[data-session-status="running"]')).toHaveCount(0);
     await expect(counts.locator('[data-session-status="idle"]')).toHaveText('3');
   }
+});
+
+test('pulses for unread pending and completed work, prioritizes pending, and marks each changed session', async ({ page }, testInfo) => {
+  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: route.request().postDataJSON().nativeSessionId } }));
+  await page.addInitScript(() => {
+    const sessions = ['Needs input', 'Finished work'].map(nativeSessionId => ({
+      hostId: 'host', providerId: 'recorded', nativeSessionId, title: nativeSessionId, starredAt: 1,
+    }));
+    localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify(sessions));
+  });
+  if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('/e2e/fixtures/session-stars.html');
+  const floating = page.locator('.lab-tracking-floating');
+  const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
+  const panel = floating.locator('section');
+  const pendingIndicator = page.getByRole('button', { name: 'New status for Needs input. Mark as seen', exact: true });
+  const idleIndicator = page.getByRole('button', { name: 'New status for Finished work. Mark as seen', exact: true });
+  const activity = async (agentId: string, status: string) => {
+    await page.evaluate(detail => window.dispatchEvent(new CustomEvent('fixture-activity', { detail })), { agentId, status });
+  };
+  await expect(floating.locator('[data-session-status="idle"].lab-tracking-count')).toHaveText('2');
+  await expect(trigger).toHaveCSS('animation-name', 'none');
+  await trigger.click();
+  await expect(panel.locator('.lab-tracked-change')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  await activity('Needs input', 'running'); await activity('Finished work', 'running');
+  await expect(trigger).toHaveCSS('animation-name', 'none');
+  await activity('Finished work', 'idle');
+  await expect(floating).toHaveAttribute('data-alert', 'idle');
+  await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
+  await trigger.click();
+  await expect(idleIndicator).toBeVisible();
+  await expect(floating).toHaveAttribute('data-alert', 'idle');
+  await activity('Needs input', 'waiting');
+  await expect(floating).toHaveAttribute('data-alert', 'pending');
+  await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-pending-pulse');
+  await expect(pendingIndicator).toBeVisible();
+  const backgrounds = await trigger.evaluate(element => {
+    const animation = element.getAnimations().find(value => value instanceof CSSAnimation)!;
+    animation.pause(); animation.currentTime = 0;
+    const first = getComputedStyle(element).backgroundColor;
+    animation.currentTime = 800;
+    const second = getComputedStyle(element).backgroundColor;
+    animation.play();
+    return [first, second];
+  });
+  expect(backgrounds[0]).not.toBe(backgrounds[1]);
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  await trigger.click();
+  await expect(pendingIndicator).toBeVisible();
+  await expect(idleIndicator).toBeVisible();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(trigger).toHaveCSS('animation-name', 'none');
+  await expect(floating).toHaveAttribute('data-alert', 'pending');
+  await page.screenshot({ path: testInfo.outputPath('pending-reminders.png') });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await pendingIndicator.click();
+  await expect(pendingIndicator).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Needs input Waiting · recorded', exact: true })).toBeFocused();
+  await expect(floating).toHaveAttribute('data-alert', 'idle');
+  await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
+  await activity('Needs input', 'waiting');
+  await expect(floating).toHaveAttribute('data-alert', 'idle');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.screenshot({ path: testInfo.outputPath('idle-reminders.png') });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await idleIndicator.click();
+  await expect(panel.locator('.lab-tracked-change')).toHaveCount(0);
+  await expect(trigger).toHaveCSS('animation-name', 'none');
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  await activity('Needs input', 'running'); await activity('Needs input', 'waiting');
+  await expect(floating).toHaveAttribute('data-alert', 'pending');
+  await activity('Needs input', 'running');
+  await expect(trigger).toHaveCSS('animation-name', 'none');
+  await trigger.click();
+  await expect(pendingIndicator).toBeVisible();
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', page.viewportSize()!.width);
 });

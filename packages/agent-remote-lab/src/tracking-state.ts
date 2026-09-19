@@ -1,13 +1,20 @@
 import type { AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
 import type { RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
 import { validSessionStar, starKey, type SessionStar } from '@agent-remote-controller/agent-remote-hosted/session-stars';
-export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; changed?: boolean; error?: string; agentId?: string }
+export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
 export const MAX_TRACKED_SESSIONS = 8;
 export function nextObservation(previous: SessionObservation | undefined, next: SessionObservation): SessionObservation {
   const activity = next.connection === 'ready' ? next.activity : undefined;
   const runtimeChanged = previous?.connection === 'ready' && next.connection === 'ready' && previous.activity !== undefined && activity !== undefined && previous.activity !== activity;
   const disconnected = previous?.connection === 'ready' && next.connection === 'disconnected';
-  return { ...next, activity, changed: previous?.changed === true || runtimeChanged || disconnected };
+  let attention = previous?.attention;
+  if (runtimeChanged) {
+    attention = activity === 'waiting' ? 'pending' : previous.activity === 'running' && activity === 'idle' ? 'idle' : undefined;
+  } else if (next.connection === 'ready' && activity !== undefined) {
+    // Retain an unread reminder across reconnect only while that state still applies.
+    if ((attention === 'pending' && activity !== 'waiting') || (attention === 'idle' && activity !== 'idle')) attention = undefined;
+  }
+  return { ...next, activity, attention, changed: previous?.changed === true || runtimeChanged || disconnected };
 }
 export function readTrackedSessions(scope: string): SessionStar[] {
   try {

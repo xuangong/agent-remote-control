@@ -187,9 +187,11 @@ export class RemoteSessionClient {
       payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId, text,
         ...(options?.delivery === undefined ? {} : { delivery: options.delivery }) },
     } as const;
+    // Native compaction can delay acceptance. Connection teardown and native errors
+    // still settle the operation; elapsed processing time does not prove failure.
     const operation = this.sendOperation(message, 'command_acknowledged:send_message', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'send_message'
-    ));
+    ), null);
     void operation.then(() => this.replica.updateMessage(outgoingId, 'awaiting_echo'), error => {
       const uncertain = error instanceof RemoteOperationError && [
         'operation_timeout', 'connection_disconnected', 'operation_stopped', 'command_failed', 'operation_outcome_unknown',

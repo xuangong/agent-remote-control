@@ -24,26 +24,28 @@ test('shows a pulsing outgoing message immediately and replaces it with the nati
   await expect(page.locator('.agent-message-user')).toContainText('Please check the result.');
 });
 
-test('stops pulsing when confirmation is unavailable, keeps the message for ten seconds, and accepts a later echo', async ({ page }, testInfo) => {
+test('waits through compaction delays before acknowledgement and echo without showing a false delivery error', async ({ page }, testInfo) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.getByTestId('prompt-input').fill('A message without confirmation.');
+  await page.getByTestId('prompt-input').fill('Continue after compaction.');
   await page.getByTestId('prompt-submit').click();
   const row = page.locator('.agent-outgoing-message');
-  expect(await row.locator('.agent-message').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
+  await page.clock.fastForward(60_000);
+  await expect(row).toContainText('Sending…');
+  await expect(row).toHaveAttribute('data-delivery-state', 'pending');
+  await expect(page.getByTestId('prompt-input')).toHaveValue('Continue after compaction.');
+  await expect(page.getByTestId('prompt-submit')).toBeDisabled();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delivery error' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Acknowledge send' }).click();
-  await page.clock.fastForward(30_000);
-  await page.clock.runFor(100);
-  await expect(row).toHaveAttribute('data-delivery-state', 'unconfirmed');
-  await expect(row.getByRole('status')).toContainText('Delivery not confirmed');
-  await expect(row).not.toContainText('Send failed');
-  await expect(page.getByText('Message sent.', { exact: true })).toHaveCount(0);
+  await page.clock.fastForward(120_000);
+  await expect(row).toContainText('Sent — waiting for conversation…');
+  await expect(page.getByTestId('prompt-input')).toHaveValue('');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delivery error' })).toHaveCount(0);
   expect(await row.locator('.agent-message').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
-  await page.screenshot({ path: testInfo.outputPath('message-unconfirmed.png') });
-  await page.clock.fastForward(9_899);
-  await expect(row).toHaveCount(1);
-  await page.clock.fastForward(1);
-  await expect(row).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('slow-message-awaiting-echo.png') });
   await page.getByRole('button', { name: 'Deliver message' }).click();
+  await expect(row).toHaveCount(0);
   await expect(page.locator('.agent-message-user')).toHaveCount(1);
 });
 
@@ -55,7 +57,9 @@ test('uses neutral delivery wording when the connection drops before acknowledge
   await page.getByRole('button', { name: 'Disconnect before acknowledgement' }).click();
 
   await expect(row).toHaveAttribute('data-delivery-state', 'unconfirmed');
-  await expect(row.getByRole('status')).toContainText('Delivery not confirmed');
+  await expect(row.getByRole('alert')).toContainText('Delivery not confirmed');
+  await page.clock.fastForward(120_000);
+  await expect(row).toHaveCount(1);
   await expect(row).not.toContainText('Send acknowledged');
   await expect(row).not.toContainText('Send failed');
 });

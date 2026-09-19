@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { ClientMessage } from '@agent-remote-controller/agent-remote-protocol';
+import type { ClientMessage, HistoryPage } from '@agent-remote-controller/agent-remote-protocol';
 import { HttpWebSocketTransport, type WebSocketLike } from './http-websocket-transport.js';
 import type { RemoteConnection, RemoteServerMessage } from './transport.js';
+import { AgentReplica } from '../replica/store.js';
+import { RemoteSessionClient } from './remote-session-client.js';
 
 const version = '1.4.0';
 const negotiate: ClientMessage = { protocolVersion: version, type: 'negotiate' };
@@ -14,7 +16,7 @@ const response: RemoteServerMessage = {
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function server(ready = true) {
+async function server(ready = true, fetchImplementation?: typeof fetch) {
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await new Promise<void>((resolve) => wss.once('listening', resolve));
   const sockets: WebSocket[] = [];
@@ -29,7 +31,7 @@ async function server(ready = true) {
   cleanups.push(() => new Promise<void>((resolve) => { for (const socket of wss.clients) socket.terminate(); wss.close(() => resolve()); }));
   const address = wss.address();
   if (typeof address !== 'object' || !address) throw new Error('Missing address');
-  const transport = new HttpWebSocketTransport(`http://127.0.0.1:${address.port}/base/`, { WebSocket, sessionChannels: true });
+  const transport = new HttpWebSocketTransport(`http://127.0.0.1:${address.port}/base/`, { WebSocket, sessionChannels: true, fetch: fetchImplementation });
   cleanups.push(() => transport.dispose?.());
   return { transport, sockets, urls, frames };
 }
@@ -286,3 +288,58 @@ class ControlledSocket implements WebSocketLike {
   close() { this.readyState = 3; this.onclose?.({}); }
   receive(value: unknown) { this.onmessage?.({ data: JSON.stringify(value) }); }
 }
+
+it.each(['acknowledge', 'reject', 'disconnect'] as const)('keeps a slow send pending over a real session channel until %s', async outcome => {
+  const history: HistoryPage = { protocolVersion: version, type: 'timeline_page', payload: {
+    requestId: 'history', agentId: 'a', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false, error: null,
+    window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 1 },
+    hasOlder: false, hasNewer: false, entries: [{ providerId: 'test', seqStart: 1, seqEnd: 1,
+      sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [], timestamp: '2026-09-20T00:00:00Z',
+      item: { type: 'compaction', status: 'completed' } }],
+  } };
+  const harness = await server(true, async () => Response.json(history));
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('a', harness.transport, replica, { operationTimeoutMs: 20, scheduleReconnect: () => () => {} });
+  cleanups.push(() => client.stop());
+  let status = 'idle'; client.subscribeStatus(value => { status = value; });
+  client.start();
+  await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+  const { socket, frame: subscription } = harness.frames[0]!;
+  const emit = (message: RemoteServerMessage) => socket.send(JSON.stringify({ protocolVersion: version, type: 'message', subscriptionId: subscription.subscriptionId, message }));
+  emit({ protocolVersion: version, type: 'negotiated' });
+  emit({ protocolVersion: version, type: 'agent_snapshot', payload: {
+    id: 'a', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z',
+    status: 'idle', activeTurn: null, pendingInteractions: [], runtimeInfo: { providerId: 'test', sessionId: 'a', status: 'idle' },
+    capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
+      interactions: { question: false, planApproval: false, toolApproval: false } },
+  } });
+  await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+  emit({ protocolVersion: version, type: 'timeline_subscribed', payload: { requestId: harness.frames[1]!.frame.message.payload.requestId, agentIds: ['a'] } });
+  await vi.waitFor(() => expect(status).toBe('ready'));
+  let result = 'pending';
+  const send = client.sendMessage('Continue after compact');
+  void send.then(() => { result = 'accepted'; }, () => { result = 'rejected'; });
+  await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
+  await new Promise(resolve => setTimeout(resolve, 60));
+  expect(result).toBe('pending');
+  expect(status).toBe('ready');
+  expect(replica.getState().outgoingMessages?.[0]?.status).toBe('sending');
+  const requestId = harness.frames[2]!.frame.message.payload.requestId;
+  if (outcome === 'acknowledge') {
+    emit({ protocolVersion: version, type: 'command_acknowledged', payload: { requestId, agentId: 'a', command: 'send_message' } });
+    await expect(send).resolves.toMatchObject({ type: 'command_acknowledged' });
+    emit({ protocolVersion: version, type: 'agent_stream', payload: { agentId: 'a', epoch: 'epoch', seq: 2,
+      timestamp: '2026-09-20T00:00:01Z', event: { type: 'timeline', providerId: 'test', resources: [], item: { type: 'user_message', text: 'Continue after compact' } } } });
+    await vi.waitFor(() => expect(replica.getState().outgoingMessages).toEqual([]));
+  } else if (outcome === 'reject') {
+    emit({ protocolVersion: version, type: 'protocol_error', payload: { requestId, code: 'agent_busy', message: 'Native command still active.', recoverable: true } });
+    await expect(send).rejects.toMatchObject({ code: 'agent_busy' });
+    expect(replica.getState().outgoingMessages?.[0]?.status).toBe('failed');
+  } else {
+    socket.terminate();
+    await expect(send).rejects.toMatchObject({ code: 'connection_disconnected' });
+    expect(replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed');
+  }
+  expect(harness.sockets).toHaveLength(1);
+  expect(harness.frames.filter(({ frame }) => frame.message?.type === 'send_message')).toHaveLength(1);
+}, 10_000);

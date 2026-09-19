@@ -1218,36 +1218,28 @@ it('consumes identical user echoes once, including replay and echo-before-acknow
   } finally { f.client.stop(); }
 });
 
-it.each([false, true])('keeps unconfirmed messages until deletion or a late echo (late echo: %s)', async (lateEcho) => {
+it('keeps an accepted message awaiting its echo through slow native processing', async () => {
   vi.useFakeTimers();
   const f = await outgoingFixture({ requestId: () => 'send-one' });
   try {
     const send = f.client.sendMessage('Slow echo');
     f.acknowledge('send-one'); await send;
-    await vi.advanceTimersByTimeAsync(29_999);
-    expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('awaiting_echo');
-    await vi.advanceTimersByTimeAsync(1);
-    expect(f.replica.getState().outgoingMessages?.[0]).toMatchObject({ status: 'unconfirmed' });
-    await vi.advanceTimersByTimeAsync(9_999);
-    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
-    if (lateEcho) f.echo(1, 'Slow echo');
-    else {
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(f.replica.getState().outgoingMessages).toHaveLength(1);
-      f.client.deleteMessage(f.replica.getState().outgoingMessages![0]!.id);
-    }
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo', error: undefined }]);
+    expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
+    f.echo(1, 'Slow echo');
     expect(f.replica.getState().outgoingMessages).toEqual([]);
     f.echo(1, 'Slow echo');
     expect(f.replica.getState().timeline.entries).toHaveLength(1);
   } finally { f.client.stop(); vi.useRealTimers(); }
 });
 
-it('does not restart the confirmation window on a late acknowledgement', async () => {
+it('does not erase delivery uncertainty after history replacement when a late acknowledgement arrives', async () => {
   vi.useFakeTimers();
   const f = await outgoingFixture({ requestId: () => 'send-one', operationTimeoutMs: 60_000 });
   try {
     const send = f.client.sendMessage('Delayed response');
-    await vi.advanceTimersByTimeAsync(32_000);
+    f.replica.applyHistory(page('tail', [], { epoch: 'replacement' }));
     f.acknowledge('send-one'); await send;
     expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed');
     await vi.advanceTimersByTimeAsync(8_000);
@@ -1344,16 +1336,16 @@ it('recovers a stalled handshake instead of waiting forever', async () => {
   } finally { client.stop(); vi.useRealTimers(); }
 });
 
-it('reconnects after an acknowledgement timeout without replaying the mutation', async () => {
+it('reconnects after a control acknowledgement timeout without replaying the mutation', async () => {
   vi.useFakeTimers();
   const transport = new FakeTransport();
   const client = connectedClient(transport, { operationTimeoutMs: 100 });
   try {
-    const send = client.sendMessage('Once only');
+    const send = client.cancel();
     const rejected = expect(send).rejects.toMatchObject({ code: 'operation_timeout' });
     await vi.advanceTimersByTimeAsync(350); await rejected;
     expect(transport.connections).toBe(2);
-    expect(transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
+    expect(transport.sent.filter(message => message.type === 'cancel')).toHaveLength(1);
   } finally { client.stop(); vi.useRealTimers(); }
 });
 
@@ -1417,4 +1409,28 @@ it.each(['command_failed', 'operation_outcome_unknown'])('allows an explicit new
     expect(f.replica.getState().outgoingMessages).toHaveLength(1);
     f.acknowledge(second.payload.requestId); await retry;
   } finally { f.client.stop(); }
+});
+
+it.each([false, true])('waits for delayed send acknowledgement after compaction without false failure or reconnect (echo first: %s)', async echoFirst => {
+  vi.useFakeTimers();
+  const f = await outgoingFixture({ requestId: () => 'slow-send' });
+  try {
+    const compacted = live(1, '');
+    compacted.payload.event = { type: 'timeline', providerId: 'provider-neutral', item: { type: 'compaction', status: 'completed' }, resources: [] };
+    f.transport.emit(compacted);
+    const send = f.client.sendMessage('Continue after compaction');
+    let outcome = 'pending';
+    void send.then(() => { outcome = 'accepted'; }, () => { outcome = 'rejected'; });
+    if (echoFirst) f.echo(2, 'Continue after compaction');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(outcome).toBe('pending');
+    expect(f.transport.connections).toBe(1);
+    expect(f.transport.closedConnections).toBe(0);
+    expect(f.replica.getState().outgoingMessages).toEqual(echoFirst ? [] : [expect.objectContaining({ status: 'sending' })]);
+    f.acknowledge('slow-send');
+    await expect(send).resolves.toMatchObject({ type: 'command_acknowledged' });
+    if (!echoFirst) f.echo(2, 'Continue after compaction');
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
+  } finally { f.client.stop(); vi.useRealTimers(); }
 });

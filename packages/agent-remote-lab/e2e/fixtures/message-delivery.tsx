@@ -11,17 +11,33 @@ const replica = new AgentReplica();
 const snapshot = { protocolVersion: '1.4.0', type: 'agent_snapshot', payload: replicaState.agent! } as const;
 const history: HistoryPage = { protocolVersion: '1.4.0', type: 'timeline_page', payload: {
   requestId: 'history', agentId: snapshot.payload.id, epoch: 'delivery', direction: 'tail', reset: false, staleCursor: false, gap: false,
-  window: { minSeq: 0, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [], error: null,
+  window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'delivery', seq: 1 }, endCursor: { epoch: 'delivery', seq: 1 },
+  hasOlder: false, hasNewer: false, error: null, entries: [{ providerId: snapshot.payload.providerId,
+    seqStart: 1, seqEnd: 1, sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
+    timestamp: '2026-09-20T00:00:00Z', item: { type: 'compaction', status: 'completed' } }],
 } };
 replica.applySnapshot(snapshot); replica.applyHistory(history);
 let listener: RemoteTransportListener;
 let submitted: Extract<ClientMessage, { type: 'send_message' }> | undefined;
 const transport: RemoteAgentTransport = {
-  connect: (_agent, callbacks) => { listener = callbacks; return { send: message => { if (message.type === 'send_message') submitted = message; }, close: () => {} }; },
+  connect: (_agent, callbacks) => {
+    listener = callbacks;
+    queueMicrotask(() => callbacks.onOpen());
+    return { send: message => {
+      if (message.type === 'negotiate') {
+        callbacks.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
+        callbacks.onMessage(snapshot);
+      } else if (message.type === 'timeline_subscription') {
+        callbacks.onMessage({ protocolVersion: '1.4.0', type: 'timeline_subscribed', payload: {
+          requestId: message.payload.requestId, agentIds: [snapshot.payload.id],
+        } });
+      } else if (message.type === 'send_message') submitted = message;
+    }, close: () => {} };
+  },
   fetchSnapshot: async () => snapshot, fetchTimeline: async () => history,
   onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
 };
-const client = new RemoteSessionClient(snapshot.payload.id, transport, replica, { operationTimeoutMs: 60_000 });
+const client = new RemoteSessionClient(snapshot.payload.id, transport, replica, { scheduleReconnect: () => () => {} });
 client.start();
 function acknowledge() {
   if (submitted) listener.onMessage({ protocolVersion: '1.4.0', type: 'command_acknowledged', payload: {

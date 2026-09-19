@@ -32,7 +32,6 @@ export class AgentReplica {
   private readonly listeners = new Set<() => void>();
   private readonly historyListeners = new Set<(epoch: string, direction: HistoryPage['payload']['direction']) => void>();
   private readonly outbox = new MessageOutbox();
-  private readonly messageTimers = new Map<string, { confirmation?: ReturnType<typeof setTimeout> }>();
 
   getState(): AgentReplicaState {
     return this.state;
@@ -137,33 +136,6 @@ export class AgentReplica {
   private replace(next: AgentReplicaState): void {
     if (next === this.state) return;
     this.state = this.outbox.reconcile(next);
-    this.syncMessageTimers();
     for (const listener of this.listeners) listener();
   }
-
-  private syncMessageTimers(): void {
-    const messages = this.state.outgoingMessages ?? [];
-    for (const [id, timers] of this.messageTimers) {
-      if (messages.some(message => message.id === id)) continue;
-      clearTimeout(timers.confirmation);
-      this.messageTimers.delete(id);
-    }
-    for (const message of messages) {
-      const timers = this.messageTimers.get(message.id) ?? {};
-      this.messageTimers.set(message.id, timers);
-      if (message.status === 'failed' || message.status === 'unconfirmed') {
-        clearTimeout(timers.confirmation); timers.confirmation = undefined;
-      } else if (!timers.confirmation) {
-        timers.confirmation = backgroundTimer(() => this.updateMessage(message.id, 'unconfirmed',
-          'No message confirmation arrived within 30 seconds. Check the conversation before sending again.'), 30_000);
-      }
-    }
-  }
-}
-
-function backgroundTimer(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
-  const timer = setTimeout(callback, delay);
-  // Local feedback must not keep a headless Node consumer alive.
-  if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-  return timer;
 }

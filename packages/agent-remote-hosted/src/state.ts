@@ -1,3 +1,4 @@
+import { validSessionStar, starKey, MAX_USER_STARS, type SavedSessionStar } from './session-stars.js';
 import type { SecurityEvent } from './security.js';
 import { validControllerPath } from './controller-location.js';
 import { createHash } from 'node:crypto';
@@ -10,6 +11,7 @@ export interface SavedGatewaySession { hash: string; grant: GatewayGrant; sessio
 export interface HostedRelayState {
   version: 2;
   securityEvents?: SecurityEvent[];
+  sessionStars?: SavedSessionStar[];
   config: { origin: string; issuer: string };
   sessions: SavedGatewaySession[];
   tenants: Array<{ subject: string; namespace: string; broker: RemoteHostBrokerState }>;
@@ -61,6 +63,13 @@ export function validateRelayState(value: unknown, auth: GatewayAuthOptions): Ho
     !value.consumedProofs.every((item: unknown) => Array.isArray(item) && item.length === 2 && string(item[0], 128) && item[0].length >= 16 && time(item[1])) ||
     !unique(value.sessions, item => item.hash) || !unique(value.tenants, item => item.namespace) || !unique(value.loginChallenges, item => item[0]) || !unique(value.consumedProofs, item => item[0])) return invalid();
   if (value.securityEvents !== undefined && (!Array.isArray(value.securityEvents) || value.securityEvents.length > 4096 || !value.securityEvents.every((event: unknown) => record(event) && string(event.id) && string(event.subject) && time(event.at) && string(event.action, 128) && ['allowed', 'denied'].includes(event.outcome) && (event.hostId === undefined || string(event.hostId))))) return invalid();
+  if (value.sessionStars !== undefined) {
+    if (!Array.isArray(value.sessionStars) || value.sessionStars.length > 16384 || !value.sessionStars.every((item: unknown) => record(item) && string(item.subject) && validSessionStar(item)) ||
+      !unique(value.sessionStars, (item: SavedSessionStar) => JSON.stringify([item.subject, starKey(item)]))) return invalid();
+    const counts = new Map<string, number>();
+    for (const item of value.sessionStars) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > MAX_USER_STARS) return invalid(); counts.set(item.subject, count); }
+  }
+  if (value.sessions.some((session: SavedGatewaySession) => session.grant.profile !== undefined && (!record(session.grant.profile) || !string(session.grant.profile.name) || (session.grant.profile.email !== undefined && !string(session.grant.profile.email, 320))))) return invalid();
   return structuredClone(value) as HostedRelayState;
 }
 /** Only the authenticated Node file adapter calls this explicit v1 migration. */

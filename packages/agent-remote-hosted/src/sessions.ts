@@ -29,6 +29,7 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
         }
         current.sessionExpiresAt = Math.min(current.sessionExpiresAt, result.expiresAt!);
         current.grant.authenticatedAt = result.authenticatedAt;
+        current.grant.profile = result.profile;
         current.grant.expiresAt = Math.min(current.sessionExpiresAt, result.validUntil);
         return 'active' as const;
       });
@@ -45,7 +46,7 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
       if (result.subject !== grant.subject) return { status: 'denied' };
       const token = randomBytes(32).toString('base64url');
       const sessionExpiresAt = Math.min(grant.sessionExpiresAt, result.expiresAt!);
-      const current = { ...grant, authenticatedAt: result.authenticatedAt, expiresAt: Math.min(sessionExpiresAt, result.validUntil) };
+      const current = { ...grant, profile: result.profile, authenticatedAt: result.authenticatedAt, expiresAt: Math.min(sessionExpiresAt, result.validUntil) };
       return state.mutate(draft => {
         draft.sessions = draft.sessions.filter(record => record.sessionExpiresAt > Date.now());
         if (draft.sessions.length >= 1024) return { status: 'capacity' as const };

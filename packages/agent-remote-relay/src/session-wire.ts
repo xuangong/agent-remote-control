@@ -5,6 +5,7 @@ import {
   decodeClientMessage,
   encodeServerMessage,
   type AgentSnapshot,
+  type AgentStatus,
   type ClientMessage,
   type HistoryPage,
   type ResourceResponse,
@@ -77,6 +78,8 @@ export function createSessionWire(
   if (!Number.isSafeInteger(maxBufferedManagerEvents) || maxBufferedManagerEvents < 1) {
     throw new RangeError('maxBufferedManagerEvents must be a positive safe integer.');
   }
+  let activityOnly = false;
+  let lastActivity: AgentStatus | undefined;
   let negotiated = false;
   let closed = false;
   let agent: SessionWireAgent | undefined;
@@ -88,7 +91,7 @@ export function createSessionWire(
   const queuedDuringSubscriptionAck: AgentManagerEvent[] = [];
 
   const receiveManagerEvent = (event: AgentManagerEvent): void => {
-    if (closed) return;
+    if (closed || (activityOnly && event.type !== 'agent_state')) return;
     if (bufferingSnapshotHandoff) {
       enqueueManagerEvent(queuedDuringSnapshotHandoff, event);
       return;
@@ -110,6 +113,10 @@ export function createSessionWire(
 
   function sendManagerEvent(event: AgentManagerEvent): void {
     try {
+      if (activityOnly) {
+        if (event.type === 'agent_state') sendActivity(event.snapshot);
+        return;
+      }
       const message = managerEventToServerMessage(event, timelineSubscribed);
       if (message) sendMessage(message);
     } catch (error) {
@@ -139,13 +146,15 @@ export function createSessionWire(
           sendMessage(protocolError('negotiation_required', 'Protocol negotiation must be the first message.', false));
           return;
         }
+        activityOnly = message.observation === 'activity';
         bindAgent();
         if (closed) return;
         const boundAgent = requireBoundAgent();
         const snapshot = boundAgent.snapshot();
         sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated' });
         if (closed) return;
-        sendMessage(snapshot);
+        if (activityOnly) sendActivity(snapshot);
+        else sendMessage(snapshot);
         if (closed) return;
         negotiated = true;
         drainManagerEvents(queuedDuringSnapshotHandoff);
@@ -154,6 +163,10 @@ export function createSessionWire(
       }
       if (message.type === 'negotiate') {
         sendMessage(protocolError('already_negotiated', 'Protocol version has already been negotiated.', true));
+        return;
+      }
+      if (activityOnly) {
+        sendMessage(protocolError('activity_only', 'This connection observes activity only. Open the session to use content and controls.', false));
         return;
       }
       await handleClientMessage(message);
@@ -329,6 +342,16 @@ export function createSessionWire(
       }
       sendMessage(protocolError('command_failed', 'Agent command failed.', true, requestId));
     }
+  }
+
+  function sendActivity(snapshot: AgentSnapshot): void {
+    const agent = snapshot.payload;
+    const status = agent.status === 'closed' || agent.status === 'failed' ? agent.status
+      : agent.pendingInteractions.length || agent.status === 'waiting' ? 'waiting'
+      : agent.activeTurn || agent.status === 'running' ? 'running' : agent.status;
+    if (lastActivity === status) return;
+    lastActivity = status;
+    sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId: agent.id, status } });
   }
 
   function bindAgent(): void {

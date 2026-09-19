@@ -6,3 +6,5 @@ export * from './replica/selectors.js';
 export * from './replica/store.js';
 export * from './replica/types.js';
 export { watchPageResume } from './client/page-resume.js';
+
+export * from './client/remote-activity-client.js';

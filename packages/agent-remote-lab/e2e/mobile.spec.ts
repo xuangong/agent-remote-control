@@ -125,22 +125,26 @@ test('keeps drawer dismissal reachable after scrolling and preserves the chat dr
 });
 
 
-test('recovers a draft after reload without adding session history', async ({ page }) => {
+test('recovers a draft after reload and returns through discovery', async ({ page }) => {
   await openSession(page);
   const historyLength = await page.evaluate(() => history.length);
   const sessionUrl = page.url();
   await page.getByTestId('prompt-input').fill('Recover after an accidental leave');
   await page.reload();
   await expect(page.getByTestId('prompt-input')).toHaveValue('Recover after an accidental leave');
+  expect(await page.evaluate(() => history.length)).toBe(historyLength);
   await page.getByRole('button', { name: 'Open sessions' }).tap();
   await page.getByRole('button', { name: 'New session', exact: true }).tap();
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
   await expect(page.getByTestId('prompt-input')).toHaveValue('');
   expect(page.url()).not.toBe(sessionUrl);
-  expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  expect(await page.evaluate(() => history.length)).toBe(historyLength + 1);
   await page.getByRole('button', { name: 'Open sessions' }).tap();
-  await page.getByRole('region', { name: 'Opened sessions', exact: true }).locator('.lab-session-row:not([aria-current])').first().click();
+  const discovery = page.getByRole('region', { name: 'Discover sessions', exact: true });
+  await discovery.getByRole('button', { name: 'Refresh', exact: true }).click();
+  const identity = JSON.stringify(['local', 'recorded', new URL(sessionUrl).searchParams.get('session')]);
+  await discovery.locator(`[data-session-key=${JSON.stringify(identity)}] > .lab-session-branch > .lab-session-row`).click();
   await expect(page.getByTestId('prompt-input')).toHaveValue('Recover after an accidental leave');
 });
 

@@ -630,3 +630,10 @@ describe('resource and session messages', () => {
     expect(decodeServerMessage(JSON.stringify(duplicatePath)).status).toBe('rejected');
   });
 });
+
+it('round-trips strict activity observation without accepting content fields', () => {
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const activity = { protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting' } };
+  expect(decodeServerMessage(JSON.stringify(activity))).toMatchObject({ status: 'ok', value: activity });
+  expect(decodeServerMessage(JSON.stringify({ ...activity, payload: { ...activity.payload, text: 'private' } })).status).toBe('rejected');
+});

@@ -1,3 +1,4 @@
+import { createSessionStars, StarError } from './session-stars.js';
 import { unavailableRoute } from './session-errors.js';
 import { createSecurityPolicy } from './security.js';
 import { authenticationCallback } from './auth-callback.js';
@@ -41,6 +42,11 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let renewalAt = Date.now() + 60_000;
   const state = createRelayState(auth, options.storage, failClosed, published);
   const sessions = createGatewaySessions(auth, state, durable);
+  const stars = createSessionStars(state, (subject, item) => {
+    const broker = [...tenants.values()].find(value => value.broker.canStarSession(item, subject))?.broker;
+    const host = broker?.visibleHosts(subject).find(host => host.id === item.hostId);
+    return host ? { online: host.online, hostName: host.name } : undefined;
+  });
   const previewOrigin = validateGatewayOrigin(options.previewOrigin || auth.origin);
   const previewAccess = createPreviewAccess({ origin: auth.origin, previewOrigin,
     authorize: async entry => {
@@ -121,7 +127,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (!tenant({ subject: item.subject, namespace: item.namespace, expiresAt: Number.MAX_SAFE_INTEGER, ticket: '', nonce: '' }, item.broker)) throw new Error('Stored Relay tenants exceed configured capacity.');
   }
   initialized = true; queueSchedule();
-  function browserState(grant: GatewayGrant) { return { basePath: `/u/${grant.namespace}/`, expiresAt: grant.expiresAt,
+  function browserState(grant: GatewayGrant) { return { user: { id: grant.subject, ...(grant.profile ?? {}) }, basePath: `/u/${grant.namespace}/`, expiresAt: grant.expiresAt,
     ...(grant.continuation ? { refreshAfterMs: Math.max(250, Math.min(60_000, (grant.expiresAt - Date.now()) / 2)) } : {}), loginUrl: `${auth.issuer}/agent-remote` }; }
   async function authorize(request: Request, refresh = false): Promise<GatewayGrant | Response> {
     const result = await sessions.authenticate(request, refresh);
@@ -274,6 +280,18 @@ export function createHostedRelay(options: HostedRelayOptions) {
         return json(403, {code:'reauthentication_required',error:'Sign in again before managing device credentials.',loginUrl:'/auth/login?reauthenticate=1'});
       }
       if (path === '/v1/remote/pairings' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
+    }
+    if (path === '/v1/stars') {
+      try {
+        if (request.method === 'GET') return json(200, { stars: stars.list(grant.subject) });
+        if (request.method === 'POST') await stars.save(grant.subject, await readJson(request));
+        else if (request.method === 'DELETE') await stars.remove(grant.subject, await readJson(request));
+        else return json(405, { error: 'Method is not allowed.' });
+        return json(200, { stars: stars.list(grant.subject) });
+      } catch (error) {
+        if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message });
+        throw error;
+      }
     }
     const destination = routeTenant(path, grant.subject) ?? owned;
     const openPreview = /^\/v1\/remote\/hosts\/([^/]+)\/previews\/([A-Za-z0-9_-]+)\/open$/.exec(path);

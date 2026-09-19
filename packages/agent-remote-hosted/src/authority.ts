@@ -1,7 +1,7 @@
 import { createHash, createHmac } from 'node:crypto';
-import type { GatewayAuthOptions } from './auth.js';
+import { gatewayProfile, type GatewayProfile, type GatewayAuthOptions } from './auth.js';
 
-export type AuthorityResult = { status: 'active'; subject: string; expiresAt?: number; authenticatedAt?: number; validUntil: number } | { status: 'denied' | 'unavailable' };
+export type AuthorityResult = { status: 'active'; profile?: GatewayProfile; subject: string; expiresAt?: number; authenticatedAt?: number; validUntil: number } | { status: 'denied' | 'unavailable' };
 export async function queryGatewayAuthority(auth: GatewayAuthOptions, operation: 'renew' | 'user-status', value: { continuation: string } | { subject: string }): Promise<AuthorityResult> {
   const body = JSON.stringify(value); const iat = Math.floor(Date.now() / 1000);
   const input = [{ alg: 'HS256', typ: 'arc-relay-service+jwt' }, { iss: auth.origin, aud: auth.issuer, op: operation,
@@ -20,6 +20,6 @@ export async function queryGatewayAuthority(auth: GatewayAuthOptions, operation:
     const expiresAt = 'expiresAt' in data && typeof data.expiresAt === 'number' && Number.isFinite(data.expiresAt) ? data.expiresAt : undefined;
     if (operation === 'renew' && (expiresAt === undefined || expiresAt <= Date.now())) return { status: 'denied' };
     const authenticatedAt = 'authenticatedAt' in data && typeof data.authenticatedAt === 'number' && Number.isSafeInteger(data.authenticatedAt) && data.authenticatedAt >= 0 && data.authenticatedAt <= Date.now() ? data.authenticatedAt : undefined;
-    return { status: 'active', subject: data.subject, expiresAt, authenticatedAt, validUntil: Math.min(data.validUntil, Date.now() + 120_000, expiresAt ?? Infinity) };
+    return { status: 'active', profile: gatewayProfile('profile' in data ? data.profile : undefined), subject: data.subject, expiresAt, authenticatedAt, validUntil: Math.min(data.validUntil, Date.now() + 120_000, expiresAt ?? Infinity) };
   } catch { return { status: 'unavailable' }; }
 }

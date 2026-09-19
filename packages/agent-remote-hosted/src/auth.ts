@@ -1,6 +1,11 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
-export interface GatewayGrant { subject: string; namespace: string; expiresAt: number; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number; authenticatedAt?: number }
+export interface GatewayProfile { name: string; email?: string }
+export function gatewayProfile(value: unknown): GatewayProfile | undefined {
+  if (!value || typeof value !== 'object' || !('name' in value) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 512) return undefined;
+  return { name: value.name, ...('email' in value && typeof value.email === 'string' && value.email.length <= 320 ? { email: value.email } : {}) };
+}
+export interface GatewayGrant { profile?: GatewayProfile; subject: string; namespace: string; expiresAt: number; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number; authenticatedAt?: number }
 export interface GatewayAuthOptions { origin: string; issuer: string; secret: string }
 export function validateGatewayOrigin(value: string): string {
   const url = new URL(value);

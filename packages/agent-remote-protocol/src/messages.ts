@@ -16,7 +16,7 @@ import {
   ResourceUpdate,
   TimelineResourceBindingReplacement,
 } from './resources.js';
-import { AgentPersistenceHandle, AgentSnapshot } from './snapshot.js';
+import { AgentPersistenceHandle, AgentSnapshot, AgentStatus } from './snapshot.js';
 import { ProtocolVersionSchema } from './version.js';
 import { ListCommandsRequest, ExecuteCommandRequest, CommandListResponse, CommandResultResponse } from './commands.js';
 import { OperationId } from './operations.js';
@@ -30,6 +30,7 @@ const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => T
 export const NegotiateRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('negotiate'),
+  observation: Type.Optional(Type.Literal('activity')),
 });
 export type NegotiateRequest = Static<typeof NegotiateRequest>;
 
@@ -177,6 +178,13 @@ export const AgentUpdateMessage = Strict({
 });
 export type AgentUpdateMessage = Static<typeof AgentUpdateMessage>;
 
+export const AgentActivityMessage = Strict({
+  protocolVersion: ProtocolVersionSchema,
+  type: Type.Literal('agent_activity'),
+  payload: Strict({ agentId: NonEmptyString, status: AgentStatus }),
+});
+export type AgentActivityMessage = Static<typeof AgentActivityMessage>;
+
 export const ProtocolErrorMessage = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('protocol_error'),
@@ -229,6 +237,7 @@ export const ServerMessage = Type.Union([
   CommandAcknowledgementMessage,
   AgentSnapshot,
   AgentUpdateMessage,
+  AgentActivityMessage,
   TimelineSubscriptionResponse,
   HistoryPage,
   TimelineReplacementMessage,

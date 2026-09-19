@@ -40,3 +40,11 @@ it('bounds rate keys and audit retention, partitions user audit, and requires re
   expect(policy.events('alice')).toHaveLength(1); expect(policy.events('alice')[0]).not.toHaveProperty('subject');
   expect(JSON.stringify(policy.events('alice'))).not.toContain('bob');
 });
+it('takes the display profile from the trusted renewal response and refreshes it', async () => {
+  const { sessions } = fixture();
+  vi.stubGlobal('fetch', async () => Response.json({ active: true, subject: 'alice', profile: { name: 'Alice', email: 'alice@example.com', secret: 'not-public' }, expiresAt: Date.now()+3600000, validUntil: Date.now()+120000 }));
+  const result = await sessions.exchange({ subject:'alice', namespace:'a', expiresAt:Date.now()+10000, ticket:'x', nonce:'n', continuation:'arc2_x', sessionExpiresAt:Date.now()+3600000 });
+  expect(result.status).toBe('active'); if(result.status!=='active')return;
+  expect(result.grant).toMatchObject({ profile: { name: 'Alice', email: 'alice@example.com' } });
+  expect(JSON.stringify(result.grant)).not.toContain('not-public');
+});

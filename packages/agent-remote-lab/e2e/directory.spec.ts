@@ -30,9 +30,8 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   await page.getByTestId('prompt-input').press('Enter');
   await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Hello from the independent workbench.' })).toBeVisible();
   await showContext();
-  const opened = () => context().getByRole('region', { name: 'Opened sessions' });
-  await expect(opened().locator('.lab-session-row')).toHaveCount(2);
-  await opened().getByRole('button').filter({ has: page.getByText(existingTitle, { exact: true }) }).click();
+  await expect(context().getByRole('region', { name: 'Opened sessions' })).toHaveCount(0);
+  await discovery().getByRole('button').filter({ has: page.getByText(existingTitle, { exact: true }) }).click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
   await expect(page.getByTestId('prompt-input')).toHaveValue('A draft to retain while switching sessions.');
   await showContext();
@@ -40,7 +39,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   if (compact) await expect(context()).toHaveCount(0);
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
   await showContext();
-  await expect(opened().locator('.lab-session-row')).toHaveCount(2);
+  await expect(discovery().locator('.lab-session-row').first()).toBeVisible();
   if (compact) await context().getByRole('button', { name: 'Close Context' }).click();
   await toggleViewPanel(page, 'Header');
   await page.getByLabel('Connection details', { exact: true }).click();
@@ -48,7 +47,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
   await expect(page.getByTestId('prompt-input')).toHaveValue('A draft to retain while switching sessions.');
   await page.getByRole('tab', { name: 'Trace' }).click();
-  await expect(page.getByRole('heading', { name: 'Normalized Timeline trace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Execution events' })).toBeVisible();
   await page.getByRole('tab', { name: 'Workbench' }).click();
   expect(errors).toEqual([]);
   const evidence = resolve('../../.tmp/evidence');

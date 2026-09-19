@@ -1,0 +1,41 @@
+import { expect, it, vi } from 'vitest';
+import { createRelayState, emptyRelayState, validateRelayState } from './state.js';
+import { createSessionStars, MAX_USER_STARS } from './session-stars.js';
+const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 's'.repeat(32) };
+const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Session' };
+it('serializes concurrent changes, isolates owners, and permits removal after access revocation', async () => {
+  let allowed = true;
+  const state = createRelayState(auth, undefined, () => {}, () => {});
+  const stars = createSessionStars(state, () => allowed ? { online: true, hostName: 'Mac' } : undefined);
+  await Promise.all([stars.save('alice', star), stars.save('alice', { ...star, title: 'Renamed' }), stars.save('bob', star)]);
+  expect(stars.list('alice')).toHaveLength(1);
+  expect(stars.list('alice')[0]?.title).toBe('Renamed');
+  expect(stars.list('bob')[0]?.title).toBe('Session');
+  allowed = false;
+  expect(stars.list('alice')[0]).toMatchObject({ available: false, online: false });
+  await expect(stars.save('alice', star)).rejects.toMatchObject({ status: 404 });
+  await stars.remove('alice', { hostId: star.hostId, providerId: star.providerId, nativeSessionId: star.nativeSessionId });
+  expect(stars.list('alice')).toEqual([]);
+  expect(stars.list('bob')).toHaveLength(1);
+});
+it('does not publish a favorite when durable commit fails', async () => {
+  const fail = vi.fn();
+  const state = createRelayState(auth, { commit: async () => { throw new Error('Disk unavailable'); } }, fail, () => {});
+  const stars = createSessionStars(state, () => ({ online: true, hostName: 'Mac' }));
+  await expect(stars.save('alice', star)).rejects.toThrow('Disk unavailable');
+  expect(stars.list('alice')).toEqual([]);
+  expect(fail).toHaveBeenCalledOnce();
+});
+it('validates old snapshots, malformed records, duplicates, and bounded favorites', async () => {
+  const initial = emptyRelayState(auth);
+  expect(validateRelayState(initial, auth).sessionStars).toBeUndefined();
+  initial.sessionStars = Array.from({ length: MAX_USER_STARS }, (_, index) => ({ ...star, nativeSessionId: String(index), starredAt: index, subject: 'alice' }));
+  const state = createRelayState(auth, { initial, commit: async () => {} }, () => {}, () => {});
+  const stars = createSessionStars(state, () => ({ online: false, hostName: 'Mac' }));
+  await expect(stars.save('alice', star)).rejects.toMatchObject({ status: 409 });
+  await expect(stars.save('alice', { ...star, subject: 'bob' })).rejects.toMatchObject({ status: 400 });
+  initial.sessionStars.push(initial.sessionStars[0]!);
+  expect(() => validateRelayState(initial, auth)).toThrow('Invalid');
+  initial.sessionStars = [{ ...star, starredAt: NaN, subject: 'alice' }];
+  expect(() => validateRelayState(initial, auth)).toThrow('Invalid');
+});

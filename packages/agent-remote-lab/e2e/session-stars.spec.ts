@@ -1,0 +1,51 @@
+import { expect, test } from '@playwright/test';
+
+test('shares sidebar and title favorites while retaining only local activity tracking', async ({ page }, testInfo) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  let stars: Record<string, unknown>[] = [];
+  await page.route('**/v1/stars', route => {
+    const method = route.request().method();
+    if (method === 'POST') stars = [{ ...route.request().postDataJSON(), starredAt: 1, available: true, online: true, hostName: 'Work Mac' }];
+    if (method === 'DELETE') stars = [];
+    return route.fulfill({ json: { stars } });
+  });
+  await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: 'agent-1' } }));
+  await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
+  await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
+  const mobile = testInfo.project.name.includes('mobile');
+  if (mobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('/e2e/fixtures/session-stars.html');
+  await expect(page.getByRole('region', { name: 'Opened sessions' })).toHaveCount(0);
+  await page.getByTestId('prompt-input').fill('Keep my draft');
+  const title = page.getByRole('button', { name: 'Favorites', exact: true });
+  if (mobile) await title.click();
+  await page.getByRole('button', { name: 'Star Research notes', exact: true }).last().click();
+  const favorites = mobile ? page.locator('.lab-title-favorites section') : page.locator('#lab-context [aria-label="Favorites"]');
+  await expect(favorites.getByText('Research notes', { exact: true })).toBeVisible();
+  await favorites.getByRole('button', { name: 'Track Research notes', exact: true }).click();
+  if (mobile) { await page.getByRole('button', { name: 'Close Favorites', exact: true }).click(); await expect(title).toBeFocused(); }
+  await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+  await expect(page.locator('.lab-tracking-floating section')).toContainText('Ready');
+  await expect(page.getByTestId('prompt-input')).toHaveValue('Keep my draft');
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-activity', { detail: 'waiting' })));
+  await expect(page.getByLabel('1 session status changes', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+  await expect(page.locator('.lab-tracking-floating section')).toContainText('Waiting');
+  await expect(page.getByLabel('1 session status changes', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('tracking.png') });
+  await page.goto('/e2e/fixtures/session-stars.html');
+  await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+  await expect(page.locator('.lab-tracking-floating section')).toContainText('Research notes');
+  await page.locator('.lab-tracking-floating section').getByRole('button', { name: 'Untrack Research notes', exact: true }).click();
+  await expect(page.locator('.lab-tracking-floating section')).toContainText('Choose Track');
+  expect(stars).toHaveLength(1);
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  if (mobile) await title.click();
+  await favorites.getByRole('button', { name: 'Unstar Research notes', exact: true }).last().click();
+  await expect(favorites).toContainText('Star a session');
+  expect(stars).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('favorites.png') });
+});

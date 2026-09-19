@@ -825,6 +825,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     visibleHosts,
     hasHost: (hostId: string) => hosts.has(hostId),
     canAccessHost: hostAllowed,
+    canStarSession: (item: { hostId: string; providerId: string; nativeSessionId: string }, subject: string) => {
+      const host = hosts.get(item.hostId);
+      if (!hostAllowed(item.hostId, subject) || !host?.providers.some(provider => provider.providerId === item.providerId)) return false;
+      const binding = nativeBindings.get(JSON.stringify([item.hostId, item.providerId, item.nativeSessionId]));
+      return owner(subject) || !!binding && sessionAllowed(binding, subject);
+    },
     canAccessSession: (agentId: string, subject: string) => { const binding = bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },
     async manageShares(subject: string, hostId: string, action: 'shares' | 'share' | 'revoke-share', targetSubject?: string, targetLabel?: string, sessionLimit?: number) {
       assertAvailable();

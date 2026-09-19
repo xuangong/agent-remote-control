@@ -8,7 +8,7 @@ import { AccessPage } from './components/AccessPage.js';
 
 import { clearConversationRecovery } from './conversation-recovery.js';
 
-type Access = { basePath: string; expiresAt: number; refreshAfterMs?: number };
+type Access = { user?: { id: string; name?: string; email?: string }; basePath: string; expiresAt: number; refreshAfterMs?: number };
 function parseAccess(value: unknown): Access {
   if (!value || typeof value !== 'object' || !('basePath' in value) || !('expiresAt' in value) ||
     typeof value.basePath !== 'string' || !/^\/u\/[a-f0-9]{64}\/$/.test(value.basePath) ||
@@ -16,6 +16,8 @@ function parseAccess(value: unknown): Access {
     ('refreshAfterMs' in value && (typeof value.refreshAfterMs !== 'number' || !Number.isFinite(value.refreshAfterMs) || value.refreshAfterMs < 0))) {
     throw new Error('Invalid access response.');
   }
+  if ('user' in value && (!value.user || typeof value.user !== 'object' || !('id' in value.user) || typeof value.user.id !== 'string' || !value.user.id ||
+    ('name' in value.user && typeof value.user.name !== 'string') || ('email' in value.user && typeof value.user.email !== 'string'))) throw new Error('Invalid account identity.');
   return value as Access;
 }
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
@@ -122,6 +124,7 @@ export function GatewayController({ children }: { children(baseUrl: string, acco
     requestAnimationFrame(() => securityTrigger.current?.focus());
   }
   const accountAction = <>
+    {access?.user ? <span className="gateway-account-identity" aria-label="Gateway account" title={[access.user.name, access.user.email, `Gateway user: ${access.user.id}`].filter(Boolean).join(' · ')}><span aria-hidden="true">◉</span> {access.user.name || access.user.email || access.user.id}</span> : null}
     <button type="button" onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
     <button type="button" onClick={() => void logout()}>Sign out</button>
   </>;

@@ -1,12 +1,15 @@
+import { StarButton } from './SessionFavorites.js';
+import type { SessionStars } from '../hooks/useSessionStars.js';
 import { useFeedbackToast } from './Toast.js';
 import { WorkspaceFolderPicker } from './WorkspaceFolderPicker.js';
 import { useEffect, useRef, useState } from 'react';
-import { openedEntry, sessionForest, sessionKey, sessionStatusLabel, type SessionEntry } from '../session-tree.js';
+import { sessionForest, sessionKey, sessionStatusLabel, type SessionEntry } from '../session-tree.js';
 import { SessionTree } from './SessionTree.js';
 import { DirectoryError, type CreateSessionOptions, type OpenedSession, type SessionCatalogPage, type SessionDirectoryClient, type SessionSummary, type SessionWorkspace } from '../directory-client.js';
 
 interface Props {
   searchable?: boolean;
+  favorites?: SessionStars;
   directory: SessionDirectoryClient;
   providerId: string;
   activeAgentId?: string;
@@ -21,7 +24,7 @@ interface Props {
   onClose(agentId: string): void;
 }
 
-export function SessionDirectory({ searchable = false, directory, providerId, activeAgentId, opened, known = [], hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
+export function SessionDirectory({ favorites, searchable = false, directory, providerId, activeAgentId, opened, known = [], hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
   const [search, setSearch] = useState('');
   const matches = (item: SessionEntry) => !search.trim() || [item.title, item.nativeSessionId, item.providerId, ('workspace' in item && typeof item.workspace === 'string' ? item.workspace : '')].some((value) => value?.toLowerCase().includes(search.trim().toLowerCase()));
   const [page, setPage] = useState<SessionCatalogPage | undefined>(directory.cachedPages.get(providerId));
@@ -94,7 +97,6 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
     return () => { retired = true; window.clearInterval(timer); };
   }, [providerId, directory]);
 
-  const openedTree = sessionForest(opened.map((item) => openedEntry(item, known)).filter(matches), known);
   const discovered = new Map<string, SessionEntry>((page?.items ?? []).map((item) => [sessionKey({ ...item, hostId }), { ...item, hostId }]));
   for (const item of known) {
     if ((item.hostId ?? 'local') !== hostId || item.providerId !== providerId) continue;
@@ -110,13 +112,6 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
   };
   return <>
     {searchable ? <label className="lab-session-search">Search loaded sessions<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Title, workspace, or ID" /></label> : null}
-    {opened.length > 0 ? <section className="lab-session-directory" aria-label="Opened sessions">
-      <div className="lab-directory-heading"><h2>Opened sessions</h2><span>{opened.length}</span></div>
-      <SessionTree key={search.trim() ? `search:${search}` : 'all'} defaultExpanded={!!search.trim()} nodes={openedTree} activeKey={activeKey} renderRow={(item, placeholder) => <>
-        <button type="button" className="lab-session-row" aria-current={item.agentId === activeAgentId ? 'page' : undefined} disabled={busy || (placeholder && !onOpenRelated)} onClick={() => { const saved = opened.find((entry) => entry.agentId === item.agentId); if (saved && !placeholder) onSelect(saved); else openRelated(item); }}><strong className="agent-session-title" data-session-status={item.status}>{item.title}</strong><small>{placeholder ? 'Parent · View closed' : item.role ?? item.providerId}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small></button>
-        {!placeholder && item.agentId ? <button type="button" className="lab-session-close" aria-label={`Close ${item.title}`} title="Remove from opened sessions" onClick={() => onClose(item.agentId!)}>×</button> : null}
-      </>} />
-    </section> : null}
     <section className="lab-session-directory" aria-label="Discover sessions">
       <div className="lab-directory-heading"><h2>Discover sessions</h2><button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div>
       <p className="agent-visually-hidden">Roots by activity · Subagents by creation</p>
@@ -129,11 +124,11 @@ export function SessionDirectory({ searchable = false, directory, providerId, ac
         const related = Boolean(item.parentNativeSessionId) || !summary;
         const saved = openedByKey.get(sessionKey(item));
         const current = sessionKey(item) === activeKey;
-        return <button type="button" className="lab-session-row" aria-current={current ? 'page' : undefined} disabled={busy || (!saved && (related ? !onOpenRelated : summary?.state === 'unavailable'))} onClick={() => { if (saved) onSelect(saved); else if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>
+        return <><button type="button" className="lab-session-row" aria-current={current ? 'page' : undefined} disabled={busy || (!saved && (related ? !onOpenRelated : summary?.state === 'unavailable'))} onClick={() => { if (saved) onSelect(saved); else if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>
           <strong className="agent-session-title" data-session-status={item.status ?? summary?.state}>{item.title || item.nativeSessionId}</strong>
-          <small>{current ? 'Current session · ' : saved ? 'Opened · ' : ''}{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
+          <small>{current ? 'Current session · ' : ''}{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
           <span><i className="lab-session-indicator agent-session-title" data-session-status={item.status ?? summary?.state} aria-hidden="true" />{sessionStatusLabel(item) || (summary ? stateLabel(summary.state) : placeholder ? 'Parent session' : 'Discovered')}{summary ? <time dateTime={summary.updatedAt}>{formatTime(summary.updatedAt)}</time> : null}</span>
-        </button>;
+        </button>{favorites && !placeholder ? <StarButton session={item} favorites={favorites} /> : null}</>;
       }} />
       {page?.hasMore ? <button type="button" className="lab-directory-more" disabled={loading || expired} onClick={() => void load(page.nextCursor)}>Load more sessions</button> : null}
     </section>

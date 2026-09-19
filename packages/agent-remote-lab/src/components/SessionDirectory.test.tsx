@@ -8,7 +8,7 @@ const summary = (nativeSessionId: string): SessionSummary => ({ nativeSessionId,
 function button(container: HTMLElement, label: string): HTMLButtonElement { return [...container.querySelectorAll('button')].find((item) => item.textContent === label)!; }
 
 describe('SessionDirectory', () => {
-  it('marks opened and current discovery rows and selects the existing view by full identity', async () => {
+  it('marks the current discovery row and reuses navigation history without displaying it', async () => {
     const directory = new SessionDirectoryClient('http://localhost');
     vi.spyOn(directory, 'list').mockResolvedValue({items: ['current', 'opened', 'foreign-host', 'foreign-provider'].map(summary), hasMore: false, revision: '1'});
     const opened = [
@@ -22,7 +22,8 @@ describe('SessionDirectory', () => {
     const rows = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Discover sessions"] .lab-session-row')];
     expect(rows[0]!.textContent).toContain('Current session');
     expect(rows[0]!.getAttribute('aria-current')).toBe('page');
-    expect(rows[1]!.textContent).toContain('Opened');
+    expect(rows[1]!.querySelector('small')!.textContent).not.toContain('Opened');
+    expect(container.querySelector('[aria-label="Opened sessions"]')).toBeNull();
     expect(rows[2]!.textContent).not.toContain('Opened');
     expect(rows[3]!.textContent).not.toContain('Opened');
     await act(async () => rows[1]!.click());
@@ -53,18 +54,7 @@ describe('SessionDirectory', () => {
     expect(onOpen).toHaveBeenCalledWith(summary('new'));
   });
 
-  it('switches and closes opened sessions without deleting native sessions', async () => {
-    const directory = new SessionDirectoryClient('http://localhost');
-    vi.spyOn(directory, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
-    const onSelect = vi.fn(); const onClose = vi.fn();
-    const opened = { agentId: 'agent-1', nativeSessionId: 'native-1', providerId: 'recorded', title: 'Research' };
-    const container = await render(<SessionDirectory directory={directory} providerId="recorded" opened={[opened]} activeAgentId="agent-1" busy={false} revision={0} onOpen={() => undefined} onSelect={onSelect} onClose={onClose} />);
-    const selected = container.querySelector('[aria-current="page"]') as HTMLButtonElement;
-    await act(async () => selected.click());
-    expect(onSelect).toHaveBeenCalledWith(opened);
-    await act(async () => (container.querySelector('[aria-label="Close Research"]') as HTMLButtonElement).click());
-    expect(onClose).toHaveBeenCalledWith('agent-1');
-  });
+
 });
 
 it('selects an already opened native child from discovery and preserves its closed parent in the hierarchy', async () => {
@@ -84,7 +74,7 @@ it('selects an already opened native child from discovery and preserves its clos
   await act(async () => nested.click());
   expect(onSelect).toHaveBeenCalledWith(opened[0]);
   expect(onOpenRelated).not.toHaveBeenCalled();
-  expect(container.querySelector('[aria-label="Opened sessions"]')?.textContent).toContain('View closed');
+  expect(container.querySelector('[aria-label="Opened sessions"]')).toBeNull();
   await act(async () => (discovery.querySelector('[aria-label="Collapse root"]') as HTMLButtonElement).click());
   expect(discovery.querySelector('.lab-session-tree .lab-session-tree')).toBeNull();
 });

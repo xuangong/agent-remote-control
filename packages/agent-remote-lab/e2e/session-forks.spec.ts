@@ -131,7 +131,8 @@ test('rejects a delayed fork input after the main conversation changes', async (
   await primary.getByTestId('prompt-input').fill('/fork');
   await primary.getByTestId('prompt-input').press('Enter');
   await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button')).toHaveCount(1);
-  await page.getByRole('region', { name: 'Opened sessions' }).getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
+  await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
   await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
   await page.evaluate(() => {
     const key = Object.keys(localStorage).find((key) => key.includes(':record:'))!;

@@ -73,6 +73,9 @@ it('keeps shared Host catalogs private and commits concurrent quota and unknown 
   expect((await create(firstId)).status).toBe(200); expect(creations).toBe(1);
   const catalog = await f.json(bob.basePath + `v1/remote/hosts/${hostId}/catalog?providerId=codex`, bob.cookie);
   expect((await catalog.json() as any).items.map((value: any) => value.title)).toEqual(['Bob topic']);
+  const favorite = { hostId, providerId: 'codex', nativeSessionId: 'shared-native', title: 'Bob topic' };
+  expect((await f.json(bob.basePath + 'v1/stars', bob.cookie, favorite)).status).toBe(200);
+  expect((await f.json(bob.basePath + 'v1/stars', bob.cookie, { ...favorite, nativeSessionId: 'alice-private' })).status).toBe(404);
   expect((await share(2)).status).toBe(200);
   expect((await create('unknown', '/uncertain')).status).toBe(503); expect(creations).toBe(2);
   const proof = f.control({ subject: 'alice', operation: 'hosts' }); expect((await proof()).status).toBe(200);
@@ -91,6 +94,8 @@ it('keeps shared Host catalogs private and commits concurrent quota and unknown 
   expect((await f.control({ subject: 'alice', operation: 'revoke-share', hostId, targetSubject: 'bob' })()).status).toBe(200);
   expect(await (await f.json(bob.basePath + 'v1/remote/hosts', bob.cookie)).json()).toEqual({ hosts: [] });
   expect((await shareClosed).code).toBe(1008);
+  expect(await (await f.json(bob.basePath + 'v1/stars', bob.cookie)).json()).toMatchObject({ stars: [{ ...favorite, available: false, online: false }] });
+  expect((await f.request(bob.basePath + 'v1/stars', { method: 'DELETE', headers: { cookie: bob.cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ hostId, providerId: 'codex', nativeSessionId: 'shared-native' }) })).status).toBe(200);
   expect(host.socket.readyState).toBe(1);
   expect((await share(1)).status).toBe(200);
   expect((await (await create('third')).json() as any).code).toBe('session_quota_exceeded');

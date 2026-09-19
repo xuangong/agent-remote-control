@@ -221,3 +221,35 @@ async function close(server: Server, stream: AgentRemoteWebSocketStream): Promis
     server.close((error) => error ? reject(error) : resolve());
   });
 }
+
+it('streams only distinct activity over a real socket and keeps normal content subscriptions independent', async () => {
+  const listeners = new Set<(event: AgentManagerEvent) => void>();
+  let current = validSnapshot();
+  const agent: SessionWireAgent = {
+    agentId: 'agent-1', snapshot: () => current,
+    subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    fetchTimeline: () => { throw new Error('Activity must not load history'); },
+    sendMessage: async () => { throw new Error('Activity must not send'); }, respondToInteraction: async () => {},
+  };
+  const tracking = await openControlledSocket(agent);
+  const content = await openControlledSocket(agent);
+  const inbox = socketInbox(tracking), full = socketInbox(content);
+  const received: Array<{ type: string; payload?: unknown }> = [];
+  tracking.on('message', data => received.push(JSON.parse(data.toString())));
+  tracking.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }));
+  expect((await inbox.next('agent_activity')).payload).toEqual({ agentId: 'agent-1', status: 'idle' });
+  content.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate' }));
+  await full.next('agent_snapshot');
+  for (let index = 0; index < 10; index++) for (const emit of listeners) {
+    emit({ type: 'agent_state', agentId: 'agent-1', snapshot: current });
+    emit({ type: 'resource_update', agentId: 'agent-1', resourceId: 'large-file', state: { status: 'available', text: 'private output' } });
+  }
+  const waiting = { ...current, payload: { ...current.payload, status: 'waiting' as const } };
+  for (const emit of listeners) emit({ type: 'agent_state', agentId: 'agent-1', snapshot: waiting });
+  expect((await inbox.next('agent_activity')).payload).toEqual({ agentId: 'agent-1', status: 'waiting' });
+  tracking.send(JSON.stringify({ protocolVersion: '1.4.0', type: 'timeline_subscription', payload: { requestId: 'no-content', agentIds: ['agent-1'] } }));
+  expect((await inbox.next('protocol_error')).payload).toMatchObject({ code: 'activity_only' });
+  expect(received.map(item => item.type)).toEqual(['negotiated', 'agent_activity', 'agent_activity', 'protocol_error']);
+  expect(JSON.stringify(received)).not.toContain('private output');
+  tracking.close(); content.close();
+});

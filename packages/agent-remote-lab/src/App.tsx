@@ -1,3 +1,7 @@
+import { useSessionStars } from './hooks/useSessionStars.js';
+import { useSessionTracking } from './hooks/useSessionTracking.js';
+import { FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
+import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
 import { ToastProvider, useFeedbackToast } from './components/Toast.js';
 import { SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
 import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
@@ -94,6 +98,7 @@ export interface AppActions {
 export interface AppProps {
   baseUrl?: string;
   accountAction?: ReactNode;
+  userScoped?: boolean;
   transport?: LabTransport;
   directory?: SessionDirectoryClient;
   hostService?: HostPairingService;
@@ -119,11 +124,14 @@ function AppContent({
   actions,
   fixtureAction,
   accountAction,
+  userScoped = false,
 }: AppProps) {
   const shellRef = useVisualViewport();
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl) as LabTransport, [baseUrl, injectedTransport]);
+  const favorites = useSessionStars(baseUrl, userScoped);
+  const tracking = useSessionTracking(baseUrl, transport);
   const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
     try {
       const target = readControllerLocation(new URLSearchParams(window.location.search));
@@ -862,11 +870,16 @@ function AppContent({
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
   return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost}><PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+    {tracking.observers}
+    {userScoped ? <SessionTrackingMenu tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
-      {stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
+      {userScoped ? <FavoritesMenu currentSession={addressSession} title={addressSession?.title || activeOpened?.title || 'Agent Remote'} favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /> : stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
         {stackPath.map((session, index) => <option className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === session.agentId)?.status} key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : <span className="lab-mobile-session-title agent-session-title" data-session-status={sessionActivity(state)}>{activeOpened?.title || 'Agent Remote'}</span>}
+      {userScoped && stackPath.length > 1 ? <select className="lab-mobile-side-path" aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={event => { const session = stackPath.find(entry => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
+        {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
+      </select> : null}
     </nav> : null}
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
@@ -945,21 +958,22 @@ function AppContent({
         </button>
       </nav> : null}
       <div className="lab-sidebar-content">
+      {accountAction ? <div className="lab-sidebar-account">{accountAction}</div> : null}
       {compactLayout ? <div className="lab-session-panel-actions">
         {sessionPanel !== 'list' ? <button type="button" onClick={() => setSessionPanel('list')}>All sessions</button> : <strong>Your sessions</strong>}
         <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel((value) => value === 'settings' ? 'list' : 'settings')}>Settings</button>
       </div> : null}
       {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
-        {accountAction}
         <MobileDisplaySettings />
         <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
       </section> : null}
+      {userScoped && sessionPanel === 'list' ? <section className="lab-session-directory" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2><span>{favorites.stars.length}</span></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
       {directory ? <HostPairing managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {sessionPanel === 'list' || sessionPanel === 'settings' ? <HostVscodeTunnel /> : null}
       {sessionPanel === 'list' && previewHost?.access !== 'shared' && previewHost ? <HostPreviewList onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
       {providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
-      {directory ? <SessionDirectory searchable directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
+      {directory ? <SessionDirectory favorites={favorites} searchable directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       </div>
       <div hidden={sessionPanel !== 'new'}>
       <ProviderSessionControls
@@ -1016,7 +1030,7 @@ function AppContent({
           onExecuteConsoleCommand={(id, args) => state ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('No active session.'))}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
-          sessionManager={<><nav className="lab-conversation-history" aria-label="Conversation history">
+          sessionManager={<>{!compactLayout && addressSession ? <StarButton session={addressSession} favorites={favorites} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
             <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || hostOffline || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
             <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={transitioning || hostOffline || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
           </nav>{directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}{stackRoot ? <SessionLink session={stackRoot} /> : null}</>}

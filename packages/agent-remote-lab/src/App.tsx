@@ -460,7 +460,7 @@ function AppContent({
     const hostId = item.hostId ?? selectedHost.id;
     const key = sessionKey({ ...item, hostId });
     const visible = stackPath.find(entry => sessionKey(entry) === key);
-    // Existing windows keep their connections; remembered views still revalidate their Host binding below.
+    // Existing windows keep their connections; live tracking can also supply a confirmed binding.
     if (visible && (visible.agentId !== activeAgentId || status === 'ready')) {
       setSideFocus(key);
       setFailure(undefined); setSessionNotice(undefined);
@@ -475,17 +475,24 @@ function AppContent({
     setFailure(undefined);
     setSessionNotice({ tone: 'status', message: 'Opening the existing session. Waiting for the Host to confirm it is ready…' });
     try {
-      const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
-      const result = item.parentNativeSessionId
-        ? await target.attachChild(item.providerId, item.parentNativeSessionId, item.nativeSessionId)
-        : await target.attach(item.providerId, item.nativeSessionId);
+      const observation = tracking.observations[key];
+      let agentId = observation?.connection === 'ready' ? observation.agentId : undefined;
+      // Activity-only tracking already attached this session. Content transport still checks
+      // access and recovers the binding after Host reconnects; persisted IDs are never trusted here.
+      if (!agentId) {
+        const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
+        const result = item.parentNativeSessionId
+          ? await target.attachChild(item.providerId, item.parentNativeSessionId, item.nativeSessionId)
+          : await target.attach(item.providerId, item.nativeSessionId);
+        agentId = result.agentId;
+      }
       if (navigationGeneration.current !== generation) return false;
       if (currentSession?.agentId) rememberSession({ ...currentSession, agentId: currentSession.agentId });
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
-      rememberSession({ ...prior, ...item, hostId, agentId: result.agentId });
+      rememberSession({ ...prior, ...item, hostId, agentId });
       setProviderName(providerConnectionName(hostId, item.providerId));
       setSideFocus(undefined);
-      attach(result.agentId);
+      attach(agentId);
       return true;
     } catch (error) {
       if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false));

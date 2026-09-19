@@ -1,5 +1,39 @@
 import { expect, test } from '@playwright/test';
 
+test('opens live tracking without a second attach or background history downloads', async ({ page }, testInfo) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  let attachments = 0;
+  let opening = false;
+  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/remote/hosts/host/attach', async route => {
+    attachments += 1;
+    // Attachment is deliberately unavailable after tracking is ready.
+    await route.fulfill(!opening ? { json: { agentId: 'background-session' } }
+      : { status: 504, json: { error: 'Redundant attachment timed out' } });
+  });
+  await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
+  await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
+  await page.addInitScript(() => localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([
+    { hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 },
+  ])));
+  await page.goto('/e2e/fixtures/session-stars.html?switching=1');
+  await expect(page.locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
+  expect(await page.evaluate(() => performance.getEntriesByName('tracked-content-loaded').length)).toBe(0);
+  await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+  const beforeOpen = attachments;
+  opening = true;
+  await page.evaluate(() => performance.mark('tracked-open'));
+  await page.locator('.lab-tracking-floating .lab-session-row').click();
+  await expect(page.locator('.lab-primary-conversation .agent-message-assistant')).toContainText('Conversation for background-session');
+  await expect(page.locator('.lab-primary-conversation .lab-conversation-status')).toHaveText('Ready');
+  expect(attachments).toBe(beforeOpen);
+  await expect(page.locator('.lab-tracking-count')).toHaveText('0');
+  await expect(page).toHaveURL(/session=background-session/);
+  const duration = await page.evaluate(() => performance.measure('tracked-switch', 'tracked-open', 'tracked-content-loaded').duration);
+  await testInfo.attach('fixture-switch-timing', { body: JSON.stringify({ durationMs: duration, attachRequestsOnClick: attachments - beforeOpen }), contentType: 'application/json' });
+  expect(errors).toEqual([]);
+});
+
 test('moves the tracking button without opening it and keeps the menu inside the viewport', async ({ page }, testInfo) => {
   if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
   await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));

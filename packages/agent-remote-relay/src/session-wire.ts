@@ -6,6 +6,7 @@ import {
   encodeServerMessage,
   type AgentSnapshot,
   type AgentStatus,
+  type TimelineCursor,
   type ClientMessage,
   type HistoryPage,
   type ResourceResponse,
@@ -20,6 +21,7 @@ import type { TimelinePageRequest } from './timeline-projector.js';
 export interface SessionWireAgent {
   readonly agentId: string;
   snapshot(): AgentSnapshot;
+  timelineCursor?(): TimelineCursor;
   fetchTimeline(request: TimelinePageRequest): HistoryPage;
   subscribe(listener: AgentManagerListener): () => void;
   sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
@@ -114,7 +116,7 @@ export function createSessionWire(
   function sendManagerEvent(event: AgentManagerEvent): void {
     try {
       if (activityOnly) {
-        if (event.type === 'agent_state') sendActivity(event.snapshot);
+        if (event.type === 'agent_state') sendActivity(event.snapshot, event.cursor);
         return;
       }
       const message = managerEventToServerMessage(event, timelineSubscribed);
@@ -151,9 +153,10 @@ export function createSessionWire(
         if (closed) return;
         const boundAgent = requireBoundAgent();
         const snapshot = boundAgent.snapshot();
+        const cursor = activityOnly ? boundAgent.timelineCursor?.() : undefined;
         sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated' });
         if (closed) return;
-        if (activityOnly) sendActivity(snapshot);
+        if (activityOnly) sendActivity(snapshot, cursor);
         else sendMessage(snapshot);
         if (closed) return;
         negotiated = true;
@@ -344,14 +347,14 @@ export function createSessionWire(
     }
   }
 
-  function sendActivity(snapshot: AgentSnapshot): void {
+  function sendActivity(snapshot: AgentSnapshot, cursor?: TimelineCursor): void {
     const agent = snapshot.payload;
     const status = agent.status === 'closed' || agent.status === 'failed' ? agent.status
       : agent.pendingInteractions.length || agent.status === 'waiting' ? 'waiting'
       : agent.activeTurn || agent.status === 'running' ? 'running' : agent.status;
     if (lastActivity === status) return;
     lastActivity = status;
-    sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId: agent.id, status } });
+    sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId: agent.id, status, ...(cursor ? { cursor } : {}) } });
   }
 
   function bindAgent(): void {

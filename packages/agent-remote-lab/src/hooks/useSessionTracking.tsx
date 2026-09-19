@@ -58,7 +58,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     setObservations(previous => {
       const next = nextObservation(previous[key], value), old = previous[key];
       if (visible.current.has(key)) { next.changed = false; next.attention = undefined; }
-      return old && old.connection === next.connection && old.activity === next.activity && old.error === next.error && old.changed === next.changed && old.attention === next.attention && old.agentId === next.agentId ? previous : { ...previous, [key]: next };
+      return old && old.connection === next.connection && old.activity === next.activity && old.error === next.error && old.changed === next.changed && old.attention === next.attention && old.agentId === next.agentId && old.cursor?.epoch === next.cursor?.epoch && old.cursor?.seq === next.cursor?.seq ? previous : { ...previous, [key]: next };
     });
   }, [setObservations]);
   const acknowledge = useCallback((key: string) => setObservations(previous => {

@@ -37,7 +37,7 @@ async function fixture() {
   });
   const relay = { requireAgent(id: string): SessionWireAgent {
     let set = listeners.get(id); if (!set) { set = new Set(); listeners.set(id, set); }
-    return { agentId: id, snapshot: () => snapshot(id), subscribe: listener => { set!.add(listener); return () => { set!.delete(listener); }; },
+    return { agentId: id, snapshot: () => snapshot(id), timelineCursor: () => ({ epoch: id + '-epoch', seq: 3 }), subscribe: listener => { set!.add(listener); return () => { set!.delete(listener); }; },
       fetchTimeline: () => { throw new Error('Unexpected history request'); }, sendMessage: async () => {}, respondToInteraction: async () => {} };
   } } as AgentRemoteRelay;
   const authorized: string[] = [];
@@ -55,7 +55,7 @@ async function fixture() {
     return { socket, next, send: (value: object) => socket.send(JSON.stringify({ protocolVersion: '1.4.0', ...value })) };
   };
   return { connect, authorized, listeners, update(id: string) {
-    for (const listener of listeners.get(id) ?? []) listener({ type: 'agent_state', agentId: id, snapshot: snapshot(id, 'running') });
+    for (const listener of listeners.get(id) ?? []) listener({ type: 'agent_state', agentId: id, snapshot: snapshot(id, 'running'), cursor: { epoch: id + '-epoch', seq: 8 } });
   } };
 }
 
@@ -83,9 +83,21 @@ it('keeps simultaneous full sessions isolated while reusing one real socket acro
 it('keeps activity subscriptions separate from content and rejects content on the activity channel', async () => {
   const f = await fixture(); const c = await f.connect('activity');
   c.send({ type: 'subscribe', subscriptionId: 1, agentId: 'a', message: { protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' } });
-  expect((await c.next(v => v.message?.type === 'agent_activity')).message.payload).toEqual({ agentId: 'a', status: 'idle' });
+  expect((await c.next(v => v.message?.type === 'agent_activity')).message.payload).toEqual({ agentId: 'a', status: 'idle', cursor: { epoch: 'a-epoch', seq: 3 } });
   c.send({ type: 'message', subscriptionId: 1, message: { protocolVersion: '1.4.0', type: 'timeline_subscription', payload: { requestId: 'forbidden', agentIds: ['a'] } } });
   await c.next(v => v.type === 'closed' && v.subscriptionId === 1);
   expect(c.socket.readyState).toBe(WebSocket.OPEN);
   c.socket.close();
+});
+
+
+it('delivers the activity content boundary over a real channel on status changes', async () => {
+  const f = await fixture(); const c = await f.connect('activity');
+  c.send({ type: 'subscribe', subscriptionId: 1, agentId: 'a', message: {
+    protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity',
+  } });
+  expect((await c.next(v => v.message?.type === 'agent_activity')).message.payload.cursor).toEqual({ epoch: 'a-epoch', seq: 3 });
+  f.update('a');
+  expect((await c.next(v => v.message?.type === 'agent_activity')).message.payload.cursor).toEqual({ epoch: 'a-epoch', seq: 8 });
+  c.socket.close(); await once(c.socket, 'close');
 });

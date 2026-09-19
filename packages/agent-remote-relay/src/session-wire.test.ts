@@ -528,3 +528,20 @@ function timelineManagerEvent(seq: number, text: string): AgentManagerEvent {
     },
   };
 }
+
+
+it('captures the content cursor with the activity change, without sending content or moving unchanged targets', async () => {
+  const { agent, emit } = fakeAgent();
+  Object.assign(agent, { timelineCursor: () => ({ epoch: 'epoch-1', seq: 3 }) });
+  const output: any[] = [];
+  const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+  await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }));
+  expect(output.at(-1)).toMatchObject({ type: 'agent_activity', payload: { status: 'idle', cursor: { epoch: 'epoch-1', seq: 3 } } });
+  const snapshot = agent.snapshot(); snapshot.payload.status = 'waiting';
+  emit({ type: 'agent_state', agentId: agent.agentId, snapshot, cursor: { epoch: 'epoch-1', seq: 7 } } as AgentManagerEvent);
+  expect(output.at(-1).payload).toEqual({ agentId: agent.agentId, status: 'waiting', cursor: { epoch: 'epoch-1', seq: 7 } });
+  const count = output.length;
+  emit({ type: 'agent_state', agentId: agent.agentId, snapshot, cursor: { epoch: 'epoch-1', seq: 8 } } as AgentManagerEvent);
+  expect(output).toHaveLength(count);
+  wire.close();
+});

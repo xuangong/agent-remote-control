@@ -1,3 +1,5 @@
+import { SessionCatchUpRing } from './SessionCatchUpRing.js';
+import type { SessionCatchUp } from '../hooks/useSessionCatchUp.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import type { SessionStar } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
@@ -14,7 +16,7 @@ const activityGroups = [
   { status: 'unknown', label: 'Status unavailable', activities: ['unknown'] },
 ];
 
-export function SessionTrackingMenu({ tracking, busy, inert, onOpen }: { tracking: SessionTracking; busy: boolean; inert: boolean; onOpen(session: SessionStar): void }) {
+export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: { catchUp?: SessionCatchUp; tracking: SessionTracking; busy: boolean; inert: boolean; onOpen(session: SessionStar): void }) {
   const { root, style, handlers } = useTrackingPosition();
   const sessions = tracking.backgroundSessions;
   const counts = activityGroups.map(group => ({ ...group,
@@ -27,7 +29,7 @@ export function SessionTrackingMenu({ tracking, busy, inert, onOpen }: { trackin
   const alertLabel = alert === 'pending' ? 'New pending sessions need attention.' : alert === 'idle' ? 'A working session is now idle.' : '';
   const attention = sessions.some(session => ['waiting', 'failed'].includes(tracking.observations[sessionKey(session)]?.activity ?? ''));
   return <div ref={root} style={style} {...handlers} className="lab-tracking-floating" data-attention={attention} data-alert={alert} {...(inert ? { inert: '' } : {})}>
-    <SessionPopover label="Tracked sessions" triggerTitle={`${alertLabel ? `${alertLabel} ` : ''}Drag to move, or focus and use arrow keys`} trigger={<><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={`${group.label}: ${group.count}`} aria-label={`${group.count} ${group.label.toLowerCase()} sessions`}>{group.count}</span>) : <span className="lab-tracking-count" title="No background sessions">0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={`${changes} session status changes`} /> : attention ? <span className="lab-tracking-attention" aria-label="A tracked session needs attention" /> : null}</>}>
+    <SessionPopover label="Tracked sessions" triggerTitle={`${alertLabel ? `${alertLabel} ` : ''}Drag to move, or focus and use arrow keys`} trigger={<><SessionCatchUpRing value={catchUp} /><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={`${group.label}: ${group.count}`} aria-label={`${group.count} ${group.label.toLowerCase()} sessions`}>{group.count}</span>) : <span className="lab-tracking-count" title="No background sessions">0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={`${changes} session status changes`} /> : attention ? <span className="lab-tracking-attention" aria-label="A tracked session needs attention" /> : null}</>}>
       {close => <>
         <p className="lab-control-note">Tracking on this client</p>
         {!sessions.length ? <p className="lab-control-note">{tracking.sessions.length ? 'The current session shows its status in the conversation.' : 'Choose Track in Favorites to watch a session here.'}</p> : null}

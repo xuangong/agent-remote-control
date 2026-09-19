@@ -637,3 +637,15 @@ it('round-trips strict activity observation without accepting content fields', (
   expect(decodeServerMessage(JSON.stringify(activity))).toMatchObject({ status: 'ok', value: activity });
   expect(decodeServerMessage(JSON.stringify({ ...activity, payload: { ...activity.payload, text: 'private' } })).status).toBe('rejected');
 });
+
+
+it('round-trips an activity content cursor and rejects invalid cursor values', () => {
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const message = { protocolVersion: '1.4.0', type: 'agent_activity', payload: {
+    agentId: 'agent', status: 'waiting', cursor: { epoch: 'epoch', seq: 42 },
+  } };
+  expect(decodeServerMessage(JSON.stringify(message))).toMatchObject({ status: 'ok', value: message });
+  for (const cursor of [{ epoch: '', seq: 42 }, { epoch: 'epoch', seq: -1 }, { epoch: 'epoch', seq: 1.5 }]) {
+    expect(decodeServerMessage(JSON.stringify({ ...message, payload: { ...message.payload, cursor } })).status).toBe('rejected');
+  }
+});

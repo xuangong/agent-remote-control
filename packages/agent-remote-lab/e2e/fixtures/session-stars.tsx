@@ -14,6 +14,8 @@ directory.list = async () => ({ items: [session], hasMore: false, revision: '1' 
 directory.workspaces = async () => ({ workspaces: [] });
 directory.attach = async () => ({ agentId: 'agent-1', nativeSessionId: session.nativeSessionId });
 const observers = new Map<RemoteTransportListener, string>();
+const catchUpFixture = new URLSearchParams(location.search).has('catchup');
+const contentObservers = new Map<RemoteTransportListener, string>();
 const allowContent = new URLSearchParams(location.search).has('switching');
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
@@ -22,6 +24,7 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
   fetchSnapshot: async () => ({ protocolVersion: '1.4.0', type: 'agent_snapshot', payload: replicaState.agent! }),
   fetchTimeline: async agentId => {
     if (!allowContent) throw new Error('Tracking must not request content');
+    if (catchUpFixture) await new Promise<void>(resolve => window.addEventListener('fixture-history', () => resolve(), { once: true }));
     performance.mark('tracked-content-loaded');
     return { protocolVersion: '1.4.0', type: 'timeline_page', payload: {
       requestId: 'history', agentId, direction: 'tail', epoch: 'fixture', reset: false, staleCursor: false, gap: false,
@@ -34,9 +37,10 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
   onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
   connect(agentId, listener) {
     observers.set(listener, agentId); queueMicrotask(() => listener.onOpen());
-    return { close: () => { observers.delete(listener); }, send: message => {
+    return { close: () => { observers.delete(listener); contentObservers.delete(listener); }, send: message => {
       if (allowContent && message.type === 'negotiate' && message.observation !== 'activity') {
         observers.delete(listener);
+        contentObservers.set(listener, agentId);
         listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
         listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_snapshot', payload: {
           ...replicaState.agent!, id: agentId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId },
@@ -49,7 +53,7 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
       }
       if (message.type !== 'negotiate' || message.observation !== 'activity') throw new Error('Tracking requested a content subscription');
       listener.onMessage({ protocolVersion: '1.4.0', type: 'negotiated' });
-      listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId, status: 'idle' } });
+      listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId, status: 'idle', ...(catchUpFixture ? { cursor: { epoch: 'fixture', seq: 3 } } : {}) } });
     } };
   },
 };
@@ -59,6 +63,13 @@ window.addEventListener('fixture-activity', event => {
     if (typeof detail !== 'string' && detail.agentId !== agentId) continue;
     listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId, status: typeof detail === 'string' ? detail : detail.status } });
   }
+});
+window.addEventListener('fixture-content', event => {
+  const seq = (event as CustomEvent<number>).detail;
+  for (const [listener, agentId] of contentObservers) listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_stream', payload: {
+    agentId, epoch: 'fixture', seq, timestamp: '2026-09-20T00:00:00Z',
+    event: { type: 'timeline', providerId: 'recorded', resources: [], item: { type: 'assistant_message', text: `Caught-up content ${seq}` } },
+  } });
 });
 localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...session, agentId: 'agent-1' }]));
 const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Work Mac', online: true, providers: [{ providerId: 'recorded', displayName: 'Recorded' }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };

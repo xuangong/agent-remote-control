@@ -96,3 +96,27 @@ it.each(['connecting', 'disconnected'] as const)('revalidates a %s tracked sessi
   expect(f.contentConnections).toEqual(['live-agent']);
   expect(f.container.textContent).toContain('Loaded tracked conversation.');
 });
+
+
+it('closes the tracking edge only when content reaches the fixed activity cursor', async () => {
+  const f = await fixture(star);
+  await act(async () => f.activity.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: {
+    agentId: 'live-agent', status: 'waiting', cursor: { epoch: 'tracked-epoch', seq: 1 },
+  } } as Parameters<RemoteTransportListener['onMessage']>[0]));
+  const page = await f.fetchTimeline('live-agent', 'tail', undefined, 100);
+  f.fetchTimeline.mockClear();
+  let release!: (value: typeof page) => void;
+  f.fetchTimeline.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  await f.open();
+  const ring = () => f.container.querySelector('.lab-tracking-catch-up');
+  expect(ring()?.getAttribute('data-state')).toBe('catching_up');
+  expect(ring()?.getAttribute('aria-valuenow')).not.toBe('100');
+  // A newer activity report must not move the target selected on entry.
+  await act(async () => f.activity.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: {
+    agentId: 'live-agent', status: 'running', cursor: { epoch: 'tracked-epoch', seq: 50 },
+  } } as Parameters<RemoteTransportListener['onMessage']>[0]));
+  await act(async () => release(page));
+  expect(ring()?.getAttribute('data-state')).toBe('complete');
+  expect(ring()?.getAttribute('aria-valuenow')).toBe('100');
+  expect(f.container.textContent).toContain('Loaded tracked conversation.');
+});

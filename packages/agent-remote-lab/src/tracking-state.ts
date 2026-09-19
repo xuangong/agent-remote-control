@@ -1,7 +1,7 @@
-import type { AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentStatus, TimelineCursor } from '@agent-remote-controller/agent-remote-protocol';
 import type { RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
 import { validSessionStar, starKey, type SessionStar } from '@agent-remote-controller/agent-remote-hosted/session-stars';
-export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
+export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; cursor?: TimelineCursor; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
 export const MAX_TRACKED_SESSIONS = 8;
 export function nextObservation(previous: SessionObservation | undefined, next: SessionObservation): SessionObservation {
   const activity = next.connection === 'ready' ? next.activity : undefined;

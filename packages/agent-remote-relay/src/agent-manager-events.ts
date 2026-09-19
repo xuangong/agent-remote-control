@@ -5,6 +5,7 @@ import type {
 } from '@agent-remote-controller/agent-provider-sdk';
 import type {
   AgentSnapshot,
+  TimelineCursor,
   ResourceBinding,
   ResourceState,
 } from '@agent-remote-controller/agent-remote-protocol';
@@ -12,7 +13,7 @@ import type {
 import type { CanonicalTimelineRow } from './timeline-store.js';
 
 export type AgentManagerEvent =
-  | { type: 'agent_state'; agentId: string; snapshot: AgentSnapshot }
+  | { type: 'agent_state'; agentId: string; snapshot: AgentSnapshot; cursor?: TimelineCursor }
   | {
       type: 'agent_stream';
       agentId: string;

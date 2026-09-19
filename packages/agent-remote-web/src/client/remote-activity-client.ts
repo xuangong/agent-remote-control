@@ -1,9 +1,10 @@
-import { PROTOCOL_VERSION, type AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
+import { PROTOCOL_VERSION, type TimelineCursor, type AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
 import type { RemoteAgentTransport, RemoteConnection, RemoteServerMessage } from './transport.js';
 
 export interface RemoteActivityState {
   connection: 'connecting' | 'ready' | 'disconnected';
   activity?: AgentStatus;
+  cursor?: TimelineCursor;
   error?: string;
 }
 /** A read-only subscription: no replica, history fetches, resources, or content commands. */
@@ -38,7 +39,7 @@ export class RemoteActivityClient {
   private receive(generation: number, message: RemoteServerMessage): void {
     if (message.type === 'agent_activity' && message.payload.agentId === this.agentId) {
       clearTimeout(this.deadline); this.deadline = undefined; this.attempts = 0;
-      this.changed({ connection: 'ready', activity: message.payload.status });
+      this.changed({ connection: 'ready', activity: message.payload.status, ...(message.payload.cursor ? { cursor: message.payload.cursor } : {}) });
     } else if (message.type === 'protocol_error') {
       const unsupported = message.payload.code === 'invalid_shape' || message.payload.code === 'incompatible_protocol_version';
       this.failed(generation, unsupported ? 'This Host does not support activity-only tracking. Update the Controller to track sessions.' : message.payload.message, !unsupported && message.payload.recoverable);

@@ -275,3 +275,53 @@ test('pulses for unread pending and completed work, prioritizes pending, and mar
   await expect(pendingIndicator).toBeVisible();
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', page.viewportSize()!.width);
 });
+
+
+test('draws the tracking edge from applied content and closes immediately when the activity target is reached', async ({ page }, testInfo) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
+  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: 'background-session' } }));
+  await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
+  await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
+  await page.addInitScript(() => localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([
+    { hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 },
+  ])));
+  await page.goto('/e2e/fixtures/session-stars.html?switching=1&catchup=1');
+  await expect(page.locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
+  const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
+  await trigger.click(); await page.locator('.lab-tracking-floating .lab-session-row').click();
+  const ring = page.locator('.lab-tracking-catch-up');
+  await expect(ring).toHaveAttribute('data-state', 'catching_up');
+  const composer = page.locator('.lab-primary-conversation .lab-composer-dock');
+  const geometry = await composer.boundingBox();
+  const input = page.getByTestId('prompt-input');
+  await input.fill('Draft while catching up');
+  await page.waitForTimeout(1200);
+  await expect(ring).toHaveAttribute('aria-valuenow', '0');
+  await page.evaluate(() => window.dispatchEvent(new Event('fixture-history')));
+  await expect(ring).toHaveAttribute('aria-valuenow', '33');
+  const rect = ring.locator('rect');
+  expect(await rect.evaluate(node => (node as SVGGraphicsElement).getBBox().width)).toBeGreaterThan(40);
+  expect(await rect.evaluate(node => getComputedStyle(node).strokeWidth)).toBe(await trigger.evaluate(node => getComputedStyle(node).borderTopWidth));
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-content', { detail: 2 })));
+  await expect(ring).toHaveAttribute('aria-valuenow', '66');
+  await expect.poll(() => rect.evaluate(node => parseFloat(getComputedStyle(node).strokeDashoffset))).toBeCloseTo(100 / 3, 2);
+  await page.screenshot({ path: testInfo.outputPath('catch-up-partial.png') });
+  const completion = await page.evaluate(() => new Promise<{ state?: string; offset: string; transition: string }>(resolve => {
+    window.dispatchEvent(new CustomEvent('fixture-content', { detail: 3 }));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const ring = document.querySelector<HTMLElement>('.lab-tracking-catch-up')!;
+      const style = getComputedStyle(ring.querySelector('rect')!);
+      resolve({ state: ring.dataset.state, offset: style.strokeDashoffset, transition: style.transitionDuration });
+    }));
+  }));
+  expect(completion).toEqual({ state: 'complete', offset: '0px', transition: '0s' });
+  await expect(input).toHaveValue('Draft while catching up');
+  expect(await composer.boundingBox()).toEqual(geometry);
+  await page.screenshot({ path: testInfo.outputPath('catch-up-complete.png') });
+  await expect.poll(() => ring.evaluate(node => getComputedStyle(node).opacity)).toBe('0');
+  // The overlay never intercepts the existing menu or movement controls.
+  await trigger.click(); await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  expect(errors).toEqual([]);
+});

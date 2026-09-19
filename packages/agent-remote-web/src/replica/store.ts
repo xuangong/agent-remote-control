@@ -30,6 +30,7 @@ import { MessageOutbox } from './message-outbox.js';
 export class AgentReplica {
   private state = createReplicaState();
   private readonly listeners = new Set<() => void>();
+  private readonly historyListeners = new Set<(epoch: string, direction: HistoryPage['payload']['direction']) => void>();
   private readonly outbox = new MessageOutbox();
   private readonly messageTimers = new Map<string, { confirmation?: ReturnType<typeof setTimeout> }>();
 
@@ -40,6 +41,12 @@ export class AgentReplica {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Reports only accepted history applications, not buffered live or resource changes. */
+  subscribeHistory(listener: (epoch: string, direction: HistoryPage['payload']['direction']) => void): () => void {
+    this.historyListeners.add(listener);
+    return () => this.historyListeners.delete(listener);
   }
 
   beginMessage(agentId: string, text: string, delivery?: OutgoingMessage['delivery'], operationId?: string): string {
@@ -82,6 +89,9 @@ export class AgentReplica {
   applyHistory(page: HistoryPage): TimelineReduction {
     const result = applyHistoryPage(this.state, page);
     this.replace(result.state);
+    if (result.status === 'applied' || result.status === 'duplicate') {
+      for (const listener of this.historyListeners) listener(page.payload.epoch, page.payload.direction);
+    }
     return result;
   }
 

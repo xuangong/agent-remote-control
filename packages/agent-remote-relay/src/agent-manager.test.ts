@@ -1366,3 +1366,30 @@ describe('AgentManager sensitive request defaults', () => {
     await manager.close();
   });
 });
+
+it('anchors an activity transition to canonical content already committed by the provider', async () => {
+  const stream = new ManualProviderStream(); stream.push({ type: 'history_boundary' });
+  const manager = await AgentManager.attach({ agentId: 'activity-cut', provider: { providerId: 'codex', displayName: 'Codex' }, session: sessionFor(stream), epoch: 'content-epoch' });
+  const output: any[] = [];
+  const wire = createSessionWire(manager, json => output.push(JSON.parse(json)));
+  try {
+    await manager.ready;
+    await wire.receive(JSON.stringify({ protocolVersion: '1.4.0', type: 'negotiate', observation: 'activity' }));
+    expect(output.at(-1).payload.cursor).toEqual({ epoch: 'content-epoch', seq: 0 });
+    stream.push({ type: 'observation', sourceKey: 'answer', occurredAt: Date.now(), delivery: 'live', event: {
+      type: 'timeline', provider: 'codex', item: { type: 'assistant_message', text: 'Please review the answer.' },
+    } });
+    stream.push({ type: 'observation', sourceKey: 'question', occurredAt: Date.now(), delivery: 'live', event: {
+      type: 'interaction_requested', provider: 'codex', request: { kind: 'plan_approval', requestId: 'review', plan: 'Review this plan', allowedActions: ['approve', 'reject'] },
+    } });
+    await expect.poll(() => output.at(-1)?.payload.status, { timeout: 1500 }).toBe('waiting');
+    expect(output.at(-1).payload.cursor).toEqual({ epoch: 'content-epoch', seq: 1 });
+    expect(manager.fetchTimeline({ requestId: 'proof', agentId: manager.agentId, direction: 'tail', limit: 10 }).payload.endCursor).toEqual({ epoch: 'content-epoch', seq: 1 });
+    const count = output.length;
+    stream.push({ type: 'observation', sourceKey: 'later-answer', occurredAt: Date.now(), delivery: 'live', event: {
+      type: 'timeline', provider: 'codex', item: { type: 'assistant_message', text: 'Later content' },
+    } });
+    await expect.poll(() => manager.timelineCursor().seq, { timeout: 1500 }).toBe(2);
+    expect(output).toHaveLength(count);
+  } finally { wire.close(); await manager.close(); }
+});

@@ -1237,3 +1237,16 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 .lab-favorites-current { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--obs-border); }
 .lab-favorites-current > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--obs-text-secondary); }
+
+/* The edge closes on applied content, never on an animation timer. */
+.lab-tracking-floating .lab-session-popover-trigger { position: relative; }
+.lab-tracking-catch-up { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; color: var(--obs-action); }
+.lab-tracking-catch-up svg { display: block; overflow: visible; }
+.lab-tracking-catch-up rect { fill: none; stroke: currentColor; stroke-width: 1px; stroke-linecap: butt; transition: stroke-dashoffset 160ms ease-out; }
+.lab-tracking-catch-up[data-state="complete"] { animation: lab-catch-up-fade 200ms ease-out 800ms forwards; }
+.lab-tracking-catch-up[data-state="complete"] rect { transition: none; }
+@keyframes lab-catch-up-fade { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .lab-tracking-catch-up rect { transition: none; }
+  .lab-tracking-catch-up[data-state="complete"] { animation-duration: 1ms; }
+}

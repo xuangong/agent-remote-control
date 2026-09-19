@@ -16,6 +16,7 @@ import {
   PROTOCOL_VERSION,
   type AgentCommand,
   type AgentSnapshot,
+  type TimelineCursor,
   type HistoryPage,
   type ResourceResolveResponse,
   type ResourceResponse,
@@ -198,6 +199,10 @@ export class AgentManager {
 
   snapshot(): AgentSnapshot {
     return structuredClone(this.state);
+  }
+
+  timelineCursor(): TimelineCursor {
+    return this.timeline.cursor;
   }
 
   fetchTimeline(request: TimelinePageRequest): HistoryPage {
@@ -627,7 +632,7 @@ export class AgentManager {
         break;
       }
     }
-    this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot() });
+    this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot(), cursor: this.timeline.cursor });
   }
 
   private clearPendingInteraction(requestId: string): void {

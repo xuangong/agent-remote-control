@@ -38,3 +38,16 @@ it('shows an unsupported Host without falling back to content or retrying foreve
   expect(connect).toHaveBeenCalledOnce();
   client.stop();
 });
+
+it('passes the observed content cursor without inferring one when absent', () => {
+  let listener!: RemoteTransportListener;
+  const transport = { connect: (_id: string, next: RemoteTransportListener) => { listener = next; return { send: vi.fn(), close: vi.fn() }; } } as unknown as RemoteAgentTransport;
+  const values: RemoteActivityState[] = [];
+  const client = new RemoteActivityClient('agent', transport, value => values.push(value));
+  client.start(); listener.onOpen();
+  listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting', cursor: { epoch: 'e', seq: 8 } } });
+  expect(values.at(-1)?.cursor).toEqual({ epoch: 'e', seq: 8 });
+  listener.onMessage({ protocolVersion: '1.4.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'idle' } });
+  expect(values.at(-1)?.cursor).toBeUndefined();
+  client.stop();
+});

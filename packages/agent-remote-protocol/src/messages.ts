@@ -20,6 +20,7 @@ import { AgentPersistenceHandle, AgentSnapshot, AgentStatus } from './snapshot.j
 import { ProtocolVersionSchema } from './version.js';
 import { ListCommandsRequest, ExecuteCommandRequest, CommandListResponse, CommandResultResponse } from './commands.js';
 import { OperationId } from './operations.js';
+import { TimelineCursor } from './cursor.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => Type.Object(
@@ -181,7 +182,7 @@ export type AgentUpdateMessage = Static<typeof AgentUpdateMessage>;
 export const AgentActivityMessage = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('agent_activity'),
-  payload: Strict({ agentId: NonEmptyString, status: AgentStatus }),
+  payload: Strict({ agentId: NonEmptyString, status: AgentStatus, cursor: Type.Optional(TimelineCursor) }),
 });
 export type AgentActivityMessage = Static<typeof AgentActivityMessage>;
 

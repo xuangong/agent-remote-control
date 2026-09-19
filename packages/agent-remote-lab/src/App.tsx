@@ -1,4 +1,6 @@
 import { useSessionStars } from './hooks/useSessionStars.js';
+import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
+import type { TimelineCursor } from '@agent-remote-controller/agent-remote-protocol';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
 import { FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
@@ -180,6 +182,8 @@ function AppContent({
   const [directoryRevision, setDirectoryRevision] = useState(0);
   const creationReservation = useRef<{ operationId: string; options: CreateSessionOptions; providerId: string }>();
   const [creationLocked, setCreationLocked] = useState(false);
+  const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
+  useEffect(() => beginCatchUp(), [baseUrl, transport, beginCatchUp]);
   const replicas = useMemo(() => new Map<string, AgentReplica>(), [baseUrl, transport]);
   const replicaFor = useCallback((agentId: string) => {
     let replica = replicas.get(agentId);
@@ -344,7 +348,7 @@ function AppContent({
     if (choice.hostId === 'local') setLocalProviderId(choice.providerId);
   }
 
-  const attach = useCallback((agentId: string): void => {
+  const attach = useCallback((agentId: string, catchUpTarget?: TimelineCursor): void => {
     navigationGeneration.current += 1;
     setSessionNotice(undefined);
     setUncertainMutation(false);
@@ -361,6 +365,7 @@ function AppContent({
     setStatus('connecting');
     setAttachingAgentId(agentId);
     const replica = replicaFor(agentId);
+    beginCatchUp(replica, catchUpTarget);
     const saved = openedSessionsRef.current.find(item => item.agentId === agentId);
     const stopMessageRecovery = recoverMessages(replica, baseUrl, saved ? sessionKey(saved) : agentId, agentId);
     const client = new RemoteSessionClient(agentId, transport, replica, { historyPageSize: 100 });
@@ -372,7 +377,7 @@ function AppContent({
     client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
     client.start();
     rememberAgent(agentId);
-  }, [baseUrl, transport, replicas, replicaFor]);
+  }, [baseUrl, transport, replicas, replicaFor, beginCatchUp]);
 
   useEffect(() => {
     if (initialState) return;
@@ -479,6 +484,8 @@ function AppContent({
     const visible = stackPath.find(entry => sessionKey(entry) === key);
     // Existing windows keep their connections; live tracking can also supply a confirmed binding.
     if (visible && (visible.agentId !== activeAgentId || status === 'ready')) {
+      const observation = tracking.observations[key];
+      beginCatchUp(replicaFor(visible.agentId), observation?.connection === 'ready' && observation.agentId === visible.agentId ? observation.cursor : undefined);
       setSideFocus(key);
       setFailure(undefined); setSessionNotice(undefined);
       setActiveView('workbench');
@@ -509,7 +516,7 @@ function AppContent({
       rememberSession({ ...prior, ...item, hostId, agentId });
       setProviderName(providerConnectionName(hostId, item.providerId));
       setSideFocus(undefined);
-      attach(agentId);
+      attach(agentId, observation?.connection === 'ready' && observation.agentId === agentId ? observation.cursor : undefined);
       return true;
     } catch (error) {
       if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false));
@@ -734,6 +741,7 @@ function AppContent({
   const focusedWindow = stackPath[stackRange.end];
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
+  useEffect(() => focusCatchUp(addressSession ? replicas.get(addressSession.agentId) : undefined), [addressSession?.agentId, replicas, focusCatchUp]);
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
     && primaryBinding.current.transport === transport && primaryBinding.current.agentId === stackRoot?.agentId);
   const openWindows = useMemo(() => [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [stackRoot, primaryIsBound, sideSessions]);
@@ -898,7 +906,7 @@ function AppContent({
 
   return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost}><PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {tracking.observers}
-    {userScoped ? <SessionTrackingMenu tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
+    {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       {userScoped ? <FavoritesMenu status={addressSession?.agentId === state?.agent?.id ? sessionActivity(state) : sessionEntries.find(entry => addressSession && sessionKey(entry) === sessionKey(addressSession))?.status} currentSession={addressSession} title={addressSession?.title || activeOpened?.title || 'Agent Remote'} favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /> : stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>

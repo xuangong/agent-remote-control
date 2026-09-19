@@ -78,3 +78,18 @@ frames, physical errors, and shared outbound backpressure close the channel.
 The package exports `SessionChannelClientMessage` and `SessionChannelServerMessage`
 as schemas and types, with matching `decodeSessionChannel*Message` and
 `encodeSessionChannel*Message` codecs using the standard wire-result convention.
+
+
+`agent_activity.payload.cursor` (`epoch`, `seq`) carries the canonical content
+boundary captured with that activity snapshot. Unchanged activity does not produce
+cursor traffic. A cursor is not a state version and does not order the two
+connections. Deploy the Controller and Relay with the matching protocol schema.
+
+When opening an observed session, the workbench freezes that cursor for the
+navigation. The tracking button edge advances only as the replica applies content
+and closes immediately at the target, even if newer history still awaits Ready.
+Buffered out-of-order events, matching status labels, and timers cannot complete
+it. Already caught-up cache completes immediately; an absent cursor omits the
+indicator. A different content epoch hides the indicator without claiming success;
+the fixed target can resume if that epoch later arrives. Retired target epochs
+remain unavailable. Normal Ready gating for commands remains independent.

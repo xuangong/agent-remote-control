@@ -1,5 +1,7 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { createConnection } from 'node:net';
+import { promisify } from 'node:util';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -52,9 +54,9 @@ async function fixture() {
   await writeFile(executable, `#!${process.execPath}\nconst fs = require('node:fs'); const path = require('node:path'); const config = fs.readFileSync(path.join(process.env.CODEX_HOME, 'config.toml'), 'utf8'); fs.writeFileSync(process.env.TEST_CAPTURE, JSON.stringify({home:process.env.CODEX_HOME,key:process.env.CODEX_GATEWAY_API_KEY,config})); console.log(process.env.TEST_NATIVE_FAIL ? process.env.CODEX_GATEWAY_API_KEY : 'codex-cli 0.155.0');\n`, { mode: 0o700 });
   const stop = async () => { if (child && child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.kill('SIGTERM'); await exited; } };
   cleanups.push(stop);
-  const start = (overrides: NodeJS.ProcessEnv = {}, saved = false) => {
+  const start = (overrides: NodeJS.ProcessEnv = {}, saved = false, command = 'foreground') => {
     output = '';
-    child = spawn(process.execPath, ['dist/cli.js', 'foreground'], { env: {
+    child = spawn(process.execPath, ['dist/cli.js', command], { env: {
       PATH: process.env.PATH, HOME: root, AGENT_HOST_STATE_DIR: root, AGENT_HOST_WORKSPACE: root, AGENT_HOST_CODEX: executable,
       TEST_CAPTURE: join(root, 'native.json'), ...(nativeFails ? { TEST_NATIVE_FAIL: '1' } : {}),
       ...(saved ? {} : { AGENT_HOST_SERVER: `http://127.0.0.1:${address.port}`, AGENT_HOST_REMOTE_KEY: 'invitation', AGENT_HOST_BOOTSTRAP_CODEX: '1' }), ...overrides,
@@ -62,7 +64,7 @@ async function fixture() {
     child.stdout!.on('data', chunk => { output += chunk; }); child.stderr!.on('data', chunk => { output += chunk; });
     return child;
   };
-  return { root, start, stop, apiKey, deviceKey, sequence, registrations, sockets, get output() { return output; }, get bootstrapKey() { return bootstrapKey; },
+  return { root, start, stop, apiKey, deviceKey, sequence, registrations, sockets, serverUrl: `http://127.0.0.1:${address.port}`, get output() { return output; }, get bootstrapKey() { return bootstrapKey; },
     failBootstrap: () => { status = 503; }, failNative: () => { nativeFails = true; } };
 }
 
@@ -100,3 +102,40 @@ it('rejects shared native state before enrolling and redacts a provisioned key f
   expect((await once(child, 'exit'))[0]).toBe(1);
   expect(f.output).not.toContain(f.apiKey); expect(f.output).toContain('[redacted]');
 }, 15000);
+
+
+it('rejects managed live pairing on the authenticated management socket without replacing the connection', async () => {
+  const f = await fixture(); f.start({}, false, '_serve');
+  let state: { token: string; socket: string };
+  await vi.waitFor(async () => {
+    state = JSON.parse(await readFile(join(f.root, 'daemon.json'), 'utf8'));
+    expect(f.registrations).toHaveLength(2);
+  }, { timeout: 5000 });
+  const connection = await readFile(join(f.root, 'connection.json'), 'utf8');
+  const credentials = await readFile(join(f.root, 'gateway-codex', 'gateway-credentials.json'), 'utf8');
+  const result = await new Promise<{ error?: string }>((resolve, reject) => {
+    const socket = createConnection(state.socket); let response = '';
+    socket.setTimeout(3000, () => { socket.destroy(); reject(new Error('Management response timed out')); });
+    socket.on('error', reject);
+    socket.on('connect', () => socket.end(JSON.stringify({ token: state.token, action: 'pair', server: f.serverUrl, key: 'other-account-device' })));
+    socket.on('data', chunk => { response += chunk.toString(); });
+    socket.on('end', () => { try { resolve(JSON.parse(response)); } catch (error) { reject(error); } });
+  });
+  expect(result.error).toMatch(/Gateway.*new.*AGENT_HOST_STATE_DIR/i);
+  expect(f.registrations).toHaveLength(2);
+  expect(await readFile(join(f.root, 'connection.json'), 'utf8')).toBe(connection);
+  expect(await readFile(join(f.root, 'gateway-codex', 'gateway-credentials.json'), 'utf8')).toBe(credentials);
+}, 10000);
+
+it('rejects the pair command for saved managed state even when the caller disables bootstrap', async () => {
+  const f = await fixture();
+  await writeFile(join(f.root, 'connection.json'), JSON.stringify({ serverUrl: f.serverUrl, remoteKey: f.deviceKey,
+    environment: { AGENT_HOST_BOOTSTRAP_CODEX: '1' } }));
+  const connection = await readFile(join(f.root, 'connection.json'), 'utf8');
+  await expect(promisify(execFile)(process.execPath, ['dist/cli.js', 'pair'], { timeout: 5000, env: {
+    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl,
+    AGENT_HOST_REMOTE_KEY: 'other-account-device', AGENT_HOST_BOOTSTRAP_CODEX: '0',
+  } })).rejects.toMatchObject({ code: 1, stderr: expect.stringMatching(/Gateway.*new.*AGENT_HOST_STATE_DIR/i) });
+  expect(f.registrations).toHaveLength(0);
+  expect(await readFile(join(f.root, 'connection.json'), 'utf8')).toBe(connection);
+}, 10000);

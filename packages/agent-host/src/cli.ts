@@ -11,7 +11,7 @@ import { createAgentHost, type AgentHost, type AgentHostUplinkDiagnostic } from 
 import { createHostRegistrations } from './registrations.js';
 import { createHostExecutionPolicy } from './execution-policy.js';
 import { boundedDiagnosticLine, createDiagnosticLog, type DiagnosticLog } from './diagnostic-log.js';
-import { resolveHostConnection, saveIssuedCredential, saveRegisteredConnection, type HostConnection } from './connection-config.js';
+import { resolveHostConnection, resolveHostEnvironment, saveIssuedCredential, saveRegisteredConnection, type HostConnection } from './connection-config.js';
 import { runCodexCommand } from './codex-command.js';
 import { createLaunchdAutostart } from './launchd.js';
 import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
@@ -162,6 +162,7 @@ async function handleManagement(input: string, token: string, host: AgentHost, c
     if (request.token !== token) throw new Error('Unauthorized local management request.');
     if (request.action === 'status') connection.end(JSON.stringify({ running: true, uplink: host.state }));
     else if (request.action === 'pair') {
+      assertLivePairAllowed(configuration.environment);
       if (!request.server || !request.key) throw new Error('Repair requires a server and key.');
       diagnosticSecrets.add(request.key);
       const replacement = { ...configuration, serverUrl: request.server, remoteKey: request.key };
@@ -232,7 +233,14 @@ async function status(): Promise<void> {
   const response = await request(state, { action: 'status' });
   process.stdout.write(`Agent Host daemon is running (pid ${state.pid}); uplink: ${String(response.uplink)}; supervisor: ${state.supervisor ?? 'manual'}.\n`);
 }
+function assertLivePairAllowed(environment: NodeJS.ProcessEnv): void {
+  if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') {
+    throw new Error('Gateway-managed Hosts cannot replace their live pairing. Initialize a new Host with a separate AGENT_HOST_STATE_DIR to change accounts or Relays.');
+  }
+}
 async function pair(): Promise<void> {
+  assertLivePairAllowed(await resolveHostEnvironment(stateDir, {}));
+  assertLivePairAllowed(process.env);
   const server = requiredEnv('AGENT_HOST_SERVER'); const key = requiredEnv('AGENT_HOST_REMOTE_KEY');
   const state = await requiredState();
   const response = await request(state, { action: 'pair', server, key });

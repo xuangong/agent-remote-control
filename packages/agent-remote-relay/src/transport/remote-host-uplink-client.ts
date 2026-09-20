@@ -283,7 +283,7 @@ function validateConfiguration(options: RemoteHostUplinkClientOptions): void {
     throw new Error('Remote Host uplink requires a valid Remote Access Key.');
   }
   if (options.providers !== undefined) {
-    if (options.providers.length < 1 || options.providers.length > 64) throw new Error('Remote Host uplink requires between 1 and 64 providers.');
+    if (options.providers.length > 64) throw new Error('Remote Host uplink supports at most 64 providers.');
     const ids = new Set<string>();
     for (const provider of options.providers) {
       for (const [name, value] of [['provider identity', provider.providerId], ['provider display name', provider.displayName]] as const) {

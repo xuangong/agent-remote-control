@@ -1,6 +1,11 @@
 import { expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 
+it('accepts an enrollment-only Host without advertising native providers', () => {
+  const message = { uplinkVersion: 2, type: 'register', installationId: 'docker-enrollment', name: 'Docker Host', credentialRotation: true, providers: [] };
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify(message))).toEqual({ status: 'ok', value: message });
+}, 10000);
+
 it('accepts optional durable credential exchange while preserving legacy registration', () => {
   for (const message of [
     { type: 'register', installationId: 'i', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] },

@@ -11,7 +11,7 @@ type ProviderDescriptor = { providerId: string; displayName: string };
 type DeviceCredential = { expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
   tunnelToken?: string;
-  ready?: boolean; credentialRotation?: boolean; issueCredential?(): Promise<void>;
+  ready?: boolean; credentialRotation?: boolean; gatewayKeyRequested?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
   pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown; method: 'GET' | 'POST'; path: string }>;
   streams: Map<string, { socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
@@ -25,7 +25,7 @@ export interface RemoteHostBrokerState {
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
@@ -81,7 +81,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   function snapshot(): RemoteHostBrokerState {
     return { previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation }) => ({ id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}) })),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested }) => ({ id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -288,6 +288,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (!existing && hosts.size >= 128) throw new BrokerError(429, 'host_capacity', 'Host capacity reached');
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
           const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name,
+            ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
           return { value: undefined, publish() {
@@ -833,8 +834,30 @@ export function createHostBroker(options: HostBrokerOptions) {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
     return url.pathname === '/ws/remote-host' || !!(session && bindings.has(session[1]!));
   };
+  function authenticateDevice(value: string) {
+    if (unavailable || !options.durable) return undefined;
+    const hash = keyHash(value); const credential = keys.get(hash);
+    if (!credential || credential.kind !== 'device' || credential.requiresRotation || !credential.installationId || credential.expires <= now()) return undefined;
+    const host = [...hosts.values()].find(host => host.installationId === credential.installationId);
+    if (!host) return undefined;
+    return { hostId: host.id, hostName: host.name,
+      current: () => !unavailable && keys.get(hash) === credential && credential.expires > now() && hosts.get(host.id) === host };
+  }
   return {
     previews,
+    authenticateDevice,
+    async markGatewayKeyRequested(value: string): Promise<boolean> {
+      return commit(draft => {
+        const device = authenticateDevice(value);
+        if (!device) return { value: false, publish() {} };
+        draft.hosts.find(host => host.id === device.hostId)!.gatewayKeyRequested = true;
+        return { value: true, publish() { hosts.get(device.hostId)!.gatewayKeyRequested = true; } };
+      });
+    },
+    gatewayKeyHost(hostId: string, subject: string) {
+      const host = hosts.get(hostId);
+      return !unavailable && owner(subject) && host?.gatewayKeyRequested ? { hostId: host.id, hostName: host.name } : undefined;
+    },
     ownsHost: (hostId: string, subject: string) => hosts.has(hostId) && owner(subject),
     tunnelHost: (token: string) => [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token)?.id,
     acceptTunnel(token: string, socket: TunnelSocket) {

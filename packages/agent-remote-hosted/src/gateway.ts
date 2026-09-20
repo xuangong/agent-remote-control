@@ -10,6 +10,7 @@ import { createGatewayControlVerifier } from './control.js';
 import { SharingError } from './host-sharing.js';
 import { createGatewaySessions } from './sessions.js';
 import { queryGatewayAuthority } from './authority.js';
+import { provisionGatewayHostKey, revokeGatewayHostKey, validateBootstrapBody } from './host-bootstrap.js';
 import { createRelayState, type RelayStateStore } from './state.js';
 import { createTimerRelayScheduler, type RelayScheduler } from './scheduler.js';
 import { readJson } from './request.js';
@@ -40,6 +41,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const auth = { origin: validateGatewayOrigin(options.origin), issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
   if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
   const tenants = new Map<string, Tenant>();
+  const hostKeyOperations = new Map<string, Promise<unknown>>();
   const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
@@ -184,10 +186,42 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (session) return [...tenants.values()].find(value => value.broker.canAccessSession(session[1]!, subject));
     return undefined;
   }
+  async function withHostKey<T>(hostId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = hostKeyOperations.get(hostId) ?? Promise.resolve();
+    const pending = previous.catch(() => undefined).then(operation);
+    hostKeyOperations.set(hostId, pending);
+    try { return await pending; }
+    finally { if (hostKeyOperations.get(hostId) === pending) hostKeyOperations.delete(hostId); }
+  }
+  async function bootstrapHost(request: Request, url: URL): Promise<Response> {
+    if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+    if (request.headers.has('origin') || request.headers.has('cookie')) return json(403, { error: 'Device authentication is required.' });
+    if (url.search) return json(400, { error: 'No bootstrap parameters are accepted.' });
+    if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, { error: 'JSON is required.' });
+    const bearer = /^Bearer ([^\s]{1,256})$/i.exec(request.headers.get('authorization') ?? '')?.[1];
+    const owned = bearer && [...tenants.values()].find(value => value.broker.authenticateDevice(bearer));
+    const device = owned && owned.broker.authenticateDevice(bearer!);
+    if (!owned || !device) return json(401, { error: 'Device credential is unavailable.' });
+    if (!security.allow('bootstrap:' + device.hostId, 30, 60_000)) return json(429, { error: 'Too many bootstrap requests.' });
+    await validateBootstrapBody(request);
+    return withHostKey(device.hostId, async () => {
+      if (request.signal.aborted || !device.current()) return json(401, { error: 'Device credential is unavailable.' });
+      const authority = await queryGatewayAuthority(auth, 'user-status', { subject: owned.subject });
+      if (authority.status !== 'active' || authority.subject !== owned.subject) {
+        return json(authority.status === 'unavailable' ? 503 : 403, { error: 'Host owner access could not be verified.' });
+      }
+      if (!device.current() || !await owned.broker.markGatewayKeyRequested(bearer!)) return json(401, { error: 'Device credential is unavailable.' });
+      const result = await provisionGatewayHostKey(auth, { subject: owned.subject, hostId: device.hostId, hostName: device.hostName });
+      if (!device.current()) return json(401, { error: 'Device credential is unavailable.' });
+      return result.status === 'active' ? json(200, result.credentials)
+        : json(result.status === 'denied' ? 403 : 503, { error: 'Host bootstrap could not be completed.' });
+    });
+  }
   async function handle(request: Request): Promise<Response | undefined> {
     const url = new URL(request.url);
     if (isPreviewRequest(url)) return handlePreview(request);
     if (url.origin !== auth.origin) return json(403, { error: 'Origin is not allowed.' });
+    if (url.pathname === '/v1/remote/host/bootstrap') return bootstrapHost(request, url);
     if (url.pathname === '/_arc/preview-authorize' && subdomainAccess) {
       if (request.method !== 'POST' || !originAllowed(request)) return json(403, {});
       if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, { error: 'JSON is required.' });
@@ -394,7 +428,19 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (body?.mode === 'link') return json(200, { tunnelUrl: auth.origin + controllerPath({ hostId, previewId, previewPath: path + original.search + original.hash }) });
       return json(200, { entryUrl: previewAccess.issue({ source: request, subject: grant.subject, hostId, previewId, path: path + original.search + original.hash }) });
     }
-    const result = await destination.broker.handleRequest(relative, context(request, grant));
+    const revokeHost = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(path);
+    const execute = () => destination.broker.handleRequest(relative, context(request, grant));
+    const result = durable && revokeHost && request.method === 'POST' ? await withHostKey(revokeHost[1]!, async () => {
+      const identity = destination.broker.gatewayKeyHost(revokeHost[1]!, grant.subject);
+      if (identity) {
+        await validateBootstrapBody(relative.clone());
+        if (!context(request, grant).authorize!()) return json(401, { error: 'Session is unavailable.' });
+        if (!await revokeGatewayHostKey(auth, { subject: grant.subject, ...identity })) {
+          return json(503, { error: 'Host key revocation could not be completed. Retry revoking the Host.' });
+        }
+      }
+      return execute();
+    }) : await execute();
     if (result?.ok && request.method === 'GET' && /^\/v1\/remote\/hosts\/[^/]+\/previews$/.test(path)) {
       const snapshot = await result.json() as { registrations: Array<{ id: string }> };
       const hostId = /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)![1]!;

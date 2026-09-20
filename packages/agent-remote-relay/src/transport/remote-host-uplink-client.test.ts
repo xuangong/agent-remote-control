@@ -7,7 +7,7 @@ import { createRemoteHostUplinkClient } from './remote-host-uplink-client.js';
 const closeables: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closeables.splice(0).reverse()) await close(); });
 
-async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
+async function broker(heartbeat: { intervalMs: number; timeoutMs: number }, providers?: Array<{ providerId: string; displayName: string }>) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>(resolve => server.once('listening', resolve));
   closeables.push(() => new Promise<void>(resolve => {
@@ -15,7 +15,7 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
     server.close(() => resolve());
   }));
   const connections: WebSocket[] = [], pings: Buffer[] = [], states: string[] = [], acknowledgements: string[] = [];
-  let registrations = 0;
+  let registrations = 0; let registeredProviders: unknown;
   const responses: Array<{ requestId: string; status: number; body: string }> = [];
   server.on('connection', socket => {
     connections.push(socket);
@@ -23,6 +23,7 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
       const message = JSON.parse(data.toString());
       if (message.type === 'register') {
         registrations += 1;
+        registeredProviders = message.providers;
         socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat }));
       }
       if (message.type === 'heartbeat_ack') acknowledgements.push(message.nonce);
@@ -32,7 +33,7 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
   });
   const relay = createAgentRemoteRelay({ providers: [] });
   closeables.push(() => relay.close());
-  const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key',
+  const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers,
     url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`,
     resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
     reconnectBaseDelayMs: 5, reconnectMaxDelayMs: 10,
@@ -40,8 +41,14 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }) {
   });
   closeables.push(() => client.close());
   await client.ready;
-  return { client, connections, pings, states, acknowledgements, responses, registrations: () => registrations };
+  return { client, connections, pings, states, acknowledgements, responses, registrations: () => registrations, registeredProviders: () => registeredProviders };
 }
+
+it('registers an enrollment-only Host over WebSocket with an empty provider list', async () => {
+  const b = await broker({ intervalMs: 30000, timeoutMs: 10000 }, []);
+  expect(b.registeredProviders()).toEqual([]);
+  expect(b.states).toEqual(['connecting', 'registered']);
+}, 10000);
 
 async function until(predicate: () => boolean): Promise<void> {
   const deadline = Date.now() + 1500;

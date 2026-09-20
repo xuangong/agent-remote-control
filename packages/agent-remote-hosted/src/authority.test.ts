@@ -30,3 +30,18 @@ it.each([301, 302, 307, 308])('rejects authority redirect %s without forwarding 
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 }, 10_000);
+
+it('bounds the owner authority response before accepting a valid lease', async () => {
+  const server = createServer((request, response) => {
+    request.resume(); response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ active: true, subject: 'alice', validUntil: Date.now() + 60_000, extra: 'x'.repeat(20000) }));
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw Error('Missing listener');
+    const result = await queryGatewayAuthority({ origin: 'https://agents.example', issuer: `http://127.0.0.1:${address.port}`, secret: 'authority-limit-secret-01234567890123456789' }, 'user-status', { subject: 'alice' });
+    expect(result).toEqual({ status: 'unavailable' });
+  } finally {
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}, 10_000);

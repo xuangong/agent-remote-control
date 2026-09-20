@@ -1,5 +1,5 @@
 import { SharingError } from './host-sharing.js';
-export async function readRequestBytes(request: Request, limit: number): Promise<Uint8Array> {
+export async function readRequestBytes(request: Pick<Request, 'body'>, limit: number): Promise<Uint8Array> {
   const reader = request.body?.getReader(); if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = []; let size = 0;
   try {

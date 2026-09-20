@@ -41,7 +41,7 @@ export const RemoteHostUplinkMessage = Type.Union([
     Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
     Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, credentialRotation: Type.Optional(Type.Literal(true)),
-      providers: Type.Array(provider, { minItems: 1, maxItems: 64 }) }, object),
+      providers: Type.Array(provider, { minItems: 0, maxItems: 64 }) }, object),
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),

@@ -3,11 +3,12 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { resolveHostEnvironment } from './connection-config.js';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
+import { loadGatewayCodexEnvironment } from './gateway-codex.js';
 
 /** Runs the native CLI with inherited terminal streams; never owns the shared daemon implicitly. */
 export async function runCodexCommand(args: string[], stateDir: string, environment: NodeJS.ProcessEnv): Promise<number> {
   if (args[0] === 'app-server' && args[1] === 'daemon') args = ['daemon', ...args.slice(2)];
-  const configured = await resolveHostEnvironment(stateDir, environment);
+  const configured = await loadGatewayCodexEnvironment(stateDir, await resolveHostEnvironment(stateDir, environment));
   const executable = configured.AGENT_HOST_CODEX ?? configured.AGENT_REMOTE_CODEX_EXECUTABLE ?? 'codex';
   const home = configured.AGENT_REMOTE_CODEX_HOME ?? configured.CODEX_HOME ?? join(homedir(), '.codex');
   const defaultSocket = join(resolve(home), 'app-server-control', 'app-server-control.sock');
@@ -28,7 +29,7 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
   } else {
     // Explicit --remote remains available for intentional one-off connections.
     const hasRemote = options.some(arg => arg === '--remote' || arg.startsWith('--remote='));
-    nativeArgs = hasRemote ? args : ['--remote', `unix://${socket}`, ...args];
+    nativeArgs = hasRemote || configured.AGENT_HOST_CODEX_CONNECTION === 'private' ? args : ['--remote', `unix://${socket}`, ...args];
   }
   let command = executable;
   const limit = configured.AGENT_HOST_CODEX_NOFILE ?? '8192';

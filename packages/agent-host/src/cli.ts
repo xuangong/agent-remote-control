@@ -16,6 +16,8 @@ import { runCodexCommand } from './codex-command.js';
 import { createLaunchdAutostart } from './launchd.js';
 import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
 import { createSystemdAutostart, systemdUnavailable } from './systemd.js';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@agent-remote-controller/agent-remote-relay';
+import { configureGatewayCodex, managedCodexHome } from './gateway-codex.js';
 
 interface DaemonState { pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' }
 const args = process.argv.slice(2);
@@ -52,15 +54,16 @@ function help(): void {
 async function serve(daemon: boolean): Promise<void> {
   await privateDirectory();
   const diagnosticLog = daemon ? createDiagnosticLog({ path: daemonLogFile }) : undefined;
+  const diagnosticSecrets = new Set<string>();
   try {
-    await serveConfigured(daemon, diagnosticLog);
+    await serveConfigured(daemon, diagnosticLog, diagnosticSecrets);
   } catch (error) {
     diagnosticLog?.dispose();
-    throw error;
+    throw new Error(boundedDiagnosticLine(error instanceof Error ? error.message : String(error), diagnosticSecrets).trimEnd());
   }
 }
 
-async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | undefined): Promise<void> {
+async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | undefined, diagnosticSecrets: Set<string>): Promise<void> {
   const writeDiagnostic = (line: string, secrets: Iterable<string> = []) => {
     if (diagnosticLog) diagnosticLog.write(line, secrets);
     else process.stderr.write(daemonDiagnosticLine(line, secrets));
@@ -69,7 +72,8 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
     : process.env.AGENT_HOST_LAUNCHD === '1' ? 'launchd' : undefined) : undefined;
   const launch = supervisor ? await resolveAutostartConnection(stateDir, process.env) : undefined;
   const configuration = launch?.connection ?? await resolveHostConnection(stateDir, process.env);
-  const { serverUrl, remoteKey, environment } = configuration;
+  const { serverUrl, environment } = configuration;
+  if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') managedCodexHome(stateDir, environment);
   if (daemon) {
     const existing = await readState();
     if (existing && existing.pid !== process.pid && processAlive(existing.pid))
@@ -77,7 +81,30 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   }
   const installationId = await installation();
   const token = process.env.AGENT_HOST_MANAGEMENT_TOKEN ?? randomBytes(32).toString('hex');
-  const diagnosticSecrets = new Set([remoteKey, token]);
+  diagnosticSecrets.add(configuration.remoteKey); diagnosticSecrets.add(token);
+  if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') {
+    const relay = createAgentRemoteRelay({ providers: [] });
+    const enrollment = createRemoteHostUplinkClient({ relay, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+      providers: [], url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey,
+      resolveSession: () => undefined, control: async () => ({ status: 503, body: JSON.stringify({ error: 'Host initialization is in progress.' }) }),
+      onCredential: credential => { diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential); },
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const accepted = await Promise.race([enrollment.ready, new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Host enrollment timed out. Restart the Controller to retry.')), 15_000);
+      })]);
+      clearTimeout(timer);
+      await saveRegisteredConnection(stateDir, configuration, Promise.resolve(accepted));
+      const managed = await configureGatewayCodex(stateDir, configuration, accepted.hostId);
+      if (managed.CODEX_GATEWAY_API_KEY) diagnosticSecrets.add(managed.CODEX_GATEWAY_API_KEY);
+      Object.assign(environment, managed);
+    } finally {
+      clearTimeout(timer);
+      try { await within(enrollment.close(), shutdownTimeout()); }
+      finally { await within(relay.close(), shutdownTimeout()); }
+    }
+  }
   const executionPolicy = await createHostExecutionPolicy(environment);
   if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   const registrations = await createHostRegistrations(environment,
@@ -90,7 +117,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
       diagnostic: event => { writeDiagnostic(JSON.stringify({ event, time: new Date().toISOString() }), diagnosticSecrets); } },
     onRequestDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
     onDiagnostic: diagnostic => { writeDiagnostic(uplinkDiagnosticLine(diagnostic), diagnosticSecrets); },
-    executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey, onCredential: credential => {
+    executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey, onCredential: credential => {
       diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);
     } }, shutdownTimeoutMs: shutdownTimeout() });
   if (!daemon) {

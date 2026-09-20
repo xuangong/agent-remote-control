@@ -6,6 +6,15 @@ import { resolveHostConnection, saveRegisteredConnection } from './connection-co
 
 const temporary: string[] = [];
 
+it('retains Gateway bootstrap opt-in without copying its LLM credential into connection settings', async () => {
+  const path = await directory();
+  const config = await resolveHostConnection(path, { AGENT_HOST_SERVER: 'https://relay.example', AGENT_HOST_REMOTE_KEY: 'device-secret',
+    AGENT_HOST_BOOTSTRAP_CODEX: '1', CODEX_GATEWAY_API_KEY: 'must-not-persist-llm-key' });
+  await saveRegisteredConnection(path, config, Promise.resolve());
+  expect((await resolveHostConnection(path, {})).environment.AGENT_HOST_BOOTSTRAP_CODEX).toBe('1');
+  expect(await readFile(join(path, 'connection.json'), 'utf8')).not.toContain('must-not-persist-llm-key');
+}, 10000);
+
 it('retains shared Codex connection settings across Host restarts', async () => {
   const path = await directory();
   const config = await resolveHostConnection(path, { AGENT_HOST_SERVER: 'https://relay.example', AGENT_HOST_REMOTE_KEY: 'device-secret',

@@ -217,6 +217,8 @@ Above 1180 px, the sidebar starts at 320 px and exposes a draggable divider. Wid
 
 Favorites in the compact sidebar and title menu use single-line rows. Long titles and Host/Provider details scroll horizontally within the list, while Track and star actions remain visible at the right edge with 44 px touch targets. Desktop favorites retain their existing layout.
 
+Phone layouts, including short touch-screen landscape viewports, keep the image-capable message editor at 16 px alongside native form controls to avoid focus-triggered iPhone magnification. Sending and returning focus retain the same editor font size; browser pinch zoom remains available.
+
 Compact layouts expose Sessions directly. The full-screen session panel starts with the Host selector and a search over loaded sessions. Matching descendants keep ancestor context and expand during search. Browse provider changes the catalog without exposing creation settings. New session opens Provider/workspace/model configuration; Settings contains Host pairing, revocation, account sign-out, and recorded playback controls. Session selection closes the panel and resumes the conversation.
 
 A small tab overlays the upper-right edge of the input dock and toggles message input visibility without reserving a layout row. The collapsed dock has zero height; the tab floats over the Timeline above the bottom safe area. Collapsing leaves the tab at the bottom and gives the recovered space to the Timeline; the mounted composer retains its draft. Expanding restores the same input without automatically opening the keyboard. The Timeline preserves its reading anchor or follows the latest content as the dock changes height.

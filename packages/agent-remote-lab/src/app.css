@@ -935,7 +935,8 @@ textarea {
 }
 
 @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
-  .lab-shell input:not([type="checkbox"]):not([type="radio"]), .lab-shell select, .lab-shell textarea { font-size: 16px; }
+  .lab-shell input:not([type="checkbox"]):not([type="radio"]), .lab-shell select, .lab-shell textarea,
+  .lab-composer-dock .agent-composer-editor { font-size: 16px; }
   .lab-session-summary > summary { gap: 5px; }
   .lab-connection-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lab-composer-dock .agent-session-controls { flex: 1 1 0; min-width: 0; }

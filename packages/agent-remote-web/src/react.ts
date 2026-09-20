@@ -2,6 +2,7 @@ export { AgentTimeline } from './react/AgentTimeline.js';
 export { TimelineDisplay, isContentOnlyItem } from './react/TimelineDisplay.js';
 export type { TimelineDisplayMode } from './react/TimelineDisplay.js';
 export type { AgentTimelineProps, AgentTimelineState } from './react/AgentTimeline.js';
+export { CopyTunnelUrl } from './react/CopyTunnelUrl.js';
 export { PreviewActions, discoverLoopbackTargets } from './react/PreviewActions.js';
 export type { PreviewController } from './react/PreviewActions.js';
 export { PreviewProvider, usePreviewController, PreviewDock } from './react/PreviewContext.js';

@@ -121,6 +121,12 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
         ? { ...entry, error: 'This preview has been unregistered.' } : entry));
       await refresh();
     },
+    getTunnelUrl: async (id: string, target: string) => {
+      if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
+      const url = await client.open(hostId, id, target, AbortSignal.timeout(20_000));
+      if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
+      return url;
+    },
     open: async (id: string, target: string, agentId?: string) => {
       if (scopeRef.current !== scope) return '';
       const sessionId = agentId ?? currentState.registrations.find(entry => entry.id === id)?.sources[0]?.sessionId ?? '';

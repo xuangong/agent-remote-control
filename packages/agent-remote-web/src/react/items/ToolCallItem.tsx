@@ -67,16 +67,17 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
     {preview ? <div className="agent-tool-preview">
       {item.detail.type === 'shell' ? <ContentPreview code text={item.detail.command} /> : null}
       {item.result ? <ToolResultPreview result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} search={item.detail.type === 'search'} /> : null}
+      {item.error ? <ContentPreview text={item.error} /> : null}
       <button className="agent-preview-expand" type="button" aria-controls={detailsId} aria-expanded={false} onClick={toggle}>
-        {item.result ? 'Show full result' : 'Show details'}
+        {item.error ? 'Show error details' : item.result ? 'Show full result' : 'Show details'}
       </button>
     </div> : null}
     <div id={detailsId} className="agent-tool-details" hidden={!expanded}>
       {expanded ? <><ToolCallDetails detail={item.detail} />
-      {item.result ? <ToolResultView result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} /> : null}</> : null}
+      {item.result ? <ToolResultView result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} /> : null}
+      {item.error ? <pre className="agent-tool-error" role="alert" tabIndex={0}>{item.error}</pre> : null}</> : null}
     </div>
     {failure ? <p className="agent-history-error" role="alert">{failure}</p> : null}
-    {item.error ? <pre className="agent-tool-error" role="alert" tabIndex={0}>{item.error}</pre> : null}
   </article>;
 }
 

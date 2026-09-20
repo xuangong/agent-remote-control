@@ -12,12 +12,25 @@ async function expectContained(container: Locator) {
 }
 
 for (const width of [320, 390, 844, 1440]) {
-  test(`keeps failed command output compact and readable at ${width}px`, async ({ page }, testInfo) => {
+  for (const mode of ['preview', 'simple']) test(`keeps failed command output compact and readable in ${mode} at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 740 });
-    await page.goto('/e2e/fixtures/view-overflow.html?view=tool-error');
+    await page.goto(`/e2e/fixtures/view-overflow.html?view=tool-error&mode=${mode}`);
     const error = page.getByRole('alert');
+    const toggle = page.locator('.agent-tool-toggle');
+    const tool = page.locator('.agent-tool');
+    await expect(error).toHaveCount(0);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toContainText('Failed');
+    if (mode === 'simple') {
+      await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
+      expect((await tool.boundingBox())!.height).toBeLessThanOrEqual(60);
+    } else {
+      const preview = tool.locator('.agent-text-preview');
+      await expect(preview).toContainText('diff --git');
+      expect((await preview.boundingBox())!.height).toBeLessThanOrEqual(81);
+    }
+    await toggle.click();
     await expect(error).toContainText('diff --git');
-    await expect(page.locator('.agent-tool-toggle')).toHaveAttribute('aria-expanded', 'false');
     const typography = await error.evaluate(element => {
       const style = getComputedStyle(element);
       return { size: parseFloat(style.fontSize), whitespace: style.whiteSpace, font: style.fontFamily, height: element.clientHeight, scrollHeight: element.scrollHeight };
@@ -31,9 +44,17 @@ for (const width of [320, 390, 844, 1440]) {
     await expectContained(page.getByTestId('timeline'));
     await error.focus();
     await expect(error).toBeFocused();
-    await error.press('ArrowDown');
+    await error.press('PageDown');
     await expect.poll(() => error.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
-    await page.screenshot({ path: testInfo.outputPath(`failed-command-${width}.png`) });
+    await page.screenshot({ path: testInfo.outputPath(`failed-command-${mode}-${width}-expanded.png`) });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toContainText('Failed');
+    await expect(error).toHaveCount(0);
+    await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
+    expect((await tool.boundingBox())!.height).toBeLessThanOrEqual(60);
+    await expectContained(page.getByTestId('timeline'));
+    await page.screenshot({ path: testInfo.outputPath(`failed-command-${mode}-${width}-collapsed.png`) });
   });
 
   for (const view of ['workbench', 'timeline', 'trace', 'inspector', 'command']) {

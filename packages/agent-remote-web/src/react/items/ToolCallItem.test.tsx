@@ -4,6 +4,7 @@ import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-pr
 
 import { render, rerender } from '../../test/setup.js';
 import { ToolCallItem } from './ToolCallItem.js';
+import { TimelineDisplay } from '../TimelineDisplay.js';
 
 describe('ToolCallItem', () => {
   it('discloses complete tool details and preserves the disclosure while the call updates', async () => {
@@ -30,16 +31,33 @@ describe('ToolCallItem', () => {
     expect(container.querySelector<HTMLElement>('.agent-tool-details')?.hidden).toBe(false);
   });
 
-  it('keeps a failed call and its error visible with the details collapsed', async () => {
-    const container = await render(<ToolCallItem item={{
-      type: 'tool_call', callId: 'read-one', name: 'read', status: 'failed', error: 'File is unavailable.',
+  it.each(['preview', 'simple'] as const)('keeps failure status visible while disclosing the full error in %s mode', async mode => {
+    const error = `File is unavailable.\n${Array.from({ length: 20 }, (_, index) => `Diagnostic line ${index}`).join('\n')}`;
+    const item: Extract<AgentTimelineItem, { type: 'tool_call' }> = {
+      type: 'tool_call', callId: 'read-one', name: 'read', status: 'failed', error,
       detail: { type: 'read', filePath: '/workspace/missing.txt' },
-    }} />);
+    };
+    const renderItem = (message = error) => <TimelineDisplay.Provider value={mode}><ToolCallItem item={{ ...item, error: message }} /></TimelineDisplay.Provider>;
+    const container = await render(renderItem());
 
-    expect(container.querySelector('.agent-tool-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    const toggle = container.querySelector<HTMLButtonElement>('.agent-tool-toggle')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toContain('Failed');
     expect(container.querySelector('.agent-tool-summary')?.textContent).toBe('/workspace/missing.txt');
-    expect(container.querySelector('[role="alert"]')?.closest('[hidden]')).toBeNull();
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe('File is unavailable.');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    if (mode === 'simple') expect(container.querySelector('.agent-tool-preview')).toBeNull();
+    else expect(container.querySelector('.agent-tool-preview')?.textContent).toContain('File is unavailable.');
+    expect(container.textContent).not.toContain('Diagnostic line 19');
+
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.agent-tool-details [role="alert"]')?.textContent).toBe(error);
+    await act(async () => toggle.click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('.agent-tool-preview')).toBeNull();
+    await rerender(container, renderItem(`${error}\nMore diagnostics`));
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('More diagnostics');
   });
 });
 

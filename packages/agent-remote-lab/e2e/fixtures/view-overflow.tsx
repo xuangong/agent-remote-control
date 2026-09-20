@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import type { AgentInteractionRequest, AgentTimelineItem, AgentToolDetail } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline } from '@agent-remote-controller/agent-remote-web/react';
+import { AgentCommandDetails, AgentTimeline, TimelineDisplay } from '@agent-remote-controller/agent-remote-web/react';
 import { App } from '../../src/App.js';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
@@ -121,11 +121,11 @@ const contentState: AgentReplicaState = { ...previewState, timeline: { ...previe
   })),
 ] } };
 createRoot(document.getElementById('root')!).render(
-  <main style={{ height: '100dvh' }}>
+  <TimelineDisplay.Provider value={new URLSearchParams(location.search).get('mode') === 'simple' ? 'simple' : 'preview'}><main style={{ height: '100dvh' }}>
     {view === 'previews' || view === 'content' ? <App initialState={view === 'content' ? contentState : previewState} initialSessionStatus="ready" /> : view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
       : view === 'trace' ? <TraceView state={state} />
       : view === 'inspector' ? <ReplicaInspector state={state} sessionStatus="ready" providerName={long} />
       : view === 'command' ? <AgentCommandDetails command={{ id: long, name: long, description: long, kind: 'skill', documentation: { resourceId: 'documentation', locator: 'SKILL.md', status: 'available' } }} resources={state.resources} onClose={() => {}} />
       : <AgentTimeline state={state} onInteractionResponse={async () => {}} />}
-  </main>,
+  </main></TimelineDisplay.Provider>,
 );

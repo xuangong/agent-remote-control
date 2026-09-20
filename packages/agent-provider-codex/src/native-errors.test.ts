@@ -1,3 +1,4 @@
+import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -41,3 +42,41 @@ it.each([
     await rm(root, { recursive: true, force: true });
   }
 }, 10000);
+
+it.each(['thread/start', 'thread/resume'])('identifies shared daemon file exhaustion from %s', async method => {
+  const root = await mkdtemp('/tmp/arc-native-files-');
+  const server = createServer();
+  const sockets = new WebSocketServer({ server });
+  sockets.on('connection', socket => socket.on('message', raw => {
+    const request = JSON.parse(raw.toString());
+    if (request.id === undefined) return;
+    socket.send(JSON.stringify(request.method === method
+      ? { id: request.id, error: { code: -32603, message: 'Failed to open rollout: Too many open files (os error 24)' } }
+      : { id: request.id, result: {} }));
+  }));
+  const socketPath = join(root, 'native.sock');
+  server.listen(socketPath); await once(server, 'listening');
+  const provider = new CodexAppServerProvider({ connectionMode: 'shared', socketPath, requestTimeoutMs: 1000 });
+  try {
+    const result = method === 'thread/start' ? provider.createSession({ sessionId: 'new' })
+      : provider.resumeSession({ providerId: 'codex', sessionId: 'existing', opaque: '{}' });
+    await expect(result).rejects.toMatchObject({ code: 'native_file_limit', message: expect.stringContaining('file descriptor') });
+  } finally {
+    for (const socket of sockets.clients) socket.terminate();
+    await new Promise<void>(resolve => sockets.close(() => resolve()));
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+}, 10000);
+
+
+it('does not recommend shared daemon recovery for private native file exhaustion', async () => {
+  const app = createScriptedAppServer({ 'thread/start': () => { throw new Error('Too many open files (os error 24)'); } });
+  const provider = new CodexAppServerProvider({ spawn: () => app.child });
+  await expect(provider.createSession({ sessionId: 'private' })).rejects.not.toMatchObject({ code: 'native_file_limit' });
+});
+
+it('does not mistake local Controller file exhaustion for a daemon RPC failure', async () => {
+  const provider = new CodexAppServerProvider({ spawn: () => { throw Object.assign(new Error('EMFILE'), { code: 'EMFILE' }); } });
+  await expect(provider.createSession({ sessionId: 'private' })).rejects.toMatchObject({ code: 'EMFILE' });
+});

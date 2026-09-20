@@ -1,5 +1,6 @@
 /** Public attach failures use fixed copy rather than arbitrary native error text. */
 const sessionErrors: Readonly<Record<string, string>> = {
+  native_file_limit: 'The shared Codex daemon reached its file descriptor limit. Review active work before restarting it on the Host computer.',
   native_runtime_unavailable: 'The native runtime connection is unavailable. Check the native daemon and the Controller socket configuration, then reopen the session.',
   native_resume_timeout: 'The native runtime did not finish resuming the session before its deadline. Check the Controller log, then reopen the session.',
   native_history_timeout: 'The native runtime did not finish reading session history before its deadline. Check the Controller log, then reopen the session.',

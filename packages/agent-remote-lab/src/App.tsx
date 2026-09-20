@@ -592,9 +592,13 @@ function AppContent({
       setProviderName(providerConnectionName(selectedHost.id, providerId));
       setSessionPanel('list');
     } catch (error) {
+      if (error instanceof DirectoryError && error.code === 'native_file_limit') {
+        const notice = sessionConnectionFailure(error, false);
+        setSessionNotice({ ...notice, operation: 'Create session', message: `${notice.message} Creation may have partially completed. Inspect the native session list before creating a new intent. Retry keeps the same reservation.` });
+      }
       const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'operation_conflict'].includes(error.code ?? '');
       if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
-      setFailure(`${message(error, 'Agent could not be created.')}${directory && !invalid ? ' Retry keeps the same session reservation and settings.' : ''}`);
+      if (!(error instanceof DirectoryError && error.code === 'native_file_limit')) setFailure(`${message(error, 'Agent could not be created.')}${directory && !invalid ? ' Retry keeps the same session reservation and settings.' : ''}`);
     } finally {
       if (directory && selectedHost.id !== 'local') retryHosts();
       transitionRef.current = false;

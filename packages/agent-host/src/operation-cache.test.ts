@@ -1,3 +1,4 @@
+import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createOperationCache, OperationCacheError, type OperationDescriptor } from './operation-cache.js';
@@ -126,4 +127,18 @@ describe('operation cache', () => {
     expect(dispatched).toBe(false);
     await cache.close();
   });
+});
+
+
+it('retains a classified file limit without replaying an uncertain mutation', async () => {
+  const cache = createOperationCache();
+  const dispatch = vi.fn(async () => { throw new AgentRuntimeError('native_file_limit', 'private details'); });
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(cache.execute(descriptor(), { dispatch })).rejects.toMatchObject({
+        code: 'native_file_limit', message: expect.stringContaining('may have reached'),
+      });
+    }
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  } finally { await cache.close(); }
 });

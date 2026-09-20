@@ -1,6 +1,8 @@
+import { NativeDaemonRecovery } from './NativeSessionCommands.js';
 import { DirectoryError } from '../directory-client.js';
 
 export interface SessionConnectionMessage {
+  operation?: string;
   tone: 'status' | 'alert';
   message: string;
   code?: string;
@@ -20,6 +22,7 @@ export function sessionConnectionFailure(error: unknown, retrying: boolean): Ses
     host_reconnected: 'The Host reconnected while this session was opening. Its binding needs to be checked again.',
     host_busy: 'The Host has too many pending requests. Wait briefly before reopening this session.',
     host_backpressure: 'The Host connection is busy. Wait briefly before reopening this session.',
+    native_file_limit: 'The shared Codex daemon reached its file descriptor limit. Review active work before restarting it.',
     native_runtime_unavailable: 'The native runtime connection is unavailable. Check the native daemon and the Controller socket configuration.',
     native_resume_timeout: 'The native runtime reached its deadline while resuming this session. Check the Controller log before reopening it.',
     native_history_timeout: 'The native runtime reached its deadline while reading session history. Check the Controller log before reopening it.',
@@ -35,10 +38,11 @@ export function sessionConnectionFailure(error: unknown, retrying: boolean): Ses
 export function SessionConnectionNotice({ notice }: { notice: SessionConnectionMessage }) {
   return <div className="lab-session-notice lab-control-note">
     <p role={notice.tone}>{notice.message}</p>
+    {notice.code === 'native_file_limit' ? <NativeDaemonRecovery /> : null}
     {notice.code || notice.status || notice.requestId ? <details>
       <summary>Connection details</summary>
       <dl>
-        <dt>Operation</dt><dd>Open existing session</dd>
+        <dt>Operation</dt><dd>{notice.operation ?? 'Open existing session'}</dd>
         {notice.code ? <><dt>Code</dt><dd>{notice.code}</dd></> : null}
         {notice.status ? <><dt>HTTP status</dt><dd>{notice.status}</dd></> : null}
         {notice.requestId ? <><dt>Request ID</dt><dd>{notice.requestId}</dd></> : null}

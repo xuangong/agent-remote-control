@@ -1,3 +1,4 @@
+import { AgentRuntimeError } from '../../agent-provider-sdk/dist/index.js';
 import { afterEach, expect, it } from 'vitest';
 import { acceptSessionChannel } from '@agent-remote-controller/agent-remote-protocol';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
@@ -196,7 +197,7 @@ it.each([
   expect(await broker.manageShares('alice', 'host', 'shares')).toMatchObject({ shares: [{ subject: 'bob', used: subject === 'bob' ? 1 : 0 }] });
 }, 10_000);
 
-it.each(['operation_outcome_unknown', 'operation_conflict', 'operation_cache_closed', 'operation_clock_invalid', 'invalid_operation_intent'])(
+it.each(['native_file_limit', 'operation_outcome_unknown', 'operation_conflict', 'operation_cache_closed', 'operation_clock_invalid', 'invalid_operation_intent'])(
   'retains an unresolved creation reservation on %s', async code => {
     const { broker, native } = await restoredFixture({ ownerSubject: 'alice' });
     await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1);
@@ -210,7 +211,7 @@ it.each(['operation_outcome_unknown', 'operation_conflict', 'operation_cache_clo
       if (message.type !== 'rpc_request') return;
       calls += 1;
       const descriptor = { operationId: JSON.parse(message.body).operationId as string, scope: 'host', kind: 'create', target: 'codex', parameters: {} };
-      if (code !== 'operation_outcome_unknown') {
+      if (code !== 'operation_outcome_unknown' && code !== 'native_file_limit') {
         await cache.execute(descriptor, { dispatch: async () => { nativeCreates += 1; return { agentId: 'earlier-effect' }; } });
       }
       if (code === 'operation_cache_closed') await cache.close();
@@ -219,7 +220,9 @@ it.each(['operation_outcome_unknown', 'operation_conflict', 'operation_cache_clo
       try {
         await cache.execute({ ...descriptor, parameters: code === 'operation_conflict' ? { changed: true }
           : code === 'invalid_operation_intent' ? { invalid: undefined } : {} }, {
-          dispatch: async () => { nativeCreates += 1; throw new Error('Acknowledgement lost after native creation'); },
+          dispatch: async () => { nativeCreates += 1;
+            if (code === 'native_file_limit') throw new AgentRuntimeError('native_file_limit', 'File limit');
+            throw new Error('Acknowledgement lost after native creation'); },
         });
       } catch (error) {
         if (!(error instanceof OperationCacheError)) throw error;
@@ -630,7 +633,7 @@ it.each([
   if (code === 'host_read_timeout') expect(error.error).not.toContain('operation outcome');
 });
 
-it.each(['native_runtime_unavailable', 'native_resume_timeout', 'native_history_timeout', 'session_in_use', 'local_execution_policy'])
+it.each(['native_file_limit', 'native_runtime_unavailable', 'native_resume_timeout', 'native_history_timeout', 'session_in_use', 'local_execution_policy'])
   ('preserves the safe recovery reason %s after Host registration', async code => {
     const { broker, native } = await restoredFixture();
     native.onMessage(data => {

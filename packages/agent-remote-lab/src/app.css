@@ -1265,3 +1265,13 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .lab-tracking-catch-up rect { transition: none; }
 }
+
+.lab-native-session-command { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--obs-border); }
+.lab-native-session-command h3 { margin: 0; font-size: 14px; }
+.lab-native-command { min-width: 0; }
+.lab-native-command label { display: grid; gap: 8px; margin-block: 12px; }
+.lab-native-command input { box-sizing: border-box; min-width: 0; width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--obs-control-border); border-radius: 6px; font-size: 16px; }
+.lab-native-command button { min-height: 44px; }
+.lab-native-daemon-recovery { margin-block: 12px; }
+.lab-native-daemon-recovery summary { cursor: pointer; padding-block: 8px; }
+.lab-native-daemon-recovery p { max-width: 65ch; line-height: 1.5; }

@@ -13,6 +13,7 @@ HTTP failures retain `code`, `error`, and an optional `requestId`. The Relay ass
 | `session_attach_timeout` | The Relay's Host RPC deadline expired while attaching. Native work may still be running. | Wait briefly and reopen the same session. |
 | `host_read_timeout` | A read request did not return before the Relay deadline. | Retry the read. |
 | `host_timeout` | Another operation did not return before the Relay deadline; its outcome is uncertain. | Check the session before retrying. Preserve the operation identity. |
+| `native_file_limit` | A shared Codex daemon RPC reported file descriptor exhaustion. | Review active work, then optionally copy the daemon restart command and run it on the Host. All attached sessions disconnect and running work can be interrupted. |
 | `native_runtime_unavailable` | The adapter could not establish or retain its native connection. | Check the daemon and the Controller's configured local socket. |
 | `native_resume_timeout` | The native resume request reached its own deadline. | Inspect Controller diagnostics and reopen the session. |
 | `native_history_timeout` | The native history request reached its own deadline. | Inspect Controller diagnostics and reopen the session. |
@@ -47,3 +48,6 @@ The Controller state directory's `agent-host.log` includes:
 - `codex_request`: native connection ID, native request ID, phase (`initialize`, `catalog`, `resume`, or `history`), outcome, and elapsed milliseconds. Native IDs are distinct from Relay request IDs; use the Host request interval to inspect native phases.
 
 These new records exclude pairing keys, request bodies, conversation content, socket paths, native session IDs, and arbitrary native error text. Log callbacks cannot change request outcomes. A start record without a matching completion means completion has not been recorded; it is not proof of a live process or an ongoing native operation.
+
+
+For session creation, `native_file_limit` preserves a known cause without declaring the mutation unexecuted. The Host retains the unknown outcome and never redispatches the same operation identity; Relay quota reservations remain retained. The notice asks the user to inspect native sessions before creating a fresh intent. Restart guidance copies a command only and does not execute Host lifecycle operations from the browser.

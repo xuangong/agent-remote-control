@@ -390,7 +390,7 @@ function publicBinding(binding: Binding): Omit<Binding, 'providerId'> {
 function operationErrorStatus(code: string): number {
   if (code === 'operation_conflict') return 409;
   if (code === 'operation_capacity_exceeded') return 429;
-  if (code === 'operation_outcome_unknown' || code === 'operation_cache_closed' || code === 'operation_clock_invalid') return 503;
+  if (code === 'native_file_limit' || code === 'operation_outcome_unknown' || code === 'operation_cache_closed' || code === 'operation_clock_invalid') return 503;
   return 400;
 }
 function string(value: unknown, field: string): string { if (typeof value !== 'string' || !value) throw new HostRequestError(400, 'invalid_request', `${field} is required.`); return value; }

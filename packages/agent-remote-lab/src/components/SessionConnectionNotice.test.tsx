@@ -25,3 +25,10 @@ it('explains legacy Host timeouts in the context of opening an existing session'
   expect(sessionConnectionFailure(new DirectoryError('outcome unknown', 'host_timeout', 504), false))
     .toMatchObject({ tone: 'status', message: expect.stringContaining('reopen the same session') });
 });
+
+it('offers daemon recovery only for a classified native file limit', async () => {
+  const notice = sessionConnectionFailure(new DirectoryError('file limit', 'native_file_limit', 503), false);
+  const container = await render(<SessionConnectionNotice notice={notice} />);
+  expect(container.textContent).toContain('file descriptor');
+  expect(container.textContent).toContain('Copy restart command');
+});

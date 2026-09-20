@@ -14,7 +14,7 @@ import type {
 
 import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
 
-import { CodexAppServerTransport, CodexTransportUnavailableError, CodexRequestTimeoutError } from './app-server-transport.js';
+import { CodexAppServerTransport, CodexTransportUnavailableError, CodexRequestTimeoutError, CodexAppServerRpcError } from './app-server-transport.js';
 import { isRecord, readString, spawnCodexAppServer } from './native.js';
 import { CodexAppServerSession } from './session.js';
 import { initializeCodexTransport } from './initialize.js';
@@ -64,7 +64,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
         limit, ...(options.cursor ? { cursor: options.cursor } : {}),
         sortKey: 'updated_at', modelProviders: [], sourceKinds: ['cli', 'vscode', 'appServer'], archived: false,
       }));
-    } catch (error) { throw runtimeError(error); } finally { await transport.dispose(); }
+    } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); } finally { await transport.dispose(); }
   }
 
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
@@ -77,7 +77,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       return session;
     } catch (error) {
       await transport.dispose();
-      throw error;
+      throw runtimeError(error, this.options.connectionMode === 'shared');
     }
   }
 
@@ -92,7 +92,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       return session;
     } catch (error) {
       await transport.dispose();
-      throw runtimeError(error);
+      throw runtimeError(error, this.options.connectionMode === 'shared');
     }
   }
 
@@ -103,7 +103,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false });
       if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== nativeSessionId) throw new Error('Source session metadata is unavailable.');
       return readString(response.thread.cwd);
-    } catch (error) { throw runtimeError(error); } finally { await transport.dispose(); }
+    } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); } finally { await transport.dispose(); }
   }
 
   async readSessionHistory(nativeSessionId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage> {
@@ -111,7 +111,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     try {
       await initializeCodexTransport(transport);
       return await readSessionHistoryPage(transport, nativeSessionId, query);
-    } catch (error) { throw runtimeError(error); } finally { await transport.dispose(); }
+    } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); } finally { await transport.dispose(); }
   }
 
   async openChildSession(parentNativeSessionId: string, childNativeSessionId: string): Promise<AgentSession> {
@@ -127,7 +127,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       const home = this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
       return CodexAppServerTransport.connectShared(this.options.socketPath ?? join(home, 'app-server-control', 'app-server-control.sock'), {
         requestTimeoutMs: this.options.requestTimeoutMs, onDiagnostic: this.options.onDiagnostic,
-      }).catch(error => { throw runtimeError(error); });
+      }).catch(error => { throw runtimeError(error, this.options.connectionMode === 'shared'); });
     }
     const child = this.options.spawn
       ? await this.options.spawn({ cwd })
@@ -160,7 +160,14 @@ function readPersistenceCwd(opaque: string): string | undefined {
   }
 }
 
-function runtimeError(error: unknown): unknown {
+function runtimeError(error: unknown, shared: boolean): unknown {
+  // Only a native RPC response identifies exhaustion inside the shared daemon.
+  // Local socket/Controller errors and private runtimes must not suggest restarting it.
+  if (shared && error instanceof CodexAppServerRpcError
+    && (error.code === 'EMFILE' || /\btoo many open files\b|\bEMFILE\b|\bos error 24\b/i.test(error.message))) {
+    return new AgentRuntimeError('native_file_limit',
+      'The shared Codex daemon reached its file descriptor limit. Consider restarting it on the Host computer after checking active work. All sessions connected to that daemon will disconnect, and running work may be interrupted.');
+  }
   if (error instanceof CodexTransportUnavailableError) return new AgentRuntimeError('native_runtime_unavailable',
     'The Codex runtime connection is unavailable. Check the native daemon and the configured local socket, then reopen the session.');
   if (error instanceof CodexRequestTimeoutError) {

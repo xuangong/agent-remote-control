@@ -1,3 +1,4 @@
+import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
 import { createHash } from 'node:crypto';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -99,7 +100,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       if (existing.state === 'in_flight') return existing.promise as Promise<T>;
       if (existing.state === 'completed') return existing.resultUndefined ? undefined as T : structuredClone(existing.result) as T;
       if (existing.state === 'unknown') {
-        throw new OperationCacheError('operation_outcome_unknown', 'The operation may have reached the native runtime. Inspect native state before creating a new intent.');
+        throw unknownOutcome(existing.errorCode);
       }
       throw new OperationCacheError(existing.errorCode ?? 'operation_rejected', 'The operation was rejected before dispatch.');
     }
@@ -144,11 +145,12 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     let result: T;
     try {
       result = await work.dispatch();
-    } catch {
+    } catch (error) {
+      const errorCode = error instanceof AgentRuntimeError && error.code === 'native_file_limit' ? error.code : undefined;
       settle(key, fingerprint, reservedBytes, {
-        state: 'unknown', bytes: entryBytes(key, 0), settledAt: validNow(now),
+        state: 'unknown', errorCode, bytes: entryBytes(key, 0), settledAt: validNow(now),
       });
-      throw new OperationCacheError('operation_outcome_unknown', 'The operation may have reached the native runtime. Inspect native state before creating a new intent.');
+      throw unknownOutcome(errorCode);
     }
 
     try {
@@ -228,4 +230,11 @@ function validNow(now: () => number): number {
   const value = now();
   if (!Number.isSafeInteger(value) || value < 0) throw new OperationCacheError('operation_clock_invalid', 'Operation cache clock returned an invalid time.');
   return value;
+}
+
+function unknownOutcome(cause?: string): OperationCacheError {
+  const detail = 'The operation may have reached the native runtime. Inspect native state before creating a new intent.';
+  return cause === 'native_file_limit'
+    ? new OperationCacheError(cause, `The shared Codex daemon reached its file descriptor limit. ${detail}`)
+    : new OperationCacheError('operation_outcome_unknown', detail);
 }

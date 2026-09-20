@@ -44,7 +44,7 @@ export class AgentSessionInUseError extends Error {
 
 /** Adapter-confirmed runtime failure. Messages must be safe for remote clients. */
 export class AgentRuntimeError extends Error {
-  constructor(readonly code: 'native_runtime_unavailable' | 'native_resume_timeout' | 'native_history_timeout' | 'native_request_timeout', message: string) {
+  constructor(readonly code: 'native_file_limit' | 'native_runtime_unavailable' | 'native_resume_timeout' | 'native_history_timeout' | 'native_request_timeout', message: string) {
     super(message);
     this.name = 'AgentRuntimeError';
   }

@@ -1,3 +1,4 @@
+import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
 import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/src/index.js';
 import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
 import { spawn } from 'node:child_process';
@@ -878,3 +879,21 @@ it('reuses a slow native opening after a Relay timeout over a real WebSocket', a
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 }, 10000);
+
+
+it('preserves file-limit guidance across create retries without redispatching', async () => {
+  const registration = fixture('codex');
+  let creates = 0;
+  registration.directory.create = async () => { creates++; throw new AgentRuntimeError('native_file_limit', 'Native private details'); };
+  const host = createAgentHostRuntime({ registrations: [registration] });
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'reserved-agent',
+        body: JSON.stringify({ providerId: 'codex', operationId: operationId('file-limit') }) });
+      expect(result.status).toBe(503);
+      expect(JSON.parse(result.body)).toMatchObject({ code: 'native_file_limit', error: expect.stringContaining('may have reached') });
+      expect(result.body).not.toContain('Native private details');
+    }
+    expect(creates).toBe(1);
+  } finally { await host.close(); }
+});

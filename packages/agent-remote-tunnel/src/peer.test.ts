@@ -108,3 +108,51 @@ describe('TunnelPeer', () => {
     relay.close(); controller.close();
   });
 });
+
+test('rejects an unread response after disconnect instead of returning a truncated body', async () => {
+  const [relaySocket, controllerSocket] = socketPair();
+  const controller = createTunnelPeer(controllerSocket, { http: async () => ({ status: 200, headers: [], body: new ReadableStream({
+    start(c) { c.enqueue(new Uint8Array(256 * 1024)); },
+  }) }) });
+  const relay = createTunnelPeer(relaySocket, {});
+  try {
+    const response = await relay.openHttp({ previewId: 'p', method: 'GET', path: '/', headers: [] });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    controller.close();
+    await expect(new Response(response.body).arrayBuffer()).rejects.toMatchObject({ code: 'disconnected' });
+  } finally { relay.close(); controller.close(); }
+});
+
+test('preserves WebSocket message order while a larger message waits for credit', async () => {
+  const [relaySocket, controllerSocket] = socketPair();
+  let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
+  const received: number[] = [];
+  const application = {
+    async send(data: string | Uint8Array) { received.push((data as Uint8Array)[0]!); if (received.length === 1) await held; },
+    onMessage() { return () => {}; }, onClose() { return () => {}; }, close() {},
+  };
+  const controller = createTunnelPeer(controllerSocket, { webSocket: async () => ({ socket: application }) }, { maxFrameBytes: 2048 });
+  const relay = createTunnelPeer(relaySocket, {}, { maxFrameBytes: 2048 });
+  try {
+    const { socket } = await relay.openWebSocket({ previewId: 'p', path: '/', headers: [], protocols: [] });
+    const first = socket.send(new Uint8Array(1500).fill(1), true);
+    const second = socket.send(new Uint8Array(1500).fill(2), true);
+    const third = socket.send(new Uint8Array(10).fill(3), true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(received).toEqual([1]); release();
+    await Promise.all([first, second, third]);
+    await expect.poll(() => received).toEqual([1, 2, 3]);
+  } finally { release(); relay.close(); controller.close(); }
+});
+
+test('closing a WebSocket releases sends waiting for peer credit', async () => {
+  const [relaySocket, controllerSocket] = socketPair();
+  const application = { send: async () => new Promise<void>(() => {}), onMessage() { return () => {}; }, onClose() { return () => {}; }, close() {} };
+  const controller = createTunnelPeer(controllerSocket, { webSocket: async () => ({ socket: application }) }, { maxFrameBytes: 2048 });
+  const relay = createTunnelPeer(relaySocket, {}, { maxFrameBytes: 2048 });
+  try {
+    const { socket } = await relay.openWebSocket({ previewId: 'p', path: '/', headers: [], protocols: [] });
+    const sends = [socket.send(new Uint8Array(1500), true), socket.send(new Uint8Array(1500), true)];
+    socket.close(); await Promise.all(sends);
+  } finally { relay.close(); controller.close(); }
+}, 1000);

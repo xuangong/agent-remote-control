@@ -8,7 +8,11 @@ import { createLoopbackTunnelHandlers } from './index.js';
 it('queues a module-loading burst without overflowing or disconnecting the tunnel', async () => {
   const payload = Buffer.alloc(128 * 1024, 97);
   const requested: string[] = [];
-  const local = createServer((req, res) => { requested.push(req.url!); res.end(payload); });
+  let active = 0; let peak = 0;
+  const local = createServer((req, res) => {
+    requested.push(req.url!); active++; peak = Math.max(peak, active);
+    setTimeout(() => { active--; res.end(payload); }, 25);
+  });
   local.listen(0, '127.0.0.1'); await once(local, 'listening');
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(wss, 'listening');
@@ -34,8 +38,9 @@ it('queues a module-loading burst without overflowing or disconnecting the tunne
     const errors = results.filter(x => x.status === 'rejected').map(x => String((x as PromiseRejectedResult).reason));
     expect([...new Set(errors)]).toEqual([]);
     expect(closeReasons).toEqual([]);
+    expect(peak).toBeGreaterThan(8);
     expect(results.map(x => (x as PromiseFulfilledResult<number>).value)).toEqual(Array(128).fill(payload.byteLength));
-    const held = await Promise.all(Array.from({ length: 8 }, (_, i) => bridge.fetch('p', { method: 'GET', path: `/held-${i}`, headers: [] })));
+    const held = await Promise.all(Array.from({ length: 48 }, (_, i) => bridge.fetch('p', { method: 'GET', path: `/held-${i}`, headers: [] })));
     const abort = new AbortController();
     const cancelled = bridge.fetch('p', { method: 'GET', path: '/cancelled', headers: [], signal: abort.signal });
     abort.abort();

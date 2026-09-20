@@ -7,7 +7,7 @@ export class PreviewHttpAdmission {
   private active = 0;
   private closed = false;
   private readonly waiting = new Set<WaitingRequest>();
-  constructor(private readonly concurrency = 8, private readonly maxWaiting = 512, private readonly waitTimeoutMs = 30_000) {}
+  constructor(private readonly concurrency = 48, private readonly maxWaiting = 512, private readonly waitTimeoutMs = 30_000) {}
 
   acquire(signal?: AbortSignal): Promise<() => void> {
     if (this.closed) return Promise.reject(new TunnelError('closed', 'Tunnel connection is closed.'));

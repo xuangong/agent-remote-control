@@ -8,7 +8,7 @@ export type PreparedWebSocket = { protocol?: string; accept(socket: TunnelSocket
 export type PreviewRejection = { status: number; code: string; message: string };
 
 export function createPreviewRelayBridge(peer: TunnelPeer, lookup: (previewId: string) => PreviewRoute | undefined, options: { acceptTimeoutMs?: number } = {}) {
-  // Eight 64 KiB response credit windows leave headroom in the 1 MiB transport queue.
+  // Leave stream slots for application WebSockets; payload bytes are bounded by the sender.
   const admission = new PreviewHttpAdmission();
   function requireActive(previewId: string) {
     const route = lookup(previewId);

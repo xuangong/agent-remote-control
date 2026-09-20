@@ -1,4 +1,6 @@
 import { createRoot } from 'react-dom/client';
+import type { ReactNode } from 'react';
+import { GatewayController } from '../../src/GatewayController.js';
 import type { HttpWebSocketTransport, RemoteAgentTransport, RemoteTransportListener } from '@agent-remote-controller/agent-remote-web';
 import type { AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
 import { App } from '../../src/App.js';
@@ -75,6 +77,9 @@ localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...sess
 const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Work Mac', online: true, providers: [{ providerId: 'recorded', displayName: 'Recorded' }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
 const requestedStatus = new URLSearchParams(location.search).get('status');
 const status = requestedStatus === 'waiting' || requestedStatus === 'idle' ? requestedStatus : 'running';
-createRoot(document.getElementById('root')!).render(<App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
+const app = (accountAction: ReactNode) => <App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
   initialState={{ ...replicaState, agent: { ...replicaState.agent!, status }, timeline: { ...replicaState.timeline, hasOlder: false } }} initialSessionStatus="ready"
-  accountAction={<><span className="gateway-account-identity">Alice Example</span><button>Security</button><button>Sign out</button></>} />);
+  accountAction={accountAction} />;
+createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).has('gateway')
+  ? <GatewayController>{(_baseUrl, accountAction) => app(accountAction)}</GatewayController>
+  : app(<><span className="gateway-account-identity">Alice Example</span><button>Security</button><button>Sign out</button></>));

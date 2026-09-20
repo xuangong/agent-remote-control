@@ -36,7 +36,7 @@ values cannot silently reuse an existing object database. Active connections are
 not restored; persisted Hosts start offline and reconnect using their saved device
 credentials, while browser sessions must revalidate their authority lease.
 
-The native WebSocket adapter enforces the 8 MiB application frame limit, treats
+The native WebSocket adapter enforces the 16 MiB application frame limit, treats
 binary data explicitly, and attaches asynchronous frame processing to `waitUntil`.
 Registration, RPC, stream-opening, admission, and buffered-command bounds remain
 in the shared core. Workers assembles a frame before dispatching its event. The

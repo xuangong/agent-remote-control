@@ -126,3 +126,25 @@ it('shows all wait targets using resolved paths while retaining unresolved ident
   await rerender(container, <ToolCallItem item={item} />);
   expect(container.querySelector('.agent-tool-summary')!.textContent).toBe('Waiting for agent updates: review-id, test-id, missing-id');
 });
+
+
+it.each([
+  { name: 'identical output', output: 'Permission denied', error: 'Permission denied', duplicate: true },
+  { name: 'error within output', output: 'Starting command\nPermission denied\nExit', error: 'Permission denied', duplicate: true },
+  { name: 'line endings and surrounding whitespace', output: 'Permission denied\r\nCheck access\r\n', error: ' Permission denied\nCheck access\n', duplicate: true },
+  { name: 'independent error', output: 'Starting command', error: 'Connection lost', duplicate: false },
+  { name: 'output truncated before full error', output: 'Permission denied', error: 'Permission denied\nCheck access', duplicate: false },
+])('renders $name without losing diagnostics', async ({ output, error, duplicate }) => {
+  const container = await render(<TimelineDisplay.Provider value="preview"><ToolCallItem item={{
+    type: 'tool_call', callId: 'failed-command', name: 'command', status: 'failed', error,
+    detail: { type: 'shell', command: 'run-command' },
+    result: { content: [{ type: 'text', stream: 'combined', text: output }], exitCode: 1 },
+  }} /></TimelineDisplay.Provider>);
+  const preview = container.querySelector('.agent-tool-preview')!;
+  expect(preview.querySelectorAll(':scope > .agent-content-preview')).toHaveLength(duplicate ? 1 : 2);
+  await act(async () => container.querySelector<HTMLButtonElement>('.agent-tool-toggle')!.click());
+  expect(container.querySelector('[aria-label="Tool result"]')?.textContent).toContain(output);
+  expect(container.querySelector('[aria-label="Tool result"]')?.textContent).toContain('Exit code 1');
+  expect(container.querySelector('.agent-state-label')?.textContent).toBe('Failed');
+  expect(container.querySelector('.agent-tool-error')?.textContent ?? null).toBe(duplicate ? null : error);
+});

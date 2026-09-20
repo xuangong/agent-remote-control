@@ -4,7 +4,7 @@ import { Fragment, useId, useState } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ToolResultPreview } from './ToolResultPreview.js';
 import { ContentPreview } from './ContentPreview.js';
-import type { AgentTimelineItem, AgentToolDetail } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem, AgentToolDetail, AgentToolResult } from '@agent-remote-controller/agent-remote-protocol';
 
 const statusLabels = {
   running: 'Running', completed: 'Completed', failed: 'Failed', canceled: 'Canceled',
@@ -15,6 +15,7 @@ export type SessionLinkResolver = (nativeSessionId: string) => { href: string; t
 export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extract<AgentTimelineItem, { type: 'tool_call' }>; resolveSessionLink?: SessionLinkResolver }) {
   const { expanded, preview, toggle } = useItemDisclosure();
   const detailsId = useId();
+  const error = distinctToolError(item.error, item.result);
   const [failure, setFailure] = useState<string>();
   const reference = item.detail.type === 'other' ? item.detail.sessionReference : undefined;
   const references = item.detail.type === 'other' ? item.detail.sessionReferences : undefined;
@@ -67,7 +68,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
     {preview ? <div className="agent-tool-preview">
       {item.detail.type === 'shell' ? <ContentPreview code text={item.detail.command} /> : null}
       {item.result ? <ToolResultPreview result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} search={item.detail.type === 'search'} /> : null}
-      {item.error ? <ContentPreview text={item.error} /> : null}
+      {error ? <ContentPreview text={error} /> : null}
       <button className="agent-preview-expand" type="button" aria-controls={detailsId} aria-expanded={false} onClick={toggle}>
         {item.error ? 'Show error details' : item.result ? 'Show full result' : 'Show details'}
       </button>
@@ -75,10 +76,19 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
     <div id={detailsId} className="agent-tool-details" hidden={!expanded}>
       {expanded ? <><ToolCallDetails detail={item.detail} />
       {item.result ? <ToolResultView result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} /> : null}
-      {item.error ? <pre className="agent-tool-error" role="alert" tabIndex={0}>{item.error}</pre> : null}</> : null}
+      {error ? <pre className="agent-tool-error" role="alert" tabIndex={0}>{error}</pre> : null}</> : null}
     </div>
     {failure ? <p className="agent-history-error" role="alert">{failure}</p> : null}
   </article>;
+}
+
+function distinctToolError(error: string | null, result: AgentToolResult | undefined): string | null {
+  if (!error || !result) return error;
+  const normalized = error.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return null;
+  const included = result.content.some(block => block.type === 'text'
+    && block.text.replace(/\r\n/g, '\n').includes(normalized));
+  return included ? null : error;
 }
 
 function toolSummary(detail: AgentToolDetail): string {

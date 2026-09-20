@@ -154,12 +154,18 @@ textarea {
 .lab-shell .agent-remote-surface textarea { border-color: var(--obs-control-border); }
 
 .lab-host-previews { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-rule); }
-.lab-host-previews ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.lab-host-previews li { display: grid; gap: 7px; padding: 10px; border: 1px solid var(--obs-control-border); border-radius: 8px; }
+.lab-host-previews ul { display: grid; min-width: 0; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.lab-host-previews li { display: grid; min-width: 0; gap: 7px; padding: 10px; border: 1px solid var(--obs-control-border); border-radius: 8px; }
 .lab-host-previews li > div { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .lab-host-previews li code { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .lab-host-previews li span, .lab-host-previews li small { color: var(--obs-text-secondary); font-size: 11px; }
-.lab-preview-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.lab-host-previews li > .lab-preview-actions { min-width: 0; max-width: 100%; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px; }
+.lab-preview-actions > *, .lab-preview-actions button { flex: 0 0 auto; }
+.lab-preview-actions button { white-space: nowrap; }
+.lab-preview-sources { display: flex; flex-wrap: nowrap; gap: 6px; }
+@media (min-width: 1181px) {
+  .lab-host-previews button { min-height: 32px; padding: 5px 8px; font-size: 12px; }
+}
 .lab-host-vscode { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-border); font-size: 12px; }
 .lab-vscode-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .lab-vscode-status small { color: var(--obs-text-secondary); margin-left: auto; }

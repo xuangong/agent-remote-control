@@ -44,15 +44,15 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen }: 
           {registration.availability === 'controller_offline' ? <span>Controller offline</span> : null}
         </div>
         <small>{controller.routing === 'subdomain' ? 'Dedicated tunnel' : registration.pathMode === 'preserve' ? `Configured base /p/${registration.id}/` : 'Root-mounted path adaptation'} · Expires {new Date(registration.expiresAt).toLocaleString()}</small>
-        {registration.sources.length ? <div className="lab-preview-sources" aria-label="Preview sources">{registration.sources.map((source, index) => <button
-          key={`${source.sessionId}:${source.itemId}`} className="lab-preview-source" type="button" disabled={!onOpenSource}
-          onClick={() => onOpenSource?.(source.sessionId, source.itemId)}
-        >Open source {index + 1}</button>)}</div> : null}
-        <div>
-          {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
-            onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(registration.id, registration.target); }}>Open preview</button> : null}
+        <div className="lab-preview-actions">
+          {registration.sources.length ? <div className="lab-preview-sources" aria-label="Preview sources">{registration.sources.map((source, index) => <button
+            key={`${source.sessionId}:${source.itemId}`} className="lab-preview-source" type="button" disabled={!onOpenSource}
+            onClick={() => onOpenSource?.(source.sessionId, source.itemId)}
+          >Open source {index + 1}</button>)}</div> : null}
           {controller.getTunnelUrl ? <CopyTunnelUrl disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
             getUrl={() => controller.getTunnelUrl!(registration.id, registration.target)} /> : null}
+          {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
+            onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(registration.id, registration.target); }}>Open preview</button> : null}
           {controller.canManage ? <button className="lab-preview-unregister" type="button"
             disabled={busy === registration.id || registration.status !== 'active' || registration.pendingUnregister}
             onClick={() => void unregister(registration.id)}>{busy === registration.id ? 'Unregistering…' : 'Unregister'}</button> : null}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createServer } from 'node:net';
@@ -69,7 +69,7 @@ test('an existing launcher lock is never replaced or removed', async (t) => {
 });
 
 async function workflow(t, failCatalog = false, providers, bundled = false, failHost = false, bareScript = false) {
-  const directory = await temporary(t);
+  const directory = await realpath(await temporary(t));
   const state = join(directory, 'state');
   await mkdir(join(directory, 'scripts/lib'), { recursive: true });
   for (const path of ['start.mjs', 'dsh-debug.mjs', 'lib/dsh-debug-runtime.mjs', 'lib/controller-options.mjs']) {
@@ -81,6 +81,8 @@ async function workflow(t, failCatalog = false, providers, bundled = false, fail
     await writeFile(path, `#!${process.execPath}\nprocess.env.CONTROLLER_FIXTURE_MODE = ${JSON.stringify(mode)};\nimport(${JSON.stringify(tool)});\n`, { mode: 0o755 });
   }
   for (const name of ['pnpm', 'codex', 'claude', 'copilot', 'dsh']) await executable(join(directory, 'bin', name), name);
+  // The launcher prioritizes Node's directory; keep it inside the fixture toolchain.
+  await cp(process.execPath, join(directory, 'bin/node'));
   await executable(join(directory, 'packages/agent-host/dist/cli.js'), 'host');
   if (bareScript) await writeFile(join(directory, 'bin/copilot.mjs'), "console.log('GitHub Copilot CLI 1.0.83.');", { mode: 0o600 });
   await executable(join(state, 'dsh/tools', PNPM_VERSION, 'node_modules/.bin/pnpm'), 'pnpm');
@@ -101,7 +103,7 @@ async function workflow(t, failCatalog = false, providers, bundled = false, fail
       ...(!providers.includes('dsh') ? { dshPort: ports[0] } : {}) } : {}) };
   await writeFile(join(directory, 'config.json'), JSON.stringify(config));
   const output = [];
-  const child = startProcess(process.execPath, [join(directory, 'scripts/start.mjs'), '--config', join(directory, 'config.json')], {
+  const child = startProcess(join(directory, 'bin/node'), [join(directory, 'scripts/start.mjs'), '--config', join(directory, 'config.json')], {
     env: { ...process.env, PATH: join(directory, 'bin') + ':' + process.env.PATH, CONTROLLER_FIXTURE_ROOT: directory,
       CONTROLLER_FIXTURE_FAIL_CATALOG: failCatalog ? '1' : '0', CONTROLLER_FIXTURE_FAIL_HOST: failHost ? '1' : '0' },
     output: (line) => output.push(line), stopTimeoutMs: 12000,

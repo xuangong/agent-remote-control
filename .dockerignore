@@ -9,3 +9,9 @@
 !scripts/
 !scripts/relay-workers-local.mjs
 !Dockerfile
+!Dockerfile.controller
+!dist/agent-remote-controller/
+!dist/agent-remote-controller/*.tgz
+!scripts/controller/
+!scripts/controller/entrypoint.mjs
+!scripts/controller/entrypoint.sh

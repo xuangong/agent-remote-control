@@ -1,0 +1,24 @@
+FROM node:22-bookworm-slim
+ARG CODEX_VERSION=0.155.1
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+COPY dist/agent-remote-controller/*.tgz /tmp/controller/
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc \
+    npm install --global --registry="$NPM_REGISTRY" /tmp/controller/*.tgz "@openai/codex@$CODEX_VERSION" \
+    && rm -rf /tmp/controller /root/.npm
+COPY scripts/controller/entrypoint.mjs scripts/controller/entrypoint.sh /opt/controller/
+RUN mkdir -p /data/host /workspace && chown -R node:node /data /workspace \
+    && chmod 755 /opt/controller/entrypoint.sh
+ENV AGENT_HOST_STATE_DIR=/data/host \
+    AGENT_HOST_WORKSPACE=/workspace \
+    AGENT_HOST_PROVIDERS=codex \
+    AGENT_HOST_CODEX_CONNECTION=private \
+    AGENT_HOST_BOOTSTRAP_CODEX=1 \
+    AGENT_HOST_CODEX_NOFILE=8192 \
+    LC_ALL=C
+USER node
+WORKDIR /workspace
+VOLUME ["/data", "/workspace"]
+ENTRYPOINT ["/opt/controller/entrypoint.sh"]
+CMD ["foreground"]

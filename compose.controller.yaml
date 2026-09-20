@@ -1,0 +1,34 @@
+services:
+  controller:
+    build:
+      context: .
+      dockerfile: Dockerfile.controller
+      args:
+        CODEX_VERSION: ${CODEX_VERSION:-0.155.1}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+      secrets:
+        - npmrc
+    init: true
+    restart: unless-stopped
+    environment:
+      AGENT_HOST_SERVER: ${AGENT_HOST_SERVER:?Set the agents Relay URL}
+      AGENT_HOST_REMOTE_KEY_FILE: /run/secrets/host_pairing_key
+      AGENT_HOST_NAME: ${AGENT_HOST_NAME:-Docker Codex}
+    secrets:
+      - host_pairing_key
+    volumes:
+      - controller-state:/data
+      - controller-workspace:/workspace
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+    stop_grace_period: 30s
+secrets:
+  host_pairing_key:
+    file: ${AGENT_HOST_PAIRING_KEY_FILE:?Set a private file containing the pairing key}
+  npmrc:
+    file: ${NPMRC_FILE:-/dev/null}
+volumes:
+  controller-state:
+  controller-workspace:

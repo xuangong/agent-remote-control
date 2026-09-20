@@ -83,7 +83,7 @@ it('opens a root-mounted React Vite app with isolated login, manifest, API, navi
   expect(await frame.locator('h1').innerText()).toBe('Root preview ready');
   await page.waitForFunction(() => document.querySelector('.agent-preview-browser-content')?.getAttribute('aria-busy') === 'false');
   const target = new URL(page.frames()[1]!.url()).origin;
-  expect(target).toMatch(/https:\/\/t-[a-f0-9]{48}\.arc\.test:/);
+  expect(target).toMatch(/https:\/\/[a-z]+-[a-z]+-[a-f0-9]{12}\.arc\.test:/);
   await page.frames()[1]!.waitForFunction(() => document.body.dataset.api === 'true');
   expect(cookies.every(cookie => !cookie.includes('arc_'))).toBe(true);
   await frame.getByText('Docs', { exact: true }).click();

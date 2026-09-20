@@ -7,7 +7,7 @@ import { onPreviewCleanup, previewFixture } from './preview-tunnel-fixture.js';
 it('serves root HTTP and WebSocket traffic with browser-bound entry and revokes it on unregister', async () => {
   const f = await previewFixture({ previewDomain: 'arc.test' });
   const entry = new URL(await f.entryUrl('/docs?q=1#part'));
-  expect(entry.hostname).toMatch(/^t-[a-f0-9]{48}\.arc\.test$/);
+  expect(entry.hostname).toMatch(/^[a-z]+-[a-z]+-[a-f0-9]{12}\.arc\.test$/);
   const target = entry.origin;
   const post = (url: string, body: unknown, cookie = '', origin = target) => f.fetch(url, { method: 'POST', headers: { cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const challenge = await post(target + '/_arc/challenge', { path: '/docs?q=1#part' }, '', f.url);

@@ -2,7 +2,7 @@
 
 **Goal:** Serve each local preview at the root of a stable tunnel hostname without modifying the target application.
 
-**Architecture:** Configure one wildcard DNS record and Worker route. Resolve `t-<sha256-prefix>.<preview-domain>` to an active preview registration. Keep authentication on the control origin and exchange a short-lived proof bound to an HttpOnly challenge cookie on the destination origin. Do not share the control login cookie across subdomains.
+**Architecture:** Configure one wildcard DNS record and Worker route. Resolve `<color>-<animal>-<12-hex>.<preview-domain>` to an active preview registration. Keep authentication on the control origin and exchange a short-lived proof bound to an HttpOnly challenge cookie on the destination origin. Do not share the control login cookie across subdomains.
 
 **Tech Stack:** TypeScript, hosted Relay, Cloudflare Workers/Durable Objects, React, Vitest, Playwright.
 
@@ -25,7 +25,7 @@
 - [x] Update browser entry/renewal and cross-origin iframe navigation; preserve legacy entry mode.
 - [x] Add Node and Worker domain configuration and compatibility metadata; document the migration.
 - [x] Validate root-mounted Vite imports, API calls, cookies, WebSocket, navigation in real browsers; verify independent tunnel authorization.
-- [ ] Inspect DNS and certificates with the scoped token, stage wildcard routing while excluding existing services, and verify TLS.
+- [x] Inspect DNS and certificates with the scoped token, stage wildcard routing while excluding existing services, and verify TLS.
 - [ ] Build, commit and deploy the approved change; verify production resources and target app without exposing credentials. Retain rollback information.
 
 ## Authentication flow
@@ -38,12 +38,12 @@
 
 ## Deployment
 
-Use `AGENT_REMOTE_PREVIEW_DOMAIN=xianliao.de5.net`. DNS is a proxied wildcard A record with an unroutable documentation address; the Worker terminates matching requests. Inventory exact existing Custom Domains and route them without the generic tunnel Worker. Only `t-<48 lowercase hex>` hosts enter tunnel routing; unknown hosts fail closed. Verify existing services before and after changes.
+Use `AGENT_REMOTE_PREVIEW_DOMAIN=agents.xianliao.de5.net`. Live certificate inspection confirmed an active `*.agents.xianliao.de5.net` certificate, so deployment uses the narrower `*.agents.xianliao.de5.net/*` route and DNS wildcard. This avoids intercepting sibling services. DNS is a proxied wildcard A record with an unroutable documentation address; the Worker terminates matching requests. Inventory exact existing Custom Domains and route them without the generic tunnel Worker. Only `<color>-<animal>-<12 lowercase hex>` hosts enter tunnel routing; unknown hosts fail closed. Verify existing services before and after changes.
 
 ## Verification and deployment status
 
-The isolated implementation is available on `feat/tunnel-subdomains`. Production remains unchanged until wildcard DNS, edge certificate coverage, and exact existing-service route exclusions have been verified. Wrangler OAuth can deploy Workers and manage routes but does not grant DNS editing. A short-lived zone-scoped DNS token is required for the infrastructure step.
+The isolated implementation is available on `feat/tunnel-subdomains`. Production wildcard DNS, the scoped Worker route, and edge TLS have been verified. The initial isolated-origin deployment is live as version `33a95929-6998-43d2-8b90-e9cb3c76aaaa`. Friendly color/animal names replace the initial hash-only names without compatibility redirects. Wrangler OAuth manages deployment; a separate short-lived zone-scoped token configured DNS.
 
-Browser acceptance uses a local TLS terminator with real sibling origins and Strict/Secure cookies. It covers React/Vite root imports, API calls, HMR, manifest access, iframe navigation, and direct browser-bound entry. Physical iPhone/Home Screen acceptance and production wildcard TLS remain pending.
+Browser acceptance uses a local TLS terminator with real sibling origins and Strict/Secure cookies. It covers React/Vite root imports, API calls, HMR, manifest access, iframe navigation, and direct browser-bound entry. Production wildcard TLS and unauthenticated login redirects pass. Production authenticated target-app and physical iPhone/Home Screen acceptance remain pending; the available production browser is signed out.
 
-Validated locally: root build and typecheck; 126 hosted tests, 323 web tests, 21 focused Node/UI integration tests, 24 Cloudflare runtime tests, and one real TLS Chromium root-Vite acceptance test. Compatibility check, documentation lint, and diff whitespace checks pass. No production DNS, routes, environment variables, or deployments were changed.
+Validated locally: root build and typecheck; 126 hosted tests, 323 web tests, 21 focused Node/UI integration tests, 24 Cloudflare runtime tests, and one real TLS Chromium root-Vite acceptance test. Compatibility check, documentation lint, and diff whitespace checks pass. The seven existing service origins returned HTTP 200 before and after deployment. Infrastructure snapshots are retained locally under `~/.agent-remote-control/deployments/tunnel-subdomains-20260920/`. The pre-subdomain rollback version is `c49ccf18-9025-4ae7-8ae4-bd529ff5a1b0`.

@@ -306,7 +306,7 @@ it('routes isolated preview origins through the Worker and redeems control-autho
   expect(policy).toContain("frame-src 'self' https://*.preview.test");
   const link = await f.json(alice.basePath + `v1/remote/hosts/${host.hostId}/previews/${registration.id}/open`, alice.cookie, { url: target + '/events', mode: 'link' });
   const tunnel = new URL((await link.json() as { tunnelUrl: string }).tunnelUrl);
-  expect(tunnel.hostname).toMatch(/^t-[a-f0-9]{48}\.preview\.test$/);
+  expect(tunnel.hostname).toMatch(/^[a-z]+-[a-z]+-[a-f0-9]{12}\.preview\.test$/);
   expect(tunnel.pathname).toBe('/events');
   expect((await f.requestAt(tunnel.origin, '/events')).status).toBe(401);
   const challenge = await f.requestAt(tunnel.origin, '/_arc/challenge', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ path: '/events' }) });

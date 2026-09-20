@@ -8,8 +8,9 @@ export interface PreviewController {
   readonly canManage: boolean;
   readonly routing?: 'subdomain' | 'path';
   register(agentId: string, request: PreviewRegistrationRequest): Promise<PreviewRegistration>;
-  unregister(id: string): Promise<void>;
-  open(id: string, originalLoopbackUrl: string, sessionId?: string): Promise<string>;
+  unregister(id: string, hostId?: string): Promise<void>;
+  open(id: string, originalLoopbackUrl: string, sessionId?: string, remote?: { hostId: string; registration: PreviewRegistration }): Promise<string>;
+  pinName?(id: string, pinned: boolean): Promise<void>;
   getTunnelUrl?(id: string, originalLoopbackUrl: string): Promise<string>;
 }
 

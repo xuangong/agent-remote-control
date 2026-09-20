@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import type { HttpPreviewClient, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 import type { PreviewController } from './PreviewActions.js';
-import { usePreviewRenewal } from './usePreviewRenewal.js';
+import { previewRegistrationKey, usePreviewRenewal } from './usePreviewRenewal.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
 import { PreviewWorkspaceContext } from './PreviewWorkspace.js';
 
@@ -17,6 +17,7 @@ const Context = createContext<PreviewContextValue | undefined>(undefined);
 
 interface BrowserEntry {
   version: number; key: string; id: string; sessionId: string; target: string;
+  hostId?: string; registration?: PreviewRegistration;
   url?: string; error?: string; returnFocus?: HTMLElement;
 }
 const DockContext = createContext<{
@@ -125,9 +126,11 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
       }
       throw new Error('The preview is registered, but its tunnel is still connecting. Open it again shortly.');
     },
-    unregister: async (id: string) => {
-      await client.unregister(hostId, id);
+    pinName: async (id, pinned) => { await client.pinName(hostId, id, pinned); await refresh(); },
+    unregister: async (id: string, remoteHostId?: string) => {
+      await client.unregister(remoteHostId ?? hostId, id);
       if (scopeRef.current === scope) updateBrowsers(current => current.map(entry => entry.id === id && entry.version === scope.version
+        && (entry.hostId ?? hostId) === (remoteHostId ?? hostId)
         ? { ...entry, error: 'This preview has been unregistered.' } : entry));
       await refresh();
     },
@@ -137,14 +140,14 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
       if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
       return url;
     },
-    open: async (id: string, target: string, agentId?: string) => {
+    open: async (id: string, target: string, agentId?: string, remote?: { hostId: string; registration: PreviewRegistration }) => {
       if (scopeRef.current !== scope) return '';
-      const sessionId = agentId ?? currentState.registrations.find(entry => entry.id === id)?.sources[0]?.sessionId ?? '';
-      const key = JSON.stringify([scope.version, sessionId, id, target]);
+      const sessionId = agentId ?? remote?.registration.sources[0]?.sessionId ?? currentState.registrations.find(entry => entry.id === id)?.sources[0]?.sessionId ?? '';
+      const key = JSON.stringify([scope.version, remote?.hostId ?? hostId, sessionId, id, target]);
       const existing = browserEntries.current.find(entry => entry.key === key);
       if (existing) { setActiveKey(key); return existing.url ?? ''; }
       const request = new AbortController(); requests.set(key, request);
-      const entry: BrowserEntry = { version: scope.version, key, id, sessionId, target,
+      const entry: BrowserEntry = { version: scope.version, key, id, sessionId, target, ...(remote ? { hostId: remote.hostId, registration: remote.registration } : {}),
         returnFocus: document.activeElement instanceof HTMLElement ? document.activeElement : undefined };
       updateBrowsers(current => [...current.filter(item => item.version === scope.version && item.key !== key), entry]);
       setActiveKey(key);
@@ -157,7 +160,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
         if (!request.signal.aborted) { update({ error: 'Preview access timed out. Close and open it again.' }); request.abort(); }
       }, 20_000);
       try {
-        const handoff = await client.open(hostId, id, target, request.signal);
+        const handoff = await client.open(remote?.hostId ?? hostId, id, target, request.signal);
         if (request.signal.aborted) return '';
         const url = await client.enter(handoff, id, request.signal);
         if (!request.signal.aborted) update({ url });
@@ -173,8 +176,8 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
     <PreviewWorkspaceContext.Provider value={{ open: currentBrowsers.some(entry => entry.key === activeKey), setContainer, hide: minimizeBrowser }}>
     {children}
     {currentBrowsers.map(browser => {
-      const selected = currentState.registrations.find(item => item.id === browser.id);
-      const renewal = renewalIssues[browser.id];
+      const selected = browser.registration ?? currentState.registrations.find(item => item.id === browser.id);
+      const renewal = renewalIssues[previewRegistrationKey(browser.hostId ?? hostId, browser.id)];
       const unavailable = selected?.pendingUnregister || selected?.status === 'unregistered' ? 'This preview has been unregistered.'
         : renewal?.terminal ? renewal.message
         : !selected && !currentState.loading && !canManage ? 'This preview registration is no longer available. Close and open it again.' : undefined;

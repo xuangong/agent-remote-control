@@ -10,7 +10,7 @@ import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'esbuild';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { controllerContentSecurityPolicy } from '@agent-remote-controller/agent-remote-hosted';
 import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
 
@@ -104,10 +104,28 @@ it('opens a root-mounted React Vite app with isolated login, manifest, API, navi
   await direct.addCookies([{ name: f.alice.cookie.slice(0, separator), value: f.alice.cookie.slice(separator + 1), url: f.url, httpOnly: true, secure: true, sameSite: 'Strict' }]);
   const directPage = await direct.newPage(); await directPage.goto(target + '/docs');
   await directPage.locator('h1').waitFor(); expect(directPage.url()).toBe(target + '/docs');
+  const previewsPath = `v1/remote/hosts/${f.hostId}/previews`;
+  await directPage.evaluate(() => { document.cookie = 'remembered=keep-me; Path=/; SameSite=Strict'; localStorage.setItem('test-settings', 'keep-me'); });
+  const previousCookies = (await direct.cookies(target)).map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+  expect((await f.alice.request(`${previewsPath}/${f.registration.id}/pin`, { pinned: true })).status).toBe(200);
+  expect((await f.alice.request(`${previewsPath}/${f.registration.id}/unregister`, {})).status).toBe(200);
+  const replacement = await (await f.alice.request(`v1/sessions/${f.agentId}/previews`, { target: f.target, itemId: 'reopened' })).json();
+  expect(replacement.registration.id).not.toBe(f.registration.id);
+  await vi.waitFor(async () => {
+    const list = await (await f.alice.request(previewsPath)).json();
+    expect(list.registrations.find((entry: { id: string }) => entry.id === replacement.registration.id)).toMatchObject({ tunnelOrigin: target, availability: 'online' });
+  }, { timeout: 5000 });
+  expect((await f.fetch(target + '/api', { headers: { cookie: previousCookies } })).status).toBe(401);
+  await directPage.goto(target + '/docs');
+  await directPage.locator('h1').waitFor();
+  await directPage.waitForFunction(() => document.body.dataset.api === 'true');
+  expect(await directPage.evaluate(() => localStorage.getItem('test-settings'))).toBe('keep-me');
+  expect(await directPage.evaluate(() => document.cookie)).toContain('remembered=keep-me');
+  expect(cookies.at(-1)).toContain('remembered=keep-me');
   await direct.close();
   expect((await f.fetch(target + '/api')).status).toBe(401);
   const navigation = await f.fetch(target + '/', { headers: { 'sec-fetch-dest': 'document' }, redirect: 'manual' });
   expect(navigation.status).toBe(303);
   const control = await f.fetch(navigation.headers.get('location')!, { redirect: 'manual' });
   expect(control.status).toBe(303); expect(control.headers.get('location')).toContain('/auth/login?');
-}, 30000);
+}, 45000);

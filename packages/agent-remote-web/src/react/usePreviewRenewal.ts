@@ -4,14 +4,17 @@ import { PreviewRequestError, type HttpPreviewClient, type PreviewRegistration }
 
 interface RenewalIssue { message: string; terminal: boolean }
 
-interface RetainedPreview { key: string; id: string; target: string; url?: string; error?: string }
+interface RetainedPreview { hostId?: string; registration?: PreviewRegistration; key: string; id: string; target: string; url?: string; error?: string }
+
+export function previewRegistrationKey(hostId: string, id: string): string { return JSON.stringify([hostId, id]); }
 
 export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, canManage: boolean,
   entries: readonly RetainedPreview[], registrations: readonly PreviewRegistration[], refresh: () => Promise<void>) {
   const retained = new Map<string, RetainedPreview>();
   if (canManage) for (const entry of entries) {
-    const registration = registrations.find(value => value.id === entry.id);
-    if (entry.url && !entry.error && registration?.status !== 'unregistered' && !registration?.pendingUnregister && !retained.has(entry.id)) retained.set(entry.id, entry);
+    const registration = entry.registration ?? registrations.find(value => value.id === entry.id);
+    const key = previewRegistrationKey(entry.hostId ?? hostId, entry.id);
+    if (entry.url && !entry.error && registration?.status !== 'unregistered' && !registration?.pendingUnregister && !retained.has(key)) retained.set(key, entry);
   }
   const hasRetained = retained.size > 0;
   const current = useRef(retained);
@@ -35,7 +38,7 @@ export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, can
         pending.set(id, request);
         const deadline = window.setTimeout(() => request.abort(), 20_000);
         const applicable = () => !disposed && current.current.get(id)?.key === entry.key && pending.get(id) === request;
-        void client.renew(hostId, id, entry.target, request.signal).then(registration => {
+        void client.renew(entry.hostId ?? hostId, entry.id, entry.target, request.signal).then(registration => {
           if (!applicable() || request.signal.aborted) return;
           due.set(id, Date.now() + Math.max(1000, Math.min(300_000, (registration.expiresAt - Date.now()) / 3)));
           setErrors(previous => ({ ...previous, [id]: undefined }));

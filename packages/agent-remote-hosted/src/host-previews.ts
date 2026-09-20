@@ -1,8 +1,9 @@
 import { createPreviewRelayBridge, createTunnelPeer, type PreviewSnapshot, type PreviewRegistration, type TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
 
 import { createPreviewActivity } from './preview-activity.js';
+import { PreviewNameError, previewNameId, previewTargetKey, reconcilePreviewNames, type PreviewNames } from './preview-names.js';
 
-export interface HostPreviewState { hostId: string; snapshot: PreviewSnapshot; pendingRemovals: string[] }
+export interface HostPreviewState extends PreviewNames { hostId: string; snapshot: PreviewSnapshot; pendingRemovals: string[] }
 interface Options {
   initial?: HostPreviewState[];
   save(state: HostPreviewState[], publish: () => void): Promise<void>;
@@ -44,9 +45,28 @@ export function createHostPreviews(options: Options) {
   }
   return {
     snapshot: () => structuredClone(records),
+    nameId: (hostId: string, id: string) => previewNameId(record(hostId), id),
+    async pinName(hostId: string, id: string, pinned: boolean) {
+      await mutate(draft => {
+        const current = draft.find(value => value.hostId === hostId);
+        const registration = current?.snapshot.registrations.find(value => value.id === id);
+        if (!current || !registration || registration.status !== 'active' || registration.expiresAt <= Date.now() || current.pendingRemovals.includes(id))
+          throw new PreviewNameError(409, 'This preview is no longer active. Refresh the list.');
+        const target = previewTargetKey(registration.target);
+        const pins = current.pins ?? [];
+        if (!pinned) { current.pins = pins.filter(value => value.target !== target); return; }
+        const nameId = previewNameId(current, id);
+        const existing = pins.find(value => value.target === target);
+        if (existing && existing.nameId !== nameId) throw new PreviewNameError(409, 'This local origin already has a pinned tunnel name. Unpin it before choosing another.');
+        if (existing) return false;
+        if (pins.length >= 256) throw new PreviewNameError(409, 'This Host has reached its pinned tunnel name limit. Unpin an unused name first.');
+        current.pins = [...pins, { target, nameId }];
+      });
+    },
     list(hostId: string) {
       const current = record(hostId);
       return { ...(current?.snapshot ?? { epoch: '', revision: 0, registrations: [] }), registrations: (current?.snapshot.registrations ?? []).map(value => ({ ...value,
+        tunnelNamePinned: current?.pins?.some(pin => pin.target === previewTargetKey(value.target) && pin.nameId === previewNameId(current, value.id)) ?? false,
         availability: reconciled.has(hostId) && peers.has(hostId) ? 'online' as const : 'controller_offline' as const,
         ...(current?.pendingRemovals.includes(value.id) ? { pendingUnregister: true } : {}),
       })) };
@@ -65,8 +85,10 @@ export function createHostPreviews(options: Options) {
         if (prior?.epoch === snapshot.epoch && prior.revision > snapshot.revision) return;
         if (prior?.epoch === snapshot.epoch && prior.revision === snapshot.revision) { currentSnapshot = prior; return; }
         accepted = true;
-        if (current) current.snapshot = snapshot;
-        else draft.push({ hostId, snapshot, pendingRemovals: [] });
+        const next = current ?? { hostId, snapshot, pendingRemovals: [] };
+        reconcilePreviewNames(next, snapshot);
+        next.snapshot = snapshot;
+        if (!current) draft.push(next);
       });
       if (generation !== (generations.get(hostId) ?? 0)) return;
       if (prior?.epoch === snapshot.epoch && prior.revision > snapshot.revision) return;

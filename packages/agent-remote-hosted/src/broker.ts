@@ -643,6 +643,10 @@ export function createHostBroker(options: HostBrokerOptions) {
         if (previewHost[3] === 'renew') {
           const registration = previews.list(previewHost[1]!).registrations.find(value => value.id === previewHost[2]);
           if (!registration || registration.status === 'unregistered' || registration.pendingUnregister) return json(409, { error: 'Preview is unavailable or has been unregistered.' });
+          const nameId = previews.nameId(previewHost[1]!, previewHost[2]);
+          if (previews.list(previewHost[1]!).registrations.some(value => value.id !== registration.id && value.status === 'active'
+            && value.expiresAt > now() && !value.pendingUnregister && previews.nameId(previewHost[1]!, value.id) === nameId))
+            return json(409, { error: 'A newer registration uses this tunnel name. Open the current preview.' });
           const result = await rpc(requireHost(previewHost[1]!), 'POST', '/remote/previews/renew', undefined, JSON.stringify({ id: previewHost[2] }));
           return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json' } });
         }

@@ -77,3 +77,50 @@ test('keeps an offline removal pending through expired snapshots until the Contr
     expect(previews.list('host').registrations[0]?.pendingUnregister).toBeUndefined();
   } finally { previews.close(); }
 });
+
+test('reserves a name by Host and local origin across removal, pruning and Relay restart', async () => {
+  const options = { async save(_state: unknown, publish: () => void) { publish(); }, async remove() {} };
+  let previews = createHostPreviews(options);
+  const next = (revision: number, id: string, target = 'http://127.0.0.1:5173'): PreviewSnapshot => {
+    const value = snapshot(revision); value.registrations[0] = { ...value.registrations[0]!, id, target }; return value;
+  };
+  try {
+    await previews.update('host', next(1, 'first'));
+    const deadline = previews.list('host').registrations[0]!.expiresAt;
+    await previews.pinName('host', 'first', true);
+    expect(previews.list('host').registrations[0]).toMatchObject({ tunnelNamePinned: true, expiresAt: deadline });
+    await previews.unregister('host', 'first');
+    await previews.update('host', { epoch: 'controller-a', revision: 2, registrations: [] });
+    const saved = previews.snapshot(); previews.close();
+    previews = createHostPreviews({ ...options, initial: saved });
+    await previews.update('host', next(3, 'second', 'http://localhost:5173'));
+    expect(previews.nameId('host', 'second')).toBe('first');
+    expect(previews.lookup('host', 'first')).toBeUndefined();
+    await previews.update('other-host', next(1, 'other', 'http://localhost:5173'));
+    expect(previews.nameId('other-host', 'other')).toBe('other');
+    await previews.update('host', next(4, 'other-port', 'http://127.0.0.1:5174'));
+    expect(previews.nameId('host', 'other-port')).toBe('other-port');
+    await previews.update('host', next(5, 'third'));
+    expect(previews.nameId('host', 'third')).toBe('first');
+    await previews.pinName('host', 'third', false);
+    expect(previews.nameId('host', 'third')).toBe('first');
+    expect(previews.list('host').registrations[0]!.tunnelNamePinned).toBe(false);
+    await previews.update('host', next(6, 'fourth'));
+    expect(previews.nameId('host', 'fourth')).toBe('fourth');
+  } finally { previews.close(); }
+});
+
+test('keeps pin persistence atomic and never assigns a reserved name to two active registrations', async () => {
+  let fail = false;
+  const previews = createHostPreviews({ async save(_state, publish) { if (fail) throw new Error('Storage unavailable'); publish(); }, async remove() {} });
+  try {
+    await previews.update('host', snapshot(1)); fail = true;
+    await expect(previews.pinName('host', 'preview-id', true)).rejects.toThrow('Storage unavailable');
+    expect(previews.list('host').registrations[0]!.tunnelNamePinned).toBe(false);
+    fail = false; await previews.pinName('host', 'preview-id', true);
+    const next = snapshot(2); next.registrations.push({ ...next.registrations[0]!, id: 'second', pathMode: 'preserve' });
+    await previews.update('host', next);
+    expect(previews.nameId('host', 'second')).toBe('second');
+    await expect(previews.pinName('host', 'second', true)).rejects.toThrow('already has a pinned');
+  } finally { previews.close(); }
+});

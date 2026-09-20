@@ -153,6 +153,11 @@ textarea {
 .lab-shell .agent-remote-surface select,
 .lab-shell .agent-remote-surface textarea { border-color: var(--obs-control-border); }
 
+.lab-preview-groups { min-width: 0; padding-top: 12px; }
+.lab-preview-groups > h2 { margin: 0; font-size: 13px; }
+.lab-preview-groups .lab-host-previews h2 { overflow-wrap: anywhere; }
+.lab-preview-mapping code { font-size: 11px; }
+.lab-preview-pin[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface); }
 .lab-host-previews { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-rule); }
 .lab-host-previews ul { display: grid; min-width: 0; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .lab-host-previews li { display: grid; min-width: 0; gap: 7px; padding: 10px; border: 1px solid var(--obs-control-border); border-radius: 8px; }

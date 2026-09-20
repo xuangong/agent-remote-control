@@ -86,3 +86,19 @@ it('only lists active previews and shows an empty state after the last one expir
   expect(empty.querySelectorAll('li')).toHaveLength(0);
   expect(empty.textContent).toContain('No active previews');
 });
+
+it('shows the Host and origin mapping and pins a name independently of tunnel availability', async () => {
+  const pinName = vi.fn(async () => {});
+  const controller = value({ routing: 'subdomain', pinName, registrations: value().registrations.map(entry => ({ ...entry,
+    tunnelOrigin: 'https://rose-seal-123456789abc.arc.test', tunnelNamePinned: true,
+  })) });
+  const container = await render(<HostPreviewList hostName="Work Mac" controller={controller} />);
+  expect(container.querySelector('li')?.textContent).toContain('Work Mac');
+  expect(container.querySelector('li')?.textContent).toContain('http://localhost:5173');
+  expect(container.querySelector('li')?.textContent).toContain('https://rose-seal-123456789abc.arc.test');
+  const button = container.querySelector<HTMLButtonElement>('.lab-preview-pin')!;
+  expect(button.textContent).toBe('Unpin tunnel name');
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  await act(async () => button.click());
+  expect(pinName).toHaveBeenCalledWith('preview-one', false);
+});

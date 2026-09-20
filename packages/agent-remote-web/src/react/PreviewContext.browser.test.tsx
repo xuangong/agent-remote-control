@@ -88,6 +88,25 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+it('keeps renewal and unregister isolated for the same registration ID on different Hosts', async () => {
+  const registration = { id: 'preview', target: 'http://localhost:5173', status: 'active' as const,
+    createdAt: Date.now(), expiresAt: Date.now() + 60000, revision: 1, pathMode: 'strip' as const, sources: [], availability: 'online' as const };
+  const client = { ...previewClient(vi.fn(async () => 'entry')), snapshot: vi.fn(async () => ({ registrations: [registration] })),
+    renew: vi.fn(async () => registration), unregister: vi.fn(async () => undefined) } as unknown as HttpPreviewClient;
+  let controller!: PreviewContextValue;
+  const container = await render(<PreviewProvider client={client} hostId="one" canManage><Probe capture={value => controller = value} /></PreviewProvider>);
+  await act(async () => { await controller.open('preview', registration.target, 'agent'); });
+  await act(async () => { await controller.open('preview', registration.target, 'agent', { hostId: 'two', registration }); });
+  expect(client.renew).toHaveBeenCalledWith('one', 'preview', registration.target, expect.any(AbortSignal));
+  expect(client.renew).toHaveBeenCalledWith('two', 'preview', registration.target, expect.any(AbortSignal));
+  await act(async () => { await controller.unregister('preview', 'two'); });
+  const browsers = container.querySelectorAll('[data-browser]');
+  expect(browsers).toHaveLength(2);
+  expect(browsers[0]!.getAttribute('data-error')).toBeNull();
+  expect(browsers[1]!.getAttribute('data-error')).toBe('This preview has been unregistered.');
+  expect(client.unregister).toHaveBeenCalledWith('two', 'preview');
+});
+
 
 it('renews retained previews while minimized, deduplicates sessions, and stops on close or manual unregister', async () => {
   vi.useFakeTimers();

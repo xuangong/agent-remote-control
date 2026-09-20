@@ -15,6 +15,7 @@ import { createTimerRelayScheduler, type RelayScheduler } from './scheduler.js';
 import { readJson } from './request.js';
 import { createSubdomainPreviewAccess } from './preview-subdomain-access.js';
 import { previewDomainOrigin, isPreviewDomain } from './preview-domain.js';
+import { PreviewNameError } from './preview-names.js';
 import { previewFrameScript } from './preview-frame.js';
 import { createPreviewAccess } from './preview-access.js';
 import { previewRequest, previewResponseHeaders } from './preview-http.js';
@@ -71,12 +72,15 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const subdomainAccess = options.previewDomain ? createSubdomainPreviewAccess({ origin: auth.origin, authorize: authorizePreview, lookup: url => {
     if (!isPreviewDomain(url.origin, options.previewDomain, auth.origin)) return undefined;
     for (const tenant of tenants.values()) for (const host of tenant.broker.previews.snapshot()) {
-      const registration = host.snapshot.registrations.find(item => previewDomainOrigin(item.id, options.previewDomain!, auth.origin) === url.origin);
+      const matching = host.snapshot.registrations.filter(item => previewDomainOrigin(tenant.broker.previews.nameId(host.hostId, item.id), options.previewDomain!, auth.origin) === url.origin);
+      const active = matching.filter(item => tenant.broker.previews.lookup(host.hostId, item.id));
+      if (active.length > 1) return undefined;
+      const registration = active[0] ?? matching.at(-1);
       if (registration) return { hostId: host.hostId, previewId: registration.id };
     }
     return undefined;
   } }) : undefined;
-  const domainOrigin = (id: string) => previewDomainOrigin(id, options.previewDomain!, auth.origin);
+  const domainOrigin = (broker: ReturnType<typeof createHostBroker>, hostId: string, id: string) => previewDomainOrigin(broker.previews.nameId(hostId, id), options.previewDomain!, auth.origin);
 
   const security = createSecurityPolicy(state);
   const verifyControl = createGatewayControlVerifier(auth, state);
@@ -208,7 +212,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (!owned.broker.previews.lookup(location.hostId!, location.previewId!) || !owned.broker.previews.bridge(location.hostId!)) return json(410, { error: 'This tunnel is offline, expired, or unregistered. Open it again from Agent Remote.' });
       let entryUrl: string;
       if (subdomainAccess) {
-        if (!location.previewChallenge) return new Response(null, { status: 303, headers: { 'cache-control': 'no-store', location: domainOrigin(location.previewId!) + '/_arc/start?path=' + encodeURIComponent(location.previewPath!) } });
+        if (!location.previewChallenge) return new Response(null, { status: 303, headers: { 'cache-control': 'no-store', location: domainOrigin(owned.broker, location.hostId!, location.previewId!) + '/_arc/start?path=' + encodeURIComponent(location.previewPath!) } });
         const code = await subdomainAccess.approve(location.previewChallenge, request, grant.subject);
         const destination = code && subdomainAccess.entryUrl(location.previewChallenge, code);
         if (!destination) return json(403, { error: 'Tunnel login challenge expired or access was denied. Open the tunnel again.' });
@@ -354,6 +358,21 @@ export function createHostedRelay(options: HostedRelayOptions) {
       }
     }
     const destination = routeTenant(path, grant.subject) ?? owned;
+    const pinPreview = /^\/v1\/remote\/hosts\/([^/]+)\/previews\/([A-Za-z0-9_-]+)\/pin$/.exec(path);
+    if (pinPreview && request.method === 'POST') {
+      const [, hostId, previewId] = pinPreview;
+      if (!destination.broker.ownsHost(hostId!, grant.subject)) return json(403, { error: 'Only the Host owner can pin tunnel names.' });
+      if (!subdomainAccess) return json(409, { error: 'Pinned tunnel names require dedicated tunnel domains.' });
+      const body = await readJson(request);
+      if (typeof body?.pinned !== 'boolean') return json(400, { error: 'Choose whether to pin the tunnel name.' });
+      try {
+        await destination.broker.previews.pinName(hostId!, previewId!, body.pinned);
+        return json(200, { pinned: body.pinned });
+      } catch (error) {
+        if (error instanceof PreviewNameError) return json(error.status, { error: error.message });
+        throw error;
+      }
+    }
     const openPreview = /^\/v1\/remote\/hosts\/([^/]+)\/previews\/([A-Za-z0-9_-]+)\/open$/.exec(path);
     if (openPreview && request.method === 'POST') {
       const hostId = openPreview[1]!; const previewId = openPreview[2]!;
@@ -368,15 +387,22 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const prefix = `/p/${previewId}`;
       const path = !subdomainAccess && registration.pathMode === 'preserve' && original.pathname.startsWith(prefix + '/') ? original.pathname.slice(prefix.length) : original.pathname;
       if (subdomainAccess) {
-        const destination = domainOrigin(previewId) + path + original.search + original.hash;
-        return body?.mode === 'link' ? json(200, { tunnelUrl: destination }) : json(200, { entryUrl: domainOrigin(previewId) + '/_arc/start?path=' + encodeURIComponent(path + original.search + original.hash) });
+        const tunnelOrigin = domainOrigin(destination.broker, hostId, previewId);
+        const tunnelUrl = tunnelOrigin + path + original.search + original.hash;
+        return body?.mode === 'link' ? json(200, { tunnelUrl }) : json(200, { entryUrl: tunnelOrigin + '/_arc/start?path=' + encodeURIComponent(path + original.search + original.hash) });
       }
       if (body?.mode === 'link') return json(200, { tunnelUrl: auth.origin + controllerPath({ hostId, previewId, previewPath: path + original.search + original.hash }) });
       return json(200, { entryUrl: previewAccess.issue({ source: request, subject: grant.subject, hostId, previewId, path: path + original.search + original.hash }) });
     }
     const result = await destination.broker.handleRequest(relative, context(request, grant));
     if (result?.ok && request.method === 'GET' && /^\/v1\/remote\/hosts\/[^/]+\/previews$/.test(path)) {
-      return json(200, { ...await result.json() as object, routing: subdomainAccess ? 'subdomain' : 'path' });
+      const snapshot = await result.json() as { registrations: Array<{ id: string }> };
+      const hostId = /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)![1]!;
+      return json(200, { ...snapshot, routing: subdomainAccess ? 'subdomain' : 'path',
+        registrations: snapshot.registrations.map(value => ({ ...value,
+          ...(subdomainAccess ? { tunnelOrigin: domainOrigin(destination.broker, hostId, value.id) } : {}),
+        })),
+      });
     }
     if (request.method !== 'GET' && result) {
       const action = path === '/v1/remote/pairings' ? 'pairing_created' : /\/revoke$/.test(path) ? 'host_revoked' : /\/rotate$/.test(path) ? 'credential_rotation_requested' : /\/stop$/.test(path) ? 'host_stop_requested' : undefined;

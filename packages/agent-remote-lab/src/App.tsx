@@ -73,7 +73,7 @@ import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.
 import { SupportingRail } from './components/SupportingRail.js';
 import { SidebarResize, useSidebarWidth } from './components/SidebarResize.js';
 import { TraceView } from './components/TraceView.js';
-import { HostPreviewList } from './components/HostPreviewList.js';
+import { HostPreviewGroups } from './components/HostPreviewGroups.js';
 import { HostVscodeTunnel } from './components/HostVscodeTunnel.js';
 import { HttpVscodeTunnelClient, VscodeTunnelScope } from './vscode-tunnel.js';
 
@@ -720,8 +720,9 @@ function AppContent({
   const connectionProviderName = providerName ?? state?.agent?.providerId ?? 'No active Agent';
   const connectionStatusLabel = hostOffline ? 'Host offline' : state?.agent?.status === 'failed' ? 'Agent failed' : sessionStatusLabel(status);
 
-  async function openPreviewSource(sessionId: string, itemId: string): Promise<void> {
-    const source = sessionEntries.find(item => item.agentId === sessionId) ?? openedSessions.find(item => item.agentId === sessionId);
+  async function openPreviewSource(sessionId: string, itemId: string, hostId: string): Promise<void> {
+    const source = [...sessionEntries, ...openedSessions].find(item => item.agentId === sessionId && item.hostId === hostId);
+    if (!source) { setFailure("This preview source is not in the current session list. Open its session from the Host first."); return; }
     if (source && source.agentId !== activeAgentId && !await openSession(source)) return;
     window.requestAnimationFrame(() => {
       const entry = [...document.querySelectorAll<HTMLElement>('[data-entry-key]')].find(item => item.dataset.entryKey === itemId);
@@ -1045,7 +1046,7 @@ function AppContent({
       {userScoped && sessionPanel === 'list' ? <section className="lab-session-directory" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2><span>{favorites.stars.length}</span></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
       {directory ? <HostPairing managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {sessionPanel === 'list' || sessionPanel === 'settings' ? <HostVscodeTunnel /> : null}
-      {sessionPanel === 'list' && previewHost?.access !== 'shared' && previewHost ? <HostPreviewList onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId) => void openPreviewSource(sessionId, itemId)} /> : null}
+      {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={compactLayout ? contextOpen : desktopContextVisible} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
       {providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
       {directory ? <SessionDirectory quickOpen={<button type="button" className="lab-session-scan-trigger" aria-label="Scan session QR code" onClick={() => setScanOpen(true)}>Scan</button>} favorites={favorites} searchable directory={directory} providerId={providerId} activeAgentId={addressSession?.agentId ?? activeAgentId} opened={openedSessions} known={sessionEntries} hostId={selectedHost.id} onOpenRelated={(item) => void openSession(item)} busy={transitioning || (remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openSession(item)} onSelect={(item) => void openSession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}

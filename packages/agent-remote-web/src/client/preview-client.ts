@@ -10,6 +10,8 @@ export type PreviewRegistration = Readonly<Omit<ProtocolPreviewRegistration, 'so
   readonly sources: readonly PreviewSource[];
   readonly availability: PreviewAvailability;
   readonly pendingUnregister?: boolean;
+  readonly tunnelOrigin?: string;
+  readonly tunnelNamePinned?: boolean;
 };
 export type PreviewSnapshot = Readonly<Omit<PreviewRegistrationSnapshot, 'registrations'>> & {
   readonly registrations: readonly PreviewRegistration[];
@@ -38,6 +40,12 @@ export class HttpPreviewClient {
 
   snapshot(hostId: string, signal?: AbortSignal): Promise<PreviewSnapshot> {
     return this.request(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews`, { signal });
+  }
+
+  async pinName(hostId: string, id: string, pinned: boolean): Promise<void> {
+    await this.request(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/${encodeURIComponent(id)}/pin`, {
+      method: 'POST', body: JSON.stringify({ pinned }), headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20_000),
+    });
   }
 
   async unregister(hostId: string, id: string): Promise<PreviewRegistration | undefined> {

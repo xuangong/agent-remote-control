@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { onPreviewCleanup, previewFixture } from './preview-tunnel-fixture.js';
 
 it('serves root HTTP and WebSocket traffic with browser-bound entry and revokes it on unregister', async () => {
@@ -44,4 +44,35 @@ it('serves root HTTP and WebSocket traffic with browser-bound entry and revokes 
   await f.alice.request(`v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/unregister`, {});
   await closing;
   expect((await f.fetch(target + '/bytes', { headers })).status).toBe(401);
+}, 20000);
+
+it('pins a domain without extending its lease and reuses it with a fresh registration and authorization', async () => {
+  const f = await previewFixture({ previewDomain: 'arc.test' });
+  const base = `v1/remote/hosts/${f.hostId}/previews`;
+  const first = await (await f.alice.request(base)).json();
+  const origin = first.registrations[0].tunnelOrigin;
+  expect(origin).toBe(new URL(await f.entryUrl('/')).origin);
+  expect((await f.bob.request(`${base}/${f.registration.id}/pin`, { pinned: true })).status).toBe(403);
+  expect((await f.alice.request(`${base}/${f.registration.id}/pin`, { pinned: 'yes' })).status).toBe(400);
+  expect((await f.alice.request(`${base}/${f.registration.id}/pin`, { pinned: true })).status).toBe(200);
+  const pinned = await (await f.alice.request(base)).json();
+  expect(pinned.registrations[0]).toMatchObject({ tunnelNamePinned: true, tunnelOrigin: origin, expiresAt: first.registrations[0].expiresAt });
+  expect((await f.alice.request(`${base}/${f.registration.id}/unregister`, {})).status).toBe(200);
+  const created = await f.alice.request(`v1/sessions/${f.agentId}/previews`, { target: f.target.replace('127.0.0.1', 'localhost') + '/another/path', itemId: 'again' });
+  expect(created.status).toBe(200);
+  const { registration } = await created.json();
+  expect(registration.id).not.toBe(f.registration.id);
+  await vi.waitFor(async () => {
+    const list = await (await f.alice.request(base)).json();
+    expect(list.registrations.find((value: { id: string }) => value.id === registration.id)).toMatchObject({ tunnelOrigin: origin, tunnelNamePinned: true, availability: 'online' });
+  });
+  expect((await f.fetch(origin + '/bytes')).status).toBe(401);
+  expect((await f.alice.request(`${base}/${registration.id}/pin`, { pinned: false })).status).toBe(200);
+  expect((await f.alice.request(`${base}/${registration.id}/unregister`, {})).status).toBe(200);
+  const random = await (await f.alice.request(`v1/sessions/${f.agentId}/previews`, { target: f.target, itemId: 'random' })).json();
+  await vi.waitFor(async () => {
+    const list = await (await f.alice.request(base)).json();
+    const entry = list.registrations.find((value: { id: string }) => value.id === random.registration.id);
+    expect(entry?.tunnelOrigin).toBeTruthy(); expect(entry.tunnelOrigin).not.toBe(origin);
+  });
 }, 20000);

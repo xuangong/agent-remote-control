@@ -10,6 +10,7 @@ async function signIn(page: Page, subject = 'alice') {
 
 test('QR and copied URLs open the same session across authenticated devices without browser storage', async ({ page, browser }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'Uses separate desktop and mobile contexts.');
+  test.setTimeout(90000);
   const f = await sessionLinkFixture();
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const desktop = await browser.newContext();
@@ -18,6 +19,7 @@ test('QR and copied URLs open the same session across authenticated devices with
     await page.goto(f.url);
     await signIn(page);
     await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await showNewSession(page);
     await page.getByTestId('session-create').click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
     await page.getByTestId('prompt-input').fill('Cross-device conversation marker');
@@ -27,7 +29,7 @@ test('QR and copied URLs open the same session across authenticated devices with
     expect(new URL(original).searchParams.get('host')).toBe(f.hostId);
     expect(new URL(original).searchParams.get('session')).toBeTruthy();
     await page.getByRole('button', { name: 'Share session link' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Open session on another device' });
+    const dialog = page.getByRole('dialog', { name: 'Share session' });
     await expect(dialog.getByLabel('Session URL')).toHaveValue(original);
     const qr = dialog.getByAltText('Session QR code');
     await expect(qr).toBeVisible();
@@ -43,18 +45,49 @@ test('QR and copied URLs open the same session across authenticated devices with
     await expect(dialog.getByRole('button', { name: 'Copied' })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(original);
     await page.screenshot({ path: testInfo.outputPath('session-qr.png') });
+    const qrData = await qr.getAttribute('src');
     await dialog.getByRole('button', { name: 'Close session link' }).click();
 
     const mobile = await phone.newPage();
-    await mobile.goto(original);
+    await mobile.bringToFront();
+    await mobile.goto(f.url);
     await signIn(mobile);
+    await expect(mobile.getByRole('button', { name: 'Share session link' })).toHaveCount(0);
+    await mobile.evaluate(() => Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true,
+      value: async () => { throw new DOMException('Denied', 'NotAllowedError'); } }));
+    await mobile.getByRole('button', { name: 'Scan session QR code', exact: true }).click();
+    await mobile.getByText('Paste a session link', { exact: true }).click();
+    await mobile.getByLabel('Session link', { exact: true }).fill(original);
+    await mobile.getByRole('button', { name: 'Open session', exact: true }).click();
+    await expect(mobile.getByRole('dialog', { name: 'Scan session', exact: true })).not.toBeVisible();
     await expect(mobile.getByTestId('prompt-input')).toBeEnabled();
     await expect(mobile.locator('.agent-message-assistant').last()).toContainText('Cross-device conversation marker');
     expect(mobile.url()).toBe(original);
-    await mobile.getByRole('button', { name: 'Share session link' }).click();
-    await expect(mobile.getByAltText('Session QR code')).toBeVisible();
-    await mobile.screenshot({ path: testInfo.outputPath('session-qr-mobile.png') });
-    await mobile.getByRole('button', { name: 'Close session link' }).click();
+    await showNewSession(mobile);
+    await mobile.getByLabel('Connected Host').selectOption(f.hostId);
+    await mobile.getByTestId('session-create').click();
+    await expect(mobile.getByTestId('prompt-input')).toBeEnabled();
+    await expect(mobile).not.toHaveURL(original);
+    await mobile.getByTestId('prompt-input').fill('Keep this draft when scanning');
+    await mobile.evaluate(async data => {
+      const image = new Image(); image.src = data!; await image.decode();
+      const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 640;
+      canvas.getContext('2d')!.drawImage(image, 0, 0, 640, 640);
+      const stream = canvas.captureStream(5);
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => stream });
+      Object.assign(window, { scanStream: stream, scanDocument: true });
+    }, qrData);
+    await mobile.getByRole('button', { name: 'Favorites', exact: true }).click();
+    await mobile.getByRole('button', { name: 'Scan to open', exact: true }).click();
+    await expect(mobile.getByRole('dialog', { name: 'Scan session', exact: true })).not.toBeVisible();
+    await expect(mobile).toHaveURL(original);
+    await expect(mobile.locator('.agent-message-assistant').last()).toContainText('Cross-device conversation marker');
+    expect(await mobile.evaluate(() => (window as unknown as { scanDocument: boolean }).scanDocument)).toBe(true);
+    expect(await mobile.evaluate(() => (window as unknown as { scanStream: MediaStream }).scanStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
+    await mobile.evaluate(() => history.back());
+    await expect(mobile.getByTestId('prompt-input')).toHaveValue('Keep this draft when scanning');
+    await mobile.evaluate(() => history.forward());
+    await expect(mobile).toHaveURL(original);
     await mobile.getByTestId('prompt-input').fill('Reply from phone');
     await mobile.getByTestId('prompt-submit').click();
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Reply from phone');
@@ -71,7 +104,7 @@ test('QR and copied URLs open the same session across authenticated devices with
     await signIn(denied, 'bob');
     await expect(denied.getByRole('alert').first()).toBeVisible();
     await expect(denied.locator('.agent-message-user')).toHaveCount(0);
-  } finally { await phone.close(); await desktop.close(); await outsider.close(); await f.close(); }
+  } finally { await Promise.allSettled([phone.close(), desktop.close(), outsider.close()]); await f.close(); }
 });
 
 test('the address bar tracks a side session and opens it on a fresh device', async ({ page, browser }) => {

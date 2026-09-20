@@ -35,8 +35,8 @@ export function FavoritesList({ favorites, tracking, activeKey, busy, onOpen }: 
     {tracking.error ? <p className="lab-control-note" role="alert">{tracking.error}</p> : null}
   </>;
 }
-export function FavoritesMenu({ title, status, currentSession, favorites, tracking, activeKey, busy, onOpen }: { title: string; status?: AgentStatus; currentSession?: Parameters<typeof starInput>[0]; favorites: SessionStars; tracking: SessionTracking; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
-  return <SessionPopover label="Favorites" className="lab-title-favorites" trigger={<><span className="lab-favorites-title agent-session-title" data-session-status={status}>{title}</span><span className="lab-favorites-chevron" aria-hidden="true">▾</span></>} onOpen={() => void favorites.refresh()}>
+export function FavoritesMenu({ onScan, title, status, currentSession, favorites, tracking, activeKey, busy, onOpen }: { onScan?(): void; title: string; status?: AgentStatus; currentSession?: Parameters<typeof starInput>[0]; favorites: SessionStars; tracking: SessionTracking; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
+  return <SessionPopover headingAction={onScan ? close => <button type="button" className="lab-favorites-scan" onClick={() => { close(); onScan(); }}>Scan to open</button> : undefined} label="Favorites" className="lab-title-favorites" trigger={<><span className="lab-favorites-title agent-session-title" data-session-status={status}>{title}</span><span className="lab-favorites-chevron" aria-hidden="true">▾</span></>} onOpen={() => void favorites.refresh()}>
     {close => <>{currentSession ? <div className="lab-favorites-current"><span>Current: {currentSession.title}</span><StarButton session={currentSession} favorites={favorites} /></div> : null}<FavoritesList favorites={favorites} tracking={tracking} activeKey={activeKey} busy={busy} onOpen={item => { close(); onOpen(item); }} /></>}
   </SessionPopover>;
 }

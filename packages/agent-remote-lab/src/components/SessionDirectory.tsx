@@ -2,12 +2,13 @@ import { StarButton } from './SessionFavorites.js';
 import type { SessionStars } from '../hooks/useSessionStars.js';
 import { useFeedbackToast } from './Toast.js';
 import { WorkspaceFolderPicker } from './WorkspaceFolderPicker.js';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { sessionForest, sessionKey, sessionStatusLabel, type SessionEntry } from '../session-tree.js';
 import { SessionTree } from './SessionTree.js';
 import { DirectoryError, type CreateSessionOptions, type OpenedSession, type SessionCatalogPage, type SessionDirectoryClient, type SessionSummary, type SessionWorkspace } from '../directory-client.js';
 
 interface Props {
+  quickOpen?: ReactNode;
   searchable?: boolean;
   favorites?: SessionStars;
   directory: SessionDirectoryClient;
@@ -24,7 +25,7 @@ interface Props {
   onClose(agentId: string): void;
 }
 
-export function SessionDirectory({ favorites, searchable = false, directory, providerId, activeAgentId, opened, known = [], hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
+export function SessionDirectory({ quickOpen, favorites, searchable = false, directory, providerId, activeAgentId, opened, known = [], hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
   const [search, setSearch] = useState('');
   const matches = (item: SessionEntry) => !search.trim() || [item.title, item.nativeSessionId, item.providerId, ('workspace' in item && typeof item.workspace === 'string' ? item.workspace : '')].some((value) => value?.toLowerCase().includes(search.trim().toLowerCase()));
   const [page, setPage] = useState<SessionCatalogPage | undefined>(directory.cachedPages.get(providerId));
@@ -113,7 +114,7 @@ export function SessionDirectory({ favorites, searchable = false, directory, pro
   return <>
     {searchable ? <label className="lab-session-search">Search loaded sessions<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Title, workspace, or ID" /></label> : null}
     <section className="lab-session-directory" aria-label="Discover sessions">
-      <div className="lab-directory-heading"><h2>Discover sessions</h2><button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div>
+      <div className="lab-directory-heading"><h2>Discover sessions</h2><div className="lab-directory-actions">{quickOpen}<button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div></div>
       <p className="agent-visually-hidden">Roots by activity · Subagents by creation</p>
       {updates && !expired ? <button type="button" className="lab-directory-updates" onClick={() => void load()} disabled={loading}>Updates available · Refresh</button> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}

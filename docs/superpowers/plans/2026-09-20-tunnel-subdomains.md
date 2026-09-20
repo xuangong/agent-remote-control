@@ -26,7 +26,8 @@
 - [x] Add Node and Worker domain configuration and compatibility metadata; document the migration.
 - [x] Validate root-mounted Vite imports, API calls, cookies, WebSocket, navigation in real browsers; verify independent tunnel authorization.
 - [x] Inspect DNS and certificates with the scoped token, stage wildcard routing while excluding existing services, and verify TLS.
-- [ ] Build, commit and deploy the approved change; verify production resources and target app without exposing credentials. Retain rollback information.
+- [x] Build, commit and deploy the approved change; verify production assets, health, TLS and unauthenticated entry. Retain rollback information.
+- [ ] Complete signed-in production target-app and physical iPhone/Home Screen acceptance.
 
 ## Authentication flow
 
@@ -42,8 +43,10 @@ Use `AGENT_REMOTE_PREVIEW_DOMAIN=agents.xianliao.de5.net`. Live certificate insp
 
 ## Verification and deployment status
 
-The isolated implementation is available on `feat/tunnel-subdomains`. Production wildcard DNS, the scoped Worker route, and edge TLS have been verified. The initial isolated-origin deployment is live as version `33a95929-6998-43d2-8b90-e9cb3c76aaaa`. Friendly color/animal names replace the initial hash-only names without compatibility redirects. Wrangler OAuth manages deployment; a separate short-lived zone-scoped token configured DNS.
+The isolated implementation is available on `feat/tunnel-subdomains`. Production wildcard DNS, the scoped Worker route, and edge TLS have been verified. The friendly-name deployment is live as version `107558f8-3de3-4d22-baec-d273e27fd77c` from commit `6baf68a`. The previous isolated-origin deployment was `33a95929-6998-43d2-8b90-e9cb3c76aaaa`. Friendly color/animal names replace the initial hash-only names without compatibility redirects. Wrangler OAuth manages deployment; a separate short-lived zone-scoped token configured DNS.
 
 Browser acceptance uses a local TLS terminator with real sibling origins and Strict/Secure cookies. It covers React/Vite root imports, API calls, HMR, manifest access, iframe navigation, and direct browser-bound entry. Production wildcard TLS and unauthenticated login redirects pass. Production authenticated target-app and physical iPhone/Home Screen acceptance remain pending; the available production browser is signed out.
 
 Validated locally: root build and typecheck; 126 hosted tests, 323 web tests, 21 focused Node/UI integration tests, 24 Cloudflare runtime tests, and one real TLS Chromium root-Vite acceptance test. Compatibility check, documentation lint, and diff whitespace checks pass. The seven existing service origins returned HTTP 200 before and after deployment. Infrastructure snapshots are retained locally under `~/.agent-remote-control/deployments/tunnel-subdomains-20260920/`. The pre-subdomain rollback version is `c49ccf18-9025-4ae7-8ae4-bd529ff5a1b0`.
+
+Friendly-name validation: Relay and Worker builds, root typecheck, four hostname/CSP tests, one real Node HTTP/WebSocket test, eight Cloudflare preview runtime tests, and one TLS Chromium/Vite browser test passed. Compatibility and documentation checks passed. Production confirmed the new hostname redirects to control login (303), unauthorized resources return 401, the former hash hostname returns 403, TLS validates, and the served JavaScript matches the local build. The control site and six existing sibling services return 200. Deployment evidence is saved as `friendly-hostnames.json` beside the infrastructure snapshots. The branch remains unmerged and unpushed.

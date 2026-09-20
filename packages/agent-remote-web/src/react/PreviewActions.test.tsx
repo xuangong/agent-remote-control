@@ -6,6 +6,28 @@ import type { PreviewRegistration } from '../client/preview-client.js';
 import { PreviewActions, discoverLoopbackTargets, type PreviewController } from './PreviewActions.js';
 
 describe('PreviewActions', () => {
+  it.each([
+    ['[Codex 测试入口](http://127.0.0.1:5181/dm/01M2YT5DQR4J17GC5GVHGEYP1D)：已打开 **Session** 模式，显示 Ready。', 'http://127.0.0.1:5181/dm/01M2YT5DQR4J17GC5GVHGEYP1D'],
+    ['[Preview](http://localhost:5173/docs)ready', 'http://localhost:5173/docs'],
+    ['[Preview](http://localhost:5173/docs/section_(one))：已打开', 'http://localhost:5173/docs/section_(one)'],
+    ['http://localhost:5173/docs：已打开', 'http://localhost:5173/docs'],
+    ['http://localhost:5173/docs，下一步', 'http://localhost:5173/docs'],
+    ['`http://localhost:5173/docs/section_(one)`', 'http://localhost:5173/docs/section_(one)'],
+    ['<http://localhost:5173/中文?q=%EF%BC%9A#part>', 'http://localhost:5173/%E4%B8%AD%E6%96%87?q=%EF%BC%9A#part'],
+  ])('discovers the URL without consuming surrounding prose: %s', (text, target) => {
+    expect(discoverLoopbackTargets(text)).toEqual([target]);
+  });
+
+  it('opens a Markdown preview at the exact linked path', async () => {
+    const open = vi.fn(async () => 'https://preview.test/entry');
+    const container = await render(<PreviewActions agentId="agent-one" itemId="epoch:1"
+      text="[Codex 测试入口](http://localhost:5173/dm/session)：已打开 **Session** 模式，显示 Ready。"
+      controller={controller({ registrations: [activeRegistration()], open })} />);
+    expect(container.querySelector('code')?.textContent).toBe('http://localhost:5173/dm/session');
+    await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-open')?.click());
+    expect(open).toHaveBeenCalledWith('preview-one', 'http://localhost:5173/dm/session', 'agent-one');
+  });
+
   it('discovers distinct loopback HTTP targets without registering during render', async () => {
     expect(discoverLoopbackTargets('Open http://localhost:5173/a and `127.0.0.1:5173/b`, not https://example.com.')).toEqual([
       'http://localhost:5173/a', 'http://127.0.0.1:5173/b',

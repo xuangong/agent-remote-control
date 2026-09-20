@@ -13,10 +13,10 @@ export interface PreviewController {
 }
 
 export function discoverLoopbackTargets(text: string): string[] {
-  const pattern = /(?:https?:\/\/)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]):\d{1,5}(?:\/[^\s<>'"`]*)?/gi;
+  const pattern = /(?:https?:\/\/)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]):\d{1,5}(?:\/[^\s<>'"`，。；：！？、（）【】「」『』“”‘’]*)?/gi;
   const found = new Map<string, string>();
   for (const match of text.matchAll(pattern)) {
-    const value = match[0].replace(/[),.;!?]+$/, '');
+    const value = trimUrlProse(match[0]);
     const normalized = /^https?:\/\//i.test(value) ? value : `http://${value}`;
     try {
       const url = new URL(normalized);
@@ -26,6 +26,19 @@ export function discoverLoopbackTargets(text: string): string[] {
     } catch { /* Ignore malformed transcript text. */ }
   }
   return [...found.values()];
+}
+
+function trimUrlProse(candidate: string): string {
+  let depth = 0;
+  for (let index = 0; index < candidate.length; index += 1) {
+    if (candidate[index] === '(') depth += 1;
+    else if (candidate[index] === ')') {
+      // A Markdown link's closing delimiter is not part of its destination.
+      if (depth === 0) return candidate.slice(0, index).replace(/[,.;!?]+$/, '');
+      depth -= 1;
+    }
+  }
+  return candidate.replace(/[,.;!?]+$/, '');
 }
 
 export function PreviewActions({ agentId, itemId, text, controller }: {

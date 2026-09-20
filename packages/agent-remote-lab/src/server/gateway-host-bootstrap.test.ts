@@ -36,6 +36,9 @@ async function fixture() {
     if (claims.op === 'host-key' || claims.op === 'revoke-host-key') {
       calls.push({ operation: claims.op, body: input });
       entered?.(); await hold;
+      if (!input.hostName.trim() || input.hostName.length > 256 || /[\u0000-\u001f\u007f]/.test(input.hostName)) {
+        res.writeHead(400, { 'content-type': 'application/json' }); res.end('{}'); return;
+      }
       res.writeHead(upstreamStatus, { 'content-type': 'application/json' });
       res.end(JSON.stringify(reply ?? (claims.op === 'host-key' ? credentials : { ok: true })));
     } else {
@@ -73,16 +76,24 @@ async function fixture() {
     const host = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } });
     cleanups.push(async () => { host.terminate(); });
     await event(host, 'open'); const issued = event(host, 'message');
-    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: randomUUID(), name: 'Docker Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+    const installationId = randomUUID();
+    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId, name: 'Docker Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
     const key = JSON.parse((await issued)[0].toString()).credential as string;
     const saved = event(host, 'message'); host.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
     const hostId = JSON.parse((await saved)[0].toString()).hostId as string;
-    return { host, key, invitation: pairing.key, hostId };
+    return { host, key, invitation: pairing.key, hostId, installationId };
+  }
+  async function rename(device: { key: string; installationId: string }, name: string) {
+    const host = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${device.key}` } });
+    cleanups.push(async () => { host.terminate(); });
+    await event(host, 'open'); const registered = event(host, 'message');
+    host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: device.installationId, name, providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+    expect(JSON.parse((await registered)[0].toString()).type).toBe('registered');
   }
   const bootstrap = (key: string, body = '{}', headers: Record<string, string> = {}, query = '') => request(url + '/v1/remote/host/bootstrap' + query, {
     method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', ...headers }, body,
   });
-  return { login, enroll, bootstrap, calls, credentials, restart: async () => { await relay.close(); await start(); },
+  return { login, enroll, rename, bootstrap, calls, credentials, restart: async () => { await relay.close(); await start(); },
     disable: () => { disabled = true; }, upstream: (status: number, value?: unknown) => { upstreamStatus = status; reply = value; },
     hold: () => { let release!: () => void; hold = new Promise<void>(resolve => { release = resolve; }); return { entered: new Promise<void>(resolve => { entered = resolve; }), release }; } };
 }
@@ -172,4 +183,18 @@ it('rejects a credential rotated while its bootstrap response is pending', async
   hold.release(); expect((await pending).status).toBe(401);
   expect((await f.bootstrap(device.key)).status).toBe(401);
   expect((await f.bootstrap(next)).status).toBe(200);
+}, 15000);
+
+it('normalizes Gateway display names without changing Host names or blocking owner revocation', async () => {
+  const f = await fixture(); const alice = await f.login('alice'); const device = await f.enroll(alice.browser);
+  expect((await f.bootstrap(device.key)).status).toBe(200);
+  const longName = '\n' + 'x'.repeat(300) + '\u007f';
+  await f.rename(device, longName);
+  expect((await f.bootstrap(device.key)).status).toBe(200);
+  expect(f.calls.at(-1)?.body.hostName).toBe('x'.repeat(256));
+  expect((await (await alice.browser('v1/remote/hosts')).json()).hosts[0].name).toBe(longName);
+  await f.rename(device, '\n\u007f');
+  expect((await alice.browser(`v1/remote/hosts/${device.hostId}/revoke`, {})).status).toBe(200);
+  expect(f.calls.at(-1)).toEqual({ operation: 'revoke-host-key', body: { subject: 'alice', hostId: device.hostId, hostName: device.hostId } });
+  expect((await f.bootstrap(device.key)).status).toBe(401);
 }, 15000);

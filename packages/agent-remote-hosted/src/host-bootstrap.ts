@@ -36,7 +36,8 @@ export async function validateBootstrapBody(request: Request): Promise<void> {
 }
 
 async function gatewayHostKeyRequest(auth: GatewayAuthOptions, operation: 'host-key' | 'revoke-host-key', identity: HostKeyIdentity): Promise<{ status: 'active'; value: unknown } | { status: 'denied' | 'unavailable' }> {
-  const body = JSON.stringify(identity);
+  const hostName = identity.hostName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 256) || identity.hostId;
+  const body = JSON.stringify({ ...identity, hostName });
   try {
     const response = await fetch(auth.issuer + '/api/agent-remote/' + operation, { method: 'POST', body,
       redirect: 'manual', signal: AbortSignal.timeout(5000), headers: {

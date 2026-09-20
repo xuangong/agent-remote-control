@@ -81,5 +81,8 @@ body:has(.lab-ask-viewport) { position: fixed; inset: 0; overflow: clip; }
 }
 
 @media (min-width: 1181px) {
+  .lab-ask-window :is(.lab-workbench-heading, .lab-ask-heading) { cursor: grab; touch-action: none; user-select: none; }
+  .lab-ask-window[data-dragging="true"],
+  .lab-ask-window[data-dragging="true"] :is(.lab-workbench-heading, .lab-ask-heading) { cursor: grabbing; }
   .lab-ask-window { position: absolute; left: var(--ask-left); top: var(--ask-top); max-height: calc(var(--lab-viewport-height, 100dvh) - 24px); }
 }

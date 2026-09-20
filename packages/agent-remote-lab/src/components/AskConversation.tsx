@@ -6,16 +6,18 @@ import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { ForkStore, SessionFork } from '../session-forks.js';
 import { sessionActivity } from '../session-activity.js';
 import { sessionKey } from '../session-tree.js';
+import type { FloatingPosition } from '../hooks/useTrackingPosition.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
+import { askCommand } from '../fork-actions.js';
 import { LabWorkbench } from './LabWorkbench.js';
 
-export function AskConversation({ entry, store, replica, transport, draft, onDraftChange, onClose, onClean, onRetry, onSendInput, simple, onToggleSimple, triggerRef }: {
-  triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
+export function AskConversation({ entry, store, replica, transport, draft, onDraftChange, onClose, onToggleEnabled, onClean, onRetry, onSendInput, simple, onToggleSimple, triggerRef, positionRef }: {
+  positionRef: RefObject<FloatingPosition>; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
   simple: boolean; onToggleSimple(): void;
-  draft: string; onDraftChange(value: string): void; onClose(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void;
+  draft: string; onDraftChange(value: string): void; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void;
 }) {
   const panel = useRef<HTMLElement>(null);
-  useAskPosition(panel, triggerRef);
+  useAskPosition(panel, triggerRef, positionRef);
   useLayoutEffect(() => {
     const previous = document.activeElement;
     panel.current?.focus({ preventScroll: true });
@@ -36,7 +38,7 @@ export function AskConversation({ entry, store, replica, transport, draft, onDra
     {entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => input.text).join(" · ")}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={entry.busy} onClick={onRetry}>Retry</button></div> : null}
     {entry.record?.target ? <AskChat key={entry.record.id} record={store.get(entry.record.id)} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
-      mode={simple ? 'simple' : 'content'} busy={entry.busy} draft={draft} onDraftChange={onDraftChange} tools={tools} /> : <>
+      onToggleEnabled={onToggleEnabled} mode={simple ? 'simple' : 'content'} busy={entry.busy} draft={draft} onDraftChange={onDraftChange} tools={tools} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       <div className="lab-ask-opening" role="status">{entry.busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div>
       <textarea className="lab-ask-draft" aria-label="Ask draft" rows={2} placeholder="Ask anything…" value={draft} onChange={event => onDraftChange(event.target.value)} />
@@ -44,8 +46,8 @@ export function AskConversation({ entry, store, replica, transport, draft, onDra
   </section></div>;
 }
 
-function AskChat({ mode, record, inputs, onSendInput, replica, transport, draft, onDraftChange, tools, busy }: {
-  mode: TimelineDisplayMode; record: SessionFork; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
+function AskChat({ mode, record, inputs, onSendInput, replica, transport, draft, onDraftChange, tools, busy, onToggleEnabled }: {
+  onToggleEnabled(): void; mode: TimelineDisplayMode; record: SessionFork; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
   draft: string; onDraftChange(value: string): void; tools: ReactNode; busy?: boolean;
 }) {
   const session = record.target!;
@@ -54,6 +56,13 @@ function AskChat({ mode, record, inputs, onSendInput, replica, transport, draft,
     if (sendQueuedInput && !busy && inputs?.[0]) onSendInput(inputs[0].id, sendQueuedInput);
   }, [sendQueuedInput, inputs, onSendInput, busy]);
   return <TimelineDisplay.Provider value={mode}><LabWorkbench compact state={state}
+    consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
+      if (args.trim()) {
+        if (!actions.sendMessage) throw new Error('Wait for Ask to finish synchronizing.');
+        await actions.sendMessage(args.trim());
+      } else onToggleEnabled();
+      return {};
+    }}
     sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
     draftSessionKey={sessionKey(session)} messageDraft={draft} onMessageDraftChange={onDraftChange}
     questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}

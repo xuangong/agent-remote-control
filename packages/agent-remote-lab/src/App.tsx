@@ -56,6 +56,7 @@ import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
+import type { FloatingPosition } from './hooks/useTrackingPosition.js';
 import { AskButton } from './components/AskButton.js';
 import { AskConversation } from './components/AskConversation.js';
 import { useAskConversations } from './hooks/useAskConversations.js';
@@ -132,6 +133,7 @@ function AppContent({
   userScoped = false,
 }: AppProps) {
   const shellRef = useVisualViewport();
+  const askPositionRef = useRef<FloatingPosition>(null);
   const askTriggerRef = useRef<HTMLButtonElement>(null);
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
@@ -749,7 +751,7 @@ function AppContent({
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
   const askKey = addressSession ? sessionKey(addressSession) : undefined;
   const askEntry = addressSession ? ask.entryFor(addressSession) : undefined;
-  const askVisible = ask.openKey === askKey && !!askEntry && activeView === 'workbench' && !supportingRailOpen;
+  const askVisible = ask.enabled && ask.openKey === askKey && !!askEntry && activeView === 'workbench' && !supportingRailOpen;
   const askSourceState = addressSession?.agentId === state?.agent?.id ? state : addressSession ? replicas.get(addressSession.agentId)?.getState() : undefined;
   function openAsk(clean = false) {
     if (addressSession && askSourceState) void ask.open(askSourceState, addressSession, '', clean).catch(() => {});
@@ -758,8 +760,8 @@ function AppContent({
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
     && primaryBinding.current.transport === transport && primaryBinding.current.agentId === stackRoot?.agentId);
   const openWindows = useMemo(() => [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [stackRoot, primaryIsBound, sideSessions]);
-  const askActivitySessions = useMemo(() => askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
-    liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [askEntry?.record?.target, askEntry?.attached, askVisible]);
+  const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
+    liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, askEntry?.record?.target, askEntry?.attached, askVisible]);
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions);
   const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
   useEffect(() => {
@@ -838,6 +840,7 @@ function AppContent({
   }
 
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
+    if (id === 'console:ask' && !args.trim()) { ask.toggle(); return {}; }
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
     if (id === 'console:ask') return ask.open(sourceState, saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }, args);
@@ -925,11 +928,11 @@ function AppContent({
 
   return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {tracking.observers}
-    {addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
+    {ask.enabled && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
       observation={askEntry?.record?.target ? tracking.observations[sessionKey(askEntry.record.target)] : undefined} onOpen={() => openAsk()} />
-      {askVisible ? <AskConversation triggerRef={askTriggerRef} simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
+      {askVisible ? <AskConversation positionRef={askPositionRef} triggerRef={askTriggerRef} simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
       entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
-      onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draft={ask.drafts[askKey!] ?? ''} onDraftChange={text => ask.setDraft(askKey!, text)} onClose={ask.close} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
+      onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draft={ask.drafts[askKey!] ?? ''} onDraftChange={text => ask.setDraft(askKey!, text)} onClose={ask.close} onToggleEnabled={ask.toggle} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
       : null}</> : null}
     {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>

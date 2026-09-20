@@ -11,6 +11,31 @@ export interface AskInput { id: string; text: string }
 export interface AskEntry { attached?: boolean; inputs?: AskInput[]; source: OpenedSession; record?: SessionFork; pending?: SessionFork; busy?: boolean; error?: string }
 
 export function useAskConversations(baseUrl: string, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void) {
+  const [enabled, setEnabledState] = useState(() => {
+    try { return localStorage.getItem('agent-remote-ask-enabled') === 'true'; } catch { return false; }
+  });
+  const enabledRef = useRef(enabled);
+  const preparations = useRef(new Map<string, AbortController>());
+  const resumeRequested = useRef(new Set<string>());
+  const openKeyRef = useRef<string>();
+  useEffect(() => () => {
+    resumeRequested.current.clear();
+    for (const preparation of preparations.current.values()) preparation.abort();
+  }, []);
+  function setEnabled(next: boolean) {
+    enabledRef.current = next;
+    setEnabledState(next);
+    try { localStorage.setItem('agent-remote-ask-enabled', String(next)); } catch { /* Keep the preference for this page. */ }
+    if (!next) {
+      setOpenKey(undefined);
+      resumeRequested.current.clear();
+      for (const preparation of preparations.current.values()) preparation.abort();
+    }
+  }
+  function toggle() {
+    const next = !enabledRef.current;
+    setEnabled(next);
+  }
   // A tab-local ledger keeps retries idempotent without populating the normal fork list.
   const storage = useMemo(() => {
     try { return window.sessionStorage; } catch { return undefined; }
@@ -30,7 +55,8 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
   }
   const entries = useMemo(() => new Map<string, AskEntry>(), [store]);
   const [, refresh] = useState(0);
-  const [openKey, setOpenKey] = useState<string>();
+  const [openKey, setOpenKeyState] = useState<string>();
+  function setOpenKey(key: string | undefined) { openKeyRef.current = key; setOpenKeyState(key); }
   const [drafts, setDrafts] = useState(() => readDrafts(`${baseUrl}:ask`));
   const draftsRef = useRef(drafts); draftsRef.current = drafts;
   useEffect(() => saveDrafts(`${baseUrl}:ask`, drafts), [baseUrl, drafts]);
@@ -67,10 +93,17 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     return entry;
   }
   async function open(sourceState: AgentReplicaState, source: OpenedSession, args = '', clean = false) {
+    setEnabled(true);
     const key = sessionKey(source);
     setOpenKey(key);
     const entry = entryFor(source);
-    if (entry.busy) throw new Error('Ask is already opening.');
+    if (entry.busy) {
+      if (preparations.current.get(key)?.signal.aborted && !args.trim() && !clean) {
+        resumeRequested.current.add(key);
+        return {};
+      }
+      throw new Error('Ask is already opening.');
+    }
     if (clean && entry.inputs?.length) throw new Error('Wait for the saved Ask question to send before clearing.');
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('Open the source session before starting Ask.');
@@ -78,6 +111,14 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     const draftAtStart = draftsRef.current[key];
     const target = (source.hostId ?? 'local') === selectedHostId ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
     update(key, { busy: true, error: undefined });
+    const queueQuestion = () => {
+      if (!args.trim()) return;
+      const inputs = [...(entries.get(key)?.inputs ?? []), { id: crypto.randomUUID(), text: args.trim() }];
+      saveInputs(key, inputs);
+      update(key, { inputs });
+    };
+    const preparation = new AbortController();
+    preparations.current.set(key, preparation);
     try {
       let record = entry.pending ?? (!clean ? entry.record : undefined);
       if (!record) {
@@ -92,21 +133,26 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
         : await target.create(source.providerId, record.id, record.options);
       store.bind(record.id, { agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? record.target?.nativeSessionId ?? result.agentId,
         providerId: source.providerId, hostId: source.hostId ?? 'local', title: 'Ask', createdAt: record.capturedAt });
-      await configureFork(transport, store, store.get(record.id));
+      update(key, { pending: store.get(record.id) });
+      preparation.signal.throwIfAborted();
+      await configureFork(transport, store, store.get(record.id), preparation.signal);
       store.finishCreation(record.id);
       update(key, { record: store.get(record.id), pending: undefined, attached: true });
       if (replacing && draftsRef.current[key] === draftAtStart) setDraft(key, '');
       onCreated?.();
-      if (args.trim()) {
-        const inputs = [...(entries.get(key)?.inputs ?? []), { id: crypto.randomUUID(), text: args.trim() }];
-        saveInputs(key, inputs);
-        update(key, { inputs });
-      }
+      queueQuestion();
       return {};
     } catch (error) {
+      if (preparation.signal.aborted) { queueQuestion(); return {}; }
       update(key, { error: error instanceof Error ? error.message : 'Ask could not open. Retry to reconnect.' });
       throw error;
-    } finally { update(key, { busy: false }); }
+    } finally {
+      preparations.current.delete(key);
+      update(key, { busy: false });
+      if (resumeRequested.current.delete(key) && enabledRef.current && openKeyRef.current === key) {
+        void open(sourceState, source).catch(() => {});
+      }
+    }
   }
-  return { store, entries, entryFor, openKey, drafts, setDraft, sendInput, open, close: () => setOpenKey(undefined) };
+  return { enabled, toggle, store, entries, entryFor, openKey, drafts, setDraft, sendInput, open, close: () => setOpenKey(undefined) };
 }

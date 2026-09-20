@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { forkActions } from './fork-actions.js';
+import { configureFork, forkActions } from './fork-actions.js';
 import { ForkStore, forkDisplayState, contextPrefix } from './session-forks.js';
 import { replicaState } from './test/fixtures.js';
 import type { RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
@@ -38,4 +38,28 @@ it('prepends first-branch context once without changing ordered image parts', as
   expect(sendMessageContent).toHaveBeenLastCalledWith([{ type: 'text', text: contextPrefix(record) }, ...content], undefined);
   await actions.sendMessageContent!(content);
   expect(sendMessageContent).toHaveBeenLastCalledWith(content, undefined);
+});
+
+
+it('releases the preparation subscription when Ask is disabled before readiness', async () => {
+  const store = new ForkStore('cancel-preparation');
+  const record = store.prepare({ source, text: '[]', itemCount: 0, capturedAt: new Date().toISOString(), boundary: { epoch: 'one', seq: 0 } }, {}, [{ id: 'sandbox', value: 'read-only' }]);
+  store.bind(record.id, { ...source, agentId: 'target', nativeSessionId: 'native-target' });
+  const close = vi.fn();
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot: async () => { throw new Error('No snapshot should be fetched before readiness'); },
+    fetchTimeline: async () => { throw new Error('No history should be fetched before readiness'); },
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect: (_agentId, listener) => {
+      queueMicrotask(() => listener.onOpen());
+      return { send: () => {}, close };
+    },
+  };
+  const abort = new AbortController();
+  const preparation = configureFork(transport, store, store.get(record.id), abort.signal);
+  const rejected = expect(preparation).rejects.toMatchObject({ name: 'AbortError' });
+  abort.abort();
+  await rejected;
+  expect(close).toHaveBeenCalledOnce();
+  expect(store.get(record.id).configured).toBeFalsy();
 });

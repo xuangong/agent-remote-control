@@ -1,11 +1,12 @@
-import type { RefObject } from 'react';
-import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
+import { useImperativeHandle, type RefObject } from 'react';
+import { useTrackingPosition, type FloatingPosition } from '../hooks/useTrackingPosition.js';
 import { observationLabel, type SessionObservation } from '../tracking-state.js';
 
-export function AskButton({ observation, hidden, disabled, onOpen, triggerRef }: {
-  triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; hidden: boolean; disabled: boolean; onOpen(): void;
+export function AskButton({ observation, hidden, disabled, onOpen, triggerRef, positionRef }: {
+  positionRef: RefObject<FloatingPosition>; triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; hidden: boolean; disabled: boolean; onOpen(): void;
 }) {
-  const { root, style, handlers } = useTrackingPosition('agent-remote-ask-position', '.lab-ask-trigger');
+  const { root, style, handlers, move, current } = useTrackingPosition('agent-remote-ask-position', '.lab-ask-trigger');
+  useImperativeHandle(positionRef, () => ({ move, current }));
   const ready = observation?.connection === 'ready';
   const activity = ready ? observation.activity : undefined;
   const alert = ready ? observation.attention : undefined;

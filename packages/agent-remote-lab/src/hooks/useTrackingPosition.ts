@@ -1,6 +1,10 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from 'react';
 
-interface Position { x: number; y: number }
+export interface Position { x: number; y: number }
+export interface FloatingPosition {
+  move(next: Position, persist?: boolean): Position | undefined;
+  current(): Position | undefined;
+}
 const margin = 12;
 
 function viewport() {
@@ -35,6 +39,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
       '--tracking-panel-width': `${Math.min(360, view.width - 2 * margin)}px`,
     } as CSSProperties);
     if (persist) { try { localStorage.setItem(storageKey, JSON.stringify(point)); } catch { /* Position remains usable without storage. */ } }
+    return point;
   }
 
   useLayoutEffect(() => {
@@ -102,5 +107,5 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
       move({ x: position.current.x + delta.x * step, y: position.current.y + delta.y * step }, true);
     },
   };
-  return { root, style, handlers };
+  return { root, style, handlers, move, current: () => position.current };
 }

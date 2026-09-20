@@ -3,8 +3,9 @@ import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport } from '@a
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 
+export const askCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle Ask on/off, or add a question to start chatting' };
 export const forkCommands = [
-  { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Ask about this session in a floating conversation' },
+  askCommand,
   { id: 'console:fork', name: 'fork', kind: 'command' as const, description: 'Create an independent session with this conversation’s context' },
   { id: 'console:side', name: 'side', aliases: ['btw'], kind: 'command' as const, description: 'Open an independent conversation alongside this chat' },
 ];
@@ -53,10 +54,11 @@ async function inheritSettings(actions: LabWorkbenchActions, store: ForkStore, r
   store.markConfigured(record.id);
 }
 
-export async function configureFork(transport: RemoteAgentTransport, store: ForkStore, record: SessionFork): Promise<void> {
+export async function configureFork(transport: RemoteAgentTransport, store: ForkStore, record: SessionFork, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   if (store.get(record.id).configured) return;
   if (!record.settings.length) { store.markConfigured(record.id); return; }
-  await withForkClient(transport, record, (client) => inheritSettings(clientActions(client), store, record, transport));
+  await withForkClient(transport, record, (client) => inheritSettings(clientActions(client), store, record, transport), signal);
 }
 
 /** Send slash-command arguments through a short-lived observer without navigating either chat. */
@@ -69,17 +71,27 @@ export async function sendForkInput(transport: RemoteAgentTransport, store: Fork
 function clientActions(client: RemoteSessionClient): LabWorkbenchActions {
   return { sendMessage: async (input) => { await client.sendMessage(input); }, setSessionSetting: async (id, value) => { await client.setSessionSetting(id, value); } };
 }
-async function withForkClient(transport: RemoteAgentTransport, record: SessionFork, use: (client: RemoteSessionClient) => Promise<void>): Promise<void> {
+async function withForkClient(transport: RemoteAgentTransport, record: SessionFork, use: (client: RemoteSessionClient) => Promise<void>, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   if (!record.target) throw new Error('The fork has not been created.');
   const client = new RemoteSessionClient(record.target.agentId, transport, new AgentReplica());
   let unsubscribe: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal!.reason);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
   try {
-    await new Promise<void>((resolve, reject) => {
+    await Promise.race([new Promise<void>((resolve, reject) => {
       timer = setTimeout(() => reject(new Error('The fork could not connect. Retry opening the fork.')), 15_000);
       unsubscribe = client.subscribeStatus((status) => { if (status === 'ready') resolve(); });
       client.start();
-    });
-    await use(client);
-  } finally { clearTimeout(timer); unsubscribe?.(); client.stop(); }
+    }), aborted]);
+    signal?.throwIfAborted();
+    await Promise.race([use(client), aborted]);
+  } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+    clearTimeout(timer); unsubscribe?.(); client.stop();
+  }
 }

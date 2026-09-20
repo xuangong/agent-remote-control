@@ -98,6 +98,8 @@ export interface AgentSession {
   readonly capabilities: AgentCapabilities;
 
   observe(): AsyncIterable<ProviderStreamItem>;
+  /** Reads an older, chronological Timeline page without changing live runtime state. */
+  readTimelineHistory?(cursor: string): Promise<{ observations: import('./observation.js').ProviderObservation[]; nextCursor?: string }>;
   sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
   sendMessageContent?(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;

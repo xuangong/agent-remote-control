@@ -1,6 +1,6 @@
 import { FormatRegistry, type Static, Type } from '@sinclair/typebox';
 
-import { SafeNonNegativeInteger } from './cursor.js';
+import { SafeNonNegativeInteger, SafeTimelinePosition } from './cursor.js';
 import { ProtocolVersionSchema } from './version.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
@@ -127,7 +127,7 @@ export const TimelineResourceBindingReplacement = Strict({
   payload: Strict({
     agentId: NonEmptyString,
     epoch: NonEmptyString,
-    seq: SafeNonNegativeInteger,
+    seq: SafeTimelinePosition,
     previous: ResourceBinding,
     replacement: ResourceBinding,
   }),

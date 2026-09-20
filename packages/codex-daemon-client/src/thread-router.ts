@@ -1,4 +1,5 @@
 import type { CodexAppServerTransport } from './app-server-transport.js';
+import { readCodexHistoryPage } from './history-page.js';
 import { historyOverlapsNotifications, reconcileCodexHistoryNotifications } from './history.js';
 import { isRecord, readString } from './native.js';
 import type { CodexDaemonCallbacks, CodexRawNotification, CodexThreadOrigin } from './types.js';
@@ -17,7 +18,7 @@ export class CodexThreadRouter {
   private generation = 0;
   private closed = false;
 
-  constructor(private readonly transport: () => CodexAppServerTransport, private readonly callbacks: CodexDaemonCallbacks) {}
+  constructor(private readonly transport: () => CodexAppServerTransport, private readonly callbacks: CodexDaemonCallbacks, private readonly paginatedHistory = false) {}
 
   registerRoot(id: string): void { this.rootId = id; this.threads.add(id); }
   hasThread(id: string): boolean { return !this.closed && this.threads.has(id); }
@@ -118,7 +119,7 @@ export class CodexThreadRouter {
     const previous = this.children.get(id);
     if (previous && previous !== parentId) return false;
     let snapshotStart = this.notificationSequence;
-    let history = await transport.request('thread/read', { threadId: id, includeTurns: true });
+    let history = await (this.paginatedHistory ? readCodexHistoryPage(transport, id, { metadata }) : transport.request('thread/read', { threadId: id, includeTurns: true }));
     if (generation !== this.generation || this.closed || !isRecord(history) || !isRecord(history.thread) || history.thread.id !== id || parentThreadId(history.thread) !== parentId) return false;
     let thread = history.thread;
     const loaded = isRecord(thread.status) && thread.status.type !== 'notLoaded';
@@ -140,7 +141,7 @@ export class CodexThreadRouter {
         if (!historyOverlapsNotifications(history, id, duringRead)) break;
         if (attempt === 2) throw new Error('Codex child history is changing during snapshot reads. Reopen the child to retry.');
         snapshotStart = this.notificationSequence;
-        history = await transport.request('thread/read', { threadId: id, includeTurns: true });
+        history = await (this.paginatedHistory ? readCodexHistoryPage(transport, id, { metadata }) : transport.request('thread/read', { threadId: id, includeTurns: true }));
         if (generation !== this.generation || !isRecord(history) || !isRecord(history.thread) || history.thread.id !== id || parentThreadId(history.thread) !== parentId) throw new Error('Codex child history is unavailable. Reopen the child to retry.');
         thread = history.thread;
       }

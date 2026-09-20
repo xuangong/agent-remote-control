@@ -31,6 +31,7 @@ import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.
 import { mapCodexPermissions } from './permissions.js';
 import { mapCodexToolApproval } from './tool-approval.js';
 import { CodexAppServerRpcError, CodexAppServerTransport, CodexServerRequestCanceled } from './app-server-transport.js';
+import { readCodexHistoryPage } from '@agent-remote-controller/codex-daemon-client';
 import { collectCodexThreadHistoryItems, projectCodexThreadHistory } from './history.js';
 import { CodexImageRegistry } from './images.js';
 import { isRecord, readItem, readItemId, readString } from './native.js';
@@ -142,6 +143,7 @@ export class CodexAppServerSession implements AgentSession {
   private acceptsDirectInput = true;
   private inputCapabilitiesRevision = 0;
   private historyRefreshNeeded = false;
+  private olderHistoryCursor: string | undefined;
   private uncertainHistorySnapshot = false;
   private preparingObservation: Promise<void> | undefined;
   private interactionGeneration = 1;
@@ -230,12 +232,25 @@ export class CodexAppServerSession implements AgentSession {
       const active = [...thread.turns].reverse().find((turn) => isRecord(turn) && turn.status === 'inProgress');
       if (isRecord(active)) child.activeTurnId = readString(active.id);
     }
+    child.olderHistoryCursor = isRecord(history) ? readString(history.historyCursor) : undefined;
     child.bufferedNotifications.push(...buffered);
     child.finishBootstrap(
       projectCodexThreadHistory(history, child.threadId!, { images: child.images, cwd: child.config.cwd }),
       collectCodexThreadHistoryItems(history, child.threadId!),
     );
     return child;
+  }
+
+  async readTimelineHistory(cursor: string): Promise<{ observations: ProviderObservation[]; nextCursor?: string }> {
+    this.assertOpen();
+    this.runtime.assertConnected();
+    const transport = this.transport;
+    const generation = this.interactionGeneration;
+    const page = await readCodexHistoryPage(transport, this.threadId!, { cursor, metadata: { thread: { id: this.threadId } } });
+    if (this.disposed || transport !== this.transport || generation !== this.interactionGeneration) throw new Error('Codex history belongs to an old connection. Retry after recovery.');
+    this.runtime.inspectHistory(this.threadId!, page);
+    return { observations: projectCodexThreadHistory(page, this.threadId!, { images: this.images, cwd: this.config.cwd }),
+      ...(page.historyCursor ? { nextCursor: page.historyCursor } : {}) };
   }
 
   markHistoryRefreshNeeded(uncertain = false): void {
@@ -260,13 +275,14 @@ export class CodexAppServerSession implements AgentSession {
       let history: unknown;
       for (let attempt = 0; ; attempt++) {
         const start = this.bufferedNotifications.length;
-        history = await this.transport.request('thread/read', { threadId: this.threadId, includeTurns: true });
+        history = await readCodexHistoryPage(this.transport, this.threadId!);
         if (!this.uncertainHistorySnapshot || !historyOverlapsNotifications(history, this.threadId!, this.bufferedNotifications.slice(start))) break;
         if (attempt === 2) throw new Error('Codex child history is changing during snapshot reads. Reopen the child to retry.');
       }
       if (!isRecord(history) || !isRecord(history.thread) || history.thread.id !== this.threadId) throw new Error('Codex child history is unavailable');
       this.images?.stop();
       this.setThreadFromResponse(history, 'thread/read');
+      this.olderHistoryCursor = readString(history.historyCursor);
       this.liveQueue.clear();
       this.preReadyEvents.length = 0;
       for (const pending of this.pendingInteractions.values()) this.emitInteractionRequested(pending.request);
@@ -336,7 +352,6 @@ export class CodexAppServerSession implements AgentSession {
     session.tools = config.tools ?? [];
     await session.initialize();
     const response = await transport.request('thread/start', {
-      historyMode: 'paginated',
       ...(session.tools.length ? { dynamicTools: session.tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) } : {}),
       config: { 'features.default_mode_request_user_input': true },
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
@@ -369,6 +384,7 @@ export class CodexAppServerSession implements AgentSession {
     await session.initialize();
     const resumed = await transport.request('thread/resume', {
       threadId: handle.sessionId,
+      excludeTurns: true,
       config: { 'features.default_mode_request_user_input': true },
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
@@ -383,10 +399,8 @@ export class CodexAppServerSession implements AgentSession {
     });
     session.setThreadFromResponse(resumed, 'thread/resume');
     const statusRevision = session.statusRevision;
-    const history = await transport.request('thread/read', {
-      threadId: handle.sessionId,
-      includeTurns: true,
-    });
+    const history = await readCodexHistoryPage(transport, handle.sessionId, { metadata: resumed });
+    session.olderHistoryCursor = history.historyCursor;
     if (session.statusRevision === statusRevision && isRecord(history) && isRecord(history.thread)) {
       const thread = history.thread;
       const active = Array.isArray(thread.turns)
@@ -775,7 +789,7 @@ export class CodexAppServerSession implements AgentSession {
   ): void {
     if (!this.threadId || !this.projector) throw new Error('Codex bootstrap has no thread');
     const historyKeys = new Set(history.map((item) => item.sourceKey));
-    if (!replacement) this.initialItems = [...history, { type: 'history_boundary' }];
+    if (!replacement) this.initialItems = [...history, { type: 'history_boundary', ...(this.olderHistoryCursor ? { olderCursor: this.olderHistoryCursor } : {}) }];
     for (const item of historyItems.values()) this.projector.seedHistoryItem(item);
     const historyText = this.projector.snapshotText();
     const coveredCharacters = new Map<string, number>();
@@ -813,7 +827,7 @@ export class CodexAppServerSession implements AgentSession {
     this.bufferedNotifications.length = 0;
     if (replacement) {
       const timeline = this.preReadyEvents.filter(item => item.event.type === 'timeline');
-      this.liveQueue.push({ type: 'timeline_replacement', observations: [...history, ...timeline] });
+      this.liveQueue.push({ type: 'timeline_replacement', ...(this.olderHistoryCursor ? { olderCursor: this.olderHistoryCursor } : {}), observations: [...history, ...timeline] });
       for (const item of this.preReadyEvents) if (item.event.type !== 'timeline') this.liveQueue.push(item);
     } else {
       this.initialItems.push(...this.preReadyEvents);
@@ -831,6 +845,7 @@ export class CodexAppServerSession implements AgentSession {
     this.images?.stop();
     this.setThreadFromResponse(snapshot, 'thread/read');
     if (!isRecord(snapshot) || !isRecord(snapshot.thread)) throw new Error('Codex restoration returned no thread');
+    this.olderHistoryCursor = readString(snapshot.historyCursor);
     const status = readThreadRuntimeStatus(snapshot.thread.status);
     if (status) this.runtimeStatus = status;
     this.acceptsDirectInput = snapshot.thread.canAcceptDirectInput === true && this.runtimeStatus !== 'closed';

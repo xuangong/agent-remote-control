@@ -1520,3 +1520,18 @@ it('does not continue an upload on a new connection generation', async () => {
     expect(f.transport.sent.some(message => message.type === 'image_upload_chunk')).toBe(false);
   } finally { f.client.stop(); vi.unstubAllGlobals(); }
 });
+
+it('loads historical rows before an empty recent page and keeps the live cursor independent', async () => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  replica.applySnapshot(snapshot());
+  replica.applyHistory(page('tail', [], { hasOlder: true }));
+  const client = new RemoteSessionClient('agent-one', transport, replica);
+  const pending = client.loadOlder();
+  transport.resolveTimeline(page('before', [entry(-2, 0, 'Earlier conversation')], { window: { minSeq: -2, maxSeq: 0, nextSeq: 1 } }));
+  await pending;
+  expect(replica.getState().timeline.entries).toEqual([entry(-2, 0, 'Earlier conversation')]);
+  expect(replica.getState().timeline.nextSeq).toBe(1);
+  transport.emit(live(1, 'Next'));
+  client.stop();
+});

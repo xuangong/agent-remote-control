@@ -95,6 +95,8 @@ export class AgentManager {
   private timeline: TimelineStore;
   private readonly state: AgentSnapshot;
   private readonly bufferedLive: ProviderObservation[] = [];
+  private olderHistoryCursor: string | undefined;
+  private historyLoading: Promise<void> | undefined;
   private readonly seenProviderRecords = new Map<string, Set<number | null>>();
   private readonly claimedInteractionIds = new Set<string>();
   private statusBeforeInteraction: AgentSnapshot['payload']['status'] | undefined;
@@ -216,7 +218,34 @@ export class AgentManager {
 
   fetchTimeline(request: TimelinePageRequest): HistoryPage {
     if (request.agentId !== this.agentId) throw new Error('Timeline request identifies a different Agent.');
-    return projectTimelinePage(this.timeline, request);
+    const page = projectTimelinePage(this.timeline, request);
+    if (!page.payload.reset && !page.payload.gap && this.olderHistoryCursor) page.payload.hasOlder = true;
+    return page;
+  }
+
+  async loadTimeline(request: TimelinePageRequest): Promise<HistoryPage> {
+    const page = this.fetchTimeline(request);
+    if (request.direction !== 'before' || page.payload.reset || page.payload.gap || !this.olderHistoryCursor
+      || page.payload.entries.length >= request.limit || !this.session.readTimelineHistory) return page;
+    if (!this.historyLoading) {
+      const timeline = this.timeline;
+      const cursor = this.olderHistoryCursor;
+      const load = async () => {
+        const history = await this.session.readTimelineHistory!(cursor);
+        if (this.closed || this.timeline !== timeline) return;
+        if (history.nextCursor === cursor) throw new Error('Provider history cursor did not advance.');
+        if (history.observations.some(row => row.delivery !== 'history' || row.event.type !== 'timeline')) throw new Error('Provider history page contains live runtime state.');
+        for (const observation of [...history.observations].reverse()) {
+          if (this.closed || this.timeline !== timeline) return;
+          await this.applyObservation(observation, true);
+        }
+        if (this.timeline === timeline) this.olderHistoryCursor = history.nextCursor;
+      };
+      const pending = load().finally(() => { if (this.historyLoading === pending) this.historyLoading = undefined; });
+      this.historyLoading = pending;
+    }
+    await this.historyLoading;
+    return this.fetchTimeline(request);
   }
 
   subscribe(listener: AgentManagerListener): () => void {
@@ -228,6 +257,8 @@ export class AgentManager {
     if (epoch === this.timeline.epoch) return;
     this.timeline = new TimelineStore(epoch);
     this.seenProviderRecords.clear();
+    this.olderHistoryCursor = undefined;
+    this.historyLoading = undefined;
     this.emit({ type: 'timeline_replacement', agentId: this.agentId, epoch });
   }
 
@@ -457,12 +488,14 @@ export class AgentManager {
           if (!this.boundarySeen) throw new Error('Provider replaced Timeline before history readiness.');
           if (item.observations.some((observation) => observation.event.type !== 'timeline')) throw new Error('Provider Timeline replacement contains non-Timeline state.');
           this.replaceTimeline(randomUUID());
+          this.olderHistoryCursor = item.olderCursor;
           for (const observation of item.observations) await this.applyObservation(observation);
           continue;
         }
         if (item.type === 'history_boundary') {
           if (this.boundarySeen) throw new Error('Provider emitted more than one history boundary.');
           this.boundarySeen = true;
+          this.olderHistoryCursor = item.olderCursor;
           for (const observation of this.bufferedLive.splice(0)) await this.applyObservation(observation);
           this.resolveReadiness();
           continue;
@@ -520,7 +553,7 @@ export class AgentManager {
     this.emitStream(event, timestamp);
   }
 
-  private async applyObservation(observation: ProviderObservation): Promise<void> {
+  private async applyObservation(observation: ProviderObservation, historical = false): Promise<void> {
     if (this.isDuplicate(observation)) return;
     let event = observation.event;
     if (event.type === 'timeline' && event.item.type === 'interaction') {
@@ -535,7 +568,7 @@ export class AgentManager {
     }
     if (event.type === 'timeline') {
       const timeline = this.timeline;
-      const result = timeline.append({
+      const result = timeline[historical ? 'prepend' : 'append']({
         providerId: event.provider,
         sourceKey: observation.sourceKey,
         ...(observation.nativeRevision === undefined ? {} : { nativeRevision: observation.nativeRevision }),
@@ -583,7 +616,7 @@ export class AgentManager {
           });
         }).catch(() => undefined);
       });
-      this.emitStream(event, row.timestamp, row);
+      if (!historical) this.emitStream(event, row.timestamp, row);
       return;
     }
     const timestamp = new Date(observation.occurredAt).toISOString();

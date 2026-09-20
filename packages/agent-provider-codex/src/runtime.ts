@@ -42,7 +42,7 @@ export class CodexSessionRuntime {
     private readonly createChild: (thread: Record<string, unknown>, history: unknown, buffered: CodexRawNotification[]) => CodexThreadSession,
     recoveryPlan?: CodexSharedRecoveryPlan,
   ) {
-    this.client = new CodexDaemonClient({ transport, initialization: providerInitialization, recovery: recoveryPlan, restorationScheduler,
+    this.client = new CodexDaemonClient({ paginatedHistory: true, transport, initialization: providerInitialization, recovery: recoveryPlan, restorationScheduler,
       callbacks: {
         onNotification: (method, params) => {
           const thread = isRecord(params) && isRecord(params.thread) ? params.thread : undefined;

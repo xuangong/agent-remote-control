@@ -18,6 +18,7 @@ export function createScriptedAppServer(
     if (typeof message.id !== 'number' || !message.method) return;
     requests.push(message as ScriptedAppServer['requests'][number]);
     try {
+      if (message.method === 'thread/turns/list' && !handlers[message.method]) throw Object.assign(new Error('Method not found'), { code: -32601 });
       const result = handlers[message.method]?.(message.params) ?? {};
       child.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
     } catch (error) {

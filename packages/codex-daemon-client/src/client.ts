@@ -1,4 +1,5 @@
 import { CodexServerRequestCanceled, type CodexAppServerTransport } from './app-server-transport.js';
+import { readCodexHistoryPage } from './history-page.js';
 import { historyOverlapsNotifications } from './history.js';
 import { initializeCodexTransport, type CodexInitialization } from './initialize.js';
 import { isRecord, readString } from './native.js';
@@ -12,6 +13,7 @@ export interface CodexDaemonClientOptions {
   initialization: CodexInitialization;
   callbacks?: CodexDaemonCallbacks;
   recovery?: CodexSharedRecoveryPlan;
+  paginatedHistory?: boolean;
   restorationScheduler?: CodexRestorationScheduler;
 }
 
@@ -33,7 +35,7 @@ export class CodexDaemonClient {
   constructor(private readonly options: CodexDaemonClientOptions) {
     this.transport = options.transport;
     this.callbacks = options.callbacks ?? {};
-    this.router = new CodexThreadRouter(() => this.transport, this.callbacks);
+    this.router = new CodexThreadRouter(() => this.transport, this.callbacks, options.paginatedHistory);
     this.restorationScheduler = options.restorationScheduler ?? new CodexRestorationSemaphore();
     this.connection = options.recovery ? { state: 'connected' } : undefined;
     this.bindTransport(options.transport);
@@ -189,7 +191,7 @@ export class CodexDaemonClient {
     if (generation !== this.generation) throw new Error('Codex shared restoration used a stale connection');
     const rootId = this.router.rootId;
     if (!rootId) throw new Error('Codex shared restoration has no native root');
-    const attached = await transport.request('thread/resume', { threadId: rootId, historyMode: 'paginated' });
+    const attached = await transport.request('thread/resume', { threadId: rootId, excludeTurns: true });
     if (generation !== this.generation) throw new Error('Codex shared restoration used a stale connection');
     if (!isRecord(attached) || !isRecord(attached.thread) || attached.thread.id !== rootId) {
       throw new Error('Codex shared restoration could not attach the native root');
@@ -198,7 +200,9 @@ export class CodexDaemonClient {
     for (const threadId of this.router.threads) {
       for (let attempt = 0; ; attempt += 1) {
         const sequence = this.restorationSequence;
-        const value = await transport.request('thread/read', { threadId, includeTurns: true });
+        const value = this.options.paginatedHistory
+          ? await readCodexHistoryPage(transport, threadId, { metadata: threadId === rootId ? attached : undefined })
+          : await transport.request('thread/read', { threadId, includeTurns: true });
         if (generation !== this.generation) throw new Error('Codex shared restoration used a stale connection');
         if (!isRecord(value) || !isRecord(value.thread) || value.thread.id !== threadId) {
           throw new Error('Codex shared restoration returned an incompatible thread snapshot');

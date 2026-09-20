@@ -2,7 +2,7 @@ import { UserMessagePart } from './image-input.js';
 import { AgentToolResult } from './tool-result.js';
 import { type Static, Type } from '@sinclair/typebox';
 
-import { SafeNonNegativeInteger } from './cursor.js';
+import { SafeNonNegativeInteger, SafeTimelinePosition } from './cursor.js';
 import { AgentInteractionRequest, AgentInteractionResponse, AgentToolDetail } from './interactions.js';
 import { ResourceBinding } from './resources.js';
 
@@ -77,8 +77,8 @@ export const AgentUsage = Strict({
 export type AgentUsage = Static<typeof AgentUsage>;
 
 export const TimelineSeqRange = Strict({
-  startSeq: SafeNonNegativeInteger,
-  endSeq: SafeNonNegativeInteger,
+  startSeq: SafeTimelinePosition,
+  endSeq: SafeTimelinePosition,
 });
 export type TimelineSeqRange = Static<typeof TimelineSeqRange>;
 
@@ -94,8 +94,8 @@ export const ProjectedTimelineEntry = Strict({
   item: AgentTimelineItem,
   turnId: Type.Optional(NonEmptyString),
   timestamp: NonEmptyString,
-  seqStart: SafeNonNegativeInteger,
-  seqEnd: SafeNonNegativeInteger,
+  seqStart: SafeTimelinePosition,
+  seqEnd: SafeTimelinePosition,
   sourceSeqRanges: Type.Array(TimelineSeqRange),
   collapsed: Type.Array(TimelineCollapse),
   resources: Type.Array(ResourceBinding),

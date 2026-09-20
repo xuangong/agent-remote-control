@@ -144,11 +144,11 @@ export class RemoteSessionClient {
   loadOlder(): Promise<void> {
     const state = this.replica.getState().timeline;
     const first = state.entries[0];
-    if (!state.initialized || !state.epoch || !first || !state.hasOlder) return Promise.resolve();
+    if (!state.initialized || !state.epoch || !state.hasOlder) return Promise.resolve();
     if (this.olderHistory) return this.olderHistory.promise;
     const generation = this.generation;
     const controller = new AbortController();
-    const promise = this.transport.fetchTimeline(this.agentId, 'before', { epoch: state.epoch, seq: first.seqStart }, this.historyPageSize, { signal: controller.signal }).then((page) => {
+    const promise = this.transport.fetchTimeline(this.agentId, 'before', { epoch: state.epoch, seq: first?.seqStart ?? 1 }, this.historyPageSize, { signal: controller.signal }).then((page) => {
       if (generation !== this.generation || controller.signal.aborted) return;
       if (page.payload.epoch !== this.replica.getState().timeline.epoch || page.payload.reset || page.payload.staleCursor || page.payload.gap) {
         throw new Error('Earlier activity changed. Retry loading history.');

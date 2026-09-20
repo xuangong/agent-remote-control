@@ -16,3 +16,5 @@ Timeline content stays within the event-specific item structures. Generated file
 
 - `@agent-remote-controller/agent-provider-sdk` — adapter, session, observation, capability, persistence, runtime, Timeline, interaction, and resource-read types.
 - `@agent-remote-controller/agent-provider-sdk/testing` — reusable provider contract tests, bounded stream collection, and capability validation.
+
+An optional `olderCursor` on `history_boundary` or `timeline_replacement` advertises earlier Timeline history. Sessions implementing `readTimelineHistory(cursor)` return chronological, history-delivery Timeline observations plus an optional `nextCursor`. The Relay commits the cursor only after successful ingestion, coalesces concurrent requests, and ignores pages belonging to a replaced Timeline epoch. The reader must not mutate live runtime status, replay input, or advance its own cursor before the Relay accepts the result.

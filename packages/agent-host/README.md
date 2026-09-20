@@ -275,3 +275,24 @@ The managed Controller enables authenticated loopback previews on the Relay orig
 The Host owner can manage one VS Code tunnel from the web sidebar. The Controller checks `code tunnel --help` before enabling the feature, starts from its state directory, exposes device authorization and connection state, and supplies per-session workspace links. `AGENT_HOST_VSCODE` explicitly selects a local CLI executable; otherwise `code` must be available on the Controller’s PATH. Missing or unsupported CLIs disable the controls.
 
 The managed tunnel is reclaimed when the Controller exits or crashes, or after five minutes continuously disconnected from the Relay. Set `AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS` to a positive millisecond duration to change that grace period. Reclamation and Controller restart require an explicit start from the UI. Short interruptions and browser closure retain the running tunnel. macOS and Linux are supported; Windows process-tree management is not implemented. See the [Host VS Code tunnel design](../../docs/current/agent-remote/host-vscode-tunnel.md).
+
+## Native Codex commands
+
+Use the Controller's saved native configuration without copying its socket path:
+
+```sh
+agent-remote-controller codex
+agent-remote-controller codex resume <session-id>
+agent-remote-controller codex resume --last
+agent-remote-controller codex --help
+agent-remote-controller codex daemon status
+agent-remote-controller codex daemon restart
+```
+
+Interactive commands receive `--remote unix://<socket>`. Resolution uses explicit environment settings, then privately saved Controller settings: `AGENT_HOST_CODEX` / `AGENT_REMOTE_CODEX_EXECUTABLE`, `AGENT_REMOTE_CODEX_HOME` / `CODEX_HOME`, and `AGENT_HOST_CODEX_SOCKET`. Without a socket override, the socket is `<CODEX_HOME>/app-server-control/app-server-control.sock`. Use the same `AGENT_HOST_STATE_DIR` as your Controller installation. Relay pairing is not required for an unconfigured local invocation.
+
+Native commands inherit the terminal and run with `LC_ALL=C`. Relay credentials are not passed to the child. Native exit codes are preserved. An explicit native `--remote` overrides the automatic address. Help, version, and local management commands retain their native behavior.
+
+`codex daemon start|restart|stop` maps to `codex app-server daemon ...`; `status` maps to native `daemon version`, which reports the running and local versions. Both the shorthand and the full native daemon spelling use the same checks. Lifecycle commands do not receive `--remote`; a custom socket is rejected because the CLI cannot establish that the daemon under the configured home owns it. Connecting never implicitly starts or restarts a daemon.
+
+Optionally set `AGENT_HOST_CODEX_NOFILE=8192` for `daemon start` or `restart`. The proxy raises the child's soft descriptor limit before executing Codex; it fails if the requested limit cannot be set. This setting does not alter an already running daemon and does not elevate privileges.

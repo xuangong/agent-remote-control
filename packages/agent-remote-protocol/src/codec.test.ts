@@ -528,7 +528,8 @@ describe('resource and session messages', () => {
     expect(decodeServerMessage(JSON.stringify({
       ...message,
       payload: { ...message.payload, seq: -1 },
-    })).status).toBe('rejected');
+    })).status).toBe('ok');
+    expect(decodeServerMessage(JSON.stringify({ ...message, payload: { ...message.payload, seq: Number.MIN_SAFE_INTEGER - 1 } })).status).toBe('rejected');
     expect(decodeServerMessage(JSON.stringify({
       ...message,
       payload: { ...message.payload, previous: { ...message.payload.previous, native: true } },

@@ -8,7 +8,7 @@ import { CodexAppServerProvider } from './provider.js';
 
 it.each([
   ['thread/resume', 'native_resume_timeout', 'resume'],
-  ['thread/read', 'native_history_timeout', 'history'],
+  ['thread/turns/list', 'native_history_timeout', 'history'],
   ['initialize', 'native_request_timeout', 'initialize'],
   ['disconnect', 'native_runtime_unavailable', 'resume'],
 ])('classifies %s failures over a real shared Unix socket', async (blocked, code, phase) => {

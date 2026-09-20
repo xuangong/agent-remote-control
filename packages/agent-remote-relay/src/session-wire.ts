@@ -25,6 +25,7 @@ export interface SessionWireAgent {
   snapshot(): AgentSnapshot;
   timelineCursor?(): TimelineCursor;
   fetchTimeline(request: TimelinePageRequest): HistoryPage;
+  loadTimeline?(request: TimelinePageRequest): Promise<HistoryPage>;
   subscribe(listener: AgentManagerListener): () => void;
   sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
   sendMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void>;
@@ -315,7 +316,7 @@ export function createSessionWire(
           return;
         }
         case 'timeline_request':
-          sendMessage(boundAgent.fetchTimeline({
+          sendMessage(await (boundAgent.loadTimeline?.bind(boundAgent) ?? boundAgent.fetchTimeline.bind(boundAgent))({
             requestId: message.payload.requestId,
             agentId: message.payload.agentId,
             direction: message.payload.direction,

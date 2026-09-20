@@ -22,7 +22,7 @@ describe('CodexAppServerProvider contract', () => {
     try {
       const opening = appServer.requests.find(request => request.method === (operation === 'create' ? 'thread/start' : 'thread/resume'))!;
       expect(opening.params).toEqual({
-        ...(operation === 'create' ? { historyMode: 'paginated' } : { threadId: 'thread-question' }),
+        ...(operation === 'create' ? {} : { threadId: 'thread-question', excludeTurns: true }),
         config: { 'features.default_mode_request_user_input': true },
       });
       await session.sendMessage('Ask a question');
@@ -84,7 +84,7 @@ describe('CodexAppServerProvider contract', () => {
     expect((await session.runtimeInfo()).settings?.find(({ id }) => id === 'sandbox')?.value).toBe('readOnly');
 
     expect(appServer.requests.map((request) => request.method)).toEqual([
-      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/resume', 'thread/read',
+      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/resume', 'thread/turns/list', 'thread/read',
     ]);
     const iterator = session.observe()[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'history_boundary' } });

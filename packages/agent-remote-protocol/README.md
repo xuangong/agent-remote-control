@@ -97,3 +97,9 @@ it. Already caught-up cache completes immediately; an absent cursor omits the
 indicator. A different content epoch hides the indicator without claiming success;
 the fixed target can resume if that epoch later arrives. Retired target epochs
 remain unavailable. Normal Ready gating for commands remains independent.
+
+### Historical positions
+
+On-demand native history can prepend rows before the initially loaded Timeline. Timeline page cursors, projected row positions, sequence ranges, and resource-binding replacement positions therefore accept signed safe integers. Initially loaded and live rows keep their original positions. Historical rows use `0, -1, -2, ...` in reverse insertion order. Live event and activity cursors remain nonnegative; backfill never advances or rewinds the live cursor. Timeline `window.minSeq` can be negative, while `maxSeq` and `nextSeq` retain the live high-water mark.
+
+This extends the unreleased protocol snapshot. Deploy matching Controller and web codecs together; an older client that only accepts nonnegative historical positions cannot decode backfilled pages. Compatibility metadata identifies the matching implementation.

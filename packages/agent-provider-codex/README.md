@@ -69,3 +69,9 @@ available does not force the model to ask. The verified native target is Codex
 0.148.0; a native configuration error is surfaced rather than retried without the
 feature. This adapter does not add a feature-negotiation API for arbitrary Codex
 versions or recover pending callbacks across process restarts.
+
+## Ten-turn history pages
+
+Session resume uses `excludeTurns: true`, followed by `thread/turns/list` with `limit: 10`, `sortDirection: "desc"`, and `itemsView: "full"`. The adapter reverses the returned page for chronological display. Readiness requires only the newest page; older pages are fetched through the optional Provider `readTimelineHistory` contract when the client requests earlier history. Pages never replay user inputs or apply historical runtime events to current status.
+
+Shared recovery and child snapshots use the same bounded reader. Recovery replaces the loaded history window and cursor; late pages from an old connection are rejected. Native pagination stays inside the adapter. Explicit `-32601` method-not-found responses from older servers retain the legacy full-history path; timeouts and malformed pages never trigger that fallback. Ten turns is a count bound, not a byte bound: this implementation does not paginate the items inside a single turn.

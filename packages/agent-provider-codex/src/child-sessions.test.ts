@@ -19,6 +19,7 @@ async function harness(sharedProvider?: CodexAppServerProvider, process = create
       if (!message.method) { replies.push(message); continue; }
       if (message.id === undefined) continue;
       requests.push(message);
+      if (message.method === 'thread/turns/list') { write({ id: message.id, error: { code: -32601, message: 'Method not found' } }); continue; }
       let result: unknown = { data: [] };
       if (message.method === 'model/list') result = { data: [{ model: 'codex', displayName: 'Codex' }, { model: 'alternative', displayName: 'Alternative' }] };
       if (message.method === 'configRequirements/read') result = { requirements: null };

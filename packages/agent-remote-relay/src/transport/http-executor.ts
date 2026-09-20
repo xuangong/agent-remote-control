@@ -112,7 +112,7 @@ async function route(relay: AgentRemoteRelay, request: AgentRemoteHttpRequest): 
 
   if (method === 'GET' && action === 'timeline') {
     const manager = relay.requireAgent(agentId);
-    return encodedResult(200, encodeHistoryPage(manager.fetchTimeline(parseTimelineQuery(url, agentId))));
+    return encodedResult(200, encodeHistoryPage(await manager.loadTimeline(parseTimelineQuery(url, agentId))));
   }
 
   return agentRemoteHttpError(405, 'method_not_allowed', 'Method is not allowed for this route.', true);
@@ -141,7 +141,7 @@ function parseTimelineQuery(url: URL, agentId: string): {
     throw new MalformedIngressError('invalid_query', 'Timeline cursor epoch and seq must be supplied together.');
   }
   const cursor = epoch === null ? undefined : { epoch, seq: Number(seqValue) };
-  if (cursor && (!epoch || !Number.isSafeInteger(cursor.seq) || cursor.seq < 0)) {
+  if (cursor && (!epoch || !Number.isSafeInteger(cursor.seq) || (direction !== 'before' && cursor.seq < 0))) {
     throw new MalformedIngressError('invalid_query', 'Timeline cursor is invalid.');
   }
   if (direction !== 'tail' && cursor === undefined) {

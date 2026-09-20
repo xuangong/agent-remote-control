@@ -1393,3 +1393,31 @@ it('anchors an activity transition to canonical content already committed by the
     expect(output).toHaveLength(count);
   } finally { wire.close(); await manager.close(); }
 });
+
+it('ignores late history from a replaced epoch without blocking the new history reader', async () => {
+  const stream = new ManualProviderStream();
+  const row = (text: string) => ({ type: 'observation' as const, sourceKey: text, occurredAt: 1, delivery: 'history' as const,
+    event: { type: 'timeline' as const, provider: 'codex', item: { type: 'assistant_message' as const, text, messageId: text } } });
+  stream.push(row('initial'));
+  stream.push({ type: 'history_boundary', olderCursor: 'old-cursor' });
+  const resolvers = new Map<string, (value: { observations: ReturnType<typeof row>[]; nextCursor?: string }) => void>();
+  const manager = await AgentManager.attach({ agentId: 'paging', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'old',
+    session: sessionFor(stream, { readTimelineHistory: cursor => new Promise(resolve => resolvers.set(cursor, resolve)) }) });
+  try {
+    await manager.ready;
+    const request = { agentId: 'paging', requestId: 'history', direction: 'before' as const, cursor: { epoch: 'old', seq: 1 }, limit: 100 };
+    const old = manager.loadTimeline(request);
+    stream.push({ type: 'timeline_replacement', observations: [row('restored')], olderCursor: 'new-cursor' });
+    await expect.poll(() => manager.timelineCursor().epoch).not.toBe('old');
+    const cursor = manager.timelineCursor();
+    const current = manager.loadTimeline({ ...request, cursor: { epoch: cursor.epoch, seq: 1 } });
+    expect(resolvers.has('new-cursor')).toBe(true);
+    resolvers.get('old-cursor')!({ observations: [row('obsolete')], nextCursor: 'wrong-cursor' });
+    expect((await old).payload.staleCursor).toBe(true);
+    resolvers.get('new-cursor')!({ observations: [row('older restored')] });
+    expect((await current).payload.entries.map(entry => entry.item)).toEqual([{ type: 'assistant_message', messageId: 'older restored', text: 'older restored' }]);
+    expect(manager.timelineCursor()).toEqual(cursor);
+    expect(manager.fetchTimeline({ ...request, direction: 'tail', cursor: undefined }).payload.entries.map(entry => entry.item))
+      .toEqual([{ type: 'assistant_message', messageId: 'older restored', text: 'older restored' }, { type: 'assistant_message', messageId: 'restored', text: 'restored' }]);
+  } finally { await manager.close(); }
+});

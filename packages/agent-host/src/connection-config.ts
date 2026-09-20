@@ -5,6 +5,7 @@ import { join } from 'node:path';
 export interface HostConnection { serverUrl: string; remoteKey: string; environment: NodeJS.ProcessEnv }
 const restartSettings = [
   'AGENT_HOST_PROVIDERS', 'AGENT_HOST_CODEX', 'AGENT_HOST_CLAUDE', 'AGENT_HOST_CLAUDE_HOME',
+  'CODEX_HOME', 'LC_ALL', 'AGENT_HOST_CODEX_NOFILE',
   'AGENT_HOST_CODEX_CONNECTION', 'AGENT_HOST_CODEX_SOCKET', 'AGENT_HOST_CODEX_TRUST_SHARED',
   'AGENT_HOST_ALLOWED_WORKSPACE_ROOTS', 'AGENT_HOST_TRUSTED_FULL_CONTROL',
   'AGENT_HOST_COPILOT', 'AGENT_HOST_COPILOT_HOME', 'AGENT_HOST_WORKSPACE', 'AGENT_HOST_NAME', 'AGENT_HOST_VSCODE', 'AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS',
@@ -24,6 +25,20 @@ async function readSaved(stateDir: string): Promise<HostConnection | undefined> 
     return { serverUrl: value.serverUrl, remoteKey: value.remoteKey, environment: retainedHostEnvironment(value.environment) };
   } catch { throw new Error('Private Agent Host connection settings are invalid. Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together to pair again.'); }
 }
+/** Native commands can reuse saved settings without requiring Relay pairing. */
+export async function resolveHostEnvironment(stateDir: string, env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+  const saved = await readSaved(stateDir);
+  return mergeHostEnvironment(saved?.environment, env);
+}
+
+function mergeHostEnvironment(saved: NodeJS.ProcessEnv | undefined, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const merged = { ...saved, ...env };
+  if (env.AGENT_REMOTE_WORKSPACE !== undefined && env.AGENT_HOST_WORKSPACE === undefined) delete merged.AGENT_HOST_WORKSPACE;
+  if (env.AGENT_REMOTE_CODEX_EXECUTABLE !== undefined && env.AGENT_HOST_CODEX === undefined) delete merged.AGENT_HOST_CODEX;
+  if (env.CODEX_HOME !== undefined && env.AGENT_REMOTE_CODEX_HOME === undefined) delete merged.AGENT_REMOTE_CODEX_HOME;
+  return merged;
+}
+
 export async function resolveHostConnection(stateDir: string, env: NodeJS.ProcessEnv): Promise<HostConnection> {
   const hasServer = env.AGENT_HOST_SERVER !== undefined;
   const hasKey = env.AGENT_HOST_REMOTE_KEY !== undefined;
@@ -33,9 +48,7 @@ export async function resolveHostConnection(stateDir: string, env: NodeJS.Proces
   const serverUrl = (hasServer ? env.AGENT_HOST_SERVER : saved?.serverUrl)?.trim();
   const remoteKey = (hasKey ? env.AGENT_HOST_REMOTE_KEY : saved?.remoteKey)?.trim();
   if (!serverUrl || !remoteKey) throw new Error('AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required for the first pairing.');
-  const environment = { ...saved?.environment, ...env };
-  if (env.AGENT_REMOTE_WORKSPACE !== undefined && env.AGENT_HOST_WORKSPACE === undefined) delete environment.AGENT_HOST_WORKSPACE;
-  if (env.AGENT_REMOTE_CODEX_EXECUTABLE !== undefined && env.AGENT_HOST_CODEX === undefined) delete environment.AGENT_HOST_CODEX;
+  const environment = mergeHostEnvironment(saved?.environment, env);
   return { serverUrl, remoteKey, environment };
 }
 export async function saveRegisteredConnection<T>(stateDir: string, connection: HostConnection, accepted: Promise<T>): Promise<T> {

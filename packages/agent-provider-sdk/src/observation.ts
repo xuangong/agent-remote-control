@@ -113,11 +113,13 @@ export interface ProviderObservation {
 
 export interface ProviderHistoryBoundary {
   type: 'history_boundary';
+  olderCursor?: string;
 }
 
 /** Complete, ordered Timeline correction after readiness. Runtime state is unaffected. */
 export interface ProviderTimelineReplacement {
   type: 'timeline_replacement';
+  olderCursor?: string;
   observations: ProviderObservation[];
 }
 

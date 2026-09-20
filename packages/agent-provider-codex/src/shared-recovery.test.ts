@@ -140,6 +140,10 @@ class UnixAppServer {
     }
     let result: unknown = {};
     if (override?.kind === 'result') result = override.value;
+    else if (message.method === 'thread/turns/list') {
+      socket.send(JSON.stringify({ id: message.id, error: { code: -32601, message: 'not supported' } }));
+      return;
+    }
     else if (message.method === 'model/list') result = { data: [] };
     else if (message.method === 'configRequirements/read') result = { requirements: {} };
     else if (message.method === 'collaborationMode/list') {
@@ -423,7 +427,7 @@ describe('shared Codex recovery', () => {
     expect((await session.runtimeInfo()).model).toBe('native-client-model');
     expect(server.requests.slice(baseline).map(request => request.method)).not.toContain('thread/start');
     expect(server.requests.slice(baseline).filter(request => request.method === 'thread/resume')).toEqual([
-      { method: 'thread/resume', params: { threadId: 'root', historyMode: 'paginated' } },
+      { method: 'thread/resume', params: { threadId: 'root', excludeTurns: true } },
     ]);
     expect(server.requests.slice(baseline).map(request => request.method)).not.toContain('turn/start');
     expect(server.requests.slice(baseline).map(request => request.method)).not.toContain('thread/settings/update');
@@ -753,4 +757,50 @@ describe('shared Codex recovery', () => {
     await expect(replacementHostSession.respondToInteraction!(first.event.request.requestId, { kind: 'question', answers: [] }))
       .rejects.toThrow('No pending');
   });
+});
+
+it('restores ten latest turns over Unix WebSocket and serves older history through the public wire', async () => {
+  const { server, session } = await harness({ initialDelayMs: 5, maximumDelayMs: 5 }, false);
+  server.thread.status = { type: 'active', activeFlags: ['waitingOnApproval'] };
+  const turns = Array.from({ length: 23 }, (_, i) => ({ id: `page-turn-${i + 1}`, status: 'completed',
+    items: [{ id: `page-message-${i + 1}`, type: 'agentMessage', text: `Message ${i + 1}` }] }));
+  server.requestHook = ({ method, params }) => {
+    if (method === 'thread/resume') return { kind: 'result', value: { thread: { ...server.thread, turns: [] } } };
+    if (method === 'thread/read' && params.includeTurns) return { kind: 'error', code: -32603, message: 'Full history is forbidden' };
+    if (method === 'thread/turns/list') {
+      const offset = Number(params.cursor ?? 0);
+      return { kind: 'result', value: { data: [...turns].reverse().slice(offset, offset + 10), nextCursor: offset + 10 < turns.length ? String(offset + 10) : null } };
+    }
+    return undefined;
+  };
+  const manager = await AgentManager.attach({ agentId: 'paged', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'original' });
+  managerCleanups.push(() => manager.close());
+  await manager.ready;
+  server.disconnectClients();
+  await expect.poll(() => manager.timelineCursor().epoch).not.toBe('original');
+  await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+  const tail = manager.fetchTimeline({ agentId: 'paged', requestId: 'tail', direction: 'tail', limit: 100 });
+  expect(tail.payload.entries.map(entry => entry.turnId)).toEqual(['page-turn-14','page-turn-15','page-turn-16','page-turn-17','page-turn-18','page-turn-19','page-turn-20','page-turn-21','page-turn-22','page-turn-23']);
+  expect(manager.snapshot().payload.status).toBe('waiting');
+  const cursor = manager.timelineCursor();
+  const output: ReturnType<typeof decodeServerMessage>[] = [];
+  const wire = createSessionWire(manager, json => output.push(decodeServerMessage(json)));
+  try {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'timeline_request', payload: {
+      agentId: 'paged', requestId: 'older', direction: 'before', cursor: tail.payload.startCursor, limit: 100,
+    } }));
+    const response = output.at(-1);
+    expect(response).toMatchObject({ status: 'ok', value: { type: 'timeline_page', payload: {
+      requestId: 'older', hasOlder: true, startCursor: { epoch: cursor.epoch, seq: -9 }, endCursor: { epoch: cursor.epoch, seq: 0 },
+    } } });
+    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'timeline_request', payload: {
+      agentId: 'paged', requestId: 'oldest', direction: 'before', cursor: { epoch: cursor.epoch, seq: -9 }, limit: 100,
+    } }));
+    expect(output.at(-1)).toMatchObject({ status: 'ok', value: { type: 'timeline_page', payload: { requestId: 'oldest', hasOlder: false, entries: [{ turnId: 'page-turn-1' }, { turnId: 'page-turn-2' }, { turnId: 'page-turn-3' }] } } });
+    expect(manager.timelineCursor()).toEqual(cursor);
+    expect(manager.snapshot().payload.status).toBe('waiting');
+    expect(server.requests.filter(request => request.method === 'thread/read' && request.params.includeTurns === true)).toHaveLength(0);
+    expect(server.requests.filter(request => request.method === 'thread/turns/list').map(request => request.params.limit)).toEqual([10, 10, 10]);
+  } finally { wire.close(); }
 });

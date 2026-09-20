@@ -1,6 +1,6 @@
 import { type Static, Type } from '@sinclair/typebox';
 
-import { SafeNonNegativeInteger, TimelineCursor } from './cursor.js';
+import { SafeNonNegativeInteger, SafeTimelinePosition, TimelineHistoryCursor } from './cursor.js';
 import { ProjectedTimelineEntry } from './timeline.js';
 import { ProtocolVersionSchema } from './version.js';
 
@@ -22,7 +22,7 @@ export const TimelineRequest = Strict({
     requestId: NonEmptyString,
     agentId: NonEmptyString,
     direction: TimelineDirection,
-    cursor: Type.Optional(TimelineCursor),
+    cursor: Type.Optional(TimelineHistoryCursor),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
   }),
 });
@@ -39,9 +39,9 @@ export const HistoryPage = Strict({
     reset: Type.Boolean(),
     staleCursor: Type.Boolean(),
     gap: Type.Boolean(),
-    window: Strict({ minSeq: SafeNonNegativeInteger, maxSeq: SafeNonNegativeInteger, nextSeq: SafeNonNegativeInteger }),
-    startCursor: Type.Union([TimelineCursor, Type.Null()]),
-    endCursor: Type.Union([TimelineCursor, Type.Null()]),
+    window: Strict({ minSeq: SafeTimelinePosition, maxSeq: SafeNonNegativeInteger, nextSeq: SafeNonNegativeInteger }),
+    startCursor: Type.Union([TimelineHistoryCursor, Type.Null()]),
+    endCursor: Type.Union([TimelineHistoryCursor, Type.Null()]),
     hasOlder: Type.Boolean(),
     hasNewer: Type.Boolean(),
     entries: Type.Array(ProjectedTimelineEntry),

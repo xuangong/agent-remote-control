@@ -166,7 +166,7 @@ function runtimeError(error: unknown): unknown {
   if (error instanceof CodexRequestTimeoutError) {
     if (error.method === 'thread/resume') return new AgentRuntimeError('native_resume_timeout',
       'Codex did not finish resuming the session before the native request deadline. Check the Controller log, then reopen the session.');
-    if (error.method === 'thread/read') return new AgentRuntimeError('native_history_timeout',
+    if (['thread/read', 'thread/turns/list', 'thread/items/list'].includes(error.method)) return new AgentRuntimeError('native_history_timeout',
       'Codex did not finish reading session history before the native request deadline. Check the Controller log, then reopen the session.');
     return new AgentRuntimeError('native_request_timeout', 'Codex did not answer a native request before its deadline. Check the Controller log and try again.');
   }

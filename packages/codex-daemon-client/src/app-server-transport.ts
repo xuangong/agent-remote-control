@@ -126,7 +126,7 @@ export class CodexAppServerTransport {
     if (this.closed) return Promise.reject(new CodexTransportUnavailableError('Codex app-server transport is closed'));
     const id = this.nextId++;
     const started = Date.now();
-    const phase = method === 'thread/resume' ? 'resume' : method === 'thread/read' ? 'history' : method === 'thread/list' ? 'catalog' : method === 'initialize' ? 'initialize' : undefined;
+    const phase = method === 'thread/resume' ? 'resume' : ['thread/read', 'thread/turns/list', 'thread/items/list'].includes(method) ? 'history' : method === 'thread/list' ? 'catalog' : method === 'initialize' ? 'initialize' : undefined;
     const diagnostic = (outcome: 'started' | 'completed' | 'timeout' | 'unavailable' | 'rejected') => {
       if (!phase) return;
       try { this.onDiagnostic(JSON.stringify({ event: 'codex_request', connectionId: this.diagnosticId, requestId: id,

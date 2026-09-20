@@ -56,6 +56,8 @@ import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
+import { AskConversation } from './components/AskConversation.js';
+import { useAskConversations } from './hooks/useAskConversations.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
 import { referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
 import { CollapsedConversations } from './components/CollapsedConversations.js';
@@ -160,6 +162,7 @@ function AppContent({
   const previewClient = useMemo(() => new HttpPreviewClient(baseUrl), [baseUrl]);
   const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
   const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined);
+  const ask = useAskConversations(baseUrl, transport, directory, selectedHost.id, retryHosts);
   const restoredHostSelection = useRef(false);
   const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory ? readOpenedSessions(baseUrl) : []);
   const openedSessionsRef = useRef(openedSessions);
@@ -741,6 +744,13 @@ function AppContent({
   const focusedWindow = stackPath[stackRange.end];
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
+  const askKey = addressSession ? sessionKey(addressSession) : undefined;
+  const askEntry = askKey ? ask.entries.get(askKey) : undefined;
+  const askVisible = ask.openKey === askKey && !!askEntry && activeView === 'workbench' && !supportingRailOpen;
+  const askSourceState = addressSession?.agentId === state?.agent?.id ? state : addressSession ? replicas.get(addressSession.agentId)?.getState() : undefined;
+  function openAsk(clean = false) {
+    if (addressSession && askSourceState) void ask.open(askSourceState, addressSession, '', clean).catch(() => {});
+  }
   useEffect(() => focusCatchUp(addressSession ? replicas.get(addressSession.agentId) : undefined), [addressSession?.agentId, replicas, focusCatchUp]);
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
     && primaryBinding.current.transport === transport && primaryBinding.current.agentId === stackRoot?.agentId);
@@ -825,6 +835,7 @@ function AppContent({
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
+    if (id === 'console:ask') return ask.open(sourceState, saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }, args);
     if (forkBusy.current) throw new Error('A session fork is already being created.');
     forkBusy.current = true;
     try {
@@ -909,6 +920,10 @@ function AppContent({
 
   return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {tracking.observers}
+    {addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? askVisible ? <AskConversation
+      entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
+      onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draft={ask.drafts[askKey!] ?? ''} onDraftChange={text => ask.setDraft(askKey!, text)} onClose={ask.close} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
+      : <button className="lab-ask-trigger" type="button" aria-label="Ask about this session" aria-haspopup="dialog" disabled={!askSourceState?.agent || hostOffline || transitioning} onClick={() => openAsk()}><span aria-hidden="true">?</span> Ask</button> : null}
     {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>

@@ -4,6 +4,7 @@ import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 
 export const forkCommands = [
+  { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Ask about this session in a floating conversation' },
   { id: 'console:fork', name: 'fork', kind: 'command' as const, description: 'Create an independent session with this conversation’s context' },
   { id: 'console:side', name: 'side', aliases: ['btw'], kind: 'command' as const, description: 'Open an independent conversation alongside this chat' },
 ];

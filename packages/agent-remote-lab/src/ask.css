@@ -1,0 +1,54 @@
+.lab-ask-trigger {
+  position: fixed; right: max(12px, env(safe-area-inset-right)); top: calc(var(--lab-viewport-top, 0px) + 116px);
+  z-index: 139; display: flex; align-items: center; gap: 7px; min-height: 44px;
+  padding: 8px 14px; border: 1px solid var(--obs-control-border); border-radius: 24px;
+  background: var(--obs-surface); color: var(--obs-text); font-weight: 600;
+  box-shadow: 0 2px 10px color-mix(in oklab, var(--obs-text) 10%, transparent);
+}
+.lab-ask-trigger > span { color: var(--obs-action); font-size: 17px; }
+.lab-ask-window {
+  --ask-height: min(560px, calc(var(--lab-viewport-height, 100dvh) * .68));
+  position: fixed; z-index: 145; right: max(12px, env(safe-area-inset-right));
+  top: calc(var(--lab-viewport-top, 0px) + var(--lab-viewport-height, 100dvh) - var(--ask-height) - max(12px, env(safe-area-inset-bottom)));
+  width: min(440px, calc(100% - 24px)); height: var(--ask-height); min-width: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--obs-border-strong); border-radius: 16px;
+  background: var(--obs-surface); box-shadow: 0 10px 40px color-mix(in oklab, var(--obs-text) 18%, transparent);
+  animation: ask-reveal 160ms ease-out;
+}
+.lab-ask-window > .lab-workbench-layout { flex: 1; min-height: 0; width: 100%; }
+.lab-shell .lab-ask-window .lab-workbench-layout.lab-workbench-compact > .lab-workbench-heading,
+.lab-ask-heading {
+  display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; padding: 6px 10px 6px 16px;
+  min-height: 48px; background: var(--obs-surface); border-bottom: 1px solid var(--obs-border);
+}
+.lab-ask-window .lab-workbench-heading > div:first-child { min-width: 0; flex: 1; }
+.lab-ask-window .lab-workbench-heading > .lab-ask-controls { flex: 0 0 auto; }
+.lab-ask-window .lab-workbench-heading > .lab-conversation-status { display: none; }
+.lab-ask-controls { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.lab-ask-controls button { min-height: 36px; padding: 6px 10px; border-color: transparent; background: transparent; }
+.lab-ask-controls button:last-child { min-width: 36px; font-size: 22px; }
+.lab-ask-window .lab-conversation-content { max-width: 100%; padding: 12px; }
+.lab-ask-window .lab-composer-dock { padding: 8px 10px; border-top: 1px solid var(--obs-border); }
+.lab-ask-window .lab-composer-body { padding: 0; }
+.lab-ask-window .lab-composer-toggle { display: none; }
+.lab-ask-window .lab-empty-state { min-height: 0; padding-block: 20px; }
+.lab-ask-window .lab-timeline-scroll { padding: 0; }
+.lab-ask-window .agent-composer { padding: 0; }
+.lab-ask-window .agent-composer-actions { gap: 6px; }
+.lab-shell .lab-ask-window .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { margin-left: auto; }
+.lab-ask-window .agent-composer-secondary-controls:empty { display: none; }
+.lab-ask-window .agent-composer textarea,
+.lab-ask-window .agent-composer-editor,
+.lab-ask-draft { font-size: 16px; max-height: min(110px, calc(var(--lab-viewport-height, 100dvh) * .18)); }
+.lab-ask-window .agent-command-menu { max-height: 160px; }
+.lab-ask-window .agent-activity[data-active="true"] { font-size: 12px; }
+.lab-ask-window .agent-activity-elapsed { display: none; }
+.lab-ask-error { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-danger); background: var(--obs-danger-soft); max-height: 25%; overflow: auto; }
+.lab-ask-error button { margin-left: 8px; }
+.lab-ask-opening { flex: 1; min-height: 0; display: grid; place-content: center; padding: 12px; color: var(--obs-text-secondary); }
+.lab-ask-draft { margin: 10px; padding: 10px; min-width: 0; resize: none; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-canvas); color: var(--obs-text); }
+@keyframes ask-reveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .lab-ask-window { animation: none; } }
+
+.lab-ask-waiting { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-text-secondary); max-height: 20%; overflow: auto; overflow-wrap: anywhere; }

@@ -1,16 +1,14 @@
 import { SessionLink } from './SessionLink.js';
-import { useContext, useEffect, useRef, useState } from 'react';
-import { AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
+import { useEffect, useRef } from 'react';
+import { useConversationSession } from '../hooks/useConversationSession.js';
+import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
 import type { AgentCommandResult } from '@agent-remote-controller/agent-remote-protocol';
-import type { QuestionDraft } from '@agent-remote-controller/agent-remote-web/react';
 import type { OpenedSession } from '../directory-client.js';
 import { forkDisplayState, type ForkStore, type SessionFork } from '../session-forks.js';
 import { forkActions, forkCommands } from '../fork-actions.js';
 import { ForkEntries, ForkReference } from './ForkReference.js';
-import { LabWorkbench, type LabWorkbenchActions } from './LabWorkbench.js';
+import { LabWorkbench } from './LabWorkbench.js';
 import { sessionActivity } from '../session-activity.js';
-import { RecoveryScope } from '../conversation-recovery.js';
-import { recoverMessages } from '../message-recovery.js';
 import { sessionKey } from '../session-tree.js';
 
 export function SideConversation({ session, replica: cachedReplica, transport, store, draft, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild }: {
@@ -22,39 +20,13 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   onFocus?(): void; onClose(): void; onOpenSource(session: OpenedSession): void; onOpenFork(fork: SessionFork): void;
   onFork(state: AgentReplicaState, session: OpenedSession, id: string, args: string): Promise<AgentCommandResult>; visible?: boolean;
 }) {
-  const recoveryScope = useContext(RecoveryScope)?.scope;
-  const [state, setState] = useState<AgentReplicaState | undefined>(() => cachedReplica?.getState().agent ? cachedReplica.getState() : undefined);
-  const [status, setStatus] = useState<RemoteSessionStatus>('connecting');
-  const [questions, setQuestions] = useState<Record<string, QuestionDraft>>({});
-  const client = useRef<RemoteSessionClient>();
+  const { state, status, questions, setQuestions, actions } = useConversationSession(session, transport, cachedReplica, initialInput?.pending);
   const panel = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const replica = cachedReplica ?? new AgentReplica();
-    const stopRecovery = recoveryScope ? recoverMessages(replica, recoveryScope, sessionKey(session), session.agentId) : () => undefined;
-    const connection = new RemoteSessionClient(session.agentId, transport, replica, { historyPageSize: 100 });
-    client.current = connection;
-    setState(replica.getState().agent ? replica.getState() : undefined); setStatus('connecting'); setQuestions({});
-    const unsubscribe = replica.subscribe(() => setState(replica.getState()));
-    const unsubscribeStatus = connection.subscribeStatus(setStatus);
-    connection.start();
-    return () => { unsubscribe(); unsubscribeStatus(); connection.stop(); stopRecovery(); if (client.current === connection) client.current = undefined; };
-  }, [session.agentId, transport, recoveryScope, cachedReplica]);
   useEffect(() => { if (status === 'ready' && focused && expanded && visible) panel.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true }); }, [session.agentId, status, focused, expanded, visible]);
   const activity = sessionActivity(state);
   useEffect(() => { onActivityChange?.(session.agentId, activity); }, [session.agentId, activity, onActivityChange]);
   const record = store.find(session);
   const title = record?.firstInput?.trim().slice(0, 72) || session.title;
-  const active = client.current;
-  const actions: LabWorkbenchActions = active && status === 'ready' && !initialInput?.pending ? {
-    sendMessageContent: async (content, options) => { await active.sendMessageContent(content, options); },
-    uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
-    retryMessage: async (id) => { await active.retryMessage(id); }, deleteMessage: (id) => active.deleteMessage(id),
-    loadOlder: () => active.loadOlder(), sendMessage: async (text, options) => { await active.sendMessage(text, options); }, cancel: async () => { await active.cancel(); },
-    setPlanning: async (value) => { await active.setPlanning(value); }, setSessionSetting: async (id, value) => { await active.setSessionSetting(id, value); },
-    listCommands: () => active.listCommands(), executeCommand: (id, args) => active.executeCommand(id, args),
-    respondToInteraction: async (id, response) => { await active.respondToInteraction(id, response); }, requestResource: async (binding) => (await active.requestResource(binding.resourceId)).payload.state,
-    resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
-  } : { deleteMessage: (id) => active?.deleteMessage(id) };
   return <aside className="lab-side-conversation" aria-label="Side conversation" ref={panel} onFocusCapture={onFocus} hidden={!expanded} style={{ order: position }}>
     <LabWorkbench draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} messageDraft={draft} onMessageDraftChange={onDraftChange}

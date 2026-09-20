@@ -52,6 +52,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
   });
   const previewOrigin = validateGatewayOrigin(options.previewOrigin || auth.origin);
   const previewAccess = createPreviewAccess({ origin: auth.origin, previewOrigin,
+    authorizeBrowser: async (request, entry) => {
+      const { grant } = await sessions.authenticate(request);
+      return !!grant && grant.subject === entry.subject;
+    },
     authorize: async entry => {
       const { grant } = await sessions.authenticate(entry.source);
       if (!grant || grant.subject !== entry.subject) return false;
@@ -165,6 +169,21 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const url = new URL(request.url);
     if (isPreviewRequest(url)) return handlePreview(request);
     if (url.origin !== auth.origin) return json(403, { error: 'Origin is not allowed.' });
+    if (url.pathname === '/' && url.searchParams.has('preview')) {
+      if (request.method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET', 'cache-control': 'no-store' } });
+      let location: ReturnType<typeof readControllerLocation>;
+      try { location = readControllerLocation(url.searchParams); } catch { return json(400, { error: 'Invalid tunnel link.' }); }
+      const { grant, unavailable } = await sessions.authenticate(request);
+      if (!grant) return unavailable ? json(503, { error: 'Sign-in verification is temporarily unavailable.' })
+        : new Response(null, { status: 303, headers: { location: '/auth/login' + controllerPath(location).slice(1), 'cache-control': 'no-store' } });
+      const owned = [...tenants.values()].find(value => value.broker.ownsHost(location.hostId!, grant.subject));
+      if (!owned) return json(403, { error: 'This account does not own the requested tunnel.' });
+      const authority = await activeOwner(owned);
+      if (authority !== 'active') return json(authority === 'denied' ? 403 : 503, { error: 'Tunnel access could not be verified.' });
+      if (!owned.broker.previews.lookup(location.hostId!, location.previewId!) || !owned.broker.previews.bridge(location.hostId!)) return json(410, { error: 'This tunnel is offline, expired, or unregistered. Open it again from Agent Remote.' });
+      const entryUrl = previewAccess.issue({ source: request, subject: grant.subject, hostId: location.hostId!, previewId: location.previewId!, path: location.previewPath! });
+      return new Response(null, { status: 303, headers: { location: entryUrl, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
+    }
     if (url.pathname === '/health' && request.method === 'GET') return json(200, { status: 'ok', service: 'agent-remote-gateway-relay' });
     if (url.pathname === '/gateway/control') {
       const control = await verifyControl(request);
@@ -316,6 +335,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (original.origin !== registration.target || original.username || original.password) return json(400, { error: 'URL must match the registered local service.' });
       const prefix = `/p/${previewId}`;
       const path = registration.pathMode === 'preserve' && original.pathname.startsWith(prefix + '/') ? original.pathname.slice(prefix.length) : original.pathname;
+      if (body?.mode === 'link') return json(200, { tunnelUrl: auth.origin + controllerPath({ hostId, previewId, previewPath: path + original.search + original.hash }) });
       return json(200, { entryUrl: previewAccess.issue({ source: request, subject: grant.subject, hostId, previewId, path: path + original.search + original.hash }) });
     }
     const result = await destination.broker.handleRequest(relative, context(request, grant));
@@ -381,7 +401,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   async function handlePreview(request: Request): Promise<Response> {
     const entry = await previewAccess.handle(request); if (entry) return entry;
-    const access = await previewAccess.authenticate(request); if (access instanceof Response) return access;
+    const access = await previewAccess.authenticate(request);
+    if (access instanceof Response) {
+      const url = new URL(request.url);
+      const match = /^\/p\/([A-Za-z0-9_-]{1,128})(\/.*)?$/.exec(url.pathname);
+      if (access.status === 401 && request.method === 'GET' && request.headers.get('sec-fetch-dest') === 'document' && match) {
+        const host = [...tenants.values()].flatMap(value => value.broker.previews.snapshot()).find(value => value.snapshot.registrations.some(item => item.id === match[1]));
+        if (host) return new Response(null, { status: 303, headers: { 'cache-control': 'no-store', location: auth.origin + controllerPath({ hostId: host.hostId, previewId: match[1], previewPath: (match[2] ?? '/') + url.search }) } });
+      }
+      return access;
+    }
     if (request.headers.get('service-worker') === 'script' || request.headers.get('sec-fetch-dest') === 'serviceworker') return json(403, { error: 'Service workers are not supported in local previews.' });
     const owned = [...tenants.values()].find(value => value.broker.ownsHost(access.hostId, access.subject));
     const registration = owned?.broker.previews.lookup(access.hostId, access.previewId);

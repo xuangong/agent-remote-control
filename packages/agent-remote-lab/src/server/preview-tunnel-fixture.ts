@@ -98,9 +98,10 @@ export async function previewFixture(options: { vscodeTunnel?: Omit<VscodeTunnel
   }
   async function enter(path: string) {
     const link = await entryUrl(path);
-    const redemption = await fetch(previewOrigin + '/_arc/enter', { method: 'POST', headers: { origin: previewOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(link).hash.slice(1) }) });
+    const redemption = await fetch(previewOrigin + '/_arc/enter', { method: 'POST', headers: { cookie: alice.cookie, origin: previewOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(link).hash.slice(1) }) });
     expect(redemption.status).toBe(200);
-    return redemption.headers.getSetCookie()[0]!.split(';')[0]!;
+    // Raw transport tests send both credentials explicitly. Browsers only do this on the control origin.
+    return redemption.headers.getSetCookie()[0]!.split(';')[0]! + '; ' + alice.cookie;
   }
   return { url, previewOrigin, target, registration, alice, bob, hostId, enter, entryUrl, host, port, agentId, observed };
 }

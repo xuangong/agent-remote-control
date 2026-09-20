@@ -26,6 +26,8 @@ it('loads a prefixed Vite page through the authenticated tunnel and receives a r
   const errors: string[] = []; const sockets: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('websocket', socket => sockets.push(socket.url()));
+  const separator = f.alice.cookie.indexOf('=');
+  await page.context().addCookies([{ name: f.alice.cookie.slice(0, separator), value: f.alice.cookie.slice(separator + 1), url: f.url, httpOnly: true, sameSite: 'Strict' }]);
   await page.goto(await f.entryUrl('/'));
   await page.waitForLoadState('networkidle');
   expect(await page.locator('#status').innerText()).toBe('Preview ready');
@@ -329,8 +331,37 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   await page.getByRole('alert').filter({ hasText: 'unregistered' }).waitFor();
   expect(await page.locator('iframe').count()).toBe(0);
   await page.getByRole('button', { name: 'Close preview', exact: true }).click();
+  // The Host list is polled independently from the retained iframe's access checks.
+  await page.getByLabel('Path mode').waitFor();
   await page.getByRole('button', { name: 'Open preview', exact: true }).click();
   await frame.getByRole('heading', { name: 'Local application' }).waitFor();
   expect(context.pages()).toHaveLength(1);
   expect(errors).toEqual([]);
 });
+
+
+for (const engine of [chromium, webkit]) it('requires current browser login for copied tunnel links in ' + engine.name(), async () => {
+  const f = await previewFixture();
+  const response = await f.alice.request('v1/remote/hosts/' + f.hostId + '/previews/' + f.registration.id + '/open', { url: f.target + '/static', mode: 'link' });
+  const { tunnelUrl } = await response.json();
+  const browser = await engine.launch({ headless: true }); onPreviewCleanup(() => browser.close());
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, ...(engine === webkit ? { isMobile: true, hasTouch: true } : {}) });
+  const page = await context.newPage(); page.setDefaultTimeout(7000);
+  const signedOut = await context.request.get(tunnelUrl, { maxRedirects: 0 });
+  expect(signedOut.status()).toBe(303);
+  expect(signedOut.headers().location).toBe('/auth/login' + new URL(tunnelUrl).search);
+  const separator = f.alice.cookie.indexOf('=');
+  await context.addCookies([{ name: f.alice.cookie.slice(0, separator), value: f.alice.cookie.slice(separator + 1), url: f.url, httpOnly: true, sameSite: 'Strict' }]);
+  await page.goto(tunnelUrl);
+  await page.waitForURL(f.previewOrigin + '/p/' + f.registration.id + '/static');
+  await page.locator('img').waitFor();
+  expect(page.url()).not.toContain('_arc/enter');
+  const cookies = await context.cookies();
+  await context.clearCookies();
+  await context.addCookies(cookies.filter(cookie => cookie.name.includes('arc_preview_')));
+  const signedOutAgain = await context.request.get(tunnelUrl, { maxRedirects: 0 });
+  expect(signedOutAgain.status()).toBe(303);
+  expect(signedOutAgain.headers().location).toBe('/auth/login' + new URL(tunnelUrl).search);
+  const data = await context.request.get(f.previewOrigin + '/p/' + f.registration.id + '/static');
+  expect(data.status()).toBe(401);
+}, 20000);

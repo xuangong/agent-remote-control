@@ -32,9 +32,9 @@ export function CopyTunnelUrl({ getUrl, disabled }: {
 
   return <>
     <button className="agent-preview-copy" type="button" disabled={disabled || pending}
-      title="Copy a one-use tunnel link. Open it within 60 seconds."
+      title="Copy a tunnel link. Sign in to Agent Remote to open it."
       onClick={() => void copy()}>{pending ? 'Copying…' : 'Copy tunnel URL'}</button>
-    {copied ? <small role="status">Copied · open within 60s</small> : null}
+    {copied ? <small role="status">Copied</small> : null}
     {failure ? <p role="alert">{failure}</p> : null}
     {fallbackUrl ? <input className="agent-preview-copy-url" aria-label="Tunnel URL" readOnly value={fallbackUrl}
       onFocus={event => event.currentTarget.select()} /> : null}

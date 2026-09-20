@@ -18,3 +18,20 @@ it('keeps legacy Agent and Host-only links valid', () => {
   expect(controllerPath(readControllerLocation(new URLSearchParams('agent=live')))).toBe('/?agent=live');
   expect(controllerPath(readControllerLocation(new URLSearchParams('host=desk')))).toBe('/?host=desk');
 });
+
+
+it('round trips a tunnel path through the existing login return location', () => {
+  const location = { hostId: 'host', previewId: 'preview', previewPath: '/docs?q=one#section' };
+  const path = controllerPath(location);
+  expect(validControllerPath(path)).toBe(true);
+  expect(readControllerLocation(new URLSearchParams(path.slice(2)))).toEqual(location);
+});
+
+it.each(['//evil.test/', '/../outside', '/%2e%2e/outside', '/\\evil.test/', 'https://evil.test/'])('rejects escaping preview paths %s', previewPath => {
+  expect(() => controllerPath({ hostId: 'host', previewId: 'preview', previewPath })).toThrow();
+});
+
+it('rejects incomplete and mixed preview identities', () => {
+  expect(() => controllerPath({ hostId: 'host', previewId: 'preview' })).toThrow();
+  expect(() => controllerPath({ hostId: 'host', previewId: 'preview', previewPath: '/', agentId: 'agent' })).toThrow();
+});

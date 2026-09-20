@@ -13,6 +13,7 @@ interface PreviewAccessOptions {
   origin: string;
   previewOrigin: string;
   authorize(session: PreviewSession): Promise<boolean>;
+  authorizeBrowser?(request: Request, session: PreviewSession): Promise<boolean>;
   now?(): number;
 }
 
@@ -37,6 +38,9 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
   async function valid(session: PreviewSession) {
     if (closed || session.expiresAt <= now()) return false;
     try { return await options.authorize(session); } catch { return false; }
+  }
+  async function validBrowser(request: Request, session: PreviewSession) {
+    try { return !options.authorizeBrowser || await options.authorizeBrowser(request, session); } catch { return false; }
   }
   async function enforce() {
     await Promise.all([...active].map(async entry => { if (!await valid(entry.session)) { active.delete(entry); entry.cancel(); } }));
@@ -71,7 +75,7 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
         if (values.length !== 1) return error(401);
         const token = values[0]!.slice(name(renew[1]!).length + 1);
         const session = sessions.get(token);
-        if (!session || session.previewId !== renew[1] || !await valid(session)) return error(401);
+        if (!session || session.previewId !== renew[1] || !await valid(session) || !await validBrowser(request, session)) return error(401);
         // Extend the same object so existing HTTP and WebSocket watches keep their authorization.
         session.expiresAt = now() + 60 * 60_000;
         return Response.json({ expiresAt: session.expiresAt }, { headers: {
@@ -89,11 +93,13 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
       if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return error(415);
       const body = await readJson(request);
       const code = typeof body?.code === 'string' ? body.code : '';
-      const session = proofs.get(code); proofs.delete(code);
-      if (!session || !await valid(session)) return error(401);
+      const session = proofs.get(code);
+      if (!session || !await valid(session) || !await validBrowser(request, session)) return error(401);
+      // Consume after identity verification; only one concurrent redemption can succeed.
+      if (!proofs.delete(code)) return error(401);
       prune(); if (sessions.size >= 4096) return error(429);
       const token = randomBytes(32).toString('base64url');
-      sessions.set(token, { ...session, expiresAt: now() + 60 * 60_000 });
+      sessions.set(token, { ...session, source: options.authorizeBrowser ? new Request(origin + '/', { headers: request.headers }) : session.source, expiresAt: now() + 60 * 60_000 });
       return Response.json({ url: `/p/${session.previewId}${session.path}` }, { headers: {
         'cache-control': 'no-store', 'set-cookie': `${name(session.previewId)}=${token}; Path=/p/${session.previewId}/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`,
       } });
@@ -109,7 +115,7 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
       const values = cookies.filter(value => value.startsWith(name(match[1]!) + '='));
       if (values.length !== 1) return error(401);
       const session = sessions.get(values[0]!.slice(name(match[1]!).length + 1));
-      if (!session || session.previewId !== match[1] || !await valid(session)) return error(401);
+      if (!session || session.previewId !== match[1] || !await valid(session) || !await validBrowser(request, session)) return error(401);
       return session;
     },
     activity(session: PreviewSession): boolean {

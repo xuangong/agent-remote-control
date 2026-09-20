@@ -105,3 +105,34 @@ it('extends stream access on traffic beyond the original deadline, then expires 
     expect((await access.authenticate(request) as Response).status).toBe(401);
   } finally { access.close(); }
 }, 10000);
+
+
+it('binds redemption and subsequent access to the receiving browser identity', async () => {
+  let active = true;
+  const access = createPreviewAccess({ origin, previewOrigin: origin,
+    authorize: async session => active && session.source.headers.get('cookie') === 'browser=alice',
+    authorizeBrowser: async (request, session) => request.headers.get('cookie')?.includes('browser=' + session.subject) === true,
+  });
+  try {
+    const entry = access.issue({ source: new Request(origin, { headers: { cookie: 'browser=alice' } }), subject: 'alice', hostId: 'host', previewId: 'abc', path: '/' });
+    const redeem = (cookie = '') => access.handle(new Request(origin + '/_arc/enter', { method: 'POST',
+      headers: { cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(entry).hash.slice(1) }) }));
+    expect((await redeem())?.status).toBe(401);
+    expect((await redeem('browser=bob'))?.status).toBe(401);
+    const results = await Promise.all([redeem('browser=alice'), redeem('browser=alice')]);
+    expect(results.map(result => result!.status).sort()).toEqual([200, 401]);
+    const cookie = results.find(result => result!.status === 200)!.headers.get('set-cookie')!.split(';')[0]!;
+    const request = (identity: string) => new Request(origin + '/p/abc/', { headers: { cookie: cookie + identity } });
+    expect((await access.authenticate(request('')) as Response).status).toBe(401);
+    expect((await access.authenticate(request('; browser=bob')) as Response).status).toBe(401);
+    const session = await access.authenticate(request('; browser=alice'));
+    expect(session).not.toBeInstanceOf(Response);
+    if (session instanceof Response) throw new Error('Expected session');
+    let cancelled = false;
+    access.watch(session, () => { cancelled = true; });
+    active = false;
+    await access.enforce();
+    expect(cancelled).toBe(true);
+    expect((await access.authenticate(request('; browser=alice')) as Response).status).toBe(401);
+  } finally { access.close(); }
+}, 10000);

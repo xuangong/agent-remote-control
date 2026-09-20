@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { createTunnelPeer, type PreviewRegistration, type TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
 import { createLoopbackTunnelHandlers } from '@agent-remote-controller/agent-remote-tunnel/node';
 import { afterEach, expect, it, vi } from 'vitest';
-import { event, fixture, origin, previewOrigin, send } from './fixture.js';
+import { event, fixture, issuer, origin, previewOrigin, send, sign } from './fixture.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -110,10 +110,10 @@ async function previewCookie(setup: Awaited<ReturnType<typeof previewFixture>>, 
     setup.alice.cookie, { url: setup.registration.target + path });
   expect(opened.status, await opened.clone().text()).toBe(200);
   const { entryUrl } = await opened.json() as { entryUrl: string };
-  const entered = await setup.f.previewRequest('/_arc/enter', { method: 'POST', headers: { origin: previewOrigin, 'content-type': 'application/json' },
+  const entered = await setup.f.previewRequest('/_arc/enter', { method: 'POST', headers: { cookie: setup.alice.cookie, origin: previewOrigin, 'content-type': 'application/json' },
     body: JSON.stringify({ code: new URL(entryUrl).hash.slice(1) }) });
   expect(entered.status).toBe(200);
-  return entered.headers.get('set-cookie')!.split(';')[0]!;
+  return entered.headers.get('set-cookie')!.split(';')[0]! + '; ' + setup.alice.cookie;
 }
 
 it('streams binary HTTP through real Miniflare control and preview uplinks and rejects unauthenticated access', async () => {
@@ -162,7 +162,7 @@ it('negotiates protocol, transports text and binary, and propagates preview revo
   const cookieRenewed = await setup.f.previewRequest(`/p/${setup.registration.id}/_arc/renew`, { method: 'POST',
     headers: { cookie, origin: previewOrigin, 'content-type': 'application/json' }, body: '{}' });
   expect(cookieRenewed.status).toBe(200);
-  expect(cookieRenewed.headers.get('set-cookie')).toContain(cookie);
+  expect(cookieRenewed.headers.get('set-cookie')).toContain(cookie.split(';')[0]!);
   received = socketMessage(socket); socket.send('still connected');
   expect((await received).data).toBe('still connected');
   const closed = event(socket, 'close');
@@ -260,4 +260,37 @@ it.each(['http', 'websocket'] as const)('renews Miniflare previews from %s traff
   await vi.waitFor(async () => expect((await setup.f.previewRequest(path + '/events')).status).toBe(401));
   await new Promise(resolve => setTimeout(resolve, 3000));
   expect((await setup.f.previewRequest(path + '/events', { headers: { cookie } })).status).toBe(401);
+}, 20000);
+
+
+it('routes copied tunnel navigation through login and current ownership before issuing a browser-bound handoff', async () => {
+  const setup = await previewFixture();
+  const path = setup.alice.basePath + 'v1/remote/hosts/' + setup.host.hostId + '/previews/' + setup.registration.id + '/open';
+  const copied = await setup.f.json(path, setup.alice.cookie, { url: setup.registration.target + '/docs?q=1#section', mode: 'link' });
+  expect(copied.status).toBe(200);
+  const { tunnelUrl } = await copied.json() as { tunnelUrl: string };
+  const url = new URL(tunnelUrl);
+  const target = url.pathname + url.search;
+  const signedOut = await setup.f.request(target);
+  expect(signedOut.status).toBe(303);
+  expect(signedOut.headers.get('location')).toBe('/auth/login' + url.search);
+  const login = await setup.f.request(signedOut.headers.get('location')!);
+  expect(login.status).toBe(303);
+  const nonce = new URL(login.headers.get('location')!).searchParams.get('challenge');
+  const iat = Math.floor(Date.now() / 1000);
+  const ticket = sign('arc-relay+jwt', { iss: issuer, aud: origin, sub: 'alice', nonce, iat, exp: iat + 900, jti: crypto.randomUUID(), continuation: 'alice', sessionExpiresAt: Date.now() + 3_600_000 });
+  const signedIn = await setup.f.json('/auth/session', login.headers.get('set-cookie')!.split(';')[0]!, { ticket });
+  expect(signedIn.status).toBe(200);
+  expect((await signedIn.json() as { returnPath: string }).returnPath).toBe(target);
+  const bob = await setup.f.login('bob');
+  expect((await setup.f.request(target, { headers: { cookie: bob.cookie } })).status).toBe(403);
+  const allowed = await setup.f.request(target, { headers: { cookie: setup.alice.cookie } });
+  expect(allowed.status).toBe(303);
+  const code = new URL(allowed.headers.get('location')!).hash.slice(1);
+  const redeem = (cookie = '') => setup.f.previewRequest('/_arc/enter', { method: 'POST', headers: { cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  expect((await redeem()).status).toBe(401);
+  expect((await redeem(bob.cookie)).status).toBe(401);
+  const response = await redeem(setup.alice.cookie);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ url: '/p/' + setup.registration.id + '/docs?q=1#section' });
 }, 20000);

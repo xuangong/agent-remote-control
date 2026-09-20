@@ -12,7 +12,7 @@ export default {
       return new Response(null, { status: 403 });
     }
     if ((request.method === 'GET' || request.method === 'HEAD') && !request.headers.has('upgrade')) {
-      if (url.pathname === '/' || url.pathname === '/index.html') {
+      if ((url.pathname === '/' || url.pathname === '/index.html') && !url.searchParams.has('preview')) {
         url.pathname = '/index.html';
         const asset = await env.ASSETS.fetch(new Request(url, { method: 'GET' }));
         if (!asset.ok) return new Response('Controller assets are unavailable.', { status: 503 });

@@ -112,8 +112,17 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
     registrations: currentState.registrations, canManage, loading: currentState.loading, error: currentState.error, refresh,
     register: async (agentId: string, request: PreviewRegistrationRequest) => {
       const registration = await client.register(agentId, request);
-      await refresh();
-      return registration;
+      // Registration can finish before the Controller's data tunnel connects.
+      const signal = AbortSignal.timeout(10_000);
+      while (!signal.aborted) {
+        if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
+        const snapshot = await client.snapshot(hostId, signal).catch(error => { if (!signal.aborted) throw error; });
+        if (!snapshot) break;
+        const ready = snapshot.registrations.find(value => value.id === registration.id && value.status === 'active' && value.availability === 'online' && !value.pendingUnregister);
+        if (ready) { await refresh(); return registration; }
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      throw new Error('The preview is registered, but its tunnel is still connecting. Open it again shortly.');
     },
     unregister: async (id: string) => {
       await client.unregister(hostId, id);
@@ -123,7 +132,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
     },
     getTunnelUrl: async (id: string, target: string) => {
       if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
-      const url = await client.open(hostId, id, target, AbortSignal.timeout(20_000));
+      const url = await client.tunnelUrl(hostId, id, target, AbortSignal.timeout(20_000));
       if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
       return url;
     },

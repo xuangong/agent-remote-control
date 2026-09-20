@@ -62,7 +62,7 @@ function socketMessage(socket: import('miniflare').WebSocket): Promise<{ data: s
   });
 }
 
-async function previewFixture(target = 'http://127.0.0.1:4173') {
+async function previewFixture(target = 'http://127.0.0.1:4173', ttlMs = 60_000) {
   const f = await fixture();
   const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
@@ -84,9 +84,9 @@ async function previewFixture(target = 'http://127.0.0.1:4173') {
     if (request.path === '/remote/previews') {
       const body = JSON.parse(request.body);
       registration = { id: 'workers-preview', target: body.target, status: 'active', createdAt: Date.now(),
-        expiresAt: Date.now() + 60_000, revision: ++revision, pathMode: body.pathMode, sources: [body.source] };
+        expiresAt: Date.now() + ttlMs, revision: ++revision, pathMode: body.pathMode, sources: [body.source] };
     } else if (request.path === '/remote/previews/renew' && registration) {
-      registration = { ...registration, expiresAt: Date.now() + 60_000, revision: ++revision };
+      registration = { ...registration, expiresAt: Date.now() + ttlMs, revision: ++revision };
     } else if (request.path === '/remote/previews/unregister' && registration) {
       registration = { ...registration, status: 'unregistered', revision: ++revision };
     } else return;
@@ -235,3 +235,29 @@ it('returns only active previews from mixed Controller history, including after 
   ]);
   expect((await setup.f.json(path + '/removed-preview/renew', setup.alice.cookie, {})).status).toBe(409);
 }, 20_000);
+
+it.each(['http', 'websocket'] as const)('renews Miniflare previews from %s traffic without browser keepalives', async mode => {
+  const target = await localApplication();
+  const setup = await previewFixture(target, 2000);
+  const originalExpiry = setup.registration.expiresAt;
+  const cookie = await previewCookie(setup, '/events');
+  createTunnelPeer(tunnelSocket(setup.dataSocket), createLoopbackTunnelHandlers({ lookup: () => ({ target, pathMode: 'strip' }) }));
+  const path = '/p/' + setup.registration.id;
+  if (mode === 'http') {
+    while (Date.now() < originalExpiry + 700) {
+      const response = await setup.f.previewRequest(path + '/events', { headers: { cookie } });
+      expect(response.status).toBe(200); await response.arrayBuffer();
+    }
+  } else {
+    const { socket } = await setup.f.upgradeResponse(path + '/socket', { cookie, origin: previewOrigin, 'sec-websocket-protocol': 'echo-v1' }, previewOrigin);
+    while (Date.now() < originalExpiry + 700) {
+      const received = socketMessage(socket); socket.send('activity'); expect((await received).data).toBe('activity');
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    socket.close();
+  }
+  expect(setup.registration.expiresAt).toBeGreaterThan(originalExpiry + 700);
+  await vi.waitFor(async () => expect((await setup.f.previewRequest(path + '/events')).status).toBe(401));
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  expect((await setup.f.previewRequest(path + '/events', { headers: { cookie } })).status).toBe(401);
+}, 20000);

@@ -44,6 +44,11 @@ export async function previewFixture(options: { vscodeTunnel?: Omit<VscodeTunnel
       if (request.headers['if-none-match'] === '"image-one"') { response.writeHead(304); response.end(); return; }
       response.writeHead(request.headers.range ? 206 : 200, { 'content-type': 'application/octet-stream', etag: '"image-one"', ...(request.headers.range ? { 'content-range': 'bytes 1-2/4' } : {}) }); response.end(request.headers.range ? Buffer.from([128, 255]) : Buffer.from([0,128,255,65])); return;
     }
+    if (request.url === '/streaming-events') {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      const timer = setInterval(() => response.write('data: activity\n\n'), 100);
+      response.once('close', () => clearInterval(timer)); return;
+    }
     if (request.url === '/events') {
       response.writeHead(200, { 'content-type': 'text/event-stream' }); response.write('data: first\n\n');
       const timer = setTimeout(() => { response.end('data: second\n\n'); }, 400); response.once('close', () => { clearTimeout(timer); observed.cancelledEvents++; }); return;

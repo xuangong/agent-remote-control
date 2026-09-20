@@ -1,10 +1,13 @@
 import { createPreviewRelayBridge, createTunnelPeer, type PreviewSnapshot, type PreviewRegistration, type TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
 
+import { createPreviewActivity } from './preview-activity.js';
+
 export interface HostPreviewState { hostId: string; snapshot: PreviewSnapshot; pendingRemovals: string[] }
 interface Options {
   initial?: HostPreviewState[];
   save(state: HostPreviewState[], publish: () => void): Promise<void>;
   remove(hostId: string, id: string): Promise<void>;
+  renew?(hostId: string, id: string): Promise<{ expiresAt: number }>;
 }
 export function createHostPreviews(options: Options) {
   let records = structuredClone(options.initial ?? []);
@@ -29,7 +32,12 @@ export function createHostPreviews(options: Options) {
     const value = current?.snapshot.registrations.find(value => value.id === id);
     return value?.status === 'active' && value.expiresAt > Date.now() ? value : undefined;
   }
+  const activity = createPreviewActivity({
+    available: (hostId, id) => !closed && !!lookup(hostId, id) && peers.has(hostId),
+    renew: (hostId, id) => options.renew ? options.renew(hostId, id) : Promise.reject(new Error('Preview renewal unavailable.')),
+  });
   function disconnect(hostId: string) {
+    activity.forget(hostId);
     generations.set(hostId, (generations.get(hostId) ?? 0) + 1);
     reconciled.delete(hostId); peers.get(hostId)?.close(1012, 'Controller disconnected'); peers.delete(hostId);
     bridges.delete(hostId);
@@ -44,6 +52,7 @@ export function createHostPreviews(options: Options) {
       })) };
     },
     lookup,
+    activity: activity.record,
     async update(hostId: string, snapshot: PreviewSnapshot) {
       const generation = generations.get(hostId) ?? 0;
       let prior: PreviewSnapshot | undefined;
@@ -62,8 +71,8 @@ export function createHostPreviews(options: Options) {
       if (generation !== (generations.get(hostId) ?? 0)) return;
       if (prior?.epoch === snapshot.epoch && prior.revision > snapshot.revision) return;
       if (accepted) {
-        for (const value of snapshot.registrations) if (value.status !== 'active') peers.get(hostId)?.cancelPreview(value.id);
-        for (const value of prior?.registrations ?? []) if (!snapshot.registrations.some(next => next.id === value.id)) peers.get(hostId)?.cancelPreview(value.id);
+        for (const value of snapshot.registrations) if (value.status !== 'active') { activity.forget(hostId, value.id); peers.get(hostId)?.cancelPreview(value.id); }
+        for (const value of prior?.registrations ?? []) if (!snapshot.registrations.some(next => next.id === value.id)) { activity.forget(hostId, value.id); peers.get(hostId)?.cancelPreview(value.id); }
       }
       // Pending removals block lookup throughout reconciliation, including failed retries.
       for (const id of [...(record(hostId)?.pendingRemovals ?? [])]) {
@@ -77,6 +86,7 @@ export function createHostPreviews(options: Options) {
       if (!closed && generation === (generations.get(hostId) ?? 0)) reconciled.add(hostId);
     },
     async unregister(hostId: string, id: string) {
+      activity.forget(hostId, id);
       if (!record(hostId)?.snapshot.registrations.some(value => value.id === id)) throw new Error('Preview is unavailable.');
       await mutate(draft => { const current = draft.find(value => value.hostId === hostId)!; if (!current.pendingRemovals.includes(id)) current.pendingRemovals.push(id); });
       peers.get(hostId)?.cancelPreview(id);
@@ -90,9 +100,9 @@ export function createHostPreviews(options: Options) {
       socket.onClose(() => { if (peers.get(hostId) === peer) { peers.delete(hostId); bridges.delete(hostId); } });
     },
     bridge(hostId: string) { return reconciled.has(hostId) ? bridges.get(hostId) : undefined; },
-    invalidate(hostId: string) { generations.set(hostId, (generations.get(hostId) ?? 0) + 1); reconciled.delete(hostId); },
+    invalidate(hostId: string) { activity.forget(hostId); generations.set(hostId, (generations.get(hostId) ?? 0) + 1); reconciled.delete(hostId); },
     forget(hostId: string) { records = records.filter(value => value.hostId !== hostId); disconnect(hostId); },
     disconnect,
-    close() { closed = true; for (const hostId of peers.keys()) disconnect(hostId); },
+    close() { closed = true; activity.close(); for (const hostId of peers.keys()) disconnect(hostId); },
   };
 }

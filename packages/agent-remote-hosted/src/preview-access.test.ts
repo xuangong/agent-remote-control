@@ -77,3 +77,31 @@ it('renews the HttpOnly cookie and its existing stream authorization without byp
     expect(cancelled).toBe(true);
   } finally { access.close(); }
 }, 10000);
+
+it('extends stream access on traffic beyond the original deadline, then expires while idle', async () => {
+  let now = 1000;
+  let authorized = true;
+  const access = createPreviewAccess({ origin, previewOrigin, now: () => now, authorize: async () => authorized });
+  try {
+    const entry = access.issue({ source, subject: 'alice', hostId: 'host', previewId: 'abc', path: '/' });
+    const response = await access.handle(new Request(previewOrigin + '/_arc/enter', { method: 'POST',
+      headers: { origin: previewOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(entry).hash.slice(1) }) }));
+    expect(response!.headers.get('set-cookie')).not.toContain('Max-Age');
+    const cookie = response!.headers.get('set-cookie')!.split(';')[0]!;
+    const request = new Request(previewOrigin + '/p/abc/socket', { headers: { cookie } });
+    const session = await access.authenticate(request);
+    if (session instanceof Response) throw new Error('Expected access');
+    let cancelled = false;
+    access.watch(session, () => { cancelled = true; });
+    now += 50 * 60_000; expect(access.activity(session)).toBe(true);
+    now += 50 * 60_000; expect(access.activity(session)).toBe(true);
+    await access.enforce(); expect(cancelled).toBe(false);
+    expect(await access.authenticate(request)).not.toBeInstanceOf(Response);
+    authorized = false;
+    await access.enforce(); expect(cancelled).toBe(true);
+    authorized = true;
+    now += 61 * 60_000;
+    expect(access.activity(session)).toBe(false);
+    expect((await access.authenticate(request) as Response).status).toBe(401);
+  } finally { access.close(); }
+}, 10000);

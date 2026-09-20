@@ -15,6 +15,7 @@ import { createTimerRelayScheduler, type RelayScheduler } from './scheduler.js';
 import { readJson } from './request.js';
 import { createPreviewAccess } from './preview-access.js';
 import { previewRequest, previewResponseHeaders } from './preview-http.js';
+import { previewTrafficBody, previewTrafficSocket } from './preview-traffic.js';
 import { adaptPreviewContent, PreviewContentError } from './preview-content.js';
 import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
 import type { BrokerRequestContext, RelaySocket } from './transport.js';
@@ -393,10 +394,13 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const cleanup = () => { unwatch(); request.signal.removeEventListener('abort', cancel); };
     try {
       const outgoing = previewRequest(request, registration);
-      const result = await bridge.fetch(access.previewId, { ...outgoing, signal: abort.signal });
+      const activity = () => { if (!abort.signal.aborted && previewAccess.activity(access)) owned!.broker.previews.activity(access.hostId, access.previewId); };
+      activity();
+      const result = await bridge.fetch(access.previewId, { ...outgoing, body: previewTrafficBody(outgoing.body, activity), signal: abort.signal });
+      activity();
       const responseHeaders = previewResponseHeaders(result.headers, registration, outgoing.path);
       if (!result.body || request.method === 'HEAD' || [204, 304].includes(result.status)) { cleanup(); return new Response(null, { status: result.status, headers: responseHeaders }); }
-      const adapted = await adaptPreviewContent({ body: result.body, headers: responseHeaders, route: registration, requestPath: outgoing.path, status: result.status });
+      const adapted = await adaptPreviewContent({ body: previewTrafficBody(result.body, activity)!, headers: responseHeaders, route: registration, requestPath: outgoing.path, status: result.status });
       const headers = adapted.headers;
       const reader = adapted.body!.getReader();
       const body = new ReadableStream<Uint8Array>({
@@ -450,7 +454,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return { protocol: prepared.protocol, accept(socket) {
         applicationSocket = socket;
         socket.onClose(() => { unwatch(); request.signal.removeEventListener('abort', revoke); });
-        if (revoked) socket.close(1008, 'Preview access revoked'); else prepared.accept(socket);
+        if (revoked) socket.close(1008, 'Preview access revoked'); else {
+          const activity = () => { if (!revoked && previewAccess.activity(access)) owned!.broker.previews.activity(access.hostId, access.previewId); };
+          activity(); prepared.accept(previewTrafficSocket(socket, activity));
+        }
       } };
     } catch { return json(503, { error: 'Preview WebSocket is unavailable.' }); }
   }

@@ -31,6 +31,8 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
   function prune() {
     for (const map of [proofs, sessions]) for (const [key, value] of map) if (value.expiresAt <= now()) map.delete(key);
   }
+  // Browser-session cookies also survive long-running WebSockets, which cannot send Set-Cookie.
+  // The server enforces the sliding idle deadline and rechecks the original owner authorization.
   const name = (id: string) => `${secure ? '__Secure-' : ''}arc_preview_${id}`;
   async function valid(session: PreviewSession) {
     if (closed || session.expiresAt <= now()) return false;
@@ -73,7 +75,7 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
         // Extend the same object so existing HTTP and WebSocket watches keep their authorization.
         session.expiresAt = now() + 60 * 60_000;
         return Response.json({ expiresAt: session.expiresAt }, { headers: {
-          'cache-control': 'no-store', 'set-cookie': `${name(session.previewId)}=${token}; Path=/p/${session.previewId}/; HttpOnly; SameSite=Strict; Max-Age=3600${secure ? '; Secure' : ''}`,
+          'cache-control': 'no-store', 'set-cookie': `${name(session.previewId)}=${token}; Path=/p/${session.previewId}/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`,
         } });
       }
       if (url.pathname !== '/_arc/enter') return undefined;
@@ -93,7 +95,7 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
       const token = randomBytes(32).toString('base64url');
       sessions.set(token, { ...session, expiresAt: now() + 60 * 60_000 });
       return Response.json({ url: `/p/${session.previewId}${session.path}` }, { headers: {
-        'cache-control': 'no-store', 'set-cookie': `${name(session.previewId)}=${token}; Path=/p/${session.previewId}/; HttpOnly; SameSite=Strict; Max-Age=3600${secure ? '; Secure' : ''}`,
+        'cache-control': 'no-store', 'set-cookie': `${name(session.previewId)}=${token}; Path=/p/${session.previewId}/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`,
       } });
     },
     async authenticate(request: Request): Promise<PreviewSession | Response> {
@@ -109,6 +111,11 @@ export function createPreviewAccess(options: PreviewAccessOptions) {
       const session = sessions.get(values[0]!.slice(name(match[1]!).length + 1));
       if (!session || session.previewId !== match[1] || !await valid(session)) return error(401);
       return session;
+    },
+    activity(session: PreviewSession): boolean {
+      if (closed || session.expiresAt <= now()) return false;
+      session.expiresAt = now() + 60 * 60_000;
+      return true;
     },
     watch(session: PreviewSession, cancel: () => void): () => void {
       const entry = { session, cancel }; active.add(entry);

@@ -258,7 +258,7 @@ export function createTunnelPeer(socket: TunnelSocket, handlers: TunnelPeerHandl
     async openWebSocket(request: TunnelWebSocketRequest & { signal?: AbortSignal }) {
       const allocated = allocate('ws');
       const credit = new CreditWindow();
-      const endpoint = new LocalWebSocket(async (data, binary) => { const payload = typeof data === 'string' ? new TextEncoder().encode(data) : data; await credit.take(payload.byteLength); transmit({ type: 'ws_message', streamId: allocated.id, binary, data: payload }); }, (code, reason) => transmit({ type: 'ws_close', streamId: allocated.id, code, reason }), limits.maxQueuedBytes, limits.maxFrameBytes - 512);
+      const endpoint = new LocalWebSocket(async (data, binary) => { const payload = typeof data === 'string' ? new TextEncoder().encode(data) : data; await credit.take(payload.byteLength); transmit({ type: 'ws_message', streamId: allocated.id, binary, data: payload }); }, (code, reason) => { if (!closed && streams.has(allocated.id)) transmit({ type: 'ws_close', streamId: allocated.id, code, reason }); }, limits.maxQueuedBytes, limits.maxFrameBytes - 512);
       return new Promise<TunnelWebSocketAcceptance>((resolve, reject) => {
         const state: WsState = { kind: 'ws', previewId: request.previewId, controller: allocated.controller, endpoint, credit, resolve, reject };
         state.timer = setTimeout(() => fail(allocated.id, 'timeout', 'WebSocket handshake timed out.'), limits.openTimeoutMs);

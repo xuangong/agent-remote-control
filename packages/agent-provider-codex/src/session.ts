@@ -1,3 +1,4 @@
+import type { AgentSessionExtensions, AgentSessionTool } from '@agent-remote-controller/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
 import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
 import { randomUUID } from 'node:crypto';
@@ -181,12 +182,26 @@ export class CodexAppServerSession implements AgentSession {
     if (this.ready && !this.disposed) this.emitRuntimeUpdate();
   }
 
+  private tools: readonly AgentSessionTool[] = [];
+
   receiveRequest(method: string, params: unknown, id: string | number): Promise<unknown> {
+    if (method === 'item/tool/call') return this.callTool(params);
     if (method === 'item/tool/requestUserInput' || method === 'tool/requestUserInput') return this.handleQuestionRequest(params, id);
     if (method === 'item/commandExecution/requestApproval') return this.handleToolRequest('command', params, id);
     if (method === 'item/fileChange/requestApproval') return this.handleToolRequest('file', params, id);
     if (method === 'mcpServer/elicitation/request') return this.handleElicitationRequest(params, id);
     return this.handlePermissionRequest(params, id);
+  }
+
+  private async callTool(params: unknown): Promise<unknown> {
+    try {
+      if (!isRecord(params) || params.threadId !== this.threadId || params.namespace != null) throw new Error('Session tool is unavailable.');
+      const tool = this.tools.find(tool => tool.name === params.tool);
+      if (!tool) throw new Error('Session tool is unavailable. Reopen this session through its Host.');
+      return { success: true, contentItems: [{ type: 'inputText', text: await tool.execute(params.arguments) }] };
+    } catch (error) {
+      return { success: false, contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : 'Session tool failed.' }] };
+    }
   }
 
   hasNativeChild(parentId: string, childId: string): boolean { return !this.disposed && this.runtime.hasChild(parentId, childId); }
@@ -318,9 +333,11 @@ export class CodexAppServerSession implements AgentSession {
   ): Promise<CodexAppServerSession> {
     const stored = toStoredConfig(config, collaborationMode);
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
+    session.tools = config.tools ?? [];
     await session.initialize();
     const response = await transport.request('thread/start', {
       historyMode: 'paginated',
+      ...(session.tools.length ? { dynamicTools: session.tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) } : {}),
       config: { 'features.default_mode_request_user_input': true },
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.model ? { model: stored.model } : {}),
@@ -339,12 +356,14 @@ export class CodexAppServerSession implements AgentSession {
     codexHome?: string,
     restrictedNative = false,
     recoveryPlan?: CodexSharedRecoveryPlan,
+    extensions: AgentSessionExtensions = {},
   ): Promise<CodexAppServerSession> {
     if (handle.providerId !== PROVIDER_ID) {
       throw new Error(`Cannot resume ${handle.providerId} with the Codex provider`);
     }
-    const stored = { ...parseStoredConfig(handle.opaque), ...(collaborationMode ? { collaborationMode } : {}) };
+    const stored = { ...parseStoredConfig(handle.opaque), ...(extensions.systemPrompt ? { systemPrompt: extensions.systemPrompt } : {}), ...(collaborationMode ? { collaborationMode } : {}) };
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
+    session.tools = extensions.tools ?? [];
     session.threadId = handle.sessionId;
     session.runtime.registerRoot(handle.sessionId);
     await session.initialize();
@@ -556,7 +575,7 @@ export class CodexAppServerSession implements AgentSession {
       settings: {
         model,
         reasoning_effort: this.config.reasoningEffort ?? selected.reasoningEffort ?? null,
-        developer_instructions: this.config.systemPrompt ?? selected.developerInstructions ?? null,
+        developer_instructions: [selected.developerInstructions, this.config.systemPrompt].filter(Boolean).join('\n\n') || null,
       },
     };
   }

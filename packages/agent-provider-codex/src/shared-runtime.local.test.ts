@@ -33,7 +33,9 @@ async function fixture() {
       const lastUser = input.findLastIndex((item: any) => item.role === 'user');
       const prompt = JSON.stringify(input[lastUser]);
       const answer = input.slice(lastUser + 1).find((item: any) => item.type === 'function_call_output');
-      const item = !answer && prompt.includes('question') ? {
+      const item = !answer && prompt.includes('source reference') ? {
+        type: 'function_call', call_id: `source-${id}`, name: 'read_source_session', arguments: JSON.stringify({ limit: 2 }),
+      } : !answer && prompt.includes('question') ? {
         type: 'function_call', call_id: `question-${id}`, name: 'request_user_input',
         arguments: JSON.stringify({ questions: [{ id: 'choice', header: 'Choice', question: 'Choose one',
           options: [{ label: 'First', description: 'First option' }, { label: 'Second', description: 'Second option' }] }] }),
@@ -206,3 +208,38 @@ it.runIf(executable)('replays a pending question to a joining client and resolve
     await expect(mobile.respondToInteraction!(mobileQuestion.request.requestId, answer)).rejects.toThrow('No pending');
   } finally { await f.close(); }
 }, 30000);
+
+
+it.runIf(executable)('dispatches persisted dynamic source tools through a real daemon after restart', async () => {
+  const f = await fixture();
+  try {
+    const source = await f.provider().createSession({ sessionId: 'source', cwd: f.home }); f.sessions.push(source);
+    const sourceStream = source.observe()[Symbol.asyncIterator]();
+    await source.sendMessage('Background decision: amber river.');
+    await until(sourceStream, event => event.type === 'turn_completed');
+    const sourceId = (await source.runtimeInfo()).sessionId!;
+    await source.dispose();
+    let calls = 0;
+    const tools = [{ name: 'read_source_session', description: 'Read the granted source session.', inputSchema: { type: 'object', properties: { limit: { type: 'integer' } } },
+      execute: async () => { calls += 1; const page = await f.provider().readSessionHistory(sourceId, { limit: 2 }); expect(page.entries.some(entry => entry.text.includes('amber river'))).toBe(true); return JSON.stringify(page); } }];
+    const first = await f.provider().createSession({ sessionId: 'side', cwd: f.home, tools, systemPrompt: 'Use read_source_session for background.' });
+    f.sessions.push(first);
+    const initial = first.observe()[Symbol.asyncIterator]();
+    await first.sendMessage('Use the source reference.');
+    await until(initial, event => event.type === 'turn_completed');
+    expect(calls).toBe(1);
+    const handle = (await first.runtimeInfo()).persistence!;
+    const page = await f.provider().readSessionHistory(handle.sessionId, { limit: 2 });
+    expect(page.entries.some(entry => entry.text.includes('ANSWER_RECEIVED'))).toBe(true);
+    await first.dispose();
+    await stop(f.daemon); await f.restartDaemon();
+    const coldSearch = await f.provider().readSessionHistory(sourceId, { query: 'amber river', limit: 1 });
+    expect(coldSearch.entries[0]?.text).toContain('amber river');
+    const resumed = await f.provider().resumeSession(handle, { tools }); f.sessions.push(resumed);
+    const stream = resumed.observe()[Symbol.asyncIterator]();
+    while ((await stream.next()).value?.type !== 'history_boundary') { /* Drain saved history. */ }
+    await resumed.sendMessage('Use the source reference again.');
+    await until(stream, event => event.type === 'turn_completed');
+    expect(calls).toBe(2);
+  } finally { await f.close(); }
+}, 30_000);

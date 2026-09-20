@@ -288,7 +288,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           message: 'Relay request could not be completed.', recoverable: true,
         });
       }
-      throw new Error('Relay request failed.');
+      throw new RemoteOperationError('network_error', 'Could not reach the Relay. Check your connection and try again.', true);
     }
     if (options?.signal?.aborted) throw new Error('Relay request was retired.');
     let body: string;
@@ -308,13 +308,10 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     if (decoded.status === 'ok' && decoded.value.type === 'protocol_error') {
       this.observe({ direction: 'inbound', channel: 'http', message: decoded.value });
       this.throwProtocolError(decoded.value);
-    } else {
-      this.diagnostic({
-        source: 'http', code: 'request_failed',
-        message: `Relay request failed with HTTP ${response.status}.`, recoverable: response.status >= 500,
-      });
     }
-    throw new Error('Relay request failed.');
+    const failure = httpFailure(response.status, body);
+    this.diagnostic({ source: 'http', code: failure.code, message: failure.message, recoverable: failure.recoverable });
+    throw failure;
   }
 
   private httpUrl(path: string): string {
@@ -412,4 +409,23 @@ function waitForAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T
     signal.addEventListener('abort', onAbort, { once: true });
     operation.then((value) => finish(undefined, value), (error) => finish(error));
   });
+}
+
+function httpFailure(status: number, body: string): RemoteOperationError {
+  let detail: { code?: unknown; error?: unknown; requestId?: unknown } | undefined;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (value && typeof value === 'object' && !Array.isArray(value)) detail = value;
+  } catch { /* Proxy HTML is not a user-facing diagnostic. */ }
+  const fallback = status === 401 ? 'Sign in again to read this session.'
+    : status === 403 ? 'Access to this session is unavailable.'
+    : status === 413 ? 'The requested data exceeds the Relay transfer limit.'
+    : 'The Relay could not complete this request.';
+  return new RemoteOperationError(
+    typeof detail?.code === 'string' && detail.code ? detail.code : `http_${status}`,
+    typeof detail?.error === 'string' && detail.error.trim() && detail.error !== 'Relay request failed.'
+      ? detail.error : `${fallback} (HTTP ${status})`,
+    status >= 500 || status === 408 || status === 429,
+    typeof detail?.requestId === 'string' ? detail.requestId : undefined,
+  );
 }

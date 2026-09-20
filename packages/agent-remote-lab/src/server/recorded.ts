@@ -1,3 +1,4 @@
+import type { AgentHistoryQuery, AgentHistoryPage } from '@agent-remote-controller/agent-provider-sdk';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type {
@@ -59,6 +60,7 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
   };
   const provider: AgentProviderAdapter = {
     descriptor: { providerId: PROVIDER_ID, displayName: 'Recorded semantic Provider' },
+    async readSessionHistory(id, query) { return requireSession(sessions, id).historyPage(query); },
     async createSession(config) {
       return openSession(config);
     },
@@ -100,6 +102,7 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
 }
 
 class RecordedLabSession implements AgentSession {
+  private readonly history: Array<{ id: string; turnId: string; role: string; text: string }> = [];
   private readonly stream = new AsyncQueue<ProviderStreamItem>();
   private readonly pending = new Map<string, AgentInteractionRequest>();
   private nextSource = 100;
@@ -122,12 +125,26 @@ class RecordedLabSession implements AgentSession {
     private readonly deferSteerObservation: boolean,
     private readonly onDispose: () => void,
   ) {
-    for (const observation of recordedHistory(sessionId)) this.stream.push(observation);
+    for (const observation of recordedHistory(sessionId)) { this.remember(observation.event); this.stream.push(observation); }
     this.stream.push({ type: 'history_boundary' });
   }
 
   observe(): AsyncIterable<ProviderStreamItem> {
     return this.stream;
+  }
+
+  historyPage(query: AgentHistoryQuery): AgentHistoryPage {
+    const entries = this.history.filter(entry => !query.query || entry.text.toLowerCase().includes(query.query.toLowerCase())).slice().reverse();
+    const offset = Number(query.cursor ?? 0), limit = query.limit ?? 5, textOffset = query.textOffset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid recorded cursor.');
+    return { entries: entries.slice(offset, offset + limit).map(entry => ({ ...entry, text: entry.text.slice(textOffset, textOffset + 6000), totalChars: entry.text.length, textOffset })),
+      ...(entries.length > offset + limit ? { nextCursor: String(offset + limit) } : {}) };
+  }
+
+  private remember(event: AgentStreamEvent): void {
+    if (event.type !== 'timeline' || !['user_message', 'assistant_message'].includes(event.item.type)) return;
+    const item = event.item;
+    if (item.type === 'user_message' || item.type === 'assistant_message') this.history.push({ id: String(this.history.length), turnId: 'recorded-turn', role: item.type, text: item.text });
   }
 
   async sendMessage(text: string): Promise<void> {
@@ -285,6 +302,7 @@ class RecordedLabSession implements AgentSession {
   }
 
   private emit(event: AgentStreamEvent): void {
+    this.remember(event);
     this.stream.push({
       type: 'observation',
       sourceKey: `recorded-live-${this.nextSource++}`,

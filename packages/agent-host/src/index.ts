@@ -9,3 +9,5 @@ export * from './copilot-directory.js';
 export * from './execution-policy.js';
 
 export * from './workspace-folders.js';
+
+export * from './session-reference.js';

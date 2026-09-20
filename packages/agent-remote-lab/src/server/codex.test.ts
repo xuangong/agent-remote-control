@@ -116,6 +116,7 @@ describe('Codex Lab composition', () => {
           providerId: 'codex',
           native: { name: 'codex-cli', version: overrides.codexVersion ?? '0.148.0', revision: null },
           degradations: [
+            { capability: 'sessions.source-reference', status: 'degraded', reason: 'Source references require Codex 0.155.0 or newer.' },
             { capability: 'interactions.form.schema', status: 'degraded', reason: 'Bounded flat schemas only.' },
             { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Native requests are process-local.' },
             { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Parent summary only.' },

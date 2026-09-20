@@ -399,7 +399,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   async function mutate(host: Host, action: string, body: Record<string, unknown>, creatorSubject?: string): Promise<Binding> {
     const providerId = host.legacyDsh ? 'dsh' : required(body.providerId, 'providerId');
     if (!host.providers.some((provider) => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-    if (host.legacyDsh && action === 'create' && ['cwd', 'model', 'reasoningEffort', 'planning'].some((key) => body[key] !== undefined)) {
+    if (host.legacyDsh && action === 'create' && ['cwd', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId'].some((key) => body[key] !== undefined)) {
       throw new BrokerError(400, 'unsupported_configuration', 'This Host uses native model settings and a registered workspace.');
     }
     if (host.legacyDsh && action === 'child/attach') throw new BrokerError(400, 'unsupported_operation', 'This Host does not support native child attachment.');
@@ -418,7 +418,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           ? { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) }
           : action === 'create'
             ? { providerId, operationId: required(body.operationId, 'operationId'),
-                ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) }
+                ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId']) }
             : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
         const result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
@@ -476,7 +476,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       await recoverBinding(host, binding); return binding;
     }
     const fingerprint = JSON.stringify({ providerId, cwd: body.cwd ?? null, workspaceId: body.workspaceId ?? null,
-      model: body.model ?? null, reasoningEffort: body.reasoningEffort ?? null, planning: body.planning ?? null });
+      model: body.model ?? null, reasoningEffort: body.reasoningEffort ?? null, planning: body.planning ?? null, ...(body.sourceNativeSessionId === undefined ? {} : { sourceNativeSessionId: body.sourceNativeSessionId }) });
     let existing = creations.get(key);
     if (existing && existing.fingerprint !== fingerprint) throw new BrokerError(409, 'request_conflict', 'This request identity was already used with different settings.');
     if (!existing) {
@@ -499,6 +499,13 @@ export function createHostBroker(options: HostBrokerOptions) {
     await recoverBinding(host, binding); return binding;
   }
   async function userMutation(host: Host, action: string, body: Record<string, unknown>, subject?: string): Promise<Binding> {
+    if (action === 'create' && body.sourceNativeSessionId !== undefined) {
+      requireAccess(host.id, subject);
+      const sourceId = required(body.sourceNativeSessionId, 'sourceNativeSessionId');
+      const providerId = required(body.providerId, 'providerId');
+      const source = nativeBindings.get(JSON.stringify([host.id, providerId, sourceId]));
+      if (!source || !sessionAllowed(source, subject)) throw new SharingError(403, 'session_forbidden', 'Source session access is unavailable. Open an accessible source session first.');
+    }
     if (owner(subject)) return mutate(host, action, body);
     requireAccess(host.id, subject);
     const providerId = host.legacyDsh ? 'dsh' : required(body.providerId, 'providerId');
@@ -526,9 +533,9 @@ export function createHostBroker(options: HostBrokerOptions) {
       throw new SharingError(403, 'session_forbidden', 'Only your own sessions can be attached.');
     }
     if (!host.providers.some(provider => provider.providerId === providerId)) throw new SharingError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-    if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
+    if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
     const operationId = required(body.operationId, 'operationId');
-    const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning']) });
+    const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId']) });
     const reservation = await changeSharing(draft => draft.reserve(host.id, subject!, providerId, operationId, fingerprint));
     if (!reservation.fresh) {
       const completedId = reservation.agentId ?? completedCreations.get(JSON.stringify([host.id, providerId, reservation.nativeRequestId]))?.agentId;

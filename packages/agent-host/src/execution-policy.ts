@@ -56,6 +56,12 @@ function protectedInfo(info: AgentRuntimeInfo, policy: HostExecutionPolicy): Age
     setting.category === 'permissions' ? { ...setting, mutable: false, description: 'Locked by local Host execution policy.' } : setting) };
 }
 export function protectHostDirectory(directory: AgentHostDirectory, policy: HostExecutionPolicy): AgentHostDirectory {
+  const checkSource = async (id: string) => {
+    const workspace = directory.sessionWorkspace ? await directory.sessionWorkspace(id)
+      : (await directory.list()).find(entry => entry.nativeSessionId === id)?.workspace;
+    await allowedWorkspace(policy, workspace);
+  };
+  directory.setSourceAccessCheck?.(checkSource);
   const sessions = new WeakMap<AgentSession, AgentSession>();
   async function protect(session: AgentSession): Promise<AgentSession> {
     try { await allowedWorkspace(policy, (await session.runtimeInfo()).cwd); }
@@ -87,6 +93,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   }
   return {
     providerId: directory.providerId,
+    supportsSourceReferences: directory.supportsSourceReferences,
     async list() {
       const entries = await directory.list();
       return (await Promise.all(entries.map(async entry => {
@@ -103,6 +110,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       const selected = input.workspaceId === undefined ? undefined : (await directory.workspaces()).find(workspace => workspace.id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new HostExecutionPolicyError('Unknown local Host workspace.');
       const cwd = await allowedWorkspace(policy, input.cwd ?? selected?.path ?? policy.defaultWorkspace);
+      if (input.sourceNativeSessionId) await checkSource(input.sourceNativeSessionId);
       return directory.create({ ...input, cwd });
     },
     async open(nativeSessionId) {

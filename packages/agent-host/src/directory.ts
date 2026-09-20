@@ -1,16 +1,24 @@
+import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { CodexAppServerProvider, CodexSessionSummary } from '@agent-remote-controller/agent-provider-codex';
-import type { AgentPersistenceHandle, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@agent-remote-controller/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'readSessionHistory' | 'readSessionWorkspace'>>,
   workspaces: readonly AgentHostWorkspace[],
+  references?: SessionReferenceStore,
 ): AgentHostDirectory {
   const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string }>();
   let discovery: Promise<CodexSessionSummary[]> | undefined;
   let closed = false;
+  let sourceAccessCheck: ((nativeSessionId: string) => Promise<void>) | undefined;
+  async function readSource(id: string, query: AgentHistoryQuery) {
+    if (closed) throw new Error('Codex directory is closed.');
+    await sourceAccessCheck?.(id);
+    return provider.readSessionHistory!(id, query);
+  }
   async function discover(): Promise<CodexSessionSummary[]> {
     const summaries = new Map<string, CodexSessionSummary>();
     let cursor: string | undefined;
@@ -46,6 +54,9 @@ export function createCodexSessionDirectory(
   }
   return {
     providerId: 'codex',
+    supportsSourceReferences: !!references && !!provider.readSessionHistory,
+    ...(provider.readSessionWorkspace ? { sessionWorkspace: provider.readSessionWorkspace.bind(provider) } : {}),
+    setSourceAccessCheck(check) { sourceAccessCheck = check; },
     list() { if (closed) throw new Error('Codex directory is closed.'); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
     async create(input) {
@@ -53,13 +64,29 @@ export function createCodexSessionDirectory(
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(({ id }) => id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new Error('Unknown Codex workspace.');
       const cwd = input.cwd ?? selected?.path ?? workspaces[0]?.path;
-      return remember(await provider.createSession({ ...input, sessionId: randomUUID(), ...(cwd ? { cwd } : {}) }));
+      const { sourceNativeSessionId, ...config } = input;
+      if (sourceNativeSessionId && (!references || !provider.readSessionHistory)) throw new Error('Source references are unavailable on this Host.');
+      const extensions = sourceNativeSessionId ? sourceSessionExtensions(sourceNativeSessionId, readSource) : {};
+      const systemPrompt = [config.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n');
+      const session = await provider.createSession({ ...config, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
+        ...(systemPrompt ? { systemPrompt } : {}) });
+      const id = await remember(session);
+      if (sourceNativeSessionId) {
+        try { await references!.set({ sourceNativeSessionId, systemPrompt, handle: opened.get(id)!.handle }); }
+        catch (error) { opened.delete(id); await session.dispose(); throw error; }
+      }
+      return id;
     },
     async open(nativeSessionId) {
       if (closed) throw new Error('Codex directory is closed.');
       const existing = opened.get(nativeSessionId);
       if (existing && (await existing.session.runtimeInfo()).status !== 'closed') return existing.session;
-      const session = await provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' });
+      const grant = await references?.get(nativeSessionId);
+      if (grant && !provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
+      const extensions = grant ? sourceSessionExtensions(grant.sourceNativeSessionId, readSource) : undefined;
+      // Let native saved settings win after a Host restart; only restore Host instructions and tools.
+      const session = await provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
+        extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : undefined);
       await remember(session); return session;
     },
     async openChild(parentNativeSessionId, nativeSessionId) {

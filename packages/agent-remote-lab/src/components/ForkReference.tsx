@@ -13,11 +13,13 @@ export function ForkReference({ fork, onOpen }: { fork: SessionFork; onOpen(sess
     </summary>
     <div className="lab-fork-reference-details">
       <strong>Context from {fork.source.title}</strong>
+      {fork.mode === 'reference' ? <p>Source reference · Read on demand. New source messages may be read.</p> : <>
       <p>Fixed snapshot · {fork.itemCount} items · {new Date(fork.capturedAt).toLocaleString()}</p>
       <p>Later source messages are not included.</p>
       {fork.shortenedToolCount ? <p>{fork.shortenedToolCount} tool records shortened. User and assistant messages are preserved.</p> : null}
-      <code>{fork.source.nativeSessionId}</code>
       <small>Boundary {fork.boundary.epoch} / {fork.boundary.seq}</small>
+      </>}
+      <code>{fork.source.nativeSessionId}</code>
       <button type="button" onClick={() => onOpen(fork.source)}>Open source session</button>
     </div>
   </details>;

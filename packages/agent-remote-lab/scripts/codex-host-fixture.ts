@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { createAgentHost, createCodexSessionDirectory } from '@agent-remote-controller/agent-remote-controller';
+import { join } from 'node:path';
+import { SessionReferenceStore, createAgentHost, createCodexSessionDirectory } from '@agent-remote-controller/agent-remote-controller';
 import { createCodexProviderFixture } from '../src/server/codex.js';
 
 const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE;
@@ -20,7 +21,7 @@ const invitation = await pair();
 const fixture = await createCodexProviderFixture({ executable });
 const directory = createCodexSessionDirectory(fixture.directoryProvider, [
   { id: fixture.workspace, name: 'Deterministic Codex workspace', path: fixture.workspace },
-]);
+], new SessionReferenceStore(join(fixture.workspace, '.references')));
 const host = createAgentHost({
   registrations: [{ adapter: fixture.provider, directory }], installationId: 'e2e-codex-host',
   name: 'Deterministic Codex Host', uplink: { url: `${serverUrl.replace('http:', 'ws:')}/ws/remote-host`, remoteKey: invitation.key },

@@ -408,6 +408,14 @@ export class CodexEventProjector {
     }
     if (type === 'commandExecution') return this.mapCommand(item, lifecycle);
     if (type === 'fileChange') return this.mapFileChange(item, lifecycle);
+    if (type === 'dynamicToolCall') {
+      const result = codexToolResult(item);
+      const status = item.success === false ? 'failed' : normalizeStatus(item.status, lifecycle);
+      const name = readString(item.tool) ?? 'session_tool';
+      const error = status === 'failed' ? result?.content.find(part => part.type === 'text') : undefined;
+      return this.toolItem(id, name, status, { type: 'other', description: `Session tool ${name}` },
+        error?.type === 'text' ? error.text : undefined, result);
+    }
     if (type === 'mcpToolCall') return this.mapMcpTool(item, lifecycle);
     if (type === 'webSearch') return this.mapWebSearch(item, lifecycle);
     if (type === 'collabAgentToolCall' || type === 'subAgentActivity') return this.mapAgentActivity(item, lifecycle);

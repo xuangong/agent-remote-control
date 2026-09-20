@@ -1,3 +1,5 @@
+import type { AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@agent-remote-controller/agent-provider-sdk';
+import { readSessionHistoryPage } from './reference-history.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -13,7 +15,7 @@ import type {
 import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
 
 import { CodexAppServerTransport, CodexTransportUnavailableError, CodexRequestTimeoutError } from './app-server-transport.js';
-import { spawnCodexAppServer } from './native.js';
+import { isRecord, readString, spawnCodexAppServer } from './native.js';
 import { CodexAppServerSession } from './session.js';
 import { initializeCodexTransport } from './initialize.js';
 import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
@@ -79,12 +81,12 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     }
   }
 
-  async resumeSession(handle: AgentPersistenceHandle): Promise<AgentSession> {
+  async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
     const cwd = readPersistenceCwd(handle.opaque);
     const transport = await this.createTransport(cwd);
     try {
       const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative,
-        this.sharedRecoveryPlan(cwd));
+        this.sharedRecoveryPlan(cwd), extensions);
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
@@ -92,6 +94,24 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       await transport.dispose();
       throw runtimeError(error);
     }
+  }
+
+  async readSessionWorkspace(nativeSessionId: string): Promise<string | undefined> {
+    const transport = await this.createTransport();
+    try {
+      await initializeCodexTransport(transport);
+      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false });
+      if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== nativeSessionId) throw new Error('Source session metadata is unavailable.');
+      return readString(response.thread.cwd);
+    } catch (error) { throw runtimeError(error); } finally { await transport.dispose(); }
+  }
+
+  async readSessionHistory(nativeSessionId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage> {
+    const transport = await this.createTransport();
+    try {
+      await initializeCodexTransport(transport);
+      return await readSessionHistoryPage(transport, nativeSessionId, query);
+    } catch (error) { throw runtimeError(error); } finally { await transport.dispose(); }
   }
 
   async openChildSession(parentNativeSessionId: string, childNativeSessionId: string): Promise<AgentSession> {

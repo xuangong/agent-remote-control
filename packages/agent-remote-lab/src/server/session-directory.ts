@@ -1,4 +1,4 @@
-import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@agent-remote-controller/agent-remote-controller';
+import { sourceSessionExtensions, browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@agent-remote-controller/agent-remote-controller';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@agent-remote-controller/dsh';
@@ -8,10 +8,11 @@ import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
 export interface SessionDirectorySource {
   providerId: string;
+  supportsSourceReferences?: boolean;
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
   workspaces(): unknown;
   models?(): unknown;
-  create(input: Partial<AgentSessionConfig> & { workspaceId?: string }): Promise<string>;
+  create(input: Partial<AgentSessionConfig> & { workspaceId?: string; sourceNativeSessionId?: string }): Promise<string>;
   open(nativeSessionId: string): Promise<AgentSession>;
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close?(): Promise<void>;
@@ -142,10 +143,11 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           if (url.pathname === '/v1/remote/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId')));
           if (url.pathname === '/v1/remote/create') {
             const operationId = required(body.operationId, 'operationId');
-            const config: Partial<AgentSessionConfig> & { workspaceId?: string } = {};
-            for (const key of ['cwd', 'workspaceId', 'model', 'reasoningEffort'] as const) {
+            const config: Partial<AgentSessionConfig> & { workspaceId?: string; sourceNativeSessionId?: string } = {};
+            for (const key of ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'sourceNativeSessionId'] as const) {
               if (body[key] !== undefined) config[key] = required(body[key], key);
             }
+            if (config.sourceNativeSessionId && !source.supportsSourceReferences) throw new DirectoryError(400, 'unsupported_configuration', 'This Host/provider does not support source-session tools. Update the Host or use /fork.');
             if (body.planning !== undefined) {
               if (typeof body.planning !== 'boolean') throw new DirectoryError(400, 'invalid_request', 'planning must be boolean.');
               config.planning = body.planning;
@@ -174,6 +176,7 @@ function localSource(provider: AgentProviderAdapter): SessionDirectorySource {
   if (providerId === 'recorded') sessions.set('recorded-welcome', { config: { sessionId: 'recorded-welcome' }, createdAt: new Date().toISOString() });
   return {
     providerId,
+    supportsSourceReferences: !!provider.readSessionHistory,
     list: () => [...sessions].map(([nativeSessionId, { config, createdAt }]) => ({
       nativeSessionId, providerId, title: nativeSessionId === 'recorded-welcome' ? 'Recorded welcome session' : nativeSessionId,
       workspace: config.cwd, model: config.model, createdAt, updatedAt: createdAt, state: 'idle',
@@ -182,7 +185,10 @@ function localSource(provider: AgentProviderAdapter): SessionDirectorySource {
     async create(input) {
       if (input.workspaceId !== undefined) throw new DirectoryError(400, 'invalid_request', 'This Provider uses a workspace path.');
       const sessionId = randomUUID();
-      sessions.set(sessionId, { config: { ...input, sessionId }, createdAt: new Date().toISOString() });
+      const { sourceNativeSessionId, ...config } = input;
+      if (sourceNativeSessionId && !sessions.has(sourceNativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The source session is unavailable.');
+      const extensions = sourceNativeSessionId && provider.readSessionHistory ? sourceSessionExtensions(sourceNativeSessionId, provider.readSessionHistory.bind(provider)) : {};
+      sessions.set(sessionId, { config: { ...config, ...extensions, sessionId }, createdAt: new Date().toISOString() });
       return sessionId;
     },
     async open(sessionId) {

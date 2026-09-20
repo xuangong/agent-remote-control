@@ -673,3 +673,29 @@ it('allows bounded image chunks without consuming the session control message bu
   await Promise.resolve();
   expect(browser.native.closeCode).toBe(1008);
 }, 10_000);
+
+it('authorizes source references before quota reservation and binds create identity to the source', async () => {
+  const state = structuredClone(restoredState);
+  state.bindings.push({ hostId: 'host', providerId: 'codex', nativeSessionId: 'bob-source', agentId: 'bob-agent', creatorSubject: 'bob' });
+  const { broker, native } = await restoredFixture({ initialState: state, ownerSubject: 'alice' });
+  await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 2);
+  const calls: any[] = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data); if (message.type !== 'rpc_request') return;
+    calls.push(message);
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: JSON.stringify({ agentId: 'side-agent', nativeSessionId: 'side-native' }) }));
+  });
+  const create = (sourceNativeSessionId: unknown, subject = 'bob') => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId: 'codex', operationId: operationOne, sourceNativeSessionId }),
+  }), { principalSubject: () => subject });
+  expect((await create('native-session'))?.status).toBe(403);
+  expect((await create('unknown'))?.status).toBe(403);
+  expect(calls).toHaveLength(0);
+  expect(await broker.manageShares('alice', 'host', 'shares')).toMatchObject({ shares: [{ subject: 'bob', used: 0 }] });
+  expect((await create('bob-source'))?.status).toBe(200);
+  expect(JSON.parse(calls[0].body)).toMatchObject({ sourceNativeSessionId: 'bob-source' });
+  expect((await create('bob-source'))?.status).toBe(200);
+  expect(calls).toHaveLength(1);
+  expect((await create('side-native'))?.status).toBe(409);
+});

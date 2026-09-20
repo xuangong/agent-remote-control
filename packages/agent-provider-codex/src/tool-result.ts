@@ -15,6 +15,11 @@ export function codexToolResult(item: JsonObject): AgentToolResult | undefined {
     if (changes.every((change): change is AgentFileChange => change !== undefined)) return fileChangesResult(changes);
     return boundToolResult({ content: [{ type: 'json', value: item.changes as AgentToolResultJson }] });
   }
+  if (item.type === 'dynamicToolCall') {
+    const content: AgentToolResultContent[] = Array.isArray(item.contentItems) ? item.contentItems.flatMap(value =>
+      isRecord(value) && value.type === 'inputText' && typeof value.text === 'string' ? [{ type: 'text' as const, text: value.text }] : []) : [];
+    return content.length ? boundToolResult({ content, ...(typeof item.durationMs === 'number' && item.durationMs >= 0 ? { durationMs: item.durationMs } : {}) }) : undefined;
+  }
   if (item.type === 'mcpToolCall') {
     const result = item.result;
     const content: AgentToolResultContent[] = [];

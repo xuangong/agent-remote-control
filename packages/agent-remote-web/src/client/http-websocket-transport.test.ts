@@ -189,6 +189,28 @@ describe('HttpWebSocketTransport', () => {
     });
   });
 
+  it('preserves hosted Relay errors while reading fork history', async () => {
+    const transport = new HttpWebSocketTransport('https://relay.test', {
+      fetch: async () => Response.json({ code: 'host_read_timeout', error: 'The Host did not return the requested data before the Relay deadline. Try reading it again.', requestId: 'history-read' }, { status: 504 }),
+      WebSocket: FakeWebSocket,
+    });
+    await expect(transport.fetchTimeline('source', 'tail', undefined, 20_000)).rejects.toMatchObject({
+      name: 'RemoteOperationError', code: 'host_read_timeout', requestId: 'history-read',
+      message: 'The Host did not return the requested data before the Relay deadline. Try reading it again.',
+    });
+  });
+
+  it.each([401, 403, 413, 502])('identifies HTTP %s failures without displaying a proxy HTML page', async status => {
+    const transport = new HttpWebSocketTransport('https://relay.test', {
+      fetch: async () => new Response('<html>Internal proxy details</html>', { status }),
+      WebSocket: FakeWebSocket,
+    });
+    await expect(transport.fetchTimeline('source', 'tail')).rejects.toMatchObject({
+      name: 'RemoteOperationError', code: `http_${status}`, message: expect.stringContaining(`HTTP ${status}`),
+    });
+    await expect(transport.fetchTimeline('source', 'tail')).rejects.not.toThrow('Internal proxy details');
+  });
+
   it('encodes client values and decodes server values across the WebSocket boundary', () => {
     const sockets: FakeWebSocket[] = [];
     const messages: string[] = [];

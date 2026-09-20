@@ -340,3 +340,13 @@ describe('CodexEventProjector', () => {
     expect(item.event.item.message.length).toBeLessThanOrEqual(640);
   });
 });
+
+it.each([true, false])('renders source tool completion and history using normalized tool results (success=%s)', success => {
+  const projector = new CodexEventProjector('thread-1');
+  const item = { type: 'dynamicToolCall', id: 'source-read', tool: 'read_source_session', arguments: { limit: 2 }, status: 'completed', success,
+    contentItems: [{ type: 'inputText', text: success ? 'Source excerpt' : 'Source unavailable' }], durationMs: 12 };
+  for (const observation of [projector.projectNotification('item/completed', { threadId: 'thread-1', turnId: 'turn', item }), projector.projectHistoryItem(item, 'turn')]) {
+    expect(observation?.event).toMatchObject({ type: 'timeline', item: { type: 'tool_call', name: 'read_source_session', status: success ? 'completed' : 'failed',
+      result: { content: [{ type: 'text', text: success ? 'Source excerpt' : 'Source unavailable' }] } } });
+  }
+});

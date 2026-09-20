@@ -68,7 +68,7 @@ export class CodexDaemonClient {
     transport.setTerminationHandler(error => {
       if (generation === this.generation) this.handleTermination(error, generation);
     });
-    for (const method of ['item/tool/requestUserInput', 'tool/requestUserInput', 'item/commandExecution/requestApproval',
+    for (const method of ['item/tool/call', 'item/tool/requestUserInput', 'tool/requestUserInput', 'item/commandExecution/requestApproval',
       'item/fileChange/requestApproval', 'mcpServer/elicitation/request', 'item/permissions/requestApproval']) {
       transport.setRequestHandler(method, async (params, id) => {
         if (generation !== this.generation) throw new CodexServerRequestCanceled('Codex request belongs to an old connection');

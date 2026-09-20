@@ -90,6 +90,7 @@ describe('Agent Remote compatibility manifest', () => {
   it.each([
     ['thread name metadata', { omitCodexThreadName: true }],
     ['command terminal interaction', { omitCodexTerminalInteraction: true }],
+    ['source reference version requirement', { omitCodexSourceReference: true }],
   ] as const)('requires the evidenced Codex %s degradation', (_name, overrides) => {
     process.env[manifestEnvironment] = writeManifest(validManifest(overrides));
 
@@ -199,6 +200,7 @@ function validManifest(overrides: {
   omitDshUnknownSource?: boolean;
   omitCodexThreadName?: boolean;
   omitCodexTerminalInteraction?: boolean;
+  omitCodexSourceReference?: boolean;
   codexFormStatus?: 'unsupported' | 'degraded';
   duplicateDshTitle?: boolean;
   extraCodexDegradation?: boolean;
@@ -219,6 +221,9 @@ function validManifest(overrides: {
     }] : []),
   ];
   const codexDegradations = overrides.emptyCodexDegradations ? [] : [
+    ...(!overrides.omitCodexSourceReference ? [{
+      capability: 'sessions.source-reference', status: 'degraded', reason: 'Source references require Codex 0.155.0 or newer.',
+    }] : []),
     { capability: 'interactions.form.schema', status: overrides.codexFormStatus ?? 'degraded', reason: 'Bounded flat schemas only.' },
     { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Native requests are process-local.' },
     { capability: 'events.subagent.navigation', status: 'degraded', reason: 'Parent summary only.' },

@@ -129,3 +129,19 @@ it('captures normalized session references as bounded context without treating t
   const context = await captureForkContext({ fetchTimeline: async () => page([tool]) }, source);
   expect(JSON.parse(JSON.parse(context.text)[0].text).detail.sessionReference).toBe(JSON.stringify(reference));
 });
+
+it('stores lightweight source references and sends only reference metadata with the first question', async () => {
+  const { referenceForkContext } = await import('./session-forks.js');
+  const store = new ForkStore('reference');
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  store.bind(record.id, { ...source, nativeSessionId: 'side', agentId: 'side-agent' });
+  const restored = new ForkStore('reference').get(record.id);
+  expect(restored.mode).toBe('reference');
+  expect('text' in restored).toBe(false);
+  const send = vi.fn(async (_text: string) => {});
+  await store.send(record.id, 'What changed?', send, async () => false);
+  expect(send.mock.calls[0]![0]).toBe(contextPrefix(record) + 'What changed?');
+  expect(contextPrefix(record)).toContain('native-parent');
+  expect(contextPrefix(record)).not.toContain('history');
+  expect(JSON.stringify(restored).length).toBeLessThan(1000);
+});

@@ -33,6 +33,7 @@ const requiredDegradations: Record<
     { capability: 'events.compaction.failure', status: 'degraded' },
   ],
   codex: [
+    { capability: 'sessions.source-reference', status: 'degraded' },
     { capability: 'interactions.form.schema', status: 'degraded' },
     { capability: 'interactions.restart-recovery', status: 'degraded' },
     { capability: 'events.subagent.navigation', status: 'degraded' },

@@ -57,7 +57,7 @@ import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
-import { captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
+import { referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
 import { CollapsedConversations } from './components/CollapsedConversations.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
@@ -835,7 +835,7 @@ function AppContent({
       if (!record) {
         const quota = remoteHosts.find((host) => host.id === source.hostId)?.sessionQuota;
         if (quota && quota.used >= quota.limit) throw new Error('Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.');
-        const context = await captureForkContext(transport, source);
+        const context = id === 'console:side' ? referenceForkContext(source) : await captureForkContext(transport, source);
         const settings = (agent.runtimeInfo.settings ?? []).filter((setting) => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
         let options: CreateSessionOptions;
         if ((source.hostId ?? 'local') !== 'local' && source.providerId === 'dsh') {
@@ -845,6 +845,7 @@ function AppContent({
           options = workspace ? { workspaceId: workspace.id } : {};
         } else options = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}),
           ...(agent.capabilities.planning && source.providerId !== 'dsh' ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
+        if (context.mode === 'reference') options.sourceNativeSessionId = source.nativeSessionId;
         record = forkStore.prepare(context, options, settings, key);
         forkReservation.current = { key, record };
       }

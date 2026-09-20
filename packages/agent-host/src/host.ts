@@ -15,10 +15,13 @@ import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, c
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
   readonly providerId: string;
+  readonly supportsSourceReferences?: boolean;
+  sessionWorkspace?(nativeSessionId: string): Promise<string | undefined>;
+  setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
   workspaces(): Promise<readonly AgentHostWorkspace[]> | readonly AgentHostWorkspace[];
   models?(): Promise<unknown> | unknown;
-  create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string }): Promise<string>;
+  create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string; sourceNativeSessionId?: string }): Promise<string>;
   open(nativeSessionId: string): Promise<AgentSession>;
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close(): Promise<void> | void;
@@ -239,7 +242,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const operationId = string(payload.operationId, 'operationId');
     const proposedAgentId = request.sessionId;
     if (!proposedAgentId) throw new HostRequestError(400, 'invalid_request', 'A proposed Agent identity is required.');
+    if (payload.sourceNativeSessionId !== undefined && (typeof payload.sourceNativeSessionId !== 'string' || !payload.sourceNativeSessionId || payload.sourceNativeSessionId.length > 256)) throw new HostRequestError(400, 'invalid_request', 'Source session identity is invalid.');
     const settings = {
+      ...(typeof payload.sourceNativeSessionId === 'string' ? { sourceNativeSessionId: payload.sourceNativeSessionId } : {}),
       ...(typeof payload.cwd === 'string' ? { cwd: payload.cwd } : {}),
       ...(typeof payload.workspaceId === 'string' ? { workspaceId: payload.workspaceId } : {}),
       ...(typeof payload.model === 'string' ? { model: payload.model } : {}),
@@ -255,6 +260,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }, {
       validate: async () => {
         const directory = registration(providerId).directory;
+        if (settings.sourceNativeSessionId && !directory.supportsSourceReferences) throw new HostRequestError(400, 'unsupported_configuration', 'This Host/provider does not support source-session tools. Update the Host or use /fork.');
         if (options.executionPolicy) {
           const selected = payload.workspaceId === undefined ? undefined
             : (await directory.workspaces()).find(workspace => workspace.id === payload.workspaceId);

@@ -8,6 +8,8 @@ Source audit: **2026-09-11**, initial implementation commit **`614d9fe`**, updat
 
 DSH means the live adapter **through the standalone DSH plugin**, currently `packages/agent-remote-dsh` (`@agent-remote-controller/dsh`). It does not mean Recorded fixtures, an uncompleted `plugins/dsh` move, or Borgee's separate integration. Codex, Claude and Copilot mean their adapters through Agent Host. Native product capabilities that have no exposed Remote path are not counted.
 
+Side conversations use a Host-authorized source reference with a native read-only tool and developer instructions on Codex 0.155.0 or newer. This extension was verified with an isolated Codex 0.155.1 daemon and a loopback model fixture, including paginated reads, search and tool restoration after daemon restart. It does not change the general 0.148.0 compatibility baseline. Other Providers and older Codex Hosts reject side references; `/fork` retains snapshot semantics. See [side conversations](lab.md#context-forks-and-side-conversations) for the permission and persistence boundaries.
+
 | Mark | Meaning |
 | --- | --- |
 | S — supported | The stated behavior is implemented within this row's scope. It does not mean full native-product parity. |

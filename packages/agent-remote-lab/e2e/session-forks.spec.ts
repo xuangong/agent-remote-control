@@ -73,6 +73,7 @@ test('fork keeps the source chat, side sends independently, and references survi
   expect(new Set(ids).size).toBe(ids.length);
   await side.getByTestId('prompt-input').fill('Retained side draft');
   await page.screenshot({ path: `../../.tmp/evidence/fork-side-${testInfo.project.name}.png`, fullPage: true });
+  if (testInfo.project.name === 'chromium-mobile') await toggleViewPanel(page, 'Header');
   await side.getByRole('button', { name: 'Close side conversation' }).click();
   await expect(side).toHaveCount(0);
   await entry.click();
@@ -116,8 +117,9 @@ test('forks a conversation with a large tool result and discloses shortened cont
       result: { content: [{ type: 'text', text: 'Build started\n' + 'x'.repeat(600_000) + '\nBuild succeeded' }], exitCode: 0 } } });
     await route.fulfill({ response, json: body });
   });
-  await primary.getByTestId('prompt-input').fill('/side Continue from that build');
+  await primary.getByTestId('prompt-input').fill('/fork Continue from that build');
   await primary.getByTestId('prompt-input').press('Enter');
+  await primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button').click();
   const side = page.getByRole('complementary', { name: 'Side conversation' });
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Continue from that build');
   await side.locator('.lab-fork-reference summary').click();
@@ -197,6 +199,7 @@ test('keeps a tree of side routes with stacked ancestors and independent drafts'
   await expect(e).toBeVisible();
   if (testInfo.project.name === 'chromium-desktop') await expect(c).toBeVisible();
   await expect(e.getByTestId('prompt-input')).toHaveValue('Draft on E');
+  if (testInfo.project.name === 'chromium-mobile') await toggleViewPanel(page, 'Header');
   await e.getByRole('button', { name: 'Close side conversation', exact: false }).click();
   await expect(c).toBeVisible();
   await expect(e).toBeHidden();
@@ -237,4 +240,32 @@ test('a slow sibling attachment does not override the latest side selection', as
   await expect(side.locator('.lab-side-title')).toContainText('Second branch');
   await side.getByTestId('prompt-input').fill('Still in the selected branch');
   await expect(side.getByTestId('prompt-input')).toHaveValue('Still in the selected branch');
+});
+
+
+test('side creates a lightweight source reference without capturing source history', async ({ page }) => {
+  const primary = await start(page);
+  const captures: string[] = [];
+  const creations: Record<string, unknown>[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/timeline') && url.searchParams.get('limit') === '20000') captures.push(request.url());
+    if (url.pathname.endsWith('/create') && request.method() === 'POST') creations.push(request.postDataJSON());
+  });
+  await primary.getByTestId('prompt-input').fill('/side Read background only when needed');
+  await primary.getByTestId('prompt-input').press('Enter');
+  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  await expect(side.locator('.agent-message-user').last()).toContainText('Read background only when needed');
+  expect(captures).toEqual([]);
+  expect(creations).toHaveLength(1);
+  expect(creations[0]?.sourceNativeSessionId).toBeTruthy();
+  await side.locator('.lab-fork-reference summary').click();
+  await expect(side.getByText('Source reference · Read on demand. New source messages may be read.')).toBeVisible();
+  await expect(side.getByTestId('timeline')).not.toContainText('source-session-reference');
+  const records = await page.evaluate(() => Object.keys(localStorage).filter(key => key.includes(':record:')).map(key => JSON.parse(localStorage.getItem(key)!)));
+  expect(records).toHaveLength(1);
+  expect(records[0].mode).toBe('reference');
+  expect(records[0].text).toBeUndefined();
+  await page.reload();
+  await expect(page.locator('.lab-primary-conversation .lab-fork-reference summary')).toBeVisible();
 });

@@ -50,12 +50,34 @@ export class AgentRuntimeError extends Error {
   }
 }
 
-export interface AgentSessionConfig {
+/** Host-owned tools are local callbacks, never accepted from public wire input. */
+export interface AgentSessionTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  execute(arguments_: unknown): Promise<string>;
+}
+export interface AgentSessionExtensions {
+  tools?: readonly AgentSessionTool[];
+  systemPrompt?: string;
+}
+export interface AgentHistoryQuery {
+  cursor?: string;
+  turnId?: string;
+  query?: string;
+  limit?: number;
+  textOffset?: number;
+}
+export interface AgentHistoryPage {
+  entries: Array<{ id: string; turnId: string; role: string; text: string; textOffset: number; totalChars: number }>;
+  nextCursor?: string;
+}
+
+export interface AgentSessionConfig extends AgentSessionExtensions {
   sessionId: string;
   cwd?: string;
   model?: string;
   reasoningEffort?: string;
-  systemPrompt?: string;
   planning?: boolean;
 }
 
@@ -63,7 +85,8 @@ export interface AgentProviderAdapter {
   readonly descriptor: AgentProviderDescriptor;
 
   createSession(config: AgentSessionConfig): Promise<AgentSession>;
-  resumeSession(handle: AgentPersistenceHandle): Promise<AgentSession>;
+  resumeSession(handle: AgentPersistenceHandle, extensions?: AgentSessionExtensions): Promise<AgentSession>;
+  readSessionHistory?(nativeSessionId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage>;
 }
 
 export interface AgentMessageOptions {

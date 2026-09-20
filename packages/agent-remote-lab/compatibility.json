@@ -103,7 +103,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:cfdd449c36a4cdb1678ececc35c0cac7655bac6312d3022cba32ce1209b5a896"
+      "digest": "sha256:e9a8ff408c8db53b8028e0fdbfce5fcaa2e0d16e5e1f4f4f4d1fc6ee64ef15f5"
     }
   },
   "providers": [
@@ -145,6 +145,11 @@
         "revision": null
       },
       "degradations": [
+        {
+          "capability": "sessions.source-reference",
+          "status": "degraded",
+          "reason": "Side references require Codex 0.155.0 or newer for native dynamic tools and paginated history/search. Older runtimes reject reference creation explicitly; snapshot forks remain available."
+        },
         {
           "capability": "events.thread/name",
           "status": "degraded",

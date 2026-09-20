@@ -1233,6 +1233,12 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-sidebar-account > .gateway-account-identity { flex: 1 0 100%; }
 @media (max-width: 1180px) {
   .lab-title-favorites .lab-session-popover-panel { position: fixed; top: calc(56px + env(safe-area-inset-top, 0px)); left: 12px; right: 12px; width: auto; }
+  .lab-favorite-list { display: grid; grid-template-columns: minmax(max-content, 1fr); max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+  .lab-favorite-list > li { display: flex; align-items: center; gap: 8px; padding-block: 2px; }
+  .lab-favorite-list .lab-session-row { flex: 1 0 auto; flex-direction: row; align-items: center; gap: 12px; width: auto; min-height: 44px; padding: 6px 8px; }
+  .lab-favorite-list strong, .lab-favorite-list small { flex: none; max-width: none; overflow: visible; white-space: nowrap; }
+  .lab-favorite-actions { position: sticky; right: 0; flex: none; margin-left: auto; padding-left: 6px; background: var(--obs-surface); }
+  .lab-favorite-actions > button { min-width: 44px; min-height: 44px; }
 }
 
 .lab-mobile-navigation .lab-mobile-side-path { flex: 0 0 58px; max-width: 58px; }

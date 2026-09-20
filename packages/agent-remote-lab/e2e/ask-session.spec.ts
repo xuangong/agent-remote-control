@@ -264,12 +264,12 @@ test('a question queued while Ask opens survives minimizing and reload', async (
   await expect(ask.locator('.agent-message-user').filter({ hasText: 'Keep this queued question' })).toHaveCount(1);
 });
 
-test('Ask uses a centered content-only window with an independent simple-view toggle', async ({ page }) => {
+test('Ask uses a content-only window with an independent simple-view toggle', async ({ page, isMobile }) => {
   await start(page);
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  await expect.poll(async () => {
+  if (isMobile) await expect.poll(async () => {
     const box = (await ask.boundingBox())!;
     return Math.abs(box.y + box.height / 2 - page.viewportSize()!.height / 2);
   }).toBeLessThan(2);
@@ -379,4 +379,80 @@ test('Ask observes activity while minimized, signals changes itself, and switche
   await page.reload();
   await expect(floating).toHaveAttribute('data-status', 'idle');
   await expect(ask).toHaveCount(0);
+});
+
+
+test('Ask reconciles a delayed standalone keyboard viewport after focus and resume', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { value: true }));
+  await start(page);
+  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+  const input = ask.getByTestId('prompt-input');
+  await input.fill('Standalone keyboard draft');
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event('focusin', { bubbles: true }));
+    // Standalone WebKit can publish the final dimensions after its event.
+    setTimeout(() => {
+      Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 360 });
+      Object.defineProperty(window.visualViewport!, 'offsetTop', { configurable: true, value: 120 });
+      Object.defineProperty(window.visualViewport!, 'scale', { configurable: true, value: 1.0000001 });
+    }, 100);
+  });
+  await expect.poll(async () => {
+    const box = (await ask.boundingBox())!;
+    return Math.round(box.y + box.height);
+  }).toBe(472);
+  await page.evaluate(() => {
+    Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 844 });
+    Object.defineProperty(window.visualViewport!, 'offsetTop', { configurable: true, value: 0 });
+    window.dispatchEvent(new Event('pageshow'));
+  });
+  await expect.poll(async () => {
+    const box = (await ask.boundingBox())!;
+    return Math.round(box.y + box.height / 2);
+  }).toBe(422);
+  await expect(input).toHaveValue('Standalone keyboard draft');
+});
+
+
+test('desktop Ask opens beside its moved button and flips above near the bottom', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop anchored overlay.');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await start(page);
+  const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
+  const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+  for (const target of [{ x: 600, y: 120 }, { x: 1300, y: 910 }]) {
+    const before = (await button.boundingBox())!;
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+    await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 8 }); await page.mouse.up();
+    const anchor = (await button.boundingBox())!;
+    await button.click();
+    await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+    await expect.poll(async () => {
+      const box = (await ask.boundingBox())!;
+      const expectedTop = target.y < 500 ? anchor.y + anchor.height + 8 : anchor.y - box.height - 8;
+      return Math.abs(box.y - expectedTop);
+    }).toBeLessThan(2);
+    const box = (await ask.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(12);
+    expect(box.x + box.width).toBeLessThanOrEqual(1428);
+    await ask.getByRole('button', { name: 'Minimize Ask' }).click();
+  }
+});
+
+
+test('desktop Ask keeps its controls visible in a wide short window', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop anchored overlay.');
+  await page.setViewportSize({ width: 1280, height: 450 });
+  await start(page);
+  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  await expect.poll(async () => {
+    const box = (await ask.boundingBox())!;
+    return box.y >= 0 && box.y + box.height <= 450;
+  }).toBe(true);
+  const send = (await ask.getByTestId('prompt-submit').boundingBox())!;
+  expect(send.y + send.height).toBeLessThanOrEqual(450);
 });

@@ -1,8 +1,9 @@
+import type { RefObject } from 'react';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { observationLabel, type SessionObservation } from '../tracking-state.js';
 
-export function AskButton({ observation, hidden, disabled, onOpen }: {
-  observation?: SessionObservation; hidden: boolean; disabled: boolean; onOpen(): void;
+export function AskButton({ observation, hidden, disabled, onOpen, triggerRef }: {
+  triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; hidden: boolean; disabled: boolean; onOpen(): void;
 }) {
   const { root, style, handlers } = useTrackingPosition('agent-remote-ask-position', '.lab-ask-trigger');
   const ready = observation?.connection === 'ready';
@@ -12,7 +13,7 @@ export function AskButton({ observation, hidden, disabled, onOpen }: {
   const label = observation ? observationLabel(observation) : 'Ask about this conversation';
   return <div className="lab-ask-floating" ref={root} style={style} {...handlers} data-hidden={hidden || undefined} aria-hidden={hidden || undefined}
     data-status={status} data-alert={alert}>
-    <button className="lab-ask-trigger" type="button" aria-label="Ask about this session" aria-haspopup="dialog" aria-expanded={hidden}
+    <button ref={triggerRef} className="lab-ask-trigger" type="button" aria-label="Ask about this session" aria-haspopup="dialog" aria-expanded={hidden}
       tabIndex={hidden ? -1 : undefined} disabled={disabled} onClick={onOpen}
       title={`${label}. Drag to move, or focus and use arrow keys`}>
       <span aria-hidden="true">?</span> Ask

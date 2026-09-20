@@ -132,6 +132,7 @@ function AppContent({
   userScoped = false,
 }: AppProps) {
   const shellRef = useVisualViewport();
+  const askTriggerRef = useRef<HTMLButtonElement>(null);
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl, { sessionChannels: true }) as LabTransport, [baseUrl, injectedTransport]);
@@ -924,9 +925,9 @@ function AppContent({
 
   return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {tracking.observers}
-    {addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
+    {addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
       observation={askEntry?.record?.target ? tracking.observations[sessionKey(askEntry.record.target)] : undefined} onOpen={() => openAsk()} />
-      {askVisible ? <AskConversation simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
+      {askVisible ? <AskConversation triggerRef={askTriggerRef} simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
       entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
       onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draft={ask.drafts[askKey!] ?? ''} onDraftChange={text => ask.setDraft(askKey!, text)} onClose={ask.close} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
       : null}</> : null}

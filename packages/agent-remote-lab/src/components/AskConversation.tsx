@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } from 'react';
 import type { AgentReplica, RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
 import { TimelineDisplay, type TimelineDisplayMode } from '@agent-remote-controller/agent-remote-web/react';
 import type { AskEntry, AskInput, AskInputSender } from '../hooks/useAskConversations.js';
@@ -6,14 +6,16 @@ import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { ForkStore, SessionFork } from '../session-forks.js';
 import { sessionActivity } from '../session-activity.js';
 import { sessionKey } from '../session-tree.js';
+import { useAskPosition } from '../hooks/useAskPosition.js';
 import { LabWorkbench } from './LabWorkbench.js';
 
-export function AskConversation({ entry, store, replica, transport, draft, onDraftChange, onClose, onClean, onRetry, onSendInput, simple, onToggleSimple }: {
-  entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
+export function AskConversation({ entry, store, replica, transport, draft, onDraftChange, onClose, onClean, onRetry, onSendInput, simple, onToggleSimple, triggerRef }: {
+  triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
   simple: boolean; onToggleSimple(): void;
   draft: string; onDraftChange(value: string): void; onClose(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void;
 }) {
   const panel = useRef<HTMLElement>(null);
+  useAskPosition(panel, triggerRef);
   useLayoutEffect(() => {
     const previous = document.activeElement;
     panel.current?.focus({ preventScroll: true });

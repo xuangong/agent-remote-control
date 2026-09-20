@@ -10,6 +10,7 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) awai
 
 async function localApplication() {
   const server = createServer((request, response) => {
+    if (request.url?.startsWith('/module-')) { response.setHeader('content-type', 'text/javascript'); response.end(Buffer.alloc(128 * 1024, 97)); return; }
     if (request.url === '/events') {
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.write(Buffer.from([0, 128, 255, 65]));
@@ -322,5 +323,10 @@ it('routes isolated preview origins through the Worker and redeems control-autho
   const response = await f.requestAt(tunnel.origin, '/events', { headers: { cookie: session } });
   expect(response.status).toBe(200); const reader = response.body!.getReader();
   expect([...((await reader.read()).value!)]).toEqual([0, 128, 255, 65]); await reader.cancel();
+  const modules = await Promise.all(Array.from({ length: 128 }, async (_, index) => {
+    const module = await f.requestAt(tunnel.origin, `/module-${index}.js`, { headers: { cookie: session } });
+    return { status: module.status, bytes: (await module.arrayBuffer()).byteLength };
+  }));
+  expect(modules).toEqual(Array.from({ length: 128 }, () => ({ status: 200, bytes: 128 * 1024 })));
   expect((await f.requestAt('https://unexpected.preview.test', '/')).status).toBe(403);
 }, 20000);

@@ -1,4 +1,5 @@
 import { TunnelError } from './errors.js';
+import { PreviewHttpAdmission } from './http-admission.js';
 import type { HeaderList, TunnelHttpResponse, TunnelPeer, TunnelSocket, TunnelWebSocketRequest } from './types.js';
 
 export interface PreviewRoute { id: string; status: 'active' | 'expired' | 'unregistered' }
@@ -7,15 +8,38 @@ export type PreparedWebSocket = { protocol?: string; accept(socket: TunnelSocket
 export type PreviewRejection = { status: number; code: string; message: string };
 
 export function createPreviewRelayBridge(peer: TunnelPeer, lookup: (previewId: string) => PreviewRoute | undefined, options: { acceptTimeoutMs?: number } = {}) {
+  // Eight 64 KiB response credit windows leave headroom in the 1 MiB transport queue.
+  const admission = new PreviewHttpAdmission();
   function requireActive(previewId: string) {
     const route = lookup(previewId);
     if (!route) throw new TunnelError('not_found', 'Preview registration was not found.');
     if (route.status !== 'active') throw new TunnelError(route.status, `Preview registration is ${route.status}.`);
   }
   return {
-    fetch(previewId: string, request: PreviewRelayRequest): Promise<TunnelHttpResponse> {
+    async fetch(previewId: string, request: PreviewRelayRequest): Promise<TunnelHttpResponse> {
       requireActive(previewId);
-      return peer.openHttp({ previewId, ...request });
+      const release = await admission.acquire(request.signal);
+      const cleanup = () => { request.signal?.removeEventListener('abort', cleanup); release(); };
+      request.signal?.addEventListener('abort', cleanup, { once: true });
+      try {
+        if (request.signal?.aborted) throw new TunnelError('cancelled', 'Preview request was cancelled.');
+        requireActive(previewId);
+        const response = await peer.openHttp({ previewId, ...request });
+        if (!response.body || request.method === 'HEAD' || [204, 304].includes(response.status)) {
+          await response.body?.cancel(); cleanup(); return { ...response, body: undefined };
+        }
+        const reader = response.body.getReader();
+        return { ...response, body: new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            try {
+              const part = await reader.read();
+              if (part.done) { cleanup(); controller.close(); }
+              else controller.enqueue(part.value);
+            } catch (error) { cleanup(); controller.error(error); }
+          },
+          async cancel(reason) { try { await reader.cancel(reason); } finally { cleanup(); } },
+        }, { highWaterMark: 0 }) };
+      } catch (error) { cleanup(); throw error; }
     },
     async prepareWebSocket(previewId: string, request: Omit<TunnelWebSocketRequest, 'previewId'> & { signal?: AbortSignal }): Promise<PreparedWebSocket | PreviewRejection> {
       try {
@@ -37,6 +61,6 @@ export function createPreviewRelayBridge(peer: TunnelPeer, lookup: (previewId: s
         return { status: code === 'not_found' ? 404 : code === 'expired' || code === 'unregistered' ? 410 : 502, code, message: error instanceof Error ? error.message : 'Preview WebSocket is unavailable.' };
       }
     },
-    close() { peer.close(); },
+    close() { admission.close(); peer.close(); },
   };
 }

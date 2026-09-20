@@ -39,7 +39,7 @@ export function createHostPreviews(options: Options) {
   function disconnect(hostId: string) {
     activity.forget(hostId);
     generations.set(hostId, (generations.get(hostId) ?? 0) + 1);
-    reconciled.delete(hostId); peers.get(hostId)?.close(1012, 'Controller disconnected'); peers.delete(hostId);
+    reconciled.delete(hostId); bridges.get(hostId)?.close(); peers.get(hostId)?.close(1012, 'Controller disconnected'); peers.delete(hostId);
     bridges.delete(hostId);
   }
   return {
@@ -93,11 +93,13 @@ export function createHostPreviews(options: Options) {
       try { await options.remove(hostId, id); } catch { /* Durable pending removal is delivered on reconciliation. */ }
     },
     attach(hostId: string, socket: TunnelSocket) {
+      bridges.get(hostId)?.close();
       peers.get(hostId)?.close(1012, 'Tunnel replaced');
       const peer = createTunnelPeer(socket, {});
       peers.set(hostId, peer);
-      bridges.set(hostId, createPreviewRelayBridge(peer, id => lookup(hostId, id)));
-      socket.onClose(() => { if (peers.get(hostId) === peer) { peers.delete(hostId); bridges.delete(hostId); } });
+      const bridge = createPreviewRelayBridge(peer, id => lookup(hostId, id));
+      bridges.set(hostId, bridge);
+      socket.onClose(() => { bridge.close(); if (peers.get(hostId) === peer) { peers.delete(hostId); bridges.delete(hostId); } });
     },
     bridge(hostId: string) { return reconciled.has(hostId) ? bridges.get(hostId) : undefined; },
     invalidate(hostId: string) { activity.forget(hostId); generations.set(hostId, (generations.get(hostId) ?? 0) + 1); reconciled.delete(hostId); },

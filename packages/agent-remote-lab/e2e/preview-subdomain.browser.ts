@@ -20,7 +20,11 @@ it('opens a root-mounted React Vite app with isolated login, manifest, API, navi
   await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(root, 'node_modules'));
   await writeFile(join(root, 'index.html'), '<!doctype html><html><head><link rel="manifest" href="/manifest.json"></head><body><div id="root"></div><script type="module" src="/main.jsx"></script></body></html>');
   await writeFile(join(root, 'payload.js'), 'export default "Root preview ready";');
-  await writeFile(join(root, 'main.jsx'), `import React from 'react'; import {createRoot} from 'react-dom/client'; import text from '/payload.js';
+  const catalogs = Array.from({ length: 96 }, (_, index) => `catalog-${index}.js`);
+  await Promise.all(catalogs.map((name, index) => writeFile(join(root, name), `export default ${JSON.stringify(String(index).padEnd(32 * 1024, 'a'))};`)));
+  await writeFile(join(root, 'main.jsx'), `${catalogs.map((name, index) => `import catalog${index} from '/${name}';`).join('\n')}
+    document.body.dataset.catalogs = String([${catalogs.map((_, index) => `catalog${index}`).join(',')}].length);
+    import React from 'react'; import {createRoot} from 'react-dom/client'; import text from '/payload.js';
     createRoot(document.getElementById('root')).render(<><h1>{text}</h1><button onClick={()=>history.pushState(null,'','/docs?q=1')}>Docs</button></>);
     fetch('/api').then(r=>r.json()).then(r=>document.body.dataset.api=r.ok);
     if(import.meta.hot)import.meta.hot.accept('/payload.js',m=>document.querySelector('h1').textContent=m.default);`);
@@ -81,6 +85,7 @@ it('opens a root-mounted React Vite app with isolated login, manifest, API, navi
   const frame = page.frameLocator('iframe');
   try { await frame.locator('h1').waitFor(); } catch (error) { console.error({ errors, failures, body: await page.locator('body').innerText(), message: await page.locator('body').getAttribute('data-error') }); throw error; }
   expect(await frame.locator('h1').innerText()).toBe('Root preview ready');
+  expect(await frame.locator('body').getAttribute('data-catalogs')).toBe('96');
   await page.waitForFunction(() => document.querySelector('.agent-preview-browser-content')?.getAttribute('aria-busy') === 'false');
   const target = new URL(page.frames()[1]!.url()).origin;
   expect(target).toMatch(/https:\/\/[a-z]+-[a-z]+-[a-f0-9]{12}\.arc\.test:/);

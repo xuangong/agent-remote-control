@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { PROTOCOL_VERSION, encodeClientMessage, type AgentInteractionResponse, type AgentPersistenceHandle, type AgentSessionConfig, type ResourceResponse } from '@agent-remote-controller/agent-remote-protocol';
 import { HttpWebSocketTransport, RemoteOperationError } from '@agent-remote-controller/agent-remote-web/headless';
 
-import { DebuggerError } from './errors.js';
+import { DebuggerError, remoteOperationFailure } from './errors.js';
 import { parseExactJson, readTextInput, resolveOrigin, resolveRelayUrl } from './input.js';
 import type { DebuggerIo } from './output.js';
 import { writeBinary, writeFileAtomically, writeJson, writeJsonToStderr, writeText } from './output.js';
@@ -392,7 +392,7 @@ class CommandContext {
       if (this.signal.aborted) throw this.abortError();
       if (timedOut) throw new DebuggerError(5, 'command_timeout', 'Command timed out.', true);
       if (error instanceof RemoteOperationError) {
-        throw new DebuggerError(4, error.code, error.message, error.recoverable);
+        throw remoteOperationFailure(error);
       }
       if (diagnostic?.code === 'invalid_wire_body') {
         throw new DebuggerError(4, diagnostic.code, diagnostic.message, diagnostic.recoverable);

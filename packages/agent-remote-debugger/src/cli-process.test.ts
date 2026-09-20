@@ -354,7 +354,8 @@ describe('built bdb against the recorded Relay', () => {
     await expectProcessError(['inspect', 'agent-does-not-exist', '--json'], 4, 'agent_not_found');
     await expectProcessError(['wait', agentId, '--for', 'failed', '--timeout', '25', '--json'], 5, 'command_timeout');
     await expectProcessError(['observe', agentId, '--jsonl', '--timeout', '25'], 5, 'command_timeout');
-    await expectProcessError(['provider', 'list', '--json'], 3, 'request_failed', undefined, 'http://127.0.0.1:1');
+    await expectProcessError(['provider', 'list', '--json'], 3, 'network_error', undefined, 'http://127.0.0.1:1');
+    await expectProcessError(['inspect', agentId, '--json'], 3, 'network_error', undefined, 'http://127.0.0.1:1');
   });
 
   it('exits 130 when SIGINT interrupts hanging Snapshot preflight', async () => {

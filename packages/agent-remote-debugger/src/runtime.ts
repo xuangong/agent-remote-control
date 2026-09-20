@@ -12,7 +12,7 @@ import {
   type WebSocketLike,
 } from '@agent-remote-controller/agent-remote-web/headless';
 
-import { DebuggerError } from './errors.js';
+import { DebuggerError, remoteOperationFailure } from './errors.js';
 import { resolveOrigin, resolveRelayUrl } from './input.js';
 import { stableJsonValue } from './structural.js';
 import { redactDebuggerValue } from './redaction.js';
@@ -244,7 +244,7 @@ function observeWebSocketFactory(
 
 function debuggerPreflightError(error: unknown, protocolDiagnostic?: RemoteTransportDiagnostic): DebuggerError {
   if (error instanceof RemoteOperationError) {
-    return new DebuggerError(4, error.code, error.message, error.recoverable);
+    return remoteOperationFailure(error);
   }
   if (protocolDiagnostic) {
     return new DebuggerError(4, protocolDiagnostic.code, protocolDiagnostic.message, protocolDiagnostic.recoverable);

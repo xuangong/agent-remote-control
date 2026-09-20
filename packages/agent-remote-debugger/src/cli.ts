@@ -2,7 +2,7 @@
 import { fileURLToPath } from 'node:url';
 
 import { executeCommand, type CliEnvironment, type OutputFormat, type ParsedInvocation } from './commands.js';
-import { DebuggerError } from './errors.js';
+import { DebuggerError, remoteOperationFailure } from './errors.js';
 import type { DebuggerIo } from './output.js';
 import { writeStructuredError } from './output.js';
 import { RemoteOperationError } from '@agent-remote-controller/agent-remote-web/headless';
@@ -87,12 +87,7 @@ function outputFormat(options: ReadonlyMap<string, string | true>): OutputFormat
 function toDebuggerError(error: unknown): DebuggerError {
   if (error instanceof DebuggerError) return error;
   if (error instanceof RemoteOperationError) {
-    const exitCode = error.code === 'operation_timeout'
-      ? 5
-      : error.code === 'connection_disconnected' || error.code === 'operation_send_failed' || error.code === 'operation_stopped'
-        ? 3
-        : 4;
-    return new DebuggerError(exitCode, error.code, error.message, error.recoverable);
+    return remoteOperationFailure(error);
   }
   return new DebuggerError(3, 'relay_connection_failed', 'Relay command could not be completed.', true);
 }

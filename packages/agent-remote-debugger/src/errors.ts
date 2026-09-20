@@ -1,3 +1,5 @@
+import type { RemoteOperationError } from '@agent-remote-controller/agent-remote-web/headless';
+
 export class DebuggerError extends Error {
   readonly name = 'DebuggerError';
 
@@ -9,4 +11,14 @@ export class DebuggerError extends Error {
   ) {
     super(message);
   }
+}
+
+export function remoteOperationFailure(error: RemoteOperationError): DebuggerError {
+  const exitCode = error.code === 'operation_timeout'
+    ? 5
+    : error.code === 'network_error' || error.code === 'connection_disconnected'
+      || error.code === 'operation_send_failed' || error.code === 'operation_stopped'
+      ? 3
+      : 4;
+  return new DebuggerError(exitCode, error.code, error.message, error.recoverable);
 }

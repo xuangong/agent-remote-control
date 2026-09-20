@@ -41,7 +41,12 @@ function scriptedCodex() {
           runtime = process;
           result = { thread: { id: 'native-parent' }, cwd: '/workspace', model: 'codex' };
         }
-        if (message.method === 'thread/read') result = { thread: childThread };
+        if (message.method === 'thread/read') {
+          result = { thread: { ...childThread, turns: message.params.includeTurns ? childThread.turns : [] } };
+        }
+        if (message.method === 'thread/turns/list') {
+          result = { data: [...childThread.turns].reverse(), nextCursor: null };
+        }
         queueMicrotask(() => write(process, { id: message.id, result }));
       }
     });

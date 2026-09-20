@@ -533,6 +533,34 @@ describe('bdb command surface', () => {
     expect(json(h.stderr())).toMatchObject({ error: { code: 'invalid_public_response' } });
   });
 
+  it('preserves network error details and the connection exit category for direct HTTP commands', async () => {
+    const h = harness();
+    const transport = new HttpWebSocketTransport('http://relay.example', {
+      fetch: async () => { throw new Error('connection refused'); },
+    });
+    const environment = { ...h.environment, createHttpTransport: () => transport };
+
+    expect(await runCli(['provider', 'list', '--json'], h.io, environment)).toBe(3);
+    expect(json(h.stderr())).toMatchObject({ error: {
+      code: 'network_error', message: 'Could not reach the Relay. Check your connection and try again.', recoverable: true,
+    } });
+  });
+
+  it('classifies network failures while loading older history as connection errors', async () => {
+    const h = harness();
+    h.transport.historyHasOlder = true;
+    const fetchTimeline = h.transport.fetchTimeline.bind(h.transport);
+    h.transport.fetchTimeline = async (agentId, direction) => {
+      if (direction === 'before') throw new RemoteOperationError('network_error', 'History connection failed.', true);
+      return fetchTimeline(agentId, direction);
+    };
+
+    expect(await runCli(['timeline', 'agent-one', '--all', '--json'], h.io, h.environment)).toBe(3);
+    expect(json(h.stderr())).toMatchObject({ error: {
+      code: 'network_error', message: 'History connection failed.', recoverable: true,
+    } });
+  });
+
   it('classifies response-body transport failures as connection errors', async () => {
     const h = harness();
     const transport = new HttpWebSocketTransport('http://relay.example', {

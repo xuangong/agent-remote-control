@@ -226,9 +226,9 @@ describe('createDebuggerRuntime', () => {
     });
 
     await expect(createDebuggerRuntime('agent-one', { transport })).rejects.toMatchObject({
-      code: 'relay_connection_failed',
+      code: 'network_error',
       exitCode: 3,
-      message: 'Relay Snapshot preflight failed.',
+      message: 'Could not reach the Relay. Check your connection and try again.',
       recoverable: true,
     });
   });

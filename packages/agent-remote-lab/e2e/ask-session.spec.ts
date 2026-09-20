@@ -119,6 +119,64 @@ test('Ask stays within a small viewport and follows the visual keyboard viewport
 });
 
 
+for (const rich of [false, true]) test(`Ask keeps its heading and multiline ${rich ? 'rich editor' : 'textarea'} above a panned mobile keyboard`, async ({ page }, info) => {
+  if (rich) await page.routeWebSocket(/session-channel/, route => {
+    const server = route.connectToServer();
+    server.onMessage(message => {
+      const envelope = JSON.parse(String(message));
+      const frame = envelope.type === 'message' ? envelope.message : envelope;
+      if (frame.type === 'agent_snapshot') frame.payload.capabilities.imageInput = {
+        mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520,
+      };
+      route.send(JSON.stringify(envelope));
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await start(page);
+  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+  const input = ask.getByTestId('prompt-input');
+  if (rich) await expect(input).toHaveAttribute('contenteditable', 'true');
+  await input.fill(Array.from({ length: 12 }, (_, i) => `Question line ${i + 1}`).join('\n'));
+  for (const viewport of [{ height: 520, offsetTop: 80 }, { height: 340, offsetTop: 160 }, { height: 240, offsetTop: 220 }]) {
+    await page.evaluate(value => {
+      for (const [key, next] of Object.entries(value)) Object.defineProperty(window.visualViewport!, key, { configurable: true, value: next });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+      window.visualViewport!.dispatchEvent(new Event('scroll'));
+    }, viewport);
+    await input.focus();
+    await input.press('End');
+    // Focus/caret reveal must not scroll the floating frame itself.
+    await ask.evaluate(element => { element.scrollTop = 200; });
+    await expect.poll(async () => ask.evaluate((element, visible) => {
+      const window = element.getBoundingClientRect();
+      const heading = element.querySelector('.lab-workbench-heading')!.getBoundingClientRect();
+      const input = element.querySelector('[data-testid="prompt-input"]')!.getBoundingClientRect();
+      const send = element.querySelector('[data-testid="prompt-submit"]')!.getBoundingClientRect();
+      return {
+        headingVisible: heading.top >= window.top && heading.bottom <= window.bottom,
+        inputVisible: input.top >= heading.bottom && input.bottom <= window.bottom,
+        sendVisible: send.top >= heading.bottom && send.bottom <= window.bottom,
+        inViewport: window.top >= visible.offsetTop && window.bottom <= visible.offsetTop + visible.height,
+        keyboardGap: Math.round(visible.offsetTop + visible.height - window.bottom),
+        panelScroll: element.scrollTop,
+      };
+    }, viewport)).toEqual({ headingVisible: true, inputVisible: true, sendVisible: true, inViewport: true, keyboardGap: 8, panelScroll: 0 });
+  }
+  await page.screenshot({ path: info.outputPath('ask-keyboard.png') });
+  await page.evaluate(() => {
+    Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 844 });
+    Object.defineProperty(window.visualViewport!, 'offsetTop', { configurable: true, value: 0 });
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await expect.poll(async () => {
+    const box = (await ask.boundingBox())!;
+    return Math.abs(box.y + box.height / 2 - 422);
+  }).toBeLessThan(2);
+  if (rich) await expect(input).toContainText('Question line 12');
+  else await expect(input).toHaveValue(/Question line 12/);
+});
+
 test('slash questions preserve an existing Ask draft', async ({ page }) => {
   const primary = await start(page);
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();

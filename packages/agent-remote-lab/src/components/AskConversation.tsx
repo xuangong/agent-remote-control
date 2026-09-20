@@ -29,7 +29,7 @@ export function AskConversation({ entry, store, replica, transport, draft, onDra
     </button>
     <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={onClose}>×</button>
   </div>;
-  return <section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}
+  return <div className="lab-ask-viewport"><section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}
     onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); onClose(); } }}>
     {entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => input.text).join(" · ")}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={entry.busy} onClick={onRetry}>Retry</button></div> : null}
@@ -39,7 +39,7 @@ export function AskConversation({ entry, store, replica, transport, draft, onDra
       <div className="lab-ask-opening" role="status">{entry.busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div>
       <textarea className="lab-ask-draft" aria-label="Ask draft" rows={2} placeholder="Ask anything…" value={draft} onChange={event => onDraftChange(event.target.value)} />
     </>}
-  </section>;
+  </section></div>;
 }
 
 function AskChat({ mode, record, inputs, onSendInput, replica, transport, draft, onDraftChange, tools, busy }: {

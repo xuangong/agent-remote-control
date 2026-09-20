@@ -33,7 +33,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
     scopeRef.current = { client, hostId, version: scopeRef.current.version + 1, request: 0 };
   }
   const scope = scopeRef.current;
-  const [state, setState] = useState<{ version: number; registrations: readonly PreviewRegistration[]; loading: boolean; error?: string }>(
+  const [state, setState] = useState<{ version: number; routing?: 'subdomain' | 'path'; registrations: readonly PreviewRegistration[]; loading: boolean; error?: string }>(
     { version: scope.version, registrations: [], loading: true },
   );
   const currentState = state.version === scope.version ? state : { version: scope.version, registrations: [], loading: true };
@@ -74,14 +74,15 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
       const snapshot = await client.snapshot(hostId, controller.signal);
       if (!controller.signal.aborted && scopeRef.current === scope && scope.request === request) {
         setState(previous => previous.version === scope.version && !previous.loading && !previous.error
-          && JSON.stringify(previous.registrations) === JSON.stringify(snapshot.registrations) ? previous
-          : { version: scope.version, registrations: snapshot.registrations, loading: false });
+          && previous.routing === snapshot.routing && JSON.stringify(previous.registrations) === JSON.stringify(snapshot.registrations) ? previous
+          : { version: scope.version, registrations: snapshot.registrations, routing: snapshot.routing, loading: false });
       }
     } catch (cause) {
       if ((!controller.signal.aborted || timedOut) && scopeRef.current === scope && scope.request === request) {
         setState(current => ({
           version: scope.version,
           registrations: current.version === scope.version ? current.registrations : [],
+          routing: current.version === scope.version ? current.routing : undefined,
           loading: false,
           error: message(cause, 'Preview state is unavailable. Retry after checking the Host connection.'),
         }));
@@ -109,7 +110,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
   const renewalIssues = usePreviewRenewal(client, hostId, canManage, currentBrowsers, currentState.registrations, refresh);
 
   const value = useMemo<PreviewContextValue>(() => ({
-    registrations: currentState.registrations, canManage, loading: currentState.loading, error: currentState.error, refresh,
+    registrations: currentState.registrations, routing: currentState.routing, canManage, loading: currentState.loading, error: currentState.error, refresh,
     register: async (agentId: string, request: PreviewRegistrationRequest) => {
       const registration = await client.register(agentId, request);
       // Registration can finish before the Controller's data tunnel connects.

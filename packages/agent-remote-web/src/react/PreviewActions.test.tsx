@@ -120,3 +120,12 @@ function activeRegistration(): PreviewRegistration {
     sources: [{ sessionId: 'agent-one', itemId: 'epoch:1' }],
   };
 }
+
+
+it('offers a direct preview action without legacy base-path configuration in subdomain mode', async () => {
+  const register = vi.fn(async () => activeRegistration()); const open = vi.fn(async () => 'https://t-one.preview.test/');
+  const container = await render(<PreviewActions agentId="agent-one" itemId="epoch:1" text="http://localhost:5173/a" controller={controller({ routing: 'subdomain', register, open })} />);
+  expect(container.querySelector('select')).toBeNull(); expect(container.textContent).not.toContain('/p/');
+  await act(async () => container.querySelector<HTMLButtonElement>('button')?.click());
+  expect(open).toHaveBeenCalledWith('preview-one', 'http://localhost:5173/a', 'agent-one');
+});

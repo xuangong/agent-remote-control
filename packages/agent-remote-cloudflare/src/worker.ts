@@ -1,14 +1,15 @@
+import { isPreviewDomain, controllerContentSecurityPolicy } from '@agent-remote-controller/agent-remote-hosted';
 import type { RelayEnvironment } from './relay-object.js';
 export { RelayObject } from './relay-object.js';
 
-const controllerPolicy = "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
 export default {
   async fetch(request: Request, env: RelayEnvironment): Promise<Response> {
     const url = new URL(request.url);
     const controlOrigin = new URL(env.AGENT_REMOTE_RELAY_URL).origin;
+    const policy = controllerContentSecurityPolicy(controlOrigin, env.AGENT_REMOTE_PREVIEW_DOMAIN);
     const previewOrigin = new URL(env.AGENT_REMOTE_PREVIEW_URL || controlOrigin).origin;
     if (url.origin !== controlOrigin) {
-      if (url.origin === previewOrigin) return env.RELAY.getByName('primary').fetch(request);
+      if (url.origin === previewOrigin || isPreviewDomain(url.origin, env.AGENT_REMOTE_PREVIEW_DOMAIN, controlOrigin)) return env.RELAY.getByName('primary').fetch(request);
       return new Response(null, { status: 403 });
     }
     if ((request.method === 'GET' || request.method === 'HEAD') && !request.headers.has('upgrade')) {
@@ -19,7 +20,7 @@ export default {
         const index = (await asset.text()).replace(/<head(?:\s[^>]*)?>/i, '$&<meta name="agent-remote-auth" content="gateway">');
         if (!index.includes('<meta name="agent-remote-auth" content="gateway">')) return new Response('Controller assets are invalid.', { status: 503 });
         return new Response(request.method === 'HEAD' ? null : index, { headers: {
-          'content-type': 'text/html; charset=utf-8', 'content-security-policy': controllerPolicy,
+          'content-type': 'text/html; charset=utf-8', 'content-security-policy': policy,
           'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
         } });
       }

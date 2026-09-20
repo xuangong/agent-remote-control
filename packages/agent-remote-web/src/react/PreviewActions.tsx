@@ -6,6 +6,7 @@ import type { PreviewPathMode, PreviewRegistration, PreviewRegistrationRequest }
 export interface PreviewController {
   readonly registrations: readonly PreviewRegistration[];
   readonly canManage: boolean;
+  readonly routing?: 'subdomain' | 'path';
   register(agentId: string, request: PreviewRegistrationRequest): Promise<PreviewRegistration>;
   unregister(id: string): Promise<void>;
   open(id: string, originalLoopbackUrl: string, sessionId?: string): Promise<string>;
@@ -106,9 +107,9 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
     <code>{target}</code>
     {!registration || registration.status !== 'active' ? <>
       {state ? <span className="agent-preview-state">{state}</span> : null}
-      <label>Path mode <select value={pathMode} disabled={pending} onChange={event => setPathMode(event.target.value as PreviewPathMode)}>
+      {controller.routing !== 'subdomain' && <label>Path mode <select value={pathMode} disabled={pending} onChange={event => setPathMode(event.target.value as PreviewPathMode)}>
         <option value="strip">Root-mounted app</option><option value="preserve">Configured preview base</option>
-      </select></label>
+      </select></label>}
       <button type="button" disabled={pending || !controller.canManage} onClick={() => void register()}>{pending ? 'Registering…' : registration?.status === 'expired' ? 'Register again' : 'Open preview'}</button>
     </> : <>
       <span className="agent-preview-state">{state}</span>
@@ -117,9 +118,9 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
     {controller.getTunnelUrl ? <CopyTunnelUrl disabled={pending || !controller.canManage || registration?.pendingUnregister || (registration?.status === 'active' && registration.availability !== 'online')}
       getUrl={getTunnelUrl} /> : null}
     {registration?.status === 'active' && controller.canManage ? <button type="button" disabled={pending || registration.pendingUnregister} onClick={() => void unregister()}>Unregister</button> : null}
-    <small>{effectiveMode === 'preserve'
+    {controller.routing !== 'subdomain' && <small>{effectiveMode === 'preserve'
       ? `This app must be configured with /p/${registration?.id ?? '<registration-id>'}/ as its base. Register first to get the ID.`
-      : 'Root paths are adapted for supported apps; arbitrary application URLs may still require configuration.'}</small>
+      : 'Root paths are adapted for supported apps; arbitrary application URLs may still require configuration.'}</small>}
     {failure ? <p role="alert">{failure}</p> : null}
   </div>;
 }

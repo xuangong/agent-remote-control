@@ -36,7 +36,7 @@ async function localApplication() {
 function tunnelSocket(socket: import('miniflare').WebSocket): TunnelSocket {
   return {
     send(data) { socket.send(data); },
-    close(code, reason) { socket.close(code, reason); },
+    close(code, reason) { if (socket.readyState < 2) socket.close(code, reason); },
     onMessage(listener) {
       const receive = (message: MessageEvent) => listener(typeof message.data === 'string'
         ? message.data
@@ -62,8 +62,8 @@ function socketMessage(socket: import('miniflare').WebSocket): Promise<{ data: s
   });
 }
 
-async function previewFixture(target = 'http://127.0.0.1:4173', ttlMs = 60_000) {
-  const f = await fixture();
+async function previewFixture(target = 'http://127.0.0.1:4173', ttlMs = 60_000, previewDomain?: string) {
+  const f = await fixture({ previewDomain });
   const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
   const host = await f.host(pairing.key);
@@ -293,4 +293,34 @@ it('routes copied tunnel navigation through login and current ownership before i
   const response = await redeem(setup.alice.cookie);
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ url: '/p/' + setup.registration.id + '/docs?q=1#section' });
+}, 20000);
+
+
+it('routes isolated preview origins through the Worker and redeems control-authorized browser proofs', async () => {
+  const target = await localApplication();
+  const setup = await previewFixture(target, 60_000, 'preview.test');
+  const { f, alice, host, registration } = setup;
+  createTunnelPeer(tunnelSocket(setup.dataSocket), createLoopbackTunnelHandlers({ lookup: id => id === registration.id ? { target, pathMode: 'strip' } : undefined }));
+  const policy = (await f.request('/')).headers.get('content-security-policy');
+  expect(policy).toContain("connect-src 'self' https://*.preview.test");
+  expect(policy).toContain("frame-src 'self' https://*.preview.test");
+  const link = await f.json(alice.basePath + `v1/remote/hosts/${host.hostId}/previews/${registration.id}/open`, alice.cookie, { url: target + '/events', mode: 'link' });
+  const tunnel = new URL((await link.json() as { tunnelUrl: string }).tunnelUrl);
+  expect(tunnel.hostname).toMatch(/^t-[a-f0-9]{48}\.preview\.test$/);
+  expect(tunnel.pathname).toBe('/events');
+  expect((await f.requestAt(tunnel.origin, '/events')).status).toBe(401);
+  const challenge = await f.requestAt(tunnel.origin, '/_arc/challenge', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ path: '/events' }) });
+  expect(challenge.status).toBe(200); expect(challenge.headers.get('access-control-allow-origin')).toBe(origin);
+  const cookie = challenge.headers.get('set-cookie')!.split(';')[0]!;
+  const id = (await challenge.json() as { challenge: string }).challenge;
+  const approval = await f.json('/_arc/preview-authorize', alice.cookie, { challenge: id });
+  expect(approval.status).toBe(200);
+  const code = (await approval.json() as { code: string }).code;
+  const entered = await f.requestAt(tunnel.origin, '/_arc/enter', { method: 'POST', headers: { cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  expect(entered.status).toBe(200);
+  const session = entered.headers.get('set-cookie')!.split(';')[0]!;
+  const response = await f.requestAt(tunnel.origin, '/events', { headers: { cookie: session } });
+  expect(response.status).toBe(200); const reader = response.body!.getReader();
+  expect([...((await reader.read()).value!)]).toEqual([0, 128, 255, 65]); await reader.cancel();
+  expect((await f.requestAt('https://unexpected.preview.test', '/')).status).toBe(403);
 }, 20000);

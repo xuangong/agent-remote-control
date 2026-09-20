@@ -43,7 +43,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen }: 
           {registration.pendingUnregister ? <span>Unregister pending</span> : null}
           {registration.availability === 'controller_offline' ? <span>Controller offline</span> : null}
         </div>
-        <small>{registration.pathMode === 'preserve' ? `Configured base /p/${registration.id}/` : 'Root-mounted path adaptation'} · Expires {new Date(registration.expiresAt).toLocaleString()}</small>
+        <small>{controller.routing === 'subdomain' ? 'Dedicated tunnel' : registration.pathMode === 'preserve' ? `Configured base /p/${registration.id}/` : 'Root-mounted path adaptation'} · Expires {new Date(registration.expiresAt).toLocaleString()}</small>
         {registration.sources.length ? <div className="lab-preview-sources" aria-label="Preview sources">{registration.sources.map((source, index) => <button
           key={`${source.sessionId}:${source.itemId}`} className="lab-preview-source" type="button" disabled={!onOpenSource}
           onClick={() => onOpenSource?.(source.sessionId, source.itemId)}

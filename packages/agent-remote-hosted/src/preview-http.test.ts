@@ -25,3 +25,17 @@ it('prevents authenticated preview responses from entering shared or persistent 
   expect(headers.has('cdn-cache-control')).toBe(false);
   expect(headers.has('cloudflare-cdn-cache-control')).toBe(false);
 }, 10000);
+
+it('preserves isolated application authorization and cookie paths while filtering Relay cookies', () => {
+  const route = { ...registration, root: true };
+  const request = new Request('https://t-one.preview.test/api?q=1', { headers: {
+    authorization: 'Bearer app-token', cookie: '__Host-arc_preview=private; __Host-arc_challenge_one=private; app=one',
+  } });
+  const outgoing = previewRequest(request, route);
+  expect(outgoing.path).toBe('/api?q=1');
+  expect(Object.fromEntries(outgoing.headers)).toEqual({ authorization: 'Bearer app-token', cookie: 'app=one' });
+  const response = previewResponseHeaders([['set-cookie', '__Host-app=one; Path=/; Secure'], ['set-cookie', 'section=two; Domain=localhost; Path=/docs'],
+    ['set-cookie', '__Host-arc_preview=forged; Path=/; Secure'], ['location', '/next?q=1']], route, '/api?q=1');
+  expect(response.getSetCookie()).toEqual(['__Host-app=one; Secure; Path=/', 'section=two; Path=/docs']);
+  expect(response.get('location')).toBe('/next?q=1');
+});

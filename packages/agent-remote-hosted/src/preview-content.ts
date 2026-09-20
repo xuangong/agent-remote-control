@@ -1,4 +1,4 @@
-import { parse, serialize, type DefaultTreeAdapterMap } from 'parse5';
+import { parse, parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
 import postcss from 'postcss';
 
 const MAX_ADAPTED_BYTES = 1024 * 1024;
@@ -13,6 +13,7 @@ export interface PreviewContentRoute {
   readonly id: string;
   readonly target: string;
   readonly pathMode: 'strip' | 'preserve';
+  readonly root?: boolean;
 }
 
 export interface PreviewContentInput {
@@ -30,7 +31,7 @@ export interface AdaptedPreviewContent {
 
 export async function adaptPreviewContent(input: PreviewContentInput): Promise<AdaptedPreviewContent> {
   const contentType = input.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (!input.body || input.status === 206 || input.headers.has('content-range') || input.route.pathMode === 'preserve'
+  if (!input.body || input.status === 206 || input.headers.has('content-range') || (!input.route.root && input.route.pathMode === 'preserve') || (input.route.root && contentType !== 'text/html')
     || (contentType !== 'text/html' && contentType !== 'text/css')) {
     return { body: input.body, headers: input.headers };
   }
@@ -121,6 +122,14 @@ type HtmlElement = DefaultTreeAdapterMap['element'];
 function rewriteHtml(source: string, route: PreviewContentRoute): string {
   const document = parse(source);
   visit(document, route);
+  if (route.root) {
+    const html = document.childNodes.find(isElement);
+    const head = html?.childNodes.find(node => isElement(node) && node.tagName === 'head');
+    if (head && isElement(head)) {
+      const bridge = parseFragment('<script src="/_arc/frame.js" defer></script>').childNodes[0]!;
+      head.childNodes.push(bridge); bridge.parentNode = head;
+    }
+  }
   return serialize(document);
 }
 
@@ -131,6 +140,14 @@ function visit(node: HtmlNode, route: PreviewContentRoute): void {
 }
 
 function rewriteElement(element: HtmlElement, route: PreviewContentRoute): void {
+  if (element.tagName === 'link' && element.attrs.some(attribute => attribute.name === 'rel' && attribute.value.toLowerCase().split(/\s+/).includes('manifest'))) {
+    const href = element.attrs.find(attribute => attribute.name === 'href')?.value;
+    if (href && (!/^(?:[a-z]+:)?\/\//i.test(href) || new URL(href, route.target).origin === new URL(route.target).origin)) {
+      element.attrs = element.attrs.filter(attribute => attribute.name !== 'crossorigin');
+      element.attrs.push({ name: 'crossorigin', value: 'use-credentials' });
+    }
+  }
+  if (route.root) return;
   let stylesheetChanged = false;
   for (const attribute of element.attrs) {
     if (attribute.name === 'srcset') {

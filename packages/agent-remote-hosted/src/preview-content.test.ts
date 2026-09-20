@@ -122,3 +122,16 @@ function stream(value: string): ReadableStream<Uint8Array> {
 async function text(body?: ReadableStream<Uint8Array>): Promise<string> {
   return body ? decoder.decode(await new Response(body).arrayBuffer()) : '';
 }
+
+it('preserves root application imports and makes only local manifests credentialed', async () => {
+  const rootRoute = { ...route, root: true };
+  const source = '<html><head><link rel="manifest" href="/manifest.json"><link rel="manifest" href="https://external.test/manifest.json"><script type="module">import "/@react-refresh"; fetch("/api");</script></head><body><a href="/docs">Docs</a></body></html>';
+  const result = await adaptPreviewContent({ body: stream(source), headers: new Headers({ 'content-type': 'text/html' }), route: rootRoute, requestPath: '/', status: 200 });
+  const html = await new Response(result.body).text();
+  expect(html).toContain('href="/manifest.json" crossorigin="use-credentials"');
+  expect(html).toContain('href="https://external.test/manifest.json">');
+  expect(html).toContain('import "/@react-refresh"; fetch("/api");');
+  expect(html).toContain('src="/_arc/frame.js"');
+  const body = stream('import "/module.js"');
+  expect((await adaptPreviewContent({ body, headers: new Headers({ 'content-type': 'text/javascript' }), route: rootRoute, requestPath: '/main.js', status: 200 })).body).toBe(body);
+});

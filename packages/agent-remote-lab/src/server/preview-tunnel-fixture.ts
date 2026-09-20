@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
+import { Readable } from 'node:stream';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -31,7 +32,7 @@ class LocalSession implements AgentSession {
   async runtimeInfo() { return { providerId: this.providerId, sessionId: this.nativeSessionId, status: 'idle' as const, cwd: this.cwd, persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } }; }
   async sendMessage() {} async respondToInteraction() {} async dispose() { this.release(); }
 }
-export async function previewFixture(options: { vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId' | 'stateDirectory'>; ttlMs?: number; separateOrigin?: boolean; target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
+export async function previewFixture(options: { controlOrigin?: string; previewDomain?: string; vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId' | 'stateDirectory'>; ttlMs?: number; separateOrigin?: boolean; target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-preview-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const observed = { cancelledEvents: 0, cookies: [] as string[] };
@@ -61,8 +62,28 @@ export async function previewFixture(options: { vscodeTunnel?: Omit<VscodeTunnel
   await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve));
   cleanups.push(async () => { for (const socket of appWs.clients) socket.terminate(); await new Promise<void>(resolve => appWs.close(() => resolve())); local.closeAllConnections(); await new Promise<void>(resolve => local.close(() => resolve())); });
   const target = options.target ?? `http://127.0.0.1:${(local.address() as import('node:net').AddressInfo).port}`;
-  const relay = createGatewayRelay({ origin: 'http://127.0.0.1:0', previewOrigin: options.separateOrigin ? 'http://localhost:0' : undefined, issuer, secret, servePage: options.servePage });
+  const relay = createGatewayRelay({ origin: options.controlOrigin ?? 'http://127.0.0.1:0', previewDomain: options.previewDomain, previewOrigin: options.separateOrigin ? 'http://localhost:0' : undefined, issuer, secret, servePage: options.servePage });
   const { url, port } = await relay.listen(0); cleanups.push(() => relay.close());
+  const transportUrl = `http://127.0.0.1:${port}`;
+  const fetch = (input: string, init?: RequestInit): Promise<Response> => {
+    const destination = new URL(input);
+    if (destination.origin === transportUrl) return globalThis.fetch(input, init);
+    return new Promise((resolve, reject) => {
+      const request = httpRequest(transportUrl + destination.pathname + destination.search, {
+        method: init?.method, headers: { ...Object.fromEntries(new Headers(init?.headers)), host: destination.host }, signal: init?.signal ?? undefined,
+      }, incoming => {
+        const headers = new Headers();
+        for (let index = 0; index < incoming.rawHeaders.length; index += 2) headers.append(incoming.rawHeaders[index]!, incoming.rawHeaders[index + 1]!);
+        const empty = init?.method === 'HEAD' || [204, 304].includes(incoming.statusCode!);
+        if (empty) incoming.resume();
+        resolve(new Response(empty ? null : Readable.toWeb(incoming) as ReadableStream<Uint8Array>, { status: incoming.statusCode, headers }));
+      });
+      request.on('error', reject); request.end(init?.body);
+    });
+  };
+  if (options.controlOrigin) relay.server.prependListener('upgrade', request => {
+    if (request.headers.host === new URL(transportUrl).host) request.headers.host = new URL(url).host;
+  });
   const previewOrigin = options.separateOrigin ? `http://localhost:${port}` : url;
   async function login(subject: string) {
     const begin = await fetch(url + '/auth/login', { redirect: 'manual' });
@@ -80,7 +101,7 @@ export async function previewFixture(options: { vscodeTunnel?: Omit<VscodeTunnel
   const adapter: AgentProviderAdapter = { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async () => session, resumeSession: async () => session };
   const host = createAgentHost({ installationId: 'preview-test', name: 'Preview host', vscodeTunnel: options.vscodeTunnel ? { ...options.vscodeTunnel, stateDirectory: directory } : undefined, preview: { stateDirectory: directory, ttlMs: options.ttlMs },
     registrations: [{ adapter, directory: { providerId: 'fixture', list: () => [], workspaces: () => [], create: async () => 'native', open: async () => session, close: () => session.dispose() } }],
-    uplink: { url: url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: key } });
+    uplink: { url: transportUrl.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: key } });
   cleanups.push(() => host.close());
   const { hostId } = await host.ready;
   const attached = await alice.request(`v1/remote/hosts/${hostId}/attach`, { providerId: 'fixture', nativeSessionId: 'native' });
@@ -103,7 +124,7 @@ export async function previewFixture(options: { vscodeTunnel?: Omit<VscodeTunnel
     // Raw transport tests send both credentials explicitly. Browsers only do this on the control origin.
     return redemption.headers.getSetCookie()[0]!.split(';')[0]! + '; ' + alice.cookie;
   }
-  return { url, previewOrigin, target, registration, alice, bob, hostId, enter, entryUrl, host, port, agentId, observed };
+  return { url, transportUrl, fetch, previewOrigin, target, registration, alice, bob, hostId, enter, entryUrl, host, port, agentId, observed };
 }
 
 export function onPreviewCleanup(close: () => Promise<unknown>): void { cleanups.push(close); }

@@ -1,13 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
-import { BROKER_MAX_FRAME_BYTES, createHostedRelay, migrateLegacyNodeState, validateGatewayOrigin, type GatewayAuthOptions } from '@agent-remote-controller/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES, createHostedRelay, isPreviewDomain, migrateLegacyNodeState, validateGatewayOrigin, type GatewayAuthOptions } from '@agent-remote-controller/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
 import { previewSocket } from './preview-socket.js';
 
 export interface GatewayRelayOptions extends GatewayAuthOptions {
   previewOrigin?: string;
+  previewDomain?: string;
   maxTenants?: number;
   stateFile?: string;
   keyLifetimeMs?: number;
@@ -24,7 +25,8 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   const clientAddresses = new WeakMap<Request, string>();
   let previewOrigin = options.previewOrigin;
   function requestUrl(request: IncomingMessage) {
-    const selected = [auth.origin, previewOrigin].filter((value): value is string => !!value).find(value => new URL(value).host === request.headers.host);
+    const candidate = new URL(auth.origin).protocol + '//' + request.headers.host;
+    const selected = isPreviewDomain(candidate, options.previewDomain, auth.origin) ? candidate : [auth.origin, previewOrigin].filter((value): value is string => !!value).find(value => new URL(value).host === request.headers.host);
     if (!selected) throw new InvalidHttpRequest();
     const url = new URL(request.url ?? '/', selected);
     if (url.origin !== selected) throw new InvalidHttpRequest();
@@ -68,12 +70,12 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
     async listen(port: number, host = '127.0.0.1') {
       await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, () => { server.off('error', reject); resolve(); }); });
       const address = server.address() as AddressInfo;
-      if (new URL(auth.origin).port === '0') auth.origin = `http://127.0.0.1:${address.port}`;
+      if (new URL(auth.origin).port === '0') { const origin = new URL(auth.origin); origin.port = String(address.port); auth.origin = origin.origin; }
       if (previewOrigin && new URL(previewOrigin).port === '0') { const preview = new URL(previewOrigin); preview.port = String(address.port); previewOrigin = preview.origin; }
       try {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, JSON.stringify([auth.origin, auth.issuer]));
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
-        runtime = createHostedRelay({ ...auth, previewOrigin, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs,
+        runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs,
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
       } catch (error) { storage?.close(); server.close(); throw error; }
       return { port: address.port, url: auth.origin };

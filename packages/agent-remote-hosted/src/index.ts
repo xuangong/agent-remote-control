@@ -10,3 +10,5 @@ export * from './control.js';
 export * from './sessions.js';
 export * from './state.js';
 export * from './scheduler.js';
+
+export * from './preview-domain.js';

@@ -13,6 +13,7 @@ export type PreviewRegistration = Readonly<Omit<ProtocolPreviewRegistration, 'so
 };
 export type PreviewSnapshot = Readonly<Omit<PreviewRegistrationSnapshot, 'registrations'>> & {
   readonly registrations: readonly PreviewRegistration[];
+  readonly routing?: 'subdomain' | 'path';
 };
 export interface PreviewRegistrationRequest {
   readonly target: string;
@@ -25,6 +26,7 @@ export class PreviewRequestError extends Error {
 }
 
 export class HttpPreviewClient {
+  private readonly entryOrigins = new Map<string, string>();
   constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
 
   async register(agentId: string, request: PreviewRegistrationRequest): Promise<PreviewRegistration> {
@@ -50,8 +52,10 @@ export class HttpPreviewClient {
       method: 'POST', body: '{}', headers: { 'content-type': 'application/json' }, signal,
     });
     const origin = new URL(this.baseUrl, globalThis.location?.origin ?? 'http://localhost').origin;
-    const response = await this.fetcher(`${origin}/p/${encodeURIComponent(id)}/_arc/renew`, {
-      method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: '{}', signal,
+    const destination = this.entryOrigins.get(id);
+    const isolated = destination && destination !== origin;
+    const response = await this.fetcher(isolated ? `${destination}/_arc/renew` : `${origin}/p/${encodeURIComponent(id)}/_arc/renew`, {
+      method: 'POST', credentials: isolated ? 'include' : 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: '{}', signal,
     });
     if (response.status === 401) {
       // A suspended browser can lose its cookie; redeem fresh access without navigating the retained iframe.
@@ -64,6 +68,7 @@ export class HttpPreviewClient {
     const value = await this.request<{ entryUrl: string }>(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/${encodeURIComponent(id)}/open`, {
       method: 'POST', body: JSON.stringify({ url: originalLoopbackUrl }), headers: { 'content-type': 'application/json' }, signal,
     });
+    this.entryOrigins.set(id, new URL(value.entryUrl).origin);
     return value.entryUrl;
   }
 
@@ -77,7 +82,23 @@ export class HttpPreviewClient {
   async enter(entryUrl: string, id: string, signal?: AbortSignal): Promise<string> {
     const entry = new URL(entryUrl);
     const origin = new URL(this.baseUrl, globalThis.location?.origin ?? 'http://localhost').origin;
-    if (entry.origin !== origin) throw new Error('Embedded previews require the same Relay origin.');
+    if (entry.origin !== origin) {
+      if (this.entryOrigins.get(id) !== entry.origin || entry.pathname !== '/_arc/start') throw new Error('Embedded previews require the same Relay origin or an authorized tunnel origin.');
+      const post = async (url: string, body: unknown, credentials: RequestCredentials) => {
+        const response = await this.fetcher(url, { method: 'POST', credentials, cache: 'no-store', signal,
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        if (!response.ok) throw new Error('Preview access expired or is unavailable. Open it again from the Controller.');
+        return await response.json() as { challenge?: string; code?: string; url?: string };
+      };
+      const challenge = await post(entry.origin + '/_arc/challenge', { path: entry.searchParams.get('path') ?? '/' }, 'include');
+      if (!challenge.challenge) throw new Error('The preview challenge is invalid.');
+      const proof = await post(origin + '/_arc/preview-authorize', { challenge: challenge.challenge }, 'same-origin');
+      if (!proof.code) throw new Error('The preview authorization is invalid.');
+      const redeemed = await post(entry.origin + '/_arc/enter', { code: proof.code }, 'include');
+      const destination = redeemed.url && new URL(redeemed.url, entry.origin);
+      if (!destination || destination.origin !== entry.origin || destination.pathname.startsWith('/_arc/')) throw new Error('The preview destination is invalid.');
+      return destination.href;
+    }
     if (entry.pathname !== '/_arc/enter' || !entry.hash) throw new Error('The preview entry is invalid. Open it again.');
     const response = await this.fetcher(origin + '/_arc/enter', {
       method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,

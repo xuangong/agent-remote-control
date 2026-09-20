@@ -3,6 +3,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpPreviewClient } from './preview-client.js';
 
 describe('HttpPreviewClient', () => {
+  it('binds isolated entry to the origin returned by the authenticated open request', async () => {
+    const requests: Array<{ url: string; credentials?: RequestCredentials }> = [];
+    const client = new HttpPreviewClient('https://control.test/u/account/', (async (input, init) => {
+      const url = String(input); requests.push({ url, credentials: init?.credentials });
+      if (url.endsWith('/open')) return Response.json({ entryUrl: 'https://t-one.preview.test/_arc/start?path=%2Fdocs' });
+      if (url.endsWith('/_arc/challenge')) return Response.json({ challenge: 'browser-challenge' });
+      if (url.endsWith('/_arc/preview-authorize')) return Response.json({ code: 'bound-proof' });
+      if (url.endsWith('/_arc/enter')) return Response.json({ url: '/docs' });
+      throw new Error('Unexpected request');
+    }) as typeof fetch);
+    const entry = await client.open('host', 'one', 'http://localhost:5173/docs');
+    expect(await client.enter(entry, 'one')).toBe('https://t-one.preview.test/docs');
+    expect(requests.slice(1)).toEqual([
+      { url: 'https://t-one.preview.test/_arc/challenge', credentials: 'include' },
+      { url: 'https://control.test/_arc/preview-authorize', credentials: 'same-origin' },
+      { url: 'https://t-one.preview.test/_arc/enter', credentials: 'include' },
+    ]);
+    await expect(client.enter('https://other.test/_arc/start', 'one')).rejects.toThrow('authorized tunnel origin');
+  });
   it('registers an explicit source against the namespaced session endpoint', async () => {
     const fetcher = vi.fn(async () => Response.json({ registration: registration() }));
     const client = new HttpPreviewClient('https://control.test/u/account/', fetcher as typeof fetch);

@@ -13,8 +13,9 @@ const server = createGatewayRelay({
   stateFile: join(process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay'), 'state.json'),
   origin: required('AGENT_REMOTE_RELAY_URL'), issuer: required('AGENT_REMOTE_ISSUER'),
   previewOrigin: process.env.AGENT_REMOTE_PREVIEW_URL,
+  previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN,
   secret: required('AGENT_REMOTE_SIGNING_SECRET'),
-  servePage: await createGatewayStaticPages(process.env.AGENT_REMOTE_WEB_DIST ?? fileURLToPath(new URL('../../dist', import.meta.url))),
+  servePage: await createGatewayStaticPages(process.env.AGENT_REMOTE_WEB_DIST ?? fileURLToPath(new URL('../../dist', import.meta.url)), { origin: required('AGENT_REMOTE_RELAY_URL'), previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN }),
 });
 const port = Number(process.env.AGENT_REMOTE_PORT ?? 5910);
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('AGENT_REMOTE_PORT must be a valid port.');

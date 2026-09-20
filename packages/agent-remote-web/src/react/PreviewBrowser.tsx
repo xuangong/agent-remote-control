@@ -46,6 +46,22 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
     setNavigation({ address, back: current.index > 0, forward: current.index < current.urls.length - 1 });
   }
 
+  useEffect(() => {
+    if (!url || new URL(url).origin === window.location.origin) return;
+    const origin = new URL(url).origin;
+    const receive = (event: MessageEvent) => {
+      if (event.source !== iframe.current?.contentWindow || event.origin !== origin) return;
+      if (event.data?.type === 'arc-preview-close') { onClose(); return; }
+      if (event.data?.type !== 'arc-preview-navigation' || typeof event.data.url !== 'string') return;
+      try {
+        if (new URL(event.data.url).origin !== origin) return;
+        record(event.data.url, event.data.replace === true); setLoading(false); setFailure(undefined);
+      } catch { /* Ignore malformed frame messages. */ }
+    };
+    window.addEventListener('message', receive);
+    return () => window.removeEventListener('message', receive);
+  }, [url, onClose]);
+
   function loaded() {
     detach.current();
     const frame = iframe.current?.contentWindow;
@@ -91,8 +107,10 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
         } catch { /* Listeners on an inaccessible document leave with that document. */ }
       };
     } catch {
-      // Cross-origin documents cannot expose their address or history to the workbench.
-      setLoading(false); setFailure('This page left the preview origin. Reload to return to the local application.');
+      // Isolated tunnel origins intentionally cannot expose their DOM to the workbench.
+      setLoading(false);
+      if (url && new URL(url).origin !== window.location.origin) setFailure(undefined);
+      else setFailure('This page left the preview origin. Reload to return to the local application.');
     }
   }
 
@@ -103,7 +121,8 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
     current.index = index; current.navigating = true;
     setLoading(true); setFailure(undefined);
     // The toolbar owns a URL history; it must never traverse the parent conversation history.
-    iframe.current?.contentWindow?.location.replace(current.urls[index]!);
+    if (url && new URL(url).origin !== window.location.origin) iframe.current?.contentWindow?.postMessage({ type: 'arc-preview-navigate', url: current.urls[index] }, new URL(url).origin);
+    else iframe.current?.contentWindow?.location.replace(current.urls[index]!);
   }
 
   function reload() {

@@ -247,3 +247,27 @@ it('shares the sidebar between file and webpage previews without losing the webp
   expect(container.querySelector('[data-file-preview]')).toBeNull();
   expect(container.querySelector('[data-browser]')?.getAttribute('data-visible')).toBe('true');
 });
+
+
+it('waits for the registered preview data tunnel before returning it for opening or copying', async () => {
+  vi.useFakeTimers();
+  const registration = { id: 'preview', target: 'http://localhost:5173', status: 'active', createdAt: Date.now(), expiresAt: Date.now() + 60000, revision: 1, pathMode: 'strip', sources: [], availability: 'controller_offline' };
+  let online = false;
+  const client = { ...previewClient(vi.fn(async () => 'entry')), register: vi.fn(async () => registration),
+    snapshot: vi.fn(async () => ({ registrations: [{ ...registration, availability: online ? 'online' : 'controller_offline' }] })),
+  } as unknown as HttpPreviewClient;
+  let controller!: PreviewContextValue;
+  const container = await render(<PreviewProvider client={client} hostId="one" canManage><Probe capture={value => controller = value} /></PreviewProvider>);
+  try {
+    let completed = false;
+    let pending!: Promise<unknown>;
+    await act(async () => { pending = controller.register('agent', { target: registration.target, itemId: 'message' }).then(() => { completed = true; }); });
+    expect(completed).toBe(false);
+    online = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); await pending; });
+    expect(completed).toBe(true);
+    expect(client.register).toHaveBeenCalledOnce();
+    expect(controller.registrations[0]?.availability).toBe('online');
+    expect(client.open).not.toHaveBeenCalled();
+  } finally { await unmount(container); vi.useRealTimers(); }
+});

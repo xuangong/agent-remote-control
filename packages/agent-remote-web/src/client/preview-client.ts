@@ -67,6 +67,13 @@ export class HttpPreviewClient {
     return value.entryUrl;
   }
 
+  async tunnelUrl(hostId: string, id: string, originalLoopbackUrl: string, signal?: AbortSignal): Promise<string> {
+    const value = await this.request<{ tunnelUrl: string }>(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/${encodeURIComponent(id)}/open`, {
+      method: 'POST', body: JSON.stringify({ url: originalLoopbackUrl, mode: 'link' }), headers: { 'content-type': 'application/json' }, signal,
+    });
+    return value.tunnelUrl;
+  }
+
   async enter(entryUrl: string, id: string, signal?: AbortSignal): Promise<string> {
     const entry = new URL(entryUrl);
     const origin = new URL(this.baseUrl, globalThis.location?.origin ?? 'http://localhost').origin;

@@ -1,6 +1,6 @@
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
-import { usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
+import { CopyTunnelUrl, usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
 
 export function HostPreviewList({ controller: supplied, onOpenSource, onOpen }: {
   readonly onOpen?: () => void;
@@ -48,11 +48,15 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen }: 
           key={`${source.sessionId}:${source.itemId}`} className="lab-preview-source" type="button" disabled={!onOpenSource}
           onClick={() => onOpenSource?.(source.sessionId, source.itemId)}
         >Open source {index + 1}</button>)}</div> : null}
-        {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
-          onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(registration.id, registration.target); }}>Open preview</button> : null}
-        {controller.canManage ? <button className="lab-preview-unregister" type="button"
-          disabled={busy === registration.id || registration.status !== 'active' || registration.pendingUnregister}
-          onClick={() => void unregister(registration.id)}>{busy === registration.id ? 'Unregistering…' : 'Unregister'}</button> : null}
+        <div>
+          {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
+            onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(registration.id, registration.target); }}>Open preview</button> : null}
+          {controller.getTunnelUrl ? <CopyTunnelUrl disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
+            getUrl={() => controller.getTunnelUrl!(registration.id, registration.target)} /> : null}
+          {controller.canManage ? <button className="lab-preview-unregister" type="button"
+            disabled={busy === registration.id || registration.status !== 'active' || registration.pendingUnregister}
+            onClick={() => void unregister(registration.id)}>{busy === registration.id ? 'Unregistering…' : 'Unregister'}</button> : null}
+        </div>
       </li>)}
     </ul>
     {!controller.canManage ? <p className="lab-control-note">Only the Host owner can unregister previews.</p> : null}

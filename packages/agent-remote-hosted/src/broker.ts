@@ -90,6 +90,11 @@ export function createHostBroker(options: HostBrokerOptions) {
   let commits: Promise<unknown> = Promise.resolve();
   const previews = createHostPreviews({ initial: options.initialState?.previews,
     save: (value, publish) => commit(draft => { draft.previews = value; return { value: undefined, publish }; }),
+    renew: async (hostId, id) => {
+      const result = await rpc(requireHost(hostId), 'POST', '/remote/previews/renew', undefined, JSON.stringify({ id }));
+      if (result.status !== 200) throw new Error('Preview renewal unavailable.');
+      return (JSON.parse(result.body) as { registration: { expiresAt: number } }).registration;
+    },
     remove: async (hostId, id) => { const result = await rpc(requireHost(hostId), 'POST', '/remote/previews/unregister', undefined, JSON.stringify({ id }));
       if (result.status !== 200) throw new Error('Preview removal is pending.'); },
   });

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CopyTunnelUrl } from './CopyTunnelUrl.js';
 
 import type { PreviewPathMode, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 
@@ -8,6 +9,7 @@ export interface PreviewController {
   register(agentId: string, request: PreviewRegistrationRequest): Promise<PreviewRegistration>;
   unregister(id: string): Promise<void>;
   open(id: string, originalLoopbackUrl: string, sessionId?: string): Promise<string>;
+  getTunnelUrl?(id: string, originalLoopbackUrl: string): Promise<string>;
 }
 
 export function discoverLoopbackTargets(text: string): string[] {
@@ -66,6 +68,14 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
     catch (error) { setFailure(message(error, 'Preview access could not be prepared. Retry after checking Host access.')); }
     finally { setPending(false); }
   }
+  async function getTunnelUrl(): Promise<string> {
+    setPending(true); setFailure(undefined);
+    try {
+      const selected = registration?.status === 'active' ? registration
+        : await controller.register(agentId, { target, itemId, pathMode });
+      return await controller.getTunnelUrl!(selected.id, target);
+    } finally { setPending(false); }
+  }
   async function unregister(): Promise<void> {
     if (!registration) return;
     setPending(true); setFailure(undefined);
@@ -90,8 +100,10 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
     </> : <>
       <span className="agent-preview-state">{state}</span>
       <button className="agent-preview-open" type="button" disabled={pending || registration.pendingUnregister || registration.availability !== 'online'} onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(); }}>{pending ? 'Opening…' : 'Open preview'}</button>
-      {controller.canManage ? <button type="button" disabled={pending || registration.pendingUnregister} onClick={() => void unregister()}>Unregister</button> : null}
     </>}
+    {controller.getTunnelUrl ? <CopyTunnelUrl disabled={pending || !controller.canManage || registration?.pendingUnregister || (registration?.status === 'active' && registration.availability !== 'online')}
+      getUrl={getTunnelUrl} /> : null}
+    {registration?.status === 'active' && controller.canManage ? <button type="button" disabled={pending || registration.pendingUnregister} onClick={() => void unregister()}>Unregister</button> : null}
     <small>{effectiveMode === 'preserve'
       ? `This app must be configured with /p/${registration?.id ?? '<registration-id>'}/ as its base. Register first to get the ID.`
       : 'Root paths are adapted for supported apps; arbitrary application URLs may still require configuration.'}</small>

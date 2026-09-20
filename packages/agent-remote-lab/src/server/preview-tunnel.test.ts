@@ -10,7 +10,7 @@ it.each([false, true])('serves authenticated binary HTTP, streaming uploads and 
   expect((await fetch(path + '/bytes')).status).toBe(401);
   expect((await f.bob.request(`v1/remote/hosts/${f.hostId}/previews/${f.registration.id}/open`, { url: f.target + '/bytes' })).status).toBe(403);
   expect((await fetch(path + '/bytes', { headers: { cookie: f.alice.cookie } })).status).toBe(401);
-  const binary = await fetch(path + '/bytes', { headers: { cookie: `${cookie}; ${f.alice.cookie}; app=value` } }); expect(binary.status).toBe(200);
+  const binary = await fetch(path + '/bytes', { headers: { cookie: `${cookie}; app=value` } }); expect(binary.status).toBe(200);
   expect(f.observed.cookies.at(-1)).toBe('app=value');
   expect([...new Uint8Array(await binary.arrayBuffer())]).toEqual([0, 128, 255, 65]);
   const echo = await fetch(path + '/echo', { method: 'POST', headers: { cookie, origin: f.previewOrigin }, body: Buffer.from([255, 0, 128]) });
@@ -77,7 +77,7 @@ it('renews through owner authentication and preserves the mapped URL and tunnel 
   const url = `${f.previewOrigin}/p/${f.registration.id}`;
   const renewed = await fetch(url + '/_arc/renew', { method: 'POST', headers: { cookie, origin: f.previewOrigin, 'content-type': 'application/json' }, body: '{}' });
   expect(renewed.status).toBe(200);
-  expect(renewed.headers.getSetCookie()[0]).toContain(cookie);
+  expect(renewed.headers.getSetCookie()[0]).toContain(cookie.split(';')[0]!);
   expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(200);
   await vi.waitFor(async () => {
     const snapshot = await (await f.alice.request(`v1/remote/hosts/${f.hostId}/previews`)).json();
@@ -91,4 +91,111 @@ it('renews through owner authentication and preserves the mapped URL and tunnel 
   await vi.waitFor(async () => expect(await list()).toEqual([]), { timeout: 1000 });
   expect((await f.alice.request(route, {})).status).toBe(409);
   expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(401);
+}, 20000);
+
+it.each(['http', 'sse', 'websocket', 'upload'] as const)('renews on %s traffic without an iframe and expires after traffic stops', async mode => {
+  const f = await previewFixture({ ttlMs: 1000 });
+  const cookie = await f.enter('/bytes');
+  const base = f.previewOrigin + '/p/' + f.registration.id;
+  const until = f.registration.expiresAt + 600;
+  if (mode === 'http') {
+    while (Date.now() < until) {
+      const response = await fetch(base + '/bytes', { headers: { cookie } });
+      expect(response.status).toBe(200); await response.arrayBuffer();
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  } else if (mode === 'sse') {
+    const response = await fetch(base + '/streaming-events', { headers: { cookie } });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    try { while (Date.now() < until) { const part = await reader.read(); expect(part.done).toBe(false); } }
+    finally { await reader.cancel(); }
+  } else if (mode === 'websocket') {
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/socket', ['echo-v1'], { headers: { cookie, origin: f.previewOrigin }, handshakeTimeout: 5000 });
+    onPreviewCleanup(async () => { socket.terminate(); });
+    await once(socket, 'open');
+    while (Date.now() < until) {
+      const received = once(socket, 'message'); socket.send('activity');
+      expect((await received)[0].toString()).toBe('activity');
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    socket.close(); await once(socket, 'close');
+  } else {
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (Date.now() >= until) { controller.close(); return; }
+        await new Promise(resolve => setTimeout(resolve, 100)); controller.enqueue(new Uint8Array([1, 2, 3]));
+      },
+    });
+    const response = await fetch(base + '/echo', { method: 'POST', headers: { cookie, origin: f.previewOrigin }, body, duplex: 'half' } as RequestInit);
+    expect(response.status).toBe(200); expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(3);
+  }
+  const list = async () => (await (await f.alice.request('v1/remote/hosts/' + f.hostId + '/previews')).json()).registrations;
+  await vi.waitFor(async () => expect(await list()).toEqual([expect.objectContaining({ id: f.registration.id, expiresAt: expect.any(Number) })]), { timeout: 1000 });
+  expect((await list())[0].expiresAt).toBeGreaterThan(until);
+  await vi.waitFor(async () => expect(await list()).toEqual([]), { timeout: 4000 });
+  expect((await fetch(base + '/bytes', { headers: { cookie } })).status).toBe(401);
+}, 20000);
+
+it('does not renew for unauthorized traffic, list polling, or an idle WebSocket', async () => {
+  const f = await previewFixture({ ttlMs: 1000 });
+  const cookie = await f.enter('/socket');
+  const base = f.previewOrigin + '/p/' + f.registration.id;
+  const socket = new WebSocket(base.replace('http:', 'ws:') + '/socket', { headers: { cookie, origin: f.previewOrigin }, handshakeTimeout: 5000 });
+  onPreviewCleanup(async () => { socket.terminate(); });
+  await once(socket, 'open');
+  const closed = once(socket, 'close');
+  while (Date.now() < f.registration.expiresAt + 1500) {
+    expect((await fetch(base + '/bytes')).status).toBe(401);
+    await f.alice.request('v1/remote/hosts/' + f.hostId + '/previews');
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  await closed;
+  expect((await fetch(base + '/bytes', { headers: { cookie } })).status).toBe(401);
+}, 20000);
+
+
+it('copies a credential-free link and requires the current browser owner for navigation and data', async () => {
+  const f = await previewFixture();
+  const copied = await f.alice.request('v1/remote/hosts/' + f.hostId + '/previews/' + f.registration.id + '/open', { url: f.target + '/docs?q=1#section', mode: 'link' });
+  expect(copied.status).toBe(200);
+  const { tunnelUrl } = await copied.json();
+  const link = new URL(tunnelUrl);
+  expect(link.origin).toBe(f.url);
+  expect(link.pathname).toBe('/'); expect(link.hash).toBe('');
+  expect([...link.searchParams.keys()].sort()).toEqual(['host', 'path', 'preview']);
+  expect(link.searchParams.get('path')).toBe('/docs?q=1#section');
+  const navigate = (cookie = '', method = 'GET') => fetch(tunnelUrl, { method, headers: { cookie }, redirect: 'manual' });
+  const signedOut = await navigate();
+  expect(signedOut.status).toBe(303);
+  expect(signedOut.headers.get('location')).toBe('/auth/login' + link.search);
+  const login = await fetch(f.url + signedOut.headers.get('location'), { redirect: 'manual' });
+  expect(login.status).toBe(303);
+  expect(new URL(login.headers.get('location')!).origin).toBe('https://gateway.example');
+  expect((await navigate(f.bob.cookie)).status).toBe(403);
+  expect((await navigate(f.alice.cookie, 'POST')).status).toBe(405);
+  const allowed = await navigate(f.alice.cookie);
+  expect(allowed.status).toBe(303);
+  const code = new URL(allowed.headers.get('location')!).hash.slice(1);
+  const redeem = (cookie = '') => fetch(f.previewOrigin + '/_arc/enter', { method: 'POST', headers: { cookie, origin: f.previewOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  expect((await redeem()).status).toBe(401);
+  expect((await redeem(f.bob.cookie)).status).toBe(401);
+  const entered = await redeem(f.alice.cookie);
+  expect(entered.status).toBe(200);
+  expect(await entered.json()).toEqual({ url: '/p/' + f.registration.id + '/docs?q=1#section' });
+  const previewCookie = entered.headers.getSetCookie()[0]!.split(';')[0]!;
+  const path = f.previewOrigin + '/p/' + f.registration.id + '/bytes';
+  expect((await fetch(path, { headers: { cookie: previewCookie } })).status).toBe(401);
+  expect((await fetch(path, { headers: { cookie: previewCookie + '; ' + f.bob.cookie } })).status).toBe(401);
+  expect((await fetch(path, { headers: { cookie: previewCookie + '; ' + f.alice.cookie } })).status).toBe(200);
+  const document = await fetch(path, { headers: { 'sec-fetch-dest': 'document' }, redirect: 'manual' });
+  expect(document.status).toBe(303);
+  expect(new URL(document.headers.get('location')!).searchParams.get('preview')).toBe(f.registration.id);
+}, 20000);
+
+it('does not accept a transferable entry proof on a separate preview origin without a browser login', async () => {
+  const f = await previewFixture({ separateOrigin: true });
+  const entry = await f.entryUrl('/bytes');
+  const response = await fetch(f.previewOrigin + '/_arc/enter', { method: 'POST', headers: { origin: f.previewOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(entry).hash.slice(1) }) });
+  expect(response.status).toBe(401);
 }, 20000);

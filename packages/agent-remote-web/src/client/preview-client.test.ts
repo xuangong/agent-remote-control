@@ -74,3 +74,13 @@ it('recovers an expired preview cookie with a fresh handoff while keeping the re
   expect(paths).toEqual(['/u/account/v1/remote/hosts/host-one/previews/preview-one/renew', '/p/preview-one/_arc/renew',
     '/u/account/v1/remote/hosts/host-one/previews/preview-one/open', '/_arc/enter']);
 });
+
+
+it('requests a credential-free navigation link without redeeming an iframe handoff', async () => {
+  const tunnelUrl = 'https://control.test/?host=host&preview=preview&path=%2Fdocs';
+  const fetcher = vi.fn(async () => Response.json({ tunnelUrl }));
+  const client = new HttpPreviewClient('https://control.test/u/account/', fetcher as typeof fetch);
+  expect(await client.tunnelUrl('host', 'preview', 'http://localhost:5173/docs')).toBe(tunnelUrl);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledWith('https://control.test/u/account/v1/remote/hosts/host/previews/preview/open', expect.objectContaining({ method: 'POST', body: JSON.stringify({ url: 'http://localhost:5173/docs', mode: 'link' }) }));
+});

@@ -69,8 +69,9 @@ describe('TunnelPeer', () => {
     };
     const controller = createTunnelPeer(controllerSocket, { webSocket: async () => ({ socket: application }) });
     const relay = createTunnelPeer(relaySocket, {});
-    await relay.openWebSocket({ previewId: 'p', path: '/', headers: [], protocols: [] });
+    const accepted = await relay.openWebSocket({ previewId: 'p', path: '/', headers: [], protocols: [] });
     expect(() => relay.close()).not.toThrow();
+    expect(() => accepted.socket.close()).not.toThrow();
     controller.close();
   });
 

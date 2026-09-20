@@ -20,7 +20,7 @@ it('loads authoritative Host previews and synchronizes registration mutations', 
 
   await act(async () => container.querySelector<HTMLButtonElement>('[data-action="register"]')?.click());
   expect(container.textContent).toContain('1 previews');
-  expect(client.snapshot).toHaveBeenCalledTimes(2);
+  expect(client.snapshot).toHaveBeenCalledTimes(3);
 });
 
 it('ignores a snapshot that completes after the provider switches Hosts', async () => {

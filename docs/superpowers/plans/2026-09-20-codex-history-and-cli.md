@@ -47,3 +47,10 @@ User-approved extension: expose the native resume command from the web session a
 
 
 Extension validation: Codex provider/native failures 19 passed; Host control/operation cache 45 passed; hosted broker 45 passed; web notices/copy/directory client 13 passed. Desktop and mobile Chromium dialog checks both passed, including horizontal overflow and focus restoration. Full workspace build/typecheck and compatibility check passed. Native file exhaustion used a real Unix WebSocket test server; no production daemon was restarted. No iPhone Safari device check or production deployment was performed.
+
+
+## Default Daemon Descriptor Limit
+
+User-requested extension: default `codex daemon start/restart` to `8192` rather than requiring an environment override. Saved settings and explicit environment still override the default. Set the limit before invoking the native lifecycle command; failure must not stop or restart an existing daemon. Existing sessions do not change the running daemon's limit. Test real inherited limits using shell probes and a process with a constrained hard limit.
+
+Validation: 15 CLI/configuration tests and 10 recovery UI tests passed. Controller build and typecheck passed. The hard-limit failure test uses an isolated subprocess and never invokes the real Codex executable. Production daemon and Controller installation remain unchanged.

@@ -13,7 +13,8 @@ async function fixture(saved: Record<string, string> = {}) {
   const executable = join(root, 'native codex');
   await writeFile(executable, `#!${process.execPath}\nconst value = { args: process.argv.slice(2), locale: process.env.LC_ALL, home: process.env.CODEX_HOME, key: process.env.AGENT_HOST_REMOTE_KEY }; console.log(JSON.stringify(value)); process.exit(Number(process.env.NATIVE_TEST_EXIT ?? 0));\n`, { mode: 0o700 });
   await writeFile(join(root, 'connection.json'), JSON.stringify({ serverUrl: 'https://relay.invalid', remoteKey: 'private-key', environment: { AGENT_HOST_CODEX: executable, AGENT_REMOTE_CODEX_HOME: join(root, 'codex home'), ...saved } }));
-  const run = (args: string[], environment: NodeJS.ProcessEnv = {}) => execute(process.execPath, ['dist/cli.js', 'codex', ...args], {
+  const run = (args: string[], environment: NodeJS.ProcessEnv = {}, hardLimit?: number) => execute(hardLimit === undefined ? process.execPath : '/bin/sh', hardLimit === undefined ? ['dist/cli.js', 'codex', ...args]
+    : ['-c', 'ulimit -Sn "$1" && ulimit -Hn "$1" || exit; shift; exec "$@"', 'limit-test', String(hardLimit), process.execPath, 'dist/cli.js', 'codex', ...args], {
     cwd: process.cwd(), timeout: 5000, env: { PATH: process.env.PATH, HOME: process.env.HOME, AGENT_HOST_STATE_DIR: root, ...environment },
   });
   return { root, run };
@@ -56,4 +57,27 @@ it('honors explicit native home overrides and runs without Relay pairing', async
   await rm(join(f.root, 'connection.json'));
   const local = JSON.parse((await f.run([], { AGENT_HOST_CODEX: join(f.root, 'native codex'), AGENT_REMOTE_CODEX_HOME: join(f.root, 'local') })).stdout);
   expect(local.args).toEqual(['--remote', `unix://${f.root}/local/app-server-control/app-server-control.sock`]);
+});
+
+
+it.each([['daemon', 'start'], ['daemon', 'restart'], ['app-server', 'daemon', 'restart']])('defaults the inherited daemon descriptor limit for %j', async (...args) => {
+  const f = await fixture();
+  const probe = join(f.root, 'limit probe');
+  await writeFile(probe, '#!/bin/sh\nulimit -Sn\n', { mode: 0o700 });
+  expect((await f.run(args, { AGENT_HOST_CODEX: probe })).stdout.trim()).toBe('8192');
+});
+
+it('allows saved and explicit descriptor limits to override the default', async () => {
+  const f = await fixture({ AGENT_HOST_CODEX_NOFILE: '4096' });
+  const probe = join(f.root, 'limit probe');
+  await writeFile(probe, '#!/bin/sh\nulimit -Sn\n', { mode: 0o700 });
+  expect((await f.run(['daemon', 'restart'], { AGENT_HOST_CODEX: probe })).stdout.trim()).toBe('4096');
+  expect((await f.run(['daemon', 'restart'], { AGENT_HOST_CODEX: probe, AGENT_HOST_CODEX_NOFILE: '2048' })).stdout.trim()).toBe('2048');
+});
+
+it('fails before invoking daemon lifecycle if the requested limit exceeds the hard limit', async () => {
+  const f = await fixture();
+  await expect(f.run(['daemon', 'restart'], {}, 512)).rejects.toMatchObject({
+    code: 1, stdout: '', stderr: expect.stringContaining('Daemon was not started or restarted'),
+  });
 });

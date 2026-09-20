@@ -31,6 +31,6 @@ export function NativeDaemonRecovery() {
     <p>Restarting disconnects all sessions using this shared Codex daemon. Running responses and tools may be interrupted. Saved history remains, but unfinished work may need checking; unconfirmed messages will not be resent automatically.</p>
     <p>Check active work first. If you choose to restart, run this on the Host computer using the same Controller configuration. Copying does not execute it.</p>
     <CopyCommand label="Restart command" action="Copy restart command" command="agent-remote-controller codex daemon restart" />
-    <p>If the problem returns, check the daemon’s file descriptor usage and limit. Restarting releases handles; it does not raise that limit.</p>
+    <p>If the problem returns, check the daemon’s file descriptor usage and limit. The Controller starts the replacement with a limit of 8192 unless configured otherwise.</p>
   </details>;
 }

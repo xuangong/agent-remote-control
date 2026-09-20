@@ -31,12 +31,12 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
     nativeArgs = hasRemote ? args : ['--remote', `unix://${socket}`, ...args];
   }
   let command = executable;
-  const limit = configured.AGENT_HOST_CODEX_NOFILE;
-  if (daemon && ['start', 'restart'].includes(args[1] ?? '') && limit !== undefined) {
+  const limit = configured.AGENT_HOST_CODEX_NOFILE ?? '8192';
+  if (daemon && ['start', 'restart'].includes(args[1] ?? '')) {
     if (!/^[1-9]\d*$/.test(limit) || !Number.isSafeInteger(Number(limit))) throw new Error('AGENT_HOST_CODEX_NOFILE must be a positive integer.');
     if (process.platform === 'win32') throw new Error('AGENT_HOST_CODEX_NOFILE is only supported on Unix.');
     command = '/bin/sh';
-    nativeArgs = ['-c', 'ulimit -Sn "$1" || exit; shift; exec "$@"', 'agent-remote-controller', limit, executable, ...nativeArgs];
+    nativeArgs = ['-c', 'if ! ulimit -Sn "$1"; then echo "Cannot set Codex daemon file descriptor limit to $1. Daemon was not started or restarted. Check the system hard limit or set AGENT_HOST_CODEX_NOFILE." >&2; exit 1; fi; shift; exec "$@"', 'agent-remote-controller', limit, executable, ...nativeArgs];
   }
   return new Promise<number>((resolveResult, reject) => {
     const child = spawn(command, nativeArgs, { env, stdio: 'inherit' });

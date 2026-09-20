@@ -159,3 +159,20 @@ describe('TraceView', () => {
     expect(container.querySelector('[aria-label="Trace entry details"]')?.textContent).toContain('Tests agent finished');
   });
 });
+
+it('defers hidden trace creation and freezes hidden rows until the next reveal', async () => {
+  let update!: (value: { visible: boolean; state: AgentReplicaState }) => void;
+  function Harness() {
+    const [value, setValue] = useState({ visible: false, state }); update = setValue;
+    return <TraceView {...value} />;
+  }
+  const container = await render(<Harness />);
+  expect(container.querySelector('[aria-label="Trace events"]')).toBeNull();
+  await act(async () => update({ visible: true, state }));
+  expect(container.textContent).toContain('Finished.');
+  const next = { ...state, timeline: { ...state.timeline, entries: [entry] } };
+  await act(async () => update({ visible: false, state: next }));
+  expect(container.textContent).toContain('Finished.');
+  await act(async () => update({ visible: true, state: next }));
+  expect(container.textContent).not.toContain('Finished.');
+});

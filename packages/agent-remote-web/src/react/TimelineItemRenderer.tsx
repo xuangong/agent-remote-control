@@ -1,7 +1,7 @@
 import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentTimelineItem, ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 
 import type { MessageGroupPosition } from './timeline-render-model.js';
 import { AssistantMessageItem, UserMessageItem } from './items/MessageItem.js';
@@ -23,7 +23,7 @@ export interface TimelineItemRendererProps {
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
 }
 
-export function TimelineItemRenderer({ item, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest }: TimelineItemRendererProps) {
+export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest }: TimelineItemRendererProps) {
   const markdownResources = useMemo(() => (
     resources && resourceBindings && resourceScopeKey && onResourceResolve && onResourceRequest
       ? { scopeKey: resourceScopeKey, resources, bindings: resourceBindings, resolveResource: onResourceResolve, requestResource: onResourceRequest }
@@ -39,4 +39,4 @@ export function TimelineItemRenderer({ item, messageGroup, resolveSessionLink, r
     case 'error': return <ErrorItem item={item} />;
     case 'compaction': return <CompactionItem item={item} />;
   }
-}
+});

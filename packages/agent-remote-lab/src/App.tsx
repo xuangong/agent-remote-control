@@ -906,7 +906,7 @@ function AppContent({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
-  return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost}><PreviewScope client={previewClient} host={previewHost}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {tracking.observers}
     {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
@@ -1136,9 +1136,9 @@ function AppContent({
   </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope>;
 }
 
-function PreviewScope({ client, host, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly children: ReactNode }) {
+function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {
   return host && host.access !== 'shared'
-    ? <PreviewProvider client={client} hostId={host.id} canManage>{children}</PreviewProvider>
+    ? <PreviewProvider client={client} hostId={host.id} canManage polling={polling}>{children}</PreviewProvider>
     : children;
 }
 

@@ -23,6 +23,7 @@ export function TimelineEntry({ entryKey, timestamp, sent, inspected, inspect, s
       time: new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(date),
     };
   }, [timestamp]);
+  const timeContext = useMemo(() => localTime ? { ...localTime, timestamp, visible: timeVisible, toggle: toggleTimelineTime } : undefined, [localTime, timestamp, timeVisible]);
   const { ref, reveal } = useTimelineTimeSwipe(!!localTime, sent ? -1 : 1);
   return <div ref={ref} className="agent-timeline-entry" data-entry-key={entryKey}
     data-inspected={inspected || undefined} tabIndex={inspect ? -1 : undefined}
@@ -42,7 +43,7 @@ export function TimelineEntry({ entryKey, timestamp, sent, inspected, inspect, s
     {localTime ? <time className="agent-entry-time" dateTime={timestamp} aria-label={`${localTime.date} ${localTime.time} (local time)`}>
       <span>{localTime.date}</span><span>{localTime.time}</span>
     </time> : null}
-    <TimelineTimeContext.Provider value={localTime ? { ...localTime, timestamp, visible: timeVisible, toggle: toggleTimelineTime } : undefined}>
+    <TimelineTimeContext.Provider value={timeContext}>
       <div className="agent-entry-content">{children}</div>
     </TimelineTimeContext.Provider>
   </div>;

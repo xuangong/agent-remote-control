@@ -1,5 +1,5 @@
 import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
-import { useContext, useRef, useState } from 'react';
+import { useContext, useMemo, useRef, useState } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -70,8 +70,8 @@ export function AgentTimeline({
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
   const contentOnly = useContext(TimelineDisplay) === 'content';
-  const entries = contentOnly ? state.timeline.entries.filter(({ item }) => isContentOnlyItem(item)) : state.timeline.entries;
-  const renderModel = createTimelineRenderModel(state.timeline.epoch, entries);
+  const entries = useMemo(() => contentOnly ? state.timeline.entries.filter(({ item }) => isContentOnlyItem(item)) : state.timeline.entries, [contentOnly, state.timeline.entries]);
+  const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
   const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);

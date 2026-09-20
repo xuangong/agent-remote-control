@@ -18,7 +18,7 @@ export function useRemoteHosts(service: HostPairingService, enabled: boolean) {
       const current = ++request;
       try {
         const result = await service.hosts();
-        if (!retired && request === current) { setHosts(result.hosts); setError(undefined); }
+        if (!retired && request === current) { setHosts(previous => JSON.stringify(previous) === JSON.stringify(result.hosts) ? previous : result.hosts); setError(undefined); }
       } catch (reason) { if (!retired && request === current) setError(reason instanceof Error ? reason.message : 'Could not load Hosts.'); }
       finally { if (request === current) inFlight = false; }
     };

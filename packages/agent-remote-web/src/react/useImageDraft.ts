@@ -4,7 +4,7 @@ import { readImageDraft, writeImageDraft, imageDraftScopeGeneration, cacheDraftI
 import { draftText, normalizeDraftParts, snapshotContent, type DraftPart } from './composer-document.js';
 
 export type UploadImage = (file: Blob, uploadId: string, options?: { signal?: AbortSignal; onProgress?(loaded: number, total: number): void }) => Promise<NonNullable<ImageUploadReceipt['attachment']>>;
-interface DraftEntry { draft: ImageDraft; inputText: string; revision: number; hydrated: boolean; storageError?: string; error?: string; saves: Promise<void>; generation: number; wake?: () => void }
+interface DraftEntry { draft: ImageDraft; inputText: string; revision: number; hydrated: boolean; storageError?: string; error?: string; saving?: Promise<void>; dirty: boolean; generation: number; wake?: () => void }
 export function useImageDraft({ scope, sessionKey, text, enabled, active, upload, onTextChange }: {
   scope?: string; sessionKey: string; text: string; enabled: boolean; active: boolean; upload?: UploadImage; onTextChange(text: string): void;
 }) {
@@ -12,7 +12,7 @@ export function useImageDraft({ scope, sessionKey, text, enabled, active, upload
   const key = JSON.stringify([scope ?? 'memory', sessionKey]);
   let entry = entries.current.get(key);
   if (!entry) {
-    entry = { draft: { version: 1, key, scope: scope ?? '', parts: text ? [{ type: 'text', text }] : [], images: {}, nextLabel: 1 }, inputText: text, revision: 0, hydrated: !scope, saves: Promise.resolve(), generation: imageDraftScopeGeneration(scope ?? '') };
+    entry = { draft: { version: 1, key, scope: scope ?? '', parts: text ? [{ type: 'text', text }] : [], images: {}, nextLabel: 1 }, inputText: text, revision: 0, hydrated: !scope, dirty: false, generation: imageDraftScopeGeneration(scope ?? '') };
     entries.current.set(key, entry);
   }
   const current = entry;
@@ -22,11 +22,19 @@ export function useImageDraft({ scope, sessionKey, text, enabled, active, upload
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   function notify(): void { if (mounted.current && currentKey.current === key) refresh(value => value + 1); }
-  function persist(): void {
-    if (!scope || !current.hydrated) return;
+  function flush(): void {
+    if (!current.dirty || current.saving) return;
+    current.dirty = false;
     const snapshot: ImageDraft = { ...current.draft, parts: current.draft.parts.map(part => ({ ...part })),
       images: Object.fromEntries(Object.entries(current.draft.images).map(([id, image]) => [id, { ...image }])) };
-    current.saves = current.saves.then(() => writeImageDraft(snapshot, current.generation)).catch(() => { current.storageError = 'Draft recovery is unavailable. Keep this page open to preserve your images.'; notify(); });
+    current.saving = writeImageDraft(snapshot, current.generation)
+      .catch(() => { current.storageError = 'Draft recovery is unavailable. Keep this page open to preserve your images.'; notify(); })
+      .finally(() => { current.saving = undefined; if (current.dirty) flush(); });
+  }
+  function persist(): void {
+    if (!scope || !current.hydrated) return;
+    current.dirty = true;
+    flush();
   }
   function changed(document = false): void {
     if (document) { current.revision++; if (mounted.current && currentKey.current === key) callbacks.current.onTextChange(draftText(current.draft.parts)); }

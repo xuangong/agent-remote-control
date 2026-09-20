@@ -1,3 +1,4 @@
+import { watchPagePolling } from '../client/page-polling.js';
 import { useEffect, useRef, useState } from 'react';
 import { PreviewRequestError, type HttpPreviewClient, type PreviewRegistration } from '../client/preview-client.js';
 
@@ -12,6 +13,7 @@ export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, can
     const registration = registrations.find(value => value.id === entry.id);
     if (entry.url && !entry.error && registration?.status !== 'unregistered' && !registration?.pendingUnregister && !retained.has(entry.id)) retained.set(entry.id, entry);
   }
+  const hasRetained = retained.size > 0;
   const current = useRef(retained);
   current.current = retained;
   const reconcile = useRef<() => void>(() => {});
@@ -55,23 +57,23 @@ export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, can
       }
     };
     reconcile.current = tick;
-    const wake = () => { due.clear(); tick(); };
+    const wake = () => { due.clear(); if (document.visibilityState !== 'hidden') tick(); };
     const visible = () => { if (document.visibilityState === 'visible') wake(); };
-    const timer = window.setInterval(tick, 1000);
+    const stopPolling = hasRetained ? watchPagePolling(tick, 1000) : () => {};
     document.addEventListener('visibilitychange', visible);
     window.addEventListener('online', wake);
     window.addEventListener('pageshow', wake);
-    tick();
+    if (document.visibilityState !== 'hidden') tick();
     return () => {
       disposed = true; reconcile.current = () => {};
-      window.clearInterval(timer);
+      stopPolling();
       document.removeEventListener('visibilitychange', visible);
       window.removeEventListener('online', wake);
       window.removeEventListener('pageshow', wake);
       for (const request of pending.values()) request.abort();
     };
-  }, [client, hostId, canManage, refresh]);
+  }, [client, hostId, canManage, refresh, hasRetained]);
 
-  useEffect(() => { reconcile.current(); }, [entries, registrations, canManage]);
+  useEffect(() => { if (document.visibilityState !== 'hidden') reconcile.current(); }, [entries, registrations, canManage]);
   return errors;
 }

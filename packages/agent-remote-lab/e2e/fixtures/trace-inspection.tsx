@@ -21,7 +21,7 @@ const initial: AgentReplicaState = { ...replicaState, timeline: { ...replicaStat
 } };
 
 let timeline = initial.timeline;
-let listener: RemoteTransportListener | undefined;
+const timelineListeners = new Set<RemoteTransportListener>();
 const transport: LabTransport = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
   createAgent: async () => { throw new Error('Not used by this fixture'); },
@@ -35,15 +35,24 @@ const transport: LabTransport = {
   } }),
   onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
   connect: (_agentId, target) => {
-    listener = target;
+    let activityOnly = false;
     queueMicrotask(() => {
       target.onOpen();
-      target.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: initial.agent! });
+      if (!activityOnly) target.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: initial.agent! });
     });
-    return { close: () => { if (listener === target) listener = undefined; }, send: message => {
-      if (message.type === 'timeline_subscription') queueMicrotask(() => target.onMessage({
-        protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: ['agent-1'] },
-      }));
+    return { close: () => { timelineListeners.delete(target); }, send: message => {
+      if (message.type === 'negotiate' && message.observation === 'activity') {
+        activityOnly = true;
+        queueMicrotask(() => target.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity',
+          payload: { agentId: 'agent-1', status: 'idle' },
+        }));
+      }
+      if (message.type === 'timeline_subscription') {
+        timelineListeners.add(target);
+        queueMicrotask(() => target.onMessage({
+          protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: ['agent-1'] },
+        }));
+      }
     } };
   },
 };
@@ -51,7 +60,7 @@ const transport: LabTransport = {
 function emit(item: ProjectedTimelineEntry['item']) {
   const seq = timeline.nextSeq;
   timeline = { ...timeline, nextSeq: seq + 1 };
-  listener?.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_stream', payload: {
+  for (const listener of timelineListeners) listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_stream', payload: {
     agentId: 'agent-1', epoch: timeline.epoch!, seq, timestamp: '2026-09-17T07:01:00Z',
     event: { type: 'timeline', providerId: 'recorded', turnId: 'turn-inspect', item, resources: [] },
   } });
@@ -66,7 +75,7 @@ function Fixture() {
       })}>Complete tool</button>
       <button onClick={() => {
         timeline = { ...initial.timeline, epoch: 'epoch-two' };
-        listener?.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: 'agent-1', epoch: 'epoch-two' } });
+        for (const listener of timelineListeners) listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: 'agent-1', epoch: 'epoch-two' } });
       }}>Replace timeline</button>
     </nav>
     <App transport={transport} />

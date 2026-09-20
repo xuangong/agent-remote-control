@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { clearConversationRecovery, ReadingPositions, readDrafts, saveDrafts, readLastSession, saveLastSession } from './conversation-recovery.js';
 
-afterEach(() => { sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); });
+afterEach(() => { clearConversationRecovery(); sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); });
 
 it('restores drafts and independent reading anchors within a relay scope', () => {
   saveDrafts('alice', { root: 'Unsent root', side: 'Unsent side' });
@@ -61,4 +61,25 @@ it('restores the last session from a fresh home launch and removes it on sign ou
   clearConversationRecovery();
   expect(readLastSession('relay')).toBeUndefined();
   expect(localStorage.getItem('unrelated')).toBe('keep');
+});
+
+it('coalesces reading and draft writes and flushes on page hide without reviving signed-out data', () => {
+  vi.useFakeTimers();
+  try {
+    const writes = vi.spyOn(Storage.prototype, 'setItem');
+    const positions = new ReadingPositions('batched');
+    for (let i = 0; i < 20; i++) {
+      positions.set('session', { following: false, anchor: { key: 'entry', offset: i } });
+      saveDrafts('batched', { root: String(i) });
+    }
+    expect(writes).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(readDrafts('batched').root).toBe('19');
+    expect(new ReadingPositions('batched').get('session')?.anchor?.offset).toBe(19);
+    saveDrafts('batched', { root: 'Do not resurrect' });
+    clearConversationRecovery('batched');
+    vi.runAllTimers();
+    expect(readDrafts('batched')).toEqual({});
+  } finally { vi.useRealTimers(); }
 });

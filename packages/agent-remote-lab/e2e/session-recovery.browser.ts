@@ -33,7 +33,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
         const value = JSON.parse(text);
         if (value.type === 'send_message') {
           window.attempts.push(value.payload);
-          if (window.dropNext) { window.dropNext = false; return; }
+          if (window.dropNext) { window.dropNext = false; window.disconnectDropped = () => socket.close(); return; }
         }
         send(text);
       };
@@ -68,6 +68,9 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   await input.fill('Do not lose this failed message');
   await page.getByTestId('prompt-submit').click();
   await page.clock.fastForward(11000);
+  expect(await page.locator('[data-delivery-state="unconfirmed"]').count()).toBe(0);
+  expect(await page.locator('[data-delivery-state="pending"]').count()).toBe(1);
+  await page.evaluate(() => { (window as any).disconnectDropped(); });
   await expect.poll(() => page.locator('[data-delivery-state="unconfirmed"]').count()).toBe(1);
   await page.clock.fastForward(60000);
   expect(await page.locator('[data-delivery-state="unconfirmed"]').textContent()).toContain('Do not lose this failed message');
@@ -84,6 +87,9 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   expect(await page.evaluate(() => (window as any).attempts[0].operationId)).toBe(savedOperation);
   expect(await page.locator('.agent-outgoing-message').count()).toBe(1);
   await page.clock.fastForward(31000);
+  expect(await page.locator('.agent-message-delivery').textContent()).toContain('Sent');
+  await page.goto(fixture.url + '/');
+  await expect.poll(() => input.isEnabled()).toBe(true);
   await expect.poll(() => page.getByRole('button', { name: 'Delete message', exact: true }).isEnabled()).toBe(true);
   await page.screenshot({ path: `/tmp/arc-mobile-recovery-${engine.name()}.png` });
   await page.getByRole('button', { name: 'Delete message', exact: true }).click();

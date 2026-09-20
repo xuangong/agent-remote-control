@@ -1,13 +1,19 @@
 import { useFeedbackToast } from './Toast.js';
 import { sessionActivity } from '../session-activity.js';
-import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactElement, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
 import { createTimelineRenderModel, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
 import { traceItemLabel, traceItemLabels, traceItemStatus, traceItemSummary, traceSequence, traceSessionReferences, type TraceEntryRequest } from '../trace-model.js';
 import { TraceEntryDetails } from './TraceEntryDetails.js';
 import { TraceSessionLinks } from './TraceSessionLinks.js';
 
-export function TraceView({ state, visible = true, revealEntry, onShowConversation, sessionStatus, sessionTitle, resolveSessionLink, onLoadOlder }: {
+export function TraceView(props: Parameters<typeof TraceBrowser>[0]) {
+  const retained = useRef<ReactElement | null>(null);
+  if (props.visible !== false) retained.current = <TraceBrowser {...props} />;
+  return retained.current;
+}
+
+function TraceBrowser({ state, visible = true, revealEntry, onShowConversation, sessionStatus, sessionTitle, resolveSessionLink, onLoadOlder }: {
   state?: AgentReplicaState; visible?: boolean; revealEntry?: TraceEntryRequest; onShowConversation?: (key: string) => void;
   sessionStatus?: RemoteSessionStatus; sessionTitle?: string; resolveSessionLink?: SessionLinkResolver; onLoadOlder?: () => void | Promise<void>;
 }) {

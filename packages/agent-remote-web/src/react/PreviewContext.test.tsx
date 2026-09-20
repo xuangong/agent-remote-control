@@ -65,6 +65,40 @@ function Probe() {
   return <><span>{controller.registrations.length} previews:{controller.registrations.map(item => item.id).join(',')}</span><button data-action="register" onClick={() => void controller.register('agent', { target: 'http://localhost:5173', itemId: 'one' })}>Register</button><button data-action="refresh" onClick={() => void controller.refresh()}>Refresh</button></>;
 }
 
+it('aborts a stalled snapshot and resumes automatic refreshing after its deadline', async () => {
+  vi.useFakeTimers();
+  let signal: AbortSignal | undefined;
+  const client = { snapshot: vi.fn()
+    .mockImplementationOnce((_host: string, pendingSignal: AbortSignal) => {
+      signal = pendingSignal;
+      return new Promise((_resolve, reject) => pendingSignal?.addEventListener('abort', () => reject(pendingSignal.reason)));
+    })
+    .mockResolvedValue({ epoch: 'one', revision: 1, registrations: [activeRegistration()] }),
+  } as unknown as HttpPreviewClient;
+  try {
+    const container = await render(<PreviewProvider client={client} hostId="host" canManage><Probe /></PreviewProvider>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(client.snapshot).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('preview-one');
+  } finally { vi.useRealTimers(); }
+});
+
+it('cancels pending snapshot requests when switching Hosts or unmounting', async () => {
+  const signals: AbortSignal[] = [];
+  const client = { snapshot: vi.fn((_host: string, signal: AbortSignal) => {
+    signals.push(signal);
+    return new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason)));
+  }) } as unknown as HttpPreviewClient;
+  const container = await render(<PreviewProvider client={client} hostId="one" canManage><Probe /></PreviewProvider>);
+  await rerender(container, <PreviewProvider client={client} hostId="two" canManage><Probe /></PreviewProvider>);
+  expect(signals[0]?.aborted).toBe(true);
+  expect(signals[1]?.aborted).toBe(false);
+  await rerender(container, <></>);
+  expect(signals[1]?.aborted).toBe(true);
+});
+
 function activeRegistration(id = 'preview-one'): PreviewRegistration {
   return { id, target: 'http://localhost:5173', status: 'active', createdAt: 1_789_516_800_000,
     expiresAt: 1_789_520_400_000, revision: 2, pathMode: 'strip', sources: [{ sessionId: 'agent', itemId: 'one' }], availability: 'online' };
@@ -75,3 +109,36 @@ function deferred<T>() {
   const promise = new Promise<T>(accept => { resolve = accept; });
   return { promise, resolve };
 }
+
+it('does not poll while the page is hidden and refreshes once on return', async () => {
+  vi.useFakeTimers();
+  let visibility = 'visible';
+  const property = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility as DocumentVisibilityState);
+  const client = { snapshot: vi.fn(async () => ({ epoch: 'one', revision: 1, registrations: [] })) } as unknown as HttpPreviewClient;
+  try {
+    await render(<PreviewProvider client={client} hostId="host-one" canManage><Probe /></PreviewProvider>);
+    expect(client.snapshot).toHaveBeenCalledTimes(1);
+    visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(client.snapshot).toHaveBeenCalledTimes(1);
+    visibility = 'visible';
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(client.snapshot).toHaveBeenCalledTimes(2);
+  } finally { property.mockRestore(); vi.useRealTimers(); }
+});
+
+it('uses a quiet interval until preview controls are opened', async () => {
+  vi.useFakeTimers();
+  const client = { snapshot: vi.fn(async () => ({ epoch: 'one', revision: 1, registrations: [] })) } as unknown as HttpPreviewClient;
+  try {
+    const container = await render(<PreviewProvider client={client} hostId="host" canManage polling={false}><Probe /></PreviewProvider>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+    expect(client.snapshot).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(client.snapshot).toHaveBeenCalledTimes(2);
+    await rerender(container, <PreviewProvider client={client} hostId="host" canManage polling><Probe /></PreviewProvider>);
+    expect(client.snapshot).toHaveBeenCalledTimes(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(client.snapshot).toHaveBeenCalledTimes(4);
+  } finally { vi.useRealTimers(); }
+});

@@ -1,3 +1,4 @@
+import { watchPagePolling } from '@agent-remote-controller/agent-remote-web';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@agent-remote-controller/agent-remote-protocol';
 import type { RemoteHost } from './components/HostPairing.js';
@@ -37,13 +38,13 @@ interface TunnelContext {
 const Context = createContext<TunnelContext | undefined>(undefined);
 export const useVscodeTunnel = () => useContext(Context);
 
-export function VscodeTunnelScope({ host, service, children }: { host?: RemoteHost; service: VscodeTunnelService; children: ReactNode }) {
+export function VscodeTunnelScope({ host, service, polling = true, children }: { host?: RemoteHost; service: VscodeTunnelService; polling?: boolean; children: ReactNode }) {
   return host && host.id !== 'local' && host.access !== 'shared'
-    ? <HostTunnelState key={host.id} host={host} service={service}>{children}</HostTunnelState>
+    ? <HostTunnelState key={host.id} host={host} service={service} polling={polling}>{children}</HostTunnelState>
     : <Context.Provider value={undefined}>{children}</Context.Provider>;
 }
 
-function HostTunnelState({ host, service, children }: { host: RemoteHost; service: VscodeTunnelService; children: ReactNode }) {
+function HostTunnelState({ host, service, polling, children }: { host: RemoteHost; service: VscodeTunnelService; polling: boolean; children: ReactNode }) {
   const [state, setState] = useState<VscodeTunnelSnapshot>();
   const [error, setError] = useState<string>();
   const [errorCode, setErrorCode] = useState<string>();
@@ -63,7 +64,7 @@ function HostTunnelState({ host, service, children }: { host: RemoteHost; servic
     if (action !== 'status') setBusy(true);
     try {
       const result = await service[action](host.id);
-      if (mounted.current && sequence.current === current) { setState(result); setError(undefined); setErrorCode(undefined); }
+      if (mounted.current && sequence.current === current) { setState(previous => JSON.stringify(previous) === JSON.stringify(result) ? previous : result); setError(undefined); setErrorCode(undefined); }
     } catch (failure) {
       if (mounted.current && sequence.current === current) {
         setError(failure instanceof Error ? failure.message : 'Could not read VS Code tunnel status.');
@@ -74,12 +75,8 @@ function HostTunnelState({ host, service, children }: { host: RemoteHost; servic
     }
   }, [host.id, host.online, service]);
   const refresh = useCallback(() => request('status'), [request]);
-  useEffect(() => {
-    const update = () => { if (document.visibilityState !== 'hidden') void refresh(); };
-    update(); const timer = window.setInterval(update, 2000);
-    document.addEventListener('visibilitychange', update);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update); };
-  }, [refresh]);
+  useEffect(() => watchPagePolling(refresh, polling ? 2_000 : 30_000), [refresh, polling]);
+
   return <Context.Provider value={{ host, state, error, errorCode, busy, refresh,
     start: () => request('start'), stop: () => request('stop') }}>{children}</Context.Provider>;
 }

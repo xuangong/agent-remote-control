@@ -8,3 +8,5 @@ export * from './replica/types.js';
 export { watchPageResume } from './client/page-resume.js';
 
 export * from './client/remote-activity-client.js';
+
+export { watchPagePolling } from './client/page-polling.js';

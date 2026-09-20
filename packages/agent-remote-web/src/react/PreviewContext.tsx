@@ -1,3 +1,4 @@
+import { watchPagePolling } from '../client/page-polling.js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { HttpPreviewClient, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
@@ -24,8 +25,8 @@ const DockContext = createContext<{
 } | undefined>(undefined);
 
 
-export function PreviewProvider({ client, hostId, canManage, children }: {
-  readonly client: HttpPreviewClient; readonly hostId: string; readonly canManage: boolean; readonly children: ReactNode;
+export function PreviewProvider({ client, hostId, canManage, polling = true, children }: {
+  readonly client: HttpPreviewClient; readonly hostId: string; readonly canManage: boolean; readonly polling?: boolean; readonly children: ReactNode;
 }) {
   const scopeRef = useRef({ client, hostId, version: 0, request: 0 });
   if (scopeRef.current.client !== client || scopeRef.current.hostId !== hostId) {
@@ -45,6 +46,7 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
   const [activeKey, setActiveKey] = useState<string>();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const requests = useMemo(() => new Map<string, AbortController>(), [scope]);
+  const snapshots = useMemo(() => new Map<AbortController, ReturnType<typeof setTimeout>>(), [scope]);
   const currentBrowsers = browsers.filter(entry => entry.version === scope.version);
   const closeBrowser = useCallback((key: string) => {
     requests.get(key)?.abort(); requests.delete(key);
@@ -61,13 +63,22 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
 
   const refresh = useCallback(async () => {
     const request = ++scope.request;
+    const controller = new AbortController();
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error('Preview state refresh timed out. Retrying automatically.'));
+    }, 12_000);
+    snapshots.set(controller, deadline);
     try {
-      const snapshot = await client.snapshot(hostId);
-      if (scopeRef.current === scope && scope.request === request) {
-        setState({ version: scope.version, registrations: snapshot.registrations, loading: false });
+      const snapshot = await client.snapshot(hostId, controller.signal);
+      if (!controller.signal.aborted && scopeRef.current === scope && scope.request === request) {
+        setState(previous => previous.version === scope.version && !previous.loading && !previous.error
+          && JSON.stringify(previous.registrations) === JSON.stringify(snapshot.registrations) ? previous
+          : { version: scope.version, registrations: snapshot.registrations, loading: false });
       }
     } catch (cause) {
-      if (scopeRef.current === scope && scope.request === request) {
+      if ((!controller.signal.aborted || timedOut) && scopeRef.current === scope && scope.request === request) {
         setState(current => ({
           version: scope.version,
           registrations: current.version === scope.version ? current.registrations : [],
@@ -75,17 +86,25 @@ export function PreviewProvider({ client, hostId, canManage, children }: {
           error: message(cause, 'Preview state is unavailable. Retry after checking the Host connection.'),
         }));
       }
+    } finally {
+      clearTimeout(deadline);
+      snapshots.delete(controller);
     }
-  }, [client, hostId, scope]);
+  }, [client, hostId, scope, snapshots]);
 
   useEffect(() => {
     setState({ version: scope.version, registrations: [], loading: true });
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 5_000);
-    const visible = () => { if (document.visibilityState === 'visible') void refresh(); };
-    document.addEventListener('visibilitychange', visible);
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
-  }, [refresh, scope.version]);
+    return () => {
+      scope.request++;
+      for (const [controller, deadline] of snapshots) {
+        clearTimeout(deadline);
+        controller.abort();
+      }
+      snapshots.clear();
+    };
+  }, [scope, snapshots]);
+  const pollingInterval = polling || currentBrowsers.length > 0 ? 5_000 : 30_000;
+  useEffect(() => watchPagePolling(refresh, pollingInterval), [refresh, pollingInterval]);
 
   const renewalIssues = usePreviewRenewal(client, hostId, canManage, currentBrowsers, currentState.registrations, refresh);
 

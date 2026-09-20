@@ -232,3 +232,24 @@ locators independently of browser cache, and previews use the ordinary authorize
 resource path.
 
 Ordered user messages retain Markdown rendering in each text segment around image tags.
+
+## Mobile runtime efficiency
+
+Unchanged Markdown reuses its parsed tree while resource context still reaches links
+and images. Timeline entries and render models reuse stable inputs. Trace mounts on
+first use and retains its last visible tree while hidden, preserving filters and
+reading position without rebuilding the hidden list on each conversation update.
+
+Preview and VS Code tunnel polling pauses while the document is hidden and refreshes
+on return. With their controls closed, both use a 30-second interval. Open controls
+use 5 seconds for previews and 2 seconds for tunnels; retained preview browsers keep
+the 5-second preview interval. Polls do not overlap, and preview snapshots have a
+12-second deadline so a stalled request cannot prevent later refreshes. Unchanged
+Host, preview, and tunnel snapshots retain their React state identity. These policies
+do not change the full-session or tracked-status subscriptions.
+
+Text drafts and reading positions update in memory immediately, with synchronous
+storage writes coalesced over 200 milliseconds and flushed on pagehide or visibility
+loss. Restore reads flush pending values first; signout cancels them. Image drafts
+start saving immediately and retain only the latest pending snapshot while a previous
+IndexedDB write is in flight. They do not add an intentional persistence delay.

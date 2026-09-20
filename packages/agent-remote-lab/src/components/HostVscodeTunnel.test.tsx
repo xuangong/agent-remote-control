@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import type { VscodeTunnelSnapshot } from '@agent-remote-controller/agent-remote-protocol';
 import { render } from '../test/setup.js';
@@ -97,4 +97,23 @@ it('disables starting and workspace links when this Host lacks code tunnel', asy
   await click(container, 'Start tunnel');
   expect(service.start).not.toHaveBeenCalled();
   expect(container.querySelector('a[data-vscode-workspace]')).toBeNull();
+});
+
+it('refreshes a closed Host panel slowly and immediately catches up when opened', async () => {
+  vi.useFakeTimers();
+  const { service } = fixture();
+  let reveal!: () => void;
+  function Harness() {
+    const [polling, setPolling] = useState(false); reveal = () => setPolling(true);
+    return <VscodeTunnelScope host={host} service={service} polling={polling}><WorkspaceVscodeLink workspace="/work" /></VscodeTunnelScope>;
+  }
+  try {
+    await render(<Harness />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+    expect(service.status).toHaveBeenCalledTimes(1);
+    await act(async () => reveal());
+    expect(service.status).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(service.status).toHaveBeenCalledTimes(3);
+  } finally { vi.useRealTimers(); }
 });

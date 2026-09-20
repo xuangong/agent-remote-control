@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, useMemo } from 'react';
+import { createContext, memo, useContext, useId, useMemo } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -45,9 +45,17 @@ export function MarkdownContent({ markdown, className, sourceLocator, resourceCo
 
   const markdownContext = useMemo(() => ({ resourceContext, sourceLocator, prefix }), [resourceContext, sourceLocator, prefix]);
   return <MarkdownContext.Provider value={markdownContext}><div className={`agent-markdown${className ? ` ${className}` : ''}`}>
-    <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[markLocalMarkdownResources]} remarkRehypeOptions={{ clobberPrefix: prefix }} components={scopedComponents} urlTransform={safeLink}>{markdown}</Markdown>
+    <ParsedMarkdown markdown={markdown} prefix={prefix} components={scopedComponents} />
   </div></MarkdownContext.Provider>;
 }
+
+// Resource context updates reach links and images without reparsing unchanged prose.
+const ParsedMarkdown = memo(function ParsedMarkdown({ markdown, prefix, components }: {
+  markdown: string; prefix: string; components: Components;
+}) {
+  return <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[markLocalMarkdownResources]}
+    remarkRehypeOptions={{ clobberPrefix: prefix }} components={components} urlTransform={safeLink}>{markdown}</Markdown>;
+});
 
 function safeLink(value: string): string | undefined {
   if (value.startsWith('/') || value.startsWith('#')) return value;

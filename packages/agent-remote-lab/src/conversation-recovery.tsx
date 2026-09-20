@@ -1,3 +1,4 @@
+import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite } from './recovery-writes.js';
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import { clearImageDraftScope } from '@agent-remote-controller/agent-remote-web/react';
@@ -21,6 +22,7 @@ export function saveLastSession(scope: string, location: ControllerLocation): vo
 }
 
 export function readDrafts(scope: string): Record<string, string> {
+  flushRecoveryWrites(`${prefix}${scope}:drafts`);
   try {
     const value: unknown = JSON.parse(sessionStorage.getItem(`${prefix}${scope}:drafts`) ?? '{}');
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -29,11 +31,11 @@ export function readDrafts(scope: string): Record<string, string> {
 }
 
 export function saveDrafts(scope: string, drafts: Record<string, string>): void {
-  try { sessionStorage.setItem(`${prefix}${scope}:drafts`, JSON.stringify(drafts)); }
-  catch { /* Storage can be unavailable or full; in-memory editing remains usable. */ }
+  queueRecoveryWrite(`${prefix}${scope}:drafts`, () => JSON.stringify(drafts));
 }
 
 export function clearConversationRecovery(scope?: string): void {
+  cancelRecoveryWrites(scope ? `${prefix}${scope}:` : prefix);
   if (scope) void clearImageDraftScope(scope).catch(() => { /* Signout still completes when browser storage is unavailable. */ });
   try {
     for (const storage of [sessionStorage, localStorage]) {
@@ -48,6 +50,7 @@ export class ReadingPositions extends Map<string, TimelineReadingPosition> {
   constructor(readonly scope: string) {
     super();
     this.storageKey = `${prefix}${scope}:reading`;
+    flushRecoveryWrites(this.storageKey);
     try {
       const entries: unknown = JSON.parse(sessionStorage.getItem(this.storageKey) ?? '[]');
       if (Array.isArray(entries)) for (const entry of entries.slice(-80)) {
@@ -64,8 +67,7 @@ export class ReadingPositions extends Map<string, TimelineReadingPosition> {
     super.delete(key);
     super.set(key, value);
     if (this.size > 80) super.delete(this.keys().next().value!);
-    try { sessionStorage.setItem(this.storageKey, JSON.stringify([...this])); }
-    catch { /* Reading still works without persistence. */ }
+    queueRecoveryWrite(this.storageKey, () => JSON.stringify([...this]));
     return this;
   }
 }

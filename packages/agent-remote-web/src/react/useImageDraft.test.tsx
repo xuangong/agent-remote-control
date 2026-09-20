@@ -133,3 +133,17 @@ it('counts an image still referenced elsewhere when replacing one repeated atom'
   expect(replacement).toEqual([]);
   expect(draft.error).toContain('20 MiB');
 });
+
+it('starts saving immediately and coalesces edits made while storage is busy', async () => {
+  vi.mocked(readImageDraft).mockResolvedValue(undefined);
+  await render(<Harness scope="batched-draft" />);
+  let finish!: () => void;
+  vi.mocked(writeImageDraft).mockClear();
+  vi.mocked(writeImageDraft).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  for (let i = 0; i < 10; i++) await act(async () => draft.setText(`Edit ${i}`));
+  expect(writeImageDraft).toHaveBeenCalledTimes(1);
+  expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Edit 0' }] }), 0);
+  await act(async () => finish());
+  expect(writeImageDraft).toHaveBeenCalledTimes(2);
+  expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Edit 9' }] }), 0);
+});

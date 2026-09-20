@@ -8,7 +8,7 @@ import { sessionKey } from '../session-tree.js';
 
 export type AskInputSender = (text: string, operationId: string) => Promise<unknown>;
 export interface AskInput { id: string; text: string }
-export interface AskEntry { inputs?: AskInput[]; source: OpenedSession; record?: SessionFork; pending?: SessionFork; busy?: boolean; error?: string }
+export interface AskEntry { attached?: boolean; inputs?: AskInput[]; source: OpenedSession; record?: SessionFork; pending?: SessionFork; busy?: boolean; error?: string }
 
 export function useAskConversations(baseUrl: string, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void) {
   // A tab-local ledger keeps retries idempotent without populating the normal fork list.
@@ -56,15 +56,20 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     update(key, { inputs: remaining });
     void sent.catch(() => {});
   }
-  async function open(sourceState: AgentReplicaState, source: OpenedSession, args = '', clean = false) {
+  function entryFor(source: OpenedSession) {
     const key = sessionKey(source);
-    setOpenKey(key);
     let entry = entries.get(key);
     if (!entry) {
       const saved = store.all().filter(record => sessionKey(record.source) === key).reverse();
       entry = { source, inputs: savedInputs(key), record: saved.find(record => record.target && !record.creationKey), pending: saved.find(record => !!record.creationKey) };
       entries.set(key, entry);
     }
+    return entry;
+  }
+  async function open(sourceState: AgentReplicaState, source: OpenedSession, args = '', clean = false) {
+    const key = sessionKey(source);
+    setOpenKey(key);
+    const entry = entryFor(source);
     if (entry.busy) throw new Error('Ask is already opening.');
     if (clean && entry.inputs?.length) throw new Error('Wait for the saved Ask question to send before clearing.');
     const agent = sourceState.agent;
@@ -89,7 +94,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
         providerId: source.providerId, hostId: source.hostId ?? 'local', title: 'Ask', createdAt: record.capturedAt });
       await configureFork(transport, store, store.get(record.id));
       store.finishCreation(record.id);
-      update(key, { record: store.get(record.id), pending: undefined });
+      update(key, { record: store.get(record.id), pending: undefined, attached: true });
       if (replacing && draftsRef.current[key] === draftAtStart) setDraft(key, '');
       onCreated?.();
       if (args.trim()) {
@@ -103,5 +108,5 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       throw error;
     } finally { update(key, { busy: false }); }
   }
-  return { store, entries, openKey, drafts, setDraft, sendInput, open, close: () => setOpenKey(undefined) };
+  return { store, entries, entryFor, openKey, drafts, setDraft, sendInput, open, close: () => setOpenKey(undefined) };
 }

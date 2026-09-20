@@ -56,6 +56,7 @@ import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
+import { AskButton } from './components/AskButton.js';
 import { AskConversation } from './components/AskConversation.js';
 import { useAskConversations } from './hooks/useAskConversations.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
@@ -162,6 +163,7 @@ function AppContent({
   const previewClient = useMemo(() => new HttpPreviewClient(baseUrl), [baseUrl]);
   const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
   const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined);
+  const [askSimple, setAskSimple] = useState(false);
   const ask = useAskConversations(baseUrl, transport, directory, selectedHost.id, retryHosts);
   const restoredHostSelection = useRef(false);
   const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory ? readOpenedSessions(baseUrl) : []);
@@ -745,7 +747,7 @@ function AppContent({
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
   const askKey = addressSession ? sessionKey(addressSession) : undefined;
-  const askEntry = askKey ? ask.entries.get(askKey) : undefined;
+  const askEntry = addressSession ? ask.entryFor(addressSession) : undefined;
   const askVisible = ask.openKey === askKey && !!askEntry && activeView === 'workbench' && !supportingRailOpen;
   const askSourceState = addressSession?.agentId === state?.agent?.id ? state : addressSession ? replicas.get(addressSession.agentId)?.getState() : undefined;
   function openAsk(clean = false) {
@@ -755,7 +757,9 @@ function AppContent({
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
     && primaryBinding.current.transport === transport && primaryBinding.current.agentId === stackRoot?.agentId);
   const openWindows = useMemo(() => [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [stackRoot, primaryIsBound, sideSessions]);
-  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows);
+  const askActivitySessions = useMemo(() => askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
+    liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [askEntry?.record?.target, askEntry?.attached, askVisible]);
+  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions);
   const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
   useEffect(() => {
     if (addressSession && state?.agent && !initialState) saveLastSession(baseUrl, { ...addressSession, hostId: addressSession.hostId ?? 'local' });
@@ -920,10 +924,12 @@ function AppContent({
 
   return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {tracking.observers}
-    {addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? askVisible ? <AskConversation
+    {addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
+      observation={askEntry?.record?.target ? tracking.observations[sessionKey(askEntry.record.target)] : undefined} onOpen={() => openAsk()} />
+      {askVisible ? <AskConversation simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
       entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
       onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draft={ask.drafts[askKey!] ?? ''} onDraftChange={text => ask.setDraft(askKey!, text)} onClose={ask.close} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
-      : <button className="lab-ask-trigger" type="button" aria-label="Ask about this session" aria-haspopup="dialog" disabled={!askSourceState?.agent || hostOffline || transitioning} onClick={() => openAsk()}><span aria-hidden="true">?</span> Ask</button> : null}
+      : null}</> : null}
     {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>

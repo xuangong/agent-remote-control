@@ -172,3 +172,48 @@ it('observes open windows without attachment or history and preserves subscripti
   expect(fetchSnapshot).not.toHaveBeenCalled();
   expect(fetchTimeline).not.toHaveBeenCalled();
 });
+
+it('observes a minimized auxiliary Ask independently and replaces only its subscription on Clean', async () => {
+  const listeners = new Map<string, Parameters<RemoteAgentTransport['connect']>[1]>();
+  const fetchSnapshot = vi.fn(), fetchTimeline = vi.fn();
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot, fetchTimeline, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect(id, listener) {
+      listeners.set(id, listener); queueMicrotask(() => listener.onOpen());
+      return { close: () => { listeners.delete(id); }, send: message => {
+        if (message.type !== 'negotiate') return;
+        expect(message.observation).toBe('activity');
+        listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
+        listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
+      } };
+    },
+  };
+  const primary = { ...star, agentId: 'primary' };
+  const ask = { ...star, nativeSessionId: 'ask', agentId: 'ask' };
+  let tracking!: SessionTracking, select!: (id: string) => void, show!: (visible: boolean) => void;
+  function Fixture() {
+    const [id, setId] = useState('ask'); select = setId;
+    const [visible, setVisible] = useState(false); show = setVisible;
+    tracking = useSessionTracking('alice', transport, sessionKey(primary), [primary], [
+      { session: { ...ask, nativeSessionId: id, agentId: id }, liveAgentId: id, visible },
+    ]);
+    return <>{tracking.observers}</>;
+  }
+  await render(<Fixture />);
+  expect([...listeners.keys()]).toEqual(['primary', 'ask']);
+  expect(tracking.sessions).toEqual([]);
+  expect(tracking.backgroundSessions).toEqual([]);
+  await act(async () => listeners.get('ask')!.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'ask', status: 'waiting' } }));
+  expect(tracking.observations[sessionKey(ask)]).toMatchObject({ attention: 'pending', changed: true });
+  await act(async () => show(true));
+  expect(tracking.observations[sessionKey(ask)]).toMatchObject({ attention: undefined, changed: false });
+  const primaryListener = listeners.get('primary');
+  const oldAsk = listeners.get('ask')!;
+  await act(async () => select('clean-ask'));
+  expect([...listeners.keys()]).toEqual(['primary', 'clean-ask']);
+  expect(listeners.get('primary')).toBe(primaryListener);
+  await act(async () => oldAsk.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'ask', status: 'idle' } }));
+  expect(tracking.observations[sessionKey({ ...ask, nativeSessionId: 'clean-ask' })]).toMatchObject({ activity: 'running', attention: undefined });
+  expect(readTrackedSessions('alice')).toEqual([]);
+  expect(fetchSnapshot).not.toHaveBeenCalled(); expect(fetchTimeline).not.toHaveBeenCalled();
+});

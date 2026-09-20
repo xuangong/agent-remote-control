@@ -7,8 +7,10 @@ import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessions, saveTracked
 import { useFeedbackToast } from '../components/Toast.js';
 
 const noOpenSessions: readonly OpenedSession[] = [];
+export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string; visible: boolean }
+const noAuxiliarySessions: readonly AuxiliarySession[] = [];
 
-export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions) {
+export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
@@ -23,14 +25,16 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   }, [baseUrl, transport]);
   const [retries, setRetries] = useState<Record<string, number>>({});
   const [error, setError] = useState<string>();
-  const visibleKeys = useMemo(() => new Set([...openSessions.map(sessionKey), ...(currentSessionKey ? [currentSessionKey] : [])]), [openSessions, currentSessionKey]);
-  const backgroundSessions = useMemo(() => sessions.filter(session => !visibleKeys.has(sessionKey(session))), [sessions, visibleKeys]);
+  const visibleKeys = useMemo(() => new Set([...openSessions.map(sessionKey), ...auxiliarySessions.filter(item => item.visible).map(item => sessionKey(item.session)), ...(currentSessionKey ? [currentSessionKey] : [])]), [openSessions, currentSessionKey, auxiliarySessions]);
+  const auxiliaryKeys = useMemo(() => new Set(auxiliarySessions.map(item => sessionKey(item.session))), [auxiliarySessions]);
+  const backgroundSessions = useMemo(() => sessions.filter(session => !visibleKeys.has(sessionKey(session)) && !auxiliaryKeys.has(sessionKey(session))), [sessions, visibleKeys, auxiliaryKeys]);
   const observedSessions = useMemo(() => {
     const union = new Map<string, { session: SessionStar | OpenedSession; liveAgentId?: string }>();
     for (const session of sessions) union.set(sessionKey(session), { session });
     for (const session of openSessions) union.set(sessionKey(session), { session, liveAgentId: session.agentId });
+    for (const { session, liveAgentId } of auxiliarySessions) union.set(sessionKey(session), { session, liveAgentId: liveAgentId ?? union.get(sessionKey(session))?.liveAgentId });
     return [...union.values()];
-  }, [sessions, openSessions]);
+  }, [sessions, openSessions, auxiliarySessions]);
   const current = useRef(sessions); current.current = sessions;
   const observed = useRef(observedSessions); observed.current = observedSessions;
   const visible = useRef(visibleKeys); visible.current = visibleKeys;

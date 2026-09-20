@@ -1,7 +1,6 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from 'react';
 
 interface Position { x: number; y: number }
-const storageKey = 'agent-remote-tracking-position';
 const margin = 12;
 
 function viewport() {
@@ -9,7 +8,7 @@ function viewport() {
   return { x: view?.offsetLeft ?? 0, y: view?.offsetTop ?? 0, width: view?.width ?? window.innerWidth, height: view?.height ?? window.innerHeight };
 }
 
-export function useTrackingPosition() {
+export function useTrackingPosition(storageKey = 'agent-remote-tracking-position', triggerSelector = '.lab-session-popover-trigger') {
   const root = useRef<HTMLDivElement>(null);
   const position = useRef<Position>();
   const drag = useRef<{ id: number; start: Position; origin: Position; moved: boolean }>();
@@ -60,9 +59,9 @@ export function useTrackingPosition() {
       window.visualViewport?.removeEventListener('resize', resize);
       window.visualViewport?.removeEventListener('scroll', resize);
     };
-  }, []);
+  }, [storageKey]);
 
-  const isTrigger = (target: EventTarget) => target instanceof Element && !!target.closest('.lab-session-popover-trigger');
+  const isTrigger = (target: EventTarget) => target instanceof Element && !!target.closest(triggerSelector);
   const handlers: HTMLAttributes<HTMLDivElement> = {
     onPointerDownCapture(event) {
       if (!isTrigger(event.target) || event.button !== 0 || !event.isPrimary) return;

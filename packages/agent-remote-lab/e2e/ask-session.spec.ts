@@ -205,3 +205,120 @@ test('a question queued while Ask opens survives minimizing and reload', async (
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Keep this queued question');
   await expect(ask.locator('.agent-message-user').filter({ hasText: 'Keep this queued question' })).toHaveCount(1);
 });
+
+test('Ask uses a centered content-only window with an independent simple-view toggle', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  await expect.poll(async () => {
+    const box = (await ask.boundingBox())!;
+    return Math.abs(box.y + box.height / 2 - page.viewportSize()!.height / 2);
+  }).toBeLessThan(2);
+  await expect(ask.locator('.agent-reasoning, .agent-tool')).toHaveCount(0);
+  const toggle = ask.getByRole('button', { name: 'Simple view', exact: true });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(ask.locator('.agent-tool').first()).toBeVisible();
+  await ask.getByRole('button', { name: 'Minimize Ask' }).click();
+  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await expect(ask.locator('.agent-reasoning, .agent-tool')).toHaveCount(0);
+});
+
+test('Ask can be dragged without opening and retains its own position across reload', async ({ page }, info) => {
+  await start(page);
+  const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
+  const initial = (await button.boundingBox())!;
+  const target = { x: 55, y: page.viewportSize()!.height - 70 };
+  if (info.project.name.includes('mobile')) {
+    const input = await page.context().newCDPSession(page);
+    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: initial.x + initial.width / 2, y: initial.y + initial.height / 2 }] });
+    await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [target] });
+    await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await input.detach();
+  } else {
+    await page.mouse.move(initial.x + initial.width / 2, initial.y + initial.height / 2);
+    await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 12 }); await page.mouse.up();
+  }
+  const moved = (await button.boundingBox())!;
+  expect(moved.y).toBeGreaterThan(initial.y + 100); expect(moved.x).toBeLessThan(60);
+  await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(0);
+  await page.reload();
+  const restored = (await button.boundingBox())!;
+  expect(Math.abs(restored.x - moved.x)).toBeLessThan(2); expect(Math.abs(restored.y - moved.y)).toBeLessThan(2);
+  await button.focus(); await button.press('ArrowUp');
+  expect((await button.boundingBox())!.y).toBeLessThan(restored.y);
+});
+
+
+test('Ask observes activity while minimized, signals changes itself, and switches subscriptions on Clean', async ({ page }) => {
+  const activity = new Map<number, { agentId: string; emit(status: string): void }>();
+  const content = new Map<number, string>();
+  let activityChannels = 0;
+  await page.routeWebSocket(/session-channel/, route => {
+    const server = route.connectToServer();
+    const isActivity = new URL(route.url()).searchParams.get('observation') === 'activity';
+    if (isActivity) activityChannels++;
+    route.onMessage(message => {
+      const frame = JSON.parse(String(message));
+      if (frame.type === 'subscribe') {
+        if (isActivity) activity.set(frame.subscriptionId, { agentId: frame.agentId, emit: status => route.send(JSON.stringify({
+          protocolVersion: '1.5.0', type: 'message', subscriptionId: frame.subscriptionId,
+          message: { protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: frame.agentId, status } },
+        })) });
+        else content.set(frame.subscriptionId, frame.agentId);
+      }
+      if (frame.type === 'unsubscribe') (isActivity ? activity : content).delete(frame.subscriptionId);
+      server.send(message);
+    });
+  });
+  await start(page);
+  const primaryAgent = new URL(page.url()).searchParams.get('agent');
+  const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
+  const floating = page.locator('.lab-ask-floating');
+  await button.click();
+  const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  await expect.poll(() => activity.size).toBe(2);
+  const first = [...activity.values()].find(item => item.agentId !== primaryAgent)!;
+  await ask.getByRole('button', { name: 'Minimize Ask' }).click();
+  await expect.poll(() => [...content.values()].includes(first.agentId)).toBe(false);
+  expect([...activity.values()]).toContain(first);
+  await expect(floating).toHaveAttribute('data-status', 'idle');
+  const idleColor = await button.evaluate(element => getComputedStyle(element).backgroundColor);
+  first.emit('running');
+  await expect(floating).toHaveAttribute('data-status', 'working');
+  const workingColor = await button.evaluate(element => getComputedStyle(element).backgroundColor);
+  expect(workingColor).not.toBe(idleColor);
+  first.emit('waiting');
+  await expect(floating).toHaveAttribute('data-alert', 'pending');
+  await expect(button).toHaveCSS('animation-name', 'lab-tracking-pending-pulse');
+  await button.click();
+  await expect(floating).not.toHaveAttribute('data-alert');
+  await ask.getByRole('button', { name: 'Minimize Ask' }).click();
+  await expect(floating).toHaveAttribute('data-status', 'pending');
+  await expect(button).toHaveCSS('animation-name', 'none');
+  const pendingColor = await button.evaluate(element => getComputedStyle(element).backgroundColor);
+  expect(pendingColor).not.toBe(workingColor); expect(pendingColor).not.toBe(idleColor);
+  first.emit('running'); first.emit('idle');
+  await expect(floating).toHaveAttribute('data-alert', 'idle');
+  await expect(button).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(button).toHaveCSS('animation-name', 'none');
+  await button.click();
+  await ask.getByRole('button', { name: 'Clean Ask' }).click();
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  await expect.poll(() => [...activity.values()].some(item => item.agentId === first.agentId)).toBe(false);
+  expect(activity.size).toBe(2); expect(activityChannels).toBe(1);
+  await ask.getByRole('button', { name: 'Minimize Ask' }).click();
+  await expect(floating).toHaveAttribute('data-status', 'idle');
+  await expect(floating).not.toHaveAttribute('data-alert');
+  first.emit('waiting');
+  await expect(floating).toHaveAttribute('data-status', 'idle');
+  await page.reload();
+  await expect(floating).toHaveAttribute('data-status', 'idle');
+  await expect(ask).toHaveCount(0);
+});

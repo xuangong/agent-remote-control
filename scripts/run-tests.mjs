@@ -8,7 +8,7 @@ const commands = {
   'host-package': ['exec', 'node', '--test', '--test-timeout=180000', 'scripts/agent-host-cli.test.mjs', 'scripts/agent-host-package.test.mjs'],
   cloudflare: ['--filter', '@agent-remote-controller/agent-remote-cloudflare', 'run', 'test', '--hookTimeout=30000'],
   copilot: ['--filter', '@agent-remote-controller/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
-  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/controller/entrypoint.test.mjs'],
+  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs'],
   unit: ['-r', 'run', 'test', '--hookTimeout=30000'],
   e2e: ['--filter', '@agent-remote-controller/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
   conformance: ['--filter', '@agent-remote-controller/agent-remote-lab', 'run', 'test:conformance'],

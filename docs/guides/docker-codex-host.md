@@ -10,7 +10,23 @@ Run a persistent Codex Host for an account-enabled Agent Remote Relay. The image
 
 This feature does not add account dependencies to the standalone workbench or ordinary Controller. Automatic Codex setup is opt-in with `AGENT_HOST_BOOTSTRAP_CODEX=1`; the Docker image enables it by default. The image does not contain a browser login, Google credential, service signing secret, pairing key or Gateway token.
 
-## Build and enroll
+## One-key startup
+
+Once the matching Gateway and Relay are deployed and the Controller image is available locally, run:
+
+```sh
+bash scripts/controller/create-host.sh
+```
+
+Paste one pairing key at the private prompt. No further Google login, account cookie or manually created LLM token is required. The script creates private persistent volumes, starts the Host and waits for Codex initialization and Relay registration. It transfers the pairing key through stdin into the state volume, without host-file bind mounts or placing the key in Docker arguments/environment.
+
+The default Relay is `https://agents.xianliao.de5.net` and the default local image is `arc-controller-bootstrap-controller:latest`. Build the image below first; this feature branch does not publish an image or deploy the production services. After that, the script itself only needs Bash and Docker, not a source checkout, Node or pnpm. Use `--server` or `--image` for another deployment.
+
+Running the script again with the same name starts the saved container without requesting a key. Use `--name my-second-host` and a new pairing key for an additional Host. Existing unrelated containers/volumes are left intact. A new Host is not reported ready until it has initialized Codex and registered with Relay; if initialization fails, its state is retained and the script shows the logs command.
+
+A pairing key enrolls one Host. That Host receives one stable Gateway key; retries and restarts return the same binding. Revoked keys are not recreated. The device credential and Relay service signature are automatic internal authorization steps, not additional user authentication.
+
+## Build the image or use Compose
 
 From this repository:
 
@@ -28,9 +44,9 @@ chmod 600 "$AGENT_HOST_PAIRING_KEY_FILE"
 export AGENT_HOST_SERVER=https://your-agents.example
 export AGENT_HOST_NAME='Docker Codex'
 
-docker compose -f compose.controller.yaml build controller
-docker compose -f compose.controller.yaml up -d controller
-docker compose -f compose.controller.yaml logs --tail 30 controller
+docker compose -p arc-controller-bootstrap -f compose.controller.yaml build controller
+docker compose -p arc-controller-bootstrap -f compose.controller.yaml up -d controller
+docker compose -p arc-controller-bootstrap -f compose.controller.yaml logs --tail 30 controller
 ```
 
 The pairing key file must contain the actual key before `up` and be readable by container UID 1000. On Linux, Compose file secrets retain source-file ownership and permissions; grant UID 1000 read access with a file ACL or use a file owned by UID 1000. Do not make a credential file world-readable. For private npm registries, pass `NPMRC_FILE` as a BuildKit secret. `NPM_REGISTRY` and `CODEX_VERSION` are explicit build overrides. Use a distinct Compose project (`-p project-name`) for every additional Host so its state and workspace volumes are independent.
@@ -46,9 +62,9 @@ The account Host list first sees an enrolled Host with no providers, then the re
 - The Gateway token is kept in a mode-0600 private state file and passed to native Codex through `CODEX_GATEWAY_API_KEY`. The TOML config contains only the environment-variable name.
 
 ```sh
-docker compose -f compose.controller.yaml exec controller agent-remote-controller codex
-docker compose -f compose.controller.yaml exec controller agent-remote-controller codex resume <session-id>
-docker compose -f compose.controller.yaml restart controller
+docker compose -p arc-controller-bootstrap -f compose.controller.yaml exec controller agent-remote-controller codex
+docker compose -p arc-controller-bootstrap -f compose.controller.yaml exec controller agent-remote-controller codex resume <session-id>
+docker compose -p arc-controller-bootstrap -f compose.controller.yaml restart controller
 ```
 
 On restart, the entrypoint uses the saved device credential even if Compose still supplies the consumed invitation. It rejects a different Relay with the same volume. A managed Host cannot be hot-paired to another account: use a new state volume. Do not run two containers against one state volume.

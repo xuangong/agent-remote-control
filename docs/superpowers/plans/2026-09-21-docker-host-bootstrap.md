@@ -33,3 +33,10 @@
 - The existing local Gateway Docker on port 41414 was updated with preserved account/upstream data, backed-up SQLite state and a persistent named volume. Its existing upstream returned a real Responses API completion. No Google login was used.
 - Docker Desktop stalled on an additional Compose file-secret bind-mount check. The end-to-end run used a private Docker environment file and named volumes; entrypoint secret-file/restart behavior has a passing unit test. Compose file mounting is not claimed as verified on this machine.
 - Work remains on feature branches; no main merge, remote push or cloud deployment was performed.
+
+## One-key startup follow-up
+
+- Added a standalone Bash entry point requiring only Docker and the built Controller image. It receives one pairing key privately, delivers it over stdin to a mode-private named volume, and starts the persistent Codex Host. No browser authentication or manually allocated LLM token is needed at startup.
+- Existing managed containers resume without a new key. Unrelated containers/volumes and different Relay bindings are rejected without replacement.
+- Seven executable script tests cover first enrollment, reuse, key handling, conflicts, unavailable images and failed credential delivery.
+- Real Docker integration through the new script passed: single-key provisioning, repeat invocation without a key, browser and CLI inference, stable identity across restart, session restore and revocation. This path requires no host-file bind mounts.

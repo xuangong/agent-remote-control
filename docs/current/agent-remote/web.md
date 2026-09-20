@@ -189,8 +189,14 @@ The conversation Sessions menu highlights running subagent rows and reports the 
 Image-capable Codex and Claude sessions use a minimal inline editor: text, newlines,
 and indivisible `[image #N]` atoms. Pasting an image or choosing files inserts at the
 current selection. Labels remain stable after removal, and literal text that looks
-like a label stays ordinary text. Selection actions expose preview, replace, remove,
-and explicit upload retry. Previews use an overlay and do not resize the composer.
+like a label stays ordinary text. Clicking a tag, or pressing Enter on a selected
+atom, opens a bounded image dialog on desktop and mobile without resizing the
+composer. Its header shows the label and image metadata; the preview, upload status,
+and wrapping error text have separate areas. Replace, Remove, and explicit upload
+Retry stay in the footer. Closing restores the editor selection, and keyboard focus
+stays within the dialog while it is open. Local previews remain available after an
+upload failure. JPEGs with appended auxiliary images, including HDR gain maps,
+retain their complete original bytes through upload and native dispatch.
 Text-only providers retain the existing textarea. Native slash commands and skills
 remain text commands; an image draft cannot be silently converted to a command.
 

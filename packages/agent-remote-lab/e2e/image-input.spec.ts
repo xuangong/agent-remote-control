@@ -55,6 +55,57 @@ test('pastes an image atom and leaves a failed upload visible until explicit ret
   await editor.locator('[data-image-id]').click();
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect(editor.locator('[data-image-id]')).toHaveAttribute('data-state', 'ready');
+  await page.getByRole('button', { name: 'Close image preview' }).click();
   await page.getByTestId('prompt-submit').click();
   expect(JSON.parse(await page.getByTestId('sent-content').innerText()).map((part: { type: string }) => part.type)).toEqual(['image']);
+});
+
+test('opens the image directly in a bounded dialog with readable status and keyboard dismissal', async ({ page }, info) => {
+  const editor = page.getByTestId('prompt-input');
+  await upload(page);
+  const tag = editor.locator('[data-image-id]');
+  await expect(tag).toHaveAttribute('data-state', 'ready');
+  const before = await editor.boundingBox();
+  await tag.click();
+  const dialog = page.getByRole('dialog', { name: 'Image preview' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('image #1', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('img')).toBeVisible();
+  await expect(dialog.getByRole('status')).toHaveText('Ready to send');
+  await expect(dialog.getByRole('button', { name: 'Replace', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  const box = (await dialog.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.x).toBeGreaterThanOrEqual(8);
+  expect(box.y).toBeGreaterThanOrEqual(8);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width - 8);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 8);
+  await page.screenshot({ path: info.outputPath('image-dialog.png') });
+  await dialog.getByRole('button', { name: 'Close image preview' }).focus();
+  await page.keyboard.press('Shift+Tab');
+  expect(await dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(editor).toBeFocused();
+  expect((await editor.boundingBox())!.y).toBeCloseTo(before!.y, 0);
+  await editor.press('Backspace');
+  await expect(tag).toHaveCount(0);
+});
+
+test('shows upload failure alongside the local preview and replaces the selected tag', async ({ page }, info) => {
+  await page.getByRole('button', { name: 'Toggle upload failure' }).click();
+  await upload(page);
+  const editor = page.getByTestId('prompt-input');
+  await expect(editor.locator('[data-image-id]')).toHaveAttribute('data-state', 'failed');
+  await editor.locator('[data-image-id]').click();
+  const dialog = page.getByRole('dialog', { name: 'Image preview' });
+  await expect(dialog.getByRole('img')).toBeVisible();
+  await expect(dialog.getByRole('status')).toHaveText('Upload failed');
+  await expect(dialog.getByRole('alert')).toContainText('Fixture upload failed.');
+  await page.screenshot({ path: info.outputPath('image-dialog-error.png') });
+  const [picker] = await Promise.all([page.waitForEvent('filechooser'), dialog.getByRole('button', { name: 'Replace', exact: true }).click()]);
+  await picker.setFiles({ name: 'replacement.png', mimeType: 'image/png', buffer: png });
+  await expect(dialog).toHaveCount(0);
+  await expect(editor.locator('[data-image-id]')).toHaveCount(1);
+  await expect(editor).toHaveText('[image #2]');
 });

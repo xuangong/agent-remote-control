@@ -70,8 +70,10 @@ The domain draft is independent of ProseMirror's document JSON.
 - Arrow navigation, range selection, Backspace/Delete, cut/paste inside the app,
   and undo/redo treat the image as one atom. Deletion is a document edit, not an
   immediate destructive deletion of its bytes; undo must restore the image.
-- A selected tag exposes Preview and Remove actions. Preview is an overlay;
-  loading or opening it does not expand the composer.
+- Clicking a tag or pressing Enter on a selected atom opens a bounded preview
+  dialog on desktop and mobile. The header identifies the image; the footer
+  separates upload status and wrapping errors from Replace, Remove, and Retry.
+  Loading or opening it does not expand the composer; closing restores selection.
 - Tag labels have stable numbers within the draft. Removing an image does not
   silently renumber the other tags. The number is presentation metadata;
   identity is a generated image ID. Typing `[image #1]` creates ordinary text.

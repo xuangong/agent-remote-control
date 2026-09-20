@@ -202,7 +202,7 @@ function detectImageType(bytes: Buffer): ImageMediaType | undefined {
   return undefined;
 }
 
-/** Validate complete marker/scan framing; entropy decoding remains native. */
+/** Validate the primary JPEG framing; entropy decoding remains native. */
 function validJpegSegments(bytes: Buffer): boolean {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return false;
   let offset = 2;
@@ -212,7 +212,9 @@ function validJpegSegments(bytes: Buffer): boolean {
     if (bytes[offset++] !== 0xff) return false;
     while (bytes[offset] === 0xff) offset++;
     const marker = bytes[offset++];
-    if (marker === 0xd9) return hasFrame && hasScan && offset === bytes.length;
+    // HDR gain maps and multi-picture JPEGs can follow the primary EOI. Keep
+    // those bytes intact; the primary image does not have to end the container.
+    if (marker === 0xd9) return hasFrame && hasScan;
     if (marker === undefined || marker === 0 || marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) return false;
     if (marker === 0x01) continue;
     if (offset + 2 > bytes.length) return false;

@@ -1,5 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { Schema, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { EditorState, NodeSelection, type SelectionBookmark } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
@@ -8,6 +7,7 @@ import { keymap } from 'prosemirror-keymap';
 import { history, redo, undo } from 'prosemirror-history';
 import type { DraftImage } from '../image-drafts.js';
 import { normalizeDraftParts, type DraftPart } from './composer-document.js';
+import { ImagePreview } from './ImagePreview.js';
 
 const schema = new Schema({ nodes: {
   doc: { content: 'inline*' },
@@ -39,8 +39,9 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
   const view = useRef<EditorView>();
   const latest = useRef(props); latest.current = props;
   const bookmark = useRef<SelectionBookmark>();
+  const previewSelection = useRef<SelectionBookmark>();
   const [selected, setSelected] = useState<string>();
-  const [preview, setPreview] = useState<Blob>();
+  const [previewOpen, setPreviewOpen] = useState(false);
   const replaceInput = useRef<HTMLInputElement>(null);
   const replacing = useRef<string>();
   function insertParts(parts: readonly DraftPart[], useCapturedSelection = false): void {
@@ -65,12 +66,26 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
       editable: () => !latest.current.disabled,
       dispatchTransaction(transaction) {
         if (bookmark.current) bookmark.current = bookmark.current.map(transaction.mapping);
+        if (previewSelection.current) previewSelection.current = previewSelection.current.map(transaction.mapping);
         editor.updateState(editor.state.apply(transaction));
         const selection = editor.state.selection;
         setSelected(selection instanceof NodeSelection && selection.node.type.name === 'image' ? String(selection.node.attrs.imageId) : undefined);
         if (transaction.docChanged) latest.current.onChange(fromDocument(editor.state.doc));
       },
-      handleKeyDown(_view, event) { if (event.isComposing || editor.composing || event.keyCode === 229) return false; latest.current.onKeyDown(event); return event.defaultPrevented; },
+      handleClickOn(_view, _position, node, nodePosition, _event, direct) {
+        if (!direct || node.type.name !== 'image') return false;
+        editor.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, nodePosition)));
+        previewSelection.current = editor.state.selection.getBookmark();
+        editor.focus(); setPreviewOpen(true); return true;
+      },
+      handleKeyDown(_view, event) {
+        if (event.isComposing || editor.composing || event.keyCode === 229) return false;
+        if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && editor.state.selection instanceof NodeSelection && editor.state.selection.node.type.name === 'image') {
+          previewSelection.current = editor.state.selection.getBookmark();
+          event.preventDefault(); setPreviewOpen(true); return true;
+        }
+        latest.current.onKeyDown(event); return event.defaultPrevented;
+      },
       handlePaste(_view, event) {
         if (latest.current.disabled) return false;
         const clipboard = event.clipboardData;
@@ -138,30 +153,28 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
     if (position !== undefined) editor.dispatch(editor.state.tr.delete(position, position + 1)); editor.focus();
   }
   const image = selected ? props.images[selected] : undefined;
+  const selectedPart = props.parts.find(part => part.type === 'image' && part.imageId === selected);
+  const imageStatus = image?.status === 'ready' ? 'Ready to send' : image?.status === 'uploading' ? `Uploading ${Math.round(image.progress * 100)}%`
+    : image?.status === 'pending' ? 'Waiting to upload' : image?.status === 'failed' ? 'Upload failed' : 'Image unavailable';
+  function closePreview(): void {
+    setPreviewOpen(false);
+    const editor = view.current;
+    if (!editor) return;
+    if (previewSelection.current) editor.dispatch(editor.state.tr.setSelection(previewSelection.current.resolve(editor.state.doc)));
+    previewSelection.current = undefined;
+    editor.focus();
+  }
   return <>
     <div ref={container} className="agent-composer-editor-container" />
-    {selected ? <div className="agent-image-actions" role="toolbar" aria-label="Selected image actions">
-      <span role="status">{image?.error ?? (image?.status === 'uploading' ? `Uploading ${Math.round(image.progress * 100)}%` : image?.status ?? 'Unavailable')}</span>
-      <button type="button" disabled={!image?.blob} onClick={() => setPreview(image?.blob)}>Preview</button>
-      {image?.status === 'failed' ? <button type="button" disabled={props.disabled} onClick={() => props.onRetry(selected)}>Retry</button> : null}
-      <button type="button" disabled={props.disabled} onClick={() => { replacing.current = selected; bookmark.current = view.current?.state.selection.getBookmark(); replaceInput.current?.click(); }}>Replace</button>
-      <button type="button" disabled={props.disabled} onClick={() => remove(selected)}>Remove</button>
-    </div> : null}
+    {selected && previewOpen ? <ImagePreview blob={image?.blob} label={selectedPart?.type === 'image' ? selectedPart.label : 'Image'}
+      status={imageStatus} error={image?.error} progress={image?.status === 'uploading' ? image.progress : undefined} onClose={closePreview} actions={<>
+        <button type="button" className="agent-image-preview-remove" disabled={props.disabled} onClick={() => { setPreviewOpen(false); remove(selected); }}>Remove</button>
+        <button type="button" disabled={props.disabled} onClick={() => { replacing.current = selected; bookmark.current = view.current?.state.selection.getBookmark(); replaceInput.current?.click(); }}>Replace</button>
+        {image?.status === 'failed' ? <button type="button" className="agent-image-preview-retry" disabled={props.disabled || !image.blob} onClick={() => props.onRetry(selected)}>Retry</button> : null}
+      </>} /> : null}
     <input ref={replaceInput} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {
       const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
-      if (files.length && replacing.current) insertParts(props.onFiles(files, replacing.current), true); replacing.current = undefined;
+      if (files.length && replacing.current) { setPreviewOpen(false); insertParts(props.onFiles(files, replacing.current), true); } replacing.current = undefined;
     }} />
-    {preview ? <ImagePreview blob={preview} onClose={() => { setPreview(undefined); view.current?.focus(); }} /> : null}
   </>;
 });
-export function ImagePreview({ blob, onClose }: { blob: Blob; onClose(): void }) {
-  const [url, setUrl] = useState<string>();
-  const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => { const value = URL.createObjectURL(blob); setUrl(value); close.current?.focus(); return () => URL.revokeObjectURL(value); }, [blob]);
-  return createPortal(<div className="agent-image-preview-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <div role="dialog" aria-modal="true" aria-label="Image preview" className="agent-image-preview" onKeyDown={event => { if (event.key === 'Escape') onClose(); if (event.key === 'Tab') { event.preventDefault(); close.current?.focus(); } }}>
-      <button ref={close} type="button" onClick={onClose} aria-label="Close image preview">Close</button>
-      {url ? <img src={url} alt="Attached image" /> : <span role="status">Loading image…</span>}
-    </div>
-  </div>, document.body);
-}

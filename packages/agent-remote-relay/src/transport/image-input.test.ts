@@ -27,7 +27,7 @@ function provider(sent: AgentInputPart[][]): AgentProviderAdapter {
 }
 
 describe('image input over real session WebSocket', () => {
-  it('resumes uploads across reconnect, preserves order and ownership, and denies read-only/activity uploads', async () => {
+  it.each(['PNG', 'JPEG with auxiliary image'] as const)('resumes %s uploads across reconnect, preserves order and ownership, and denies read-only/activity uploads', async format => {
     const directory = await mkdtemp(join(tmpdir(), 'image-wire-'));
     const sent: AgentInputPart[][] = [];
     const relay = createAgentRemoteRelay({ providers: [provider(sent)], inputImageStore: new InputImageStore({ directory }) });
@@ -56,8 +56,9 @@ describe('image input over real session WebSocket', () => {
           return next(message => message.type === 'protocol_error' || ('payload' in message && 'requestId' in message.payload && message.payload.requestId === requestId));
         } };
       }
-      const bytes = await readFile(new URL('../resources/fixtures/dimensions.png', import.meta.url));
-      const declaration = { uploadId: 'upload', sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length, mediaType: 'image/png' };
+      const primary = await readFile(new URL(`../resources/fixtures/${format === 'PNG' ? 'dimensions.png' : 'rotated.jpg'}`, import.meta.url));
+      const bytes = format === 'PNG' ? primary : Buffer.concat([primary, primary]);
+      const declaration = { uploadId: 'upload', sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length, mediaType: format === 'PNG' ? 'image/png' : 'image/jpeg' };
       let connection = await connect();
       expect((await connection.request('image_upload_begin', declaration)).type).toBe('image_upload_result');
       const chunk = { uploadId: 'upload', offset: 0, contentBase64: bytes.subarray(0, 20).toString('base64') };

@@ -65,6 +65,24 @@ describe('durable scoped input image storage', () => {
     const truncated = Buffer.concat([bytes.subarray(0, scan + 2 + bytes.readUInt16BE(scan + 2)), Buffer.from([0xff, 0xd9])]);
     await expect(upload(store, 's', truncated, 'empty-scan', 'image/jpeg')).rejects.toThrow('Invalid image');
   });
+  it('retains auxiliary JPEG bytes after the primary image end marker', async () => {
+    const { store } = await fixture();
+    const primary = await image('rotated.jpg');
+    // HDR gain maps and multi-picture JPEGs append auxiliary images after the primary EOI.
+    const bytes = Buffer.concat([primary, primary]);
+    const attachment = await upload(store, 's', bytes, 'auxiliary', 'image/jpeg');
+    expect(attachment).toMatchObject({ mediaType: 'image/jpeg', byteLength: bytes.length, sha256: declaration(bytes).sha256 });
+    expect(await store.read('s', `input-image:${attachment.attachmentId}`)).toMatchObject({ status: 'available', bytes });
+    const [part] = await store.resolveAndPin('s', [{ type: 'image', attachmentId: attachment.attachmentId, label: 'image #1' }]);
+    if (part?.type !== 'image') throw new Error('Expected native image input.');
+    expect(await readFile(part.path)).toEqual(bytes);
+  });
+  it('does not accept an auxiliary JPEG as a replacement for a truncated primary image', async () => {
+    const { store } = await fixture();
+    const primary = await image('rotated.jpg');
+    const bytes = Buffer.concat([primary.subarray(0, -2), primary]);
+    await expect(upload(store, 's', bytes, 'truncated-primary', 'image/jpeg')).rejects.toThrow('Invalid image');
+  });
   it('rejects WebP canvas-only and truncated image chunks', async () => {
     const { store } = await fixture();
     const headerOnly = Buffer.alloc(30);

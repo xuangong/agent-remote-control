@@ -1,6 +1,6 @@
 import { Fragment, useContext, useState } from 'react';
 import { FilePreviewContext } from '../FilePreviewContext.js';
-import { ImagePreview } from '../ComposerEditor.js';
+import { ImagePreview } from '../ImagePreview.js';
 import { loadLocalResource } from '../local-resource.js';
 import { TimelineTitle } from '../TimelineTitle.js';
 import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
@@ -67,5 +67,5 @@ function MessageImageTag({ label, locator, context }: { label: string; locator: 
   return <><button type="button" className="agent-image-tag" aria-label={`Preview ${label}`} aria-busy={loading} disabled={!context || loading}
     title={error ?? `Preview ${label}`} onClick={() => void open()}>[{label}]</button>
     {error ? <span role="alert">{error}</span> : null}
-    {blob ? <ImagePreview blob={blob} onClose={() => setBlob(undefined)} /> : null}</>;
+    {blob ? <ImagePreview blob={blob} label={label} onClose={() => setBlob(undefined)} /> : null}</>;
 }

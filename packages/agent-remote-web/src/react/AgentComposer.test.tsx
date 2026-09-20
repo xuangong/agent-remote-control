@@ -87,6 +87,14 @@ it('keeps image atoms through reconnect and sends ordered image-only content wit
 });
 
 it('offers explicit upload retry after the Host rejects an expired attachment', async () => {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: { configurable: true, value() { this.open = true; } },
+    close: { configurable: true, value() { this.open = false; } },
+  });
+  Object.defineProperties(URL, {
+    createObjectURL: { configurable: true, value: () => 'blob:test-image' },
+    revokeObjectURL: { configurable: true, value: () => {} },
+  });
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
   const state: AgentReplicaState = { ...createReplicaState(), agent: {
@@ -113,12 +121,14 @@ it('offers explicit upload retry after the Host rejects an expired attachment', 
     await new Promise(resolve => setTimeout(resolve, 30));
   });
   await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', keyCode: 37, bubbles: true, cancelable: true })));
-  const retry = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Retry')!;
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  const retry = Array.from(document.querySelectorAll('dialog button')).find(button => button.textContent === 'Retry')! as HTMLButtonElement;
   expect(retry).toBeDefined();
   upload.mockResolvedValue({ ...attachment, attachmentId: 'replacement' });
   await act(async () => retry.click());
   expect(upload.mock.calls[1]?.[1]).not.toBe(upload.mock.calls[0]?.[1]);
   expect(send).toHaveBeenCalledTimes(1);
-  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close image preview"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
   expect(send.mock.calls[1]?.[0]).toEqual([{ type: 'image', attachmentId: 'replacement', label: 'image #1' }]);
 });

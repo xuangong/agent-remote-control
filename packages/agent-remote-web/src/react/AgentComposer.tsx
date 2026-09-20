@@ -7,6 +7,7 @@ import { AgentCommandDetails } from './AgentCommandDetails.js';
 import { useAgentCommands } from './useAgentCommands.js';
 import { AgentActivityStatus } from './AgentActivityStatus.js';
 import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor.js';
+import { ImageUploadStatus } from './ImageUploadStatus.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
 import { draftHasContent } from './composer-document.js';
 import type { MessagePart } from '@agent-remote-controller/agent-remote-protocol';
@@ -359,7 +360,7 @@ export function AgentComposer({ state, sessionControls, sessionKey, disabled = f
     </div>
     {richEnabled && imageDraft.storageError ? <p className="agent-composer-note" role="alert">{imageDraft.storageError}</p> : null}
     {richEnabled && imageDraft.error ? <p className="agent-composer-note" role="alert">{imageDraft.error}</p> : null}
-    {hasImages ? <p className="agent-composer-note agent-image-upload-status" role="status">{imageSendReady ? 'Images ready. Select an image to preview or remove it.' : 'Images must finish uploading. Select an image to retry, replace, or remove it.'}</p> : null}
+    {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
     {runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
       : !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
     {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}

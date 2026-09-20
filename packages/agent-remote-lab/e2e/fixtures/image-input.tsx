@@ -9,6 +9,7 @@ import '@agent-remote-controller/agent-remote-web/styles.css';
 
 const scope = new ReadingPositions('image-browser-fixture');
 function Fixture() {
+  const uploadDelay = Number(new URLSearchParams(location.search).get('uploadDelay') ?? 100);
   const [session, setSession] = useState('one');
   const [ready, setReady] = useState(true);
   const [fail, setFail] = useState(false);
@@ -21,7 +22,8 @@ function Fixture() {
       sendMessage: async text => { setSent([{ type: 'text', text }]); },
       sendMessageContent: async content => { setSent([...content]); },
       uploadImage: async (file, uploadId, options) => {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        options?.onProgress?.(Math.round(file.size / 2), file.size);
+        await new Promise(resolve => setTimeout(resolve, uploadDelay));
         if (options?.signal?.aborted) throw new DOMException('Paused', 'AbortError');
         if (fail) throw new Error('Fixture upload failed. Retry this image.');
         const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('');

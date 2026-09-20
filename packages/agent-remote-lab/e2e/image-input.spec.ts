@@ -109,3 +109,49 @@ test('shows upload failure alongside the local preview and replaces the selected
   await expect(editor.locator('[data-image-id]')).toHaveCount(1);
   await expect(editor).toHaveText('[image #2]');
 });
+
+test('keeps upload feedback readable without scrolling or moving the composer', async ({ page }, info) => {
+  await page.goto('/e2e/fixtures/image-input.html?uploadDelay=2500');
+  const editor = page.getByTestId('prompt-input');
+  await editor.fill('A draft');
+  await upload(page);
+  const status = page.locator('.agent-image-upload-status');
+  await expect(status).toContainText('Uploading image');
+  await expect(status).toContainText('50%');
+  const before = (await editor.boundingBox())!;
+  const geometry = await status.evaluate(element => ({
+    scrollWidth: element.scrollWidth, width: element.clientWidth, scrollHeight: element.scrollHeight, height: element.clientHeight,
+    fontSize: parseFloat(getComputedStyle(element.querySelector('button')!).fontSize),
+  }));
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width);
+  expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.height);
+  expect(geometry.fontSize).toBeGreaterThanOrEqual(14);
+  expect((await status.getByRole('button').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await page.screenshot({ path: info.outputPath('upload-feedback.png') });
+  await expect(editor.locator('[data-image-id]')).toHaveAttribute('data-state', 'ready');
+  await expect(status).toHaveCount(0);
+  expect((await editor.boundingBox())!.y).toBeCloseTo(before.y, 0);
+});
+
+test('opens the failed image from upload feedback without a scrolling instruction', async ({ page }) => {
+  await page.getByRole('button', { name: 'Toggle upload failure' }).click();
+  await upload(page);
+  const status = page.locator('.agent-image-upload-status');
+  await expect(status).toContainText('1 image failed');
+  await status.getByRole('button').click();
+  const dialog = page.getByRole('dialog', { name: 'Image preview' });
+  await expect(dialog.getByRole('status')).toHaveText('Upload failed');
+  await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+});
+
+test('keeps the composer border neutral while typing', async ({ page }) => {
+  const editor = page.getByTestId('prompt-input');
+  await page.getByRole('button', { name: 'Switch session' }).focus();
+  const composer = page.locator('.agent-composer');
+  const unfocusedBorder = await composer.evaluate(element => getComputedStyle(element).borderColor);
+  await editor.focus();
+  await editor.pressSequentially('A focused draft');
+  await expect(editor).toBeFocused();
+  expect(await editor.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
+  expect(await composer.evaluate(element => getComputedStyle(element).borderColor)).toBe(unfocusedBorder);
+});

@@ -26,7 +26,7 @@ function fromDocument(doc: ProseMirrorNode): DraftPart[] {
   doc.forEach(node => { if (node.isText) parts.push({ type: 'text', text: node.text! }); else if (node.type.name === 'image') parts.push({ type: 'image', imageId: String(node.attrs.imageId), label: String(node.attrs.label) }); });
   return normalizeDraftParts(parts);
 }
-export interface ComposerEditorHandle { focus(): void; insertText(text: string): void; captureSelection(): void; insertParts(parts: readonly DraftPart[]): void }
+export interface ComposerEditorHandle { focus(): void; openImage(imageId: string): void; insertText(text: string): void; captureSelection(): void; insertParts(parts: readonly DraftPart[]): void }
 interface Props {
   id: string; parts: readonly DraftPart[]; images: Readonly<Record<string, DraftImage>>; disabled: boolean;
   onChange(parts: DraftPart[]): void; onFiles(files: readonly Blob[], replacingImageId?: string): DraftPart[];
@@ -55,6 +55,16 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
   }
   useImperativeHandle(ref, () => ({
     focus: () => view.current?.focus(),
+    openImage: imageId => {
+      const editor = view.current;
+      if (!editor) return;
+      let position: number | undefined;
+      editor.state.doc.forEach((node, offset) => { if (position === undefined && node.type.name === 'image' && node.attrs.imageId === imageId) position = offset; });
+      if (position === undefined) return;
+      editor.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, position)));
+      previewSelection.current = editor.state.selection.getBookmark();
+      editor.focus(); setPreviewOpen(true);
+    },
     insertText: text => { const editor = view.current; if (editor && !latest.current.disabled && !editor.composing) { editor.dispatch(editor.state.tr.insertText(text).scrollIntoView()); editor.focus(); } },
     captureSelection: () => { bookmark.current = view.current?.state.selection.getBookmark(); }, insertParts: parts => insertParts(parts, true),
   }));

@@ -795,7 +795,6 @@ textarea {
 .lab-chat-sessions > .lab-session-tree { position: absolute; z-index: 15; top: calc(100% + 4px); right: 0; width: min(360px, calc(100vw - 24px)); max-height: min(360px, 55dvh); margin: 0; padding: 6px; border: 1px solid var(--obs-border-strong); border-radius: var(--obs-radius-sm); background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); }
 .lab-composer-dock { border-top: 0; padding-block: 4px calc(6px + env(safe-area-inset-bottom)); }
 .lab-composer-dock .agent-composer { position: relative; width: 100%; max-width: 900px; margin-inline: auto; display: flex; flex-direction: column; gap: 0; padding: 4px 6px; border: 1px solid var(--obs-control-border); border-radius: 12px; background: var(--obs-surface); }
-.lab-composer-dock .agent-composer:focus-within { border-color: var(--obs-action); }
 .lab-composer-dock .agent-composer textarea { display: block; min-height: 38px; padding: 6px 6px; border: 0; background: transparent; border-radius: 6px; }
 .lab-composer-dock .agent-composer textarea:focus-visible { outline: none; }
 .lab-composer-dock .agent-composer .agent-composer-actions { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; }

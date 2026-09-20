@@ -206,6 +206,11 @@ attempt asks the Host for the accepted offset. The editor remains writable while
 session reconnects or an image uploads, but Send requires a ready session and verified
 attachments. The state channel never carries image bytes.
 
+While images are pending, a compact, non-scrolling upload control floats above the
+composer without changing its layout. It shows byte-weighted progress, paused or
+verification status, and disappears when every attachment is ready. A failure takes
+priority and opens the affected image dialog directly for review and retry.
+
 IndexedDB retains ordered documents and image bytes under the host application's
 account/relay scope and stable session identity. Browsers that cannot store Blob
 records use binary ArrayBuffer records and recreate the Blob on read. Storage failure

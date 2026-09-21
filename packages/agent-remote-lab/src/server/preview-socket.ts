@@ -1,5 +1,5 @@
 import type { WebSocket, RawData } from 'ws';
-import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
+import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 
 export function previewSocket(socket: WebSocket): TunnelSocket {
   socket.on('error', () => socket.terminate());

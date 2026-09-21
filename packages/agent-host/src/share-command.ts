@@ -1,5 +1,5 @@
-import { controllerPath } from '@agent-remote-controller/agent-remote-hosted/controller-location';
-import type { RemoteSessionSummary } from '@agent-remote-controller/agent-remote-relay';
+import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
+import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
 import { ShareCatalog, type ReadShareCatalog } from './share-catalog.js';
 import { browseShareSessions } from './share-browser.js';
 

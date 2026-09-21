@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentSnapshot, ClientMessage, HistoryPage, ServerMessage, TimelineDirection } from '@agent-remote-controller/agent-remote-protocol';
-import { HttpWebSocketTransport, RemoteOperationError, type RemoteAgentTransport, type RemoteConnection, type RemoteProtocolObservation, type RemoteTransportDiagnostic, type RemoteTransportListener } from '@agent-remote-controller/agent-remote-web/headless';
+import type { AgentSnapshot, ClientMessage, HistoryPage, ServerMessage, TimelineDirection } from '@orchardworks/agent-remote-protocol';
+import { HttpWebSocketTransport, RemoteOperationError, type RemoteAgentTransport, type RemoteConnection, type RemoteProtocolObservation, type RemoteTransportDiagnostic, type RemoteTransportListener } from '@orchardworks/agent-remote-web/headless';
 
 import { DebuggerError } from './errors.js';
 import { createDebuggerRuntime, createProtocolTraceRecord } from './runtime.js';

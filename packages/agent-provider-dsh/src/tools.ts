@@ -1,4 +1,4 @@
-import type { AgentToolDetail } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentToolDetail } from '@orchardworks/agent-provider-sdk';
 
 import { isRecord, nonEmptyString } from './native.js';
 

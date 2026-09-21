@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import type { PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
+import type { PreviewContextValue } from '@orchardworks/agent-remote-web/react';
 
 import { render } from '../test/setup.js';
 import { HostPreviewList } from './HostPreviewList.js';

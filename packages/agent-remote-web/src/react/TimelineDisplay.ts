@@ -1,5 +1,5 @@
 import { createContext, useContext, useState } from 'react';
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 export type TimelineDisplayMode = 'preview' | 'simple' | 'content';
 export const TimelineDisplay = createContext<TimelineDisplayMode>('preview');

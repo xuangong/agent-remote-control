@@ -4,7 +4,7 @@ import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
-import type { AgentResourceReadResult, AgentTimelineItem, AgentUserMessagePart, ProviderResourceReference } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult, AgentTimelineItem, AgentUserMessagePart, ProviderResourceReference } from '@orchardworks/agent-provider-sdk';
 
 import { isRecord, readString } from './native.js';
 

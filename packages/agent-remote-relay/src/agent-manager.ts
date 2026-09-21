@@ -1,8 +1,8 @@
 import { InputImageStore, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
-import type { MessagePart, ImageUploadReceipt } from '@agent-remote-controller/agent-remote-protocol';
+import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
-import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@agent-remote-controller/agent-provider-sdk';
-import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
+import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@orchardworks/agent-provider-sdk';
+import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@orchardworks/agent-provider-sdk';
 import type {
   AgentInteractionResponse,
   AgentMessageOptions,
@@ -13,7 +13,7 @@ import type {
   AgentSession,
   AgentStreamEvent,
   ProviderObservation,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentCommand,
@@ -22,7 +22,7 @@ import {
   type HistoryPage,
   type ResourceResolveResponse,
   type ResourceResponse,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { discoverTimelineLocators, normalizeFileLocator } from './resources/markdown-locators.js';

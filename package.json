@@ -1,5 +1,5 @@
 {
-  "name": "agent-remote-control",
+  "name": "@orchardworks/agent-remote-control",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,7 +20,7 @@
     "bdb": "node packages/agent-remote-debugger/dist/cli.js",
     "agent-remote-controller": "node packages/agent-host/dist/cli.js",
     "test:copilot": "node scripts/run-tests.mjs copilot",
-    "start:gateway-relay": "pnpm --filter @agent-remote-controller/agent-remote-lab exec tsx src/server/gateway.ts",
+    "start:gateway-relay": "pnpm --filter @orchardworks/agent-remote-lab exec tsx src/server/gateway.ts",
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",
     "test:preview-browser": "node scripts/run-tests.mjs preview-browser",
     "test:cloudflare": "node scripts/run-tests.mjs cloudflare",
@@ -28,6 +28,7 @@
     "relay:local": "node scripts/relay-local.mjs",
     "build:agent-remote-controller": "node scripts/build-agent-host.mjs",
     "test:agent-remote-controller-package": "node scripts/run-tests.mjs host-package",
+    "test:windows": "node scripts/run-tests.mjs host-windows && node scripts/run-tests.mjs codex-transport && node scripts/run-tests.mjs windows-services",
     "test:codex-shared": "node scripts/run-tests.mjs codex-shared"
   },
   "devDependencies": {

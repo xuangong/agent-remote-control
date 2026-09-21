@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike, type RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web/headless';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike, type RemoteSessionStatus } from '@orchardworks/agent-remote-web/headless';
 import { createRecordedValidationServer } from './recorded.js';
 
 it('opens a discovered native session and sends through the public WebSocket protocol', async () => {

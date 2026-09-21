@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import type { PreviewSnapshot } from '@agent-remote-controller/agent-remote-tunnel';
+import type { PreviewSnapshot } from '@orchardworks/agent-remote-tunnel';
 import { createHostPreviews } from './host-previews.js';
-import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
+import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 
 function snapshot(revision: number): PreviewSnapshot {
   return { epoch: 'controller-a', revision, registrations: [{

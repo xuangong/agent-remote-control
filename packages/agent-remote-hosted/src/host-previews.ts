@@ -1,4 +1,4 @@
-import { createPreviewRelayBridge, createTunnelPeer, type PreviewSnapshot, type PreviewRegistration, type TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
+import { createPreviewRelayBridge, createTunnelPeer, type PreviewSnapshot, type PreviewRegistration, type TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 
 import { createPreviewActivity } from './preview-activity.js';
 import { PreviewNameError, previewNameId, previewTargetKey, reconcilePreviewNames, type PreviewNames } from './preview-names.js';

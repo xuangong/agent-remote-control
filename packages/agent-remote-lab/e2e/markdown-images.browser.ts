@@ -28,7 +28,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     const source = `
       import React, { useMemo, useState, useSyncExternalStore } from 'react';
       import { createRoot } from 'react-dom/client';
-      import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@agent-remote-controller/agent-remote-web/headless';
+      import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web/headless';
       import { MarkdownContent } from '../../agent-remote-web/src/react/MarkdownContent.tsx';
       const replica = new AgentReplica();
       const client = new RemoteSessionClient(${JSON.stringify(fixture.agentId)}, new HttpWebSocketTransport(${JSON.stringify(fixture.url + fixture.alice.basePath)}), replica);

@@ -5,7 +5,7 @@ import type {
   AgentSession,
   AgentSessionConfig,
   ProviderStreamItem,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

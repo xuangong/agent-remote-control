@@ -2,8 +2,8 @@ import { crc32 } from 'node:zlib';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, open, writeFile, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
-import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, type AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
-import type { ImageMediaType, ImageUploadReceipt, MessagePart } from '@agent-remote-controller/agent-remote-protocol';
+import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, type AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
+import type { ImageMediaType, ImageUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
 import { readImageDimensions } from './image-dimensions.js';
 
 export interface InputImageStoreOptions {

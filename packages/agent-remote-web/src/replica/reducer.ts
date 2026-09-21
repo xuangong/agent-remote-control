@@ -11,7 +11,7 @@ import type {
   ResourceResponse,
   ResourceUpdate,
   TimelineResourceBindingReplacement,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import type {
   AgentReplicaState,

@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import type { AgentSession, AgentRuntimeInfo } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSession, AgentRuntimeInfo } from '@orchardworks/agent-provider-sdk';
 import { createHostExecutionPolicy, protectHostDirectory, sanitizeNativeEnvironment } from './execution-policy.js';
 import { createAgentHostRuntime, type AgentHostDirectory } from './host.js';
 

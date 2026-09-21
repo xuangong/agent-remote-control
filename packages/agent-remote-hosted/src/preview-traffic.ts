@@ -1,4 +1,4 @@
-import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
+import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 
 /** Observe forwarded bytes without prefetching or changing stream backpressure. */
 export function previewTrafficBody(body: ReadableStream<Uint8Array> | undefined, activity: () => void) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RemoteActivityClient, type RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
+import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionStar } from '../session-stars-client.js';

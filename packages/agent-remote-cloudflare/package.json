@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-remote-cloudflare",
+  "name": "@orchardworks/agent-remote-cloudflare",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
     "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-remote-hosted": "workspace:*",
-    "@agent-remote-controller/agent-remote-tunnel": "workspace:*"
+    "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-remote-tunnel": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260601.1",

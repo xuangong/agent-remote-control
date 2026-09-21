@@ -3,7 +3,7 @@ import {
   CodexDaemonClient,
   CodexRestorationSemaphore,
   type CodexDaemonCallbacks,
-} from '@agent-remote-controller/codex-daemon-client';
+} from '@orchardworks/codex-daemon-client';
 
 export function createDocumentClient(transport: CodexAppServerTransport, connect: () => Promise<CodexAppServerTransport>) {
   const documents = new Map<string, unknown>();

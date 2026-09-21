@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-remote-debugger",
+  "name": "@orchardworks/agent-remote-debugger",
   "version": "0.1.0",
   "private": false,
   "publishConfig": {
@@ -21,8 +21,8 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
-    "@agent-remote-controller/agent-remote-web": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-web": "workspace:*",
     "ws": "^8.21.0"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import type { CordisDshRuntimeOptions } from '@agent-remote-controller/agent-provider-dsh';
+import type { CordisDshRuntimeOptions } from '@orchardworks/agent-provider-dsh';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 
 type AgentContext = Parameters<NonNullable<CordisDshRuntimeOptions['setup']>>[0];

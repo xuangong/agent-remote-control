@@ -1,5 +1,5 @@
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-provider-sdk';
-import type { ResourceBinding, TimelineCursor } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem } from '@orchardworks/agent-provider-sdk';
+import type { ResourceBinding, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
 export interface CanonicalTimelineRow {
   epoch: string;

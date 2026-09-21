@@ -1,4 +1,4 @@
-import { isAgentFileChangesResult, type AgentFileChange, type AgentToolResultJson } from '@agent-remote-controller/agent-remote-protocol';
+import { isAgentFileChangesResult, type AgentFileChange, type AgentToolResultJson } from '@orchardworks/agent-remote-protocol';
 import { diffLines } from './diff-lines.js';
 
 const labels = { added: 'Added', modified: 'Modified', deleted: 'Deleted', renamed: 'Renamed', unknown: 'File change' };

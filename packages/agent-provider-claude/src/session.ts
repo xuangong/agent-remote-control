@@ -2,8 +2,8 @@ import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentCapabilities, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
-  AgentStreamEvent, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
-import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@agent-remote-controller/agent-provider-sdk';
+  AgentStreamEvent, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
 import { ClaudeInteractions } from './interactions.js';
 import { ClaudeUsage } from './usage.js';

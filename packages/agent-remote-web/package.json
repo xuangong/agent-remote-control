@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-remote-web",
+  "name": "@orchardworks/agent-remote-web",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {
@@ -27,12 +27,12 @@
     "dist"
   ],
   "scripts": {
-    "build": "node scripts/clean-dist.mjs && tsc && cp src/styles.css dist/styles.css",
+    "build": "node scripts/clean-dist.mjs && tsc && node -e \"require('node:fs').copyFileSync('src/styles.css', 'dist/styles.css')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
     "@codemirror/language": "^6.12.4",
     "@codemirror/language-data": "^6.5.2",
     "@codemirror/search": "^6.7.2",

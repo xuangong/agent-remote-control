@@ -1,11 +1,11 @@
 import { createRoot } from 'react-dom/client';
-import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport, type RemoteTransportListener } from '@agent-remote-controller/agent-remote-web/headless';
-import { useAgentReplica } from '@agent-remote-controller/agent-remote-web/react';
-import type { ClientMessage, HistoryPage } from '@agent-remote-controller/agent-remote-protocol';
+import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-remote-web/headless';
+import { useAgentReplica } from '@orchardworks/agent-remote-web/react';
+import type { ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/app.css';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 
 const replica = new AgentReplica();
 const snapshot = { protocolVersion: '1.5.0', type: 'agent_snapshot', payload: replicaState.agent! } as const;

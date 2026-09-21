@@ -1,4 +1,4 @@
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
@@ -104,6 +104,22 @@ export class CodexAppServerTransport {
     }
   }
 
+  static async connectSharedWebSocket(address: string, token: string, options: CodexAppServerTransportOptions = {}): Promise<CodexAppServerTransport> {
+    const url = new URL(address);
+    if (url.protocol !== 'ws:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+      throw new Error('Shared Windows Codex requires an authenticated loopback WebSocket.');
+    }
+    if (!token || /[\r\n]/.test(token)) throw new Error('Shared Windows Codex credential is invalid.');
+    const socket = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` },
+      handshakeTimeout: options.requestTimeoutMs ?? 5000, maxPayload: 64 * 1024 * 1024, perMessageDeflate: false, followRedirects: false });
+    const transport = new CodexAppServerTransport(undefined, options, socket);
+    try { await once(socket, 'open'); return transport; }
+    catch (error) {
+      socket.terminate();
+      throw new CodexTransportUnavailableError('Could not connect to the Windows shared Codex daemon. Start it with the matching CODEX_HOME.', { cause: error });
+    }
+  }
+
   setNotificationHandler(handler: NotificationHandler): void {
     this.notificationHandler = handler;
   }
@@ -183,6 +199,17 @@ export class CodexAppServerTransport {
       return;
     }
     if (!this.child) return;
+    if (process.platform === 'win32' && this.child.pid && this.child.exitCode === null && this.child.signalCode === null) {
+      // npm entry points can own a native child; killing only the wrapper leaves that server running.
+      const child = this.child;
+      await new Promise<void>((resolve, reject) => {
+        execFile('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 3000 }, error => {
+          if (error && child.exitCode === null && child.signalCode === null) reject(error);
+          else resolve();
+        });
+      });
+      return;
+    }
     this.child.stdin.end();
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
 

@@ -1,4 +1,4 @@
-import { readControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
+import { readControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 
 export interface ScannedSession {
   hostId: string;

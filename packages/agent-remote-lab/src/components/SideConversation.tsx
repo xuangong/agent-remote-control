@@ -1,8 +1,8 @@
 import { SessionLink } from './SessionLink.js';
 import { useEffect, useRef } from 'react';
 import { useConversationSession } from '../hooks/useConversationSession.js';
-import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
-import type { AgentCommandResult } from '@agent-remote-controller/agent-remote-protocol';
+import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from '../directory-client.js';
 import { forkDisplayState, type ForkStore, type SessionFork } from '../session-forks.js';
 import { forkActions, forkCommands } from '../fork-actions.js';

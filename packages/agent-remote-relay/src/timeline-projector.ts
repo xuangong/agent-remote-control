@@ -5,8 +5,8 @@ import type {
   TimelineCollapse,
   TimelineDirection,
   TimelineSeqRange,
-} from '@agent-remote-controller/agent-remote-protocol';
-import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 
 import { TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
 

@@ -1,4 +1,4 @@
-import type { UserMessagePart } from '@agent-remote-controller/agent-remote-protocol';
+import type { UserMessagePart } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, OutgoingMessage } from './types.js';
 
 /** A native echo can arrive before acknowledgement or later through history recovery. */

@@ -1,4 +1,4 @@
-import type { AgentToolResult } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentToolResult } from '@orchardworks/agent-remote-protocol';
 import { FileChangesView, readFileChanges } from './FileChangesView.js';
 
 export function ToolResultView({ result, fileEdit = false }: { readonly result: AgentToolResult; readonly fileEdit?: boolean }) {

@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { NativeSessionCommand } from './NativeSessionCommands.js';
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { controllerPath } from '@agent-remote-controller/agent-remote-hosted/controller-location';
+import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import type { OpenedSession } from '../directory-client.js';
 import { readSessionCode, type ScannedSession } from '../session-transfer.js';
 import { SessionScanner } from './SessionScanner.js';

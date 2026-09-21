@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import type { AgentProviderDescriptor } from '@agent-remote-controller/agent-provider-sdk';
-import type { AgentPersistenceHandle } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
+import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 
 export type ProviderCatalogStatus = 'loading' | 'ready' | 'empty' | 'error';
 

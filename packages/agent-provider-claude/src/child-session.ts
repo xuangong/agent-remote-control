@@ -1,4 +1,4 @@
-import type { AgentCapabilities, AgentChildSession, AgentSession, AgentRuntimeInfo, ProviderObservation, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentCapabilities, AgentChildSession, AgentSession, AgentRuntimeInfo, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { ClaudeImageRegistry } from './images.js';
 import { Channel } from './channel.js';
 import { ClaudeEventProjector, record } from './projector.js';

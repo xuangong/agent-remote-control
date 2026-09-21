@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { AgentSessionSetting } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentSessionSetting } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
 
 export type SessionControlView = 'status' | 'model' | 'permissions';

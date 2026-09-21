@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
 const requiredProviderIds = ['claude', 'codex', 'copilot', 'dsh'] as const;

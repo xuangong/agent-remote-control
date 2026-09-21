@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
+import type { PairingPurpose } from '@orchardworks/agent-remote-protocol';
 
 export interface HostConnection { serverUrl: string; remoteKey: string; environment: NodeJS.ProcessEnv; pairingPurpose?: PairingPurpose }
 const restartSettings = [
@@ -83,7 +83,10 @@ async function writeConnection(stateDir: string, connection: HostConnection): Pr
       await file.sync();
     } finally { await file.close(); }
     await rename(temporary, join(stateDir, 'connection.json'));
-    const directory = await open(stateDir, 'r');
-    try { await directory.sync(); } finally { await directory.close(); }
+    // Windows does not expose directory fsync through Node; the file is synced before rename.
+    if (process.platform !== 'win32') {
+      const directory = await open(stateDir, 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
+    }
   } finally { await rm(temporary, { force: true }); }
 }

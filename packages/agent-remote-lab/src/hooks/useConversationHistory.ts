@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { controllerPath } from '@agent-remote-controller/agent-remote-hosted/controller-location';
+import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import { sessionKey, sessionRootKey, type SessionEntry } from '../session-tree.js';
 
 interface Visit { id: string; session: SessionEntry; root: string }

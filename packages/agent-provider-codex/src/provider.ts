@@ -1,4 +1,4 @@
-import type { AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import { readSessionHistoryPage } from './reference-history.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -10,9 +10,9 @@ import type {
   AgentProviderDescriptor,
   AgentSession,
   AgentSessionConfig,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 
-import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
+import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 
 import { CodexAppServerTransport, CodexTransportUnavailableError, CodexRequestTimeoutError, CodexAppServerRpcError } from './app-server-transport.js';
 import { isRecord, readString, spawnCodexAppServer } from './native.js';
@@ -20,6 +20,7 @@ import { CodexAppServerSession } from './session.js';
 import { initializeCodexTransport } from './initialize.js';
 import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
 import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
+import { windowsCodexSharedEndpoint } from './windows-daemon.js';
 
 export interface CodexAppServerProviderOptions {
   executable?: string;
@@ -52,6 +53,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       throw new Error('Shared Codex uses the native daemon permissions. Explicit local trusted control is required; per-client sandbox restrictions cannot be enforced.');
     }
     if (options.connectionMode === 'shared' && options.spawn) throw new Error('Shared Codex cannot also spawn a private runtime.');
+    if (process.platform === 'win32' && options.connectionMode === 'shared' && options.socketPath) throw new Error('Windows shared Codex selects its daemon through CODEX_HOME; remove the Unix socket override.');
   }
 
   async listSessions(options: CodexSessionListOptions = {}): Promise<CodexSessionPage> {
@@ -125,6 +127,11 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   private async createTransport(cwd?: string): Promise<CodexAppServerTransport> {
     if (this.options.connectionMode === 'shared') {
       const home = this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+      if (process.platform === 'win32') {
+        return windowsCodexSharedEndpoint(home).then(({ url, token }) => CodexAppServerTransport.connectSharedWebSocket(url, token, {
+          requestTimeoutMs: this.options.requestTimeoutMs, onDiagnostic: this.options.onDiagnostic,
+        })).catch(error => { throw runtimeError(error, true); });
+      }
       return CodexAppServerTransport.connectShared(this.options.socketPath ?? join(home, 'app-server-control', 'app-server-control.sock'), {
         requestTimeoutMs: this.options.requestTimeoutMs, onDiagnostic: this.options.onDiagnostic,
       }).catch(error => { throw runtimeError(error, this.options.connectionMode === 'shared'); });

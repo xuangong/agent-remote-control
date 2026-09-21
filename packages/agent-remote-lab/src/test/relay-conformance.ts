@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import type { AgentProviderAdapter, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
-import type { TimelineCursor } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentProviderAdapter, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import WebSocket from 'ws';
 import { expect, vi } from 'vitest';
 

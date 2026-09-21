@@ -129,8 +129,8 @@ async function main() {
       AGENT_REMOTE_ORIGIN: options.consoleUrl, AGENT_REMOTE_WORKSPACE: options.workspace,
       VITE_AGENT_REMOTE_RELAY_TARGET: options.serverUrl };
     console.log('Starting Broker and built Web UI...');
-    service('Broker', pnpm, ['--filter', '@agent-remote-controller/agent-remote-lab', 'exec', 'tsx', 'src/server/local.ts']);
-    service('Web', pnpm, ['--filter', '@agent-remote-controller/agent-remote-lab', 'exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', String(options.webPort), '--strictPort']);
+    service('Broker', pnpm, ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'tsx', 'src/server/local.ts']);
+    service('Web', pnpm, ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', String(options.webPort), '--strictPort']);
     await ready(async () => {
       const relay = await reachable(`${options.serverUrl}/v1/remote/hosts`);
       if (!relay) return false;

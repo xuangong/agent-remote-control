@@ -1,4 +1,4 @@
-import { initializeCodexTransport as initializeNativeTransport, type CodexInitialization } from '@agent-remote-controller/codex-daemon-client';
+import { initializeCodexTransport as initializeNativeTransport, type CodexInitialization } from '@orchardworks/codex-daemon-client';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 
 export const providerInitialization: CodexInitialization = {

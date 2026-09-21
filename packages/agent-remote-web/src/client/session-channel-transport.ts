@@ -4,7 +4,7 @@ import {
   SESSION_CHANNEL_MAX_FRAME_BYTES, SESSION_CHANNEL_MAX_BUFFERED_BYTES,
   SESSION_CHANNEL_MAX_SUBSCRIPTIONS, SESSION_CHANNEL_MAX_PENDING_FRAMES,
   type ClientMessage, type SessionChannelClientMessage,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 import type { WebSocketLike } from './http-websocket-transport.js';
 import { watchPageResume } from './page-resume.js';
 import type {

@@ -17,7 +17,7 @@ import {
   type ResourceResponse,
   type TimelineCursor,
   type TimelineDirection,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { uploadImage, checkUploadAborted, type ImageUploadOptions, type ImageUploadRequest } from './image-upload.js';
 import type { AgentReplica } from '../replica/store.js';

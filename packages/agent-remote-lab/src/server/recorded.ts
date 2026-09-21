@@ -1,4 +1,4 @@
-import type { AgentHistoryQuery, AgentHistoryPage } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type {
@@ -12,7 +12,7 @@ import type {
   AgentStreamEvent,
   ProviderObservation,
   ProviderStreamItem,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 
 import { createProtocolValidationServer } from '../server.js';
 

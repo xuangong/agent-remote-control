@@ -1,5 +1,5 @@
 import type { CopilotSession, SessionEvent } from '@github/copilot-sdk';
-import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@agent-remote-controller/agent-provider-sdk';
+import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import { detail, provider, record } from './projector.js';
 type QuestionPayload = Parameters<NonNullable<import('@github/copilot-sdk').SessionConfig['onUserInputRequest']>>[0];
 type QuestionReply = {answer: string; wasFreeform: boolean};

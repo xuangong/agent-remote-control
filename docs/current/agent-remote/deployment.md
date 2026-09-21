@@ -55,8 +55,8 @@ Build from the Agents worktree with Node 22+ and pnpm 10:
 ```sh
 pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
 pnpm build:relay
-pnpm --filter @agent-remote-controller/agent-remote-cloudflare run build
-pnpm --filter @agent-remote-controller/agent-remote-cloudflare exec wrangler deploy --dry-run
+pnpm --filter @orchardworks/agent-remote-cloudflare run build
+pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run
 ```
 
 The Wrangler configuration owns the `agents.xianliao.de5.net` Custom Domain,
@@ -68,8 +68,8 @@ After reviewing the dry-run, configure the shared secret on both applications
 and deploy using the respective project workflows. For Agents:
 
 ```sh
-pnpm --filter @agent-remote-controller/agent-remote-cloudflare exec wrangler secret put AGENT_REMOTE_SIGNING_SECRET
-pnpm --filter @agent-remote-controller/agent-remote-cloudflare exec wrangler deploy
+pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put AGENT_REMOTE_SIGNING_SECRET
+pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy
 ```
 
 Gateway keeps its existing route and resources; set its secret using Wrangler

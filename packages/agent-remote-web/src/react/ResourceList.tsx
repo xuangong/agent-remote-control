@@ -1,6 +1,6 @@
-import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useRef, useState } from 'react';
-import type { ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
 import { canPreviewImage, ResourceCard } from './ResourceCard.js';

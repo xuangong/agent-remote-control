@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-remote-relay",
+  "name": "@orchardworks/agent-remote-relay",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {
@@ -26,8 +26,8 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
-    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
     "ws": "^8.21.0",
     "image-size": "2.0.2"
   },

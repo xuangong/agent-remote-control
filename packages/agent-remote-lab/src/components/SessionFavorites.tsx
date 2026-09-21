@@ -1,4 +1,4 @@
-import type { AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
 import type { SessionStars } from '../hooks/useSessionStars.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';

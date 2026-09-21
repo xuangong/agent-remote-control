@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { RemoteActivityClient, type RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
+import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { render } from '../test/setup.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';

@@ -1,5 +1,5 @@
 import { imageSize } from 'image-size';
-import type { ImageDimensions } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageDimensions } from '@orchardworks/agent-remote-protocol';
 
 const supportedTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 

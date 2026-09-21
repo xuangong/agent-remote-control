@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { DshChildSessions } from './children.js';
 
 function fixture(options: { interrupt?: boolean; mode?: 'continuable' | 'one-shot' } = {}) {

@@ -1,13 +1,13 @@
 import { createRoot } from 'react-dom/client';
 import type { ReactNode } from 'react';
 import { GatewayController } from '../../src/GatewayController.js';
-import type { HttpWebSocketTransport, RemoteAgentTransport, RemoteTransportListener } from '@agent-remote-controller/agent-remote-web';
-import type { AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
+import type { HttpWebSocketTransport, RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
 import { App } from '../../src/App.js';
 import { SessionDirectoryClient } from '../../src/directory-client.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/app.css';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 
 const baseUrl = location.origin + '/u/alice/';
 const directory = new SessionDirectoryClient(baseUrl, undefined, 'host');

@@ -1,1 +1,1 @@
-export * from '@agent-remote-controller/agent-remote-hosted/control';
+export * from '@orchardworks/agent-remote-hosted/control';

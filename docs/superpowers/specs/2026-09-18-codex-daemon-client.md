@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Extract the Codex-native connection and recovery logic into `packages/codex-daemon-client` (`@agent-remote-controller/codex-daemon-client`). Another repository must be able to use or reference the package without depending on the Agent Provider SDK, Remote protocol, Relay, Web, or Host. The user approved this extraction after discussing these boundaries; implementation is authorized, publication and deployment are not.
+Extract the Codex-native connection and recovery logic into `packages/codex-daemon-client` (`@orchardworks/codex-daemon-client`). Another repository must be able to use or reference the package without depending on the Agent Provider SDK, Remote protocol, Relay, Web, or Host. The user approved this extraction after discussing these boundaries; implementation is authorized, publication and deployment are not.
 
 ## Boundary
 

@@ -2,7 +2,7 @@ import { TimelineTitle } from '../TimelineTitle.js';
 import { useId } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ContentPreview } from './ContentPreview.js';
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 export function ErrorItem({ item }: { readonly item: Extract<AgentTimelineItem, { type: 'error' }> }) {
   const { expanded, preview, toggle } = useItemDisclosure();

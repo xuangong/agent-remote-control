@@ -1,4 +1,4 @@
-import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
+import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 
 export const replicaState: AgentReplicaState = {
   agent: {

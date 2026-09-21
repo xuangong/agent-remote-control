@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { watchPageResume } from '@agent-remote-controller/agent-remote-web';
+import { watchPageResume } from '@orchardworks/agent-remote-web';
 import { SessionStarsClient, type StarInput, type VisibleSessionStar } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useFeedbackToast } from '../components/Toast.js';

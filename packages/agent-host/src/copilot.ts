@@ -4,7 +4,8 @@ import { constants } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { CopilotAgentProvider, resolveCopilotExecutable } from '@agent-remote-controller/agent-provider-copilot';
+import { resolveNativeExecutable } from './native-executable.js';
+import { CopilotAgentProvider, resolveCopilotExecutable } from '@orchardworks/agent-provider-copilot';
 import { createCopilotSessionDirectory } from './copilot-directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
 
@@ -20,6 +21,7 @@ export interface CopilotHostRegistrationOptions {
 export async function createCopilotHostRegistration(options: CopilotHostRegistrationOptions = {}): Promise<AgentHostProviderRegistration> {
   let executable = options.executable ?? resolveCopilotExecutable();
   const env: NodeJS.ProcessEnv = { ...sanitizeNativeEnvironment(options.env ?? {}), ...(options.copilotHome ? { COPILOT_HOME: options.copilotHome } : {}) };
+  executable = resolveNativeExecutable(executable, '@github/copilot/npm-loader.js', env);
   const nodeEntry = /\.(?:m?js|cjs)$/i.test(executable);
   if (nodeEntry && !isAbsolute(executable) && !executable.includes('/') && !executable.includes('\\')) {
     const name = executable;

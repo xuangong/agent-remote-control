@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentSessionExtensions } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 
 interface SourceGrant { sourceNativeSessionId: string; systemPrompt: string; handle: AgentPersistenceHandle }
 

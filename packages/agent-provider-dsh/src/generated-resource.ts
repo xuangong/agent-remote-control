@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { posix } from 'node:path';
 
-import type { AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 
 import {
   dshProviderSourceKey,

@@ -1,8 +1,8 @@
-import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { AgentCommandDetails } from './AgentCommandDetails.js';
 import { useAgentCommands } from './useAgentCommands.js';
 import { AgentActivityStatus } from './AgentActivityStatus.js';
@@ -10,7 +10,7 @@ import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor.js';
 import { ImageUploadStatus } from './ImageUploadStatus.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
 import { draftHasContent } from './composer-document.js';
-import type { MessagePart } from '@agent-remote-controller/agent-remote-protocol';
+import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { useSendButtonPress } from './useSendButtonPress.js';
 
 export interface AgentComposerProps {

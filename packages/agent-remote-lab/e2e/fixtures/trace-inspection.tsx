@@ -1,10 +1,10 @@
 import { createRoot } from 'react-dom/client';
-import type { AgentReplicaState, RemoteTransportListener } from '@agent-remote-controller/agent-remote-web';
-import { PROTOCOL_VERSION, type ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentReplicaState, RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import { PROTOCOL_VERSION, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { App, type LabTransport } from '../../src/App.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/app.css';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 
 function entry(seq: number): ProjectedTimelineEntry {
   return { providerId: 'recorded', turnId: 'turn-inspect', seqStart: seq, seqEnd: seq, timestamp: '2026-09-17T07:00:00Z',

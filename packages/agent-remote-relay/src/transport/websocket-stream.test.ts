@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentManagerEvent } from '../agent-manager-events.js';
 import { AgentManager } from '../agent-manager.js';
 import type { AgentRemoteRelay } from '../relay.js';

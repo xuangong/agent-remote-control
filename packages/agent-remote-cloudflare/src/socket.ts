@@ -1,4 +1,4 @@
-import { BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN, type RelaySocket } from '@agent-remote-controller/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN, type RelaySocket } from '@orchardworks/agent-remote-hosted';
 
 /** Workers has no public egress queue metric; native buffering cannot be measured here. */
 export class WorkerRelaySocket implements RelaySocket {

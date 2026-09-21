@@ -1,6 +1,6 @@
-# @agent-remote-controller/agent-remote-protocol
+# @orchardworks/agent-remote-protocol
 
-`@agent-remote-controller/agent-remote-protocol` is the exact-version JSON boundary between the Agent Remote relay and a pure Web client.
+`@orchardworks/agent-remote-protocol` is the exact-version JSON boundary between the Agent Remote relay and a pure Web client.
 
 ## Boundary
 

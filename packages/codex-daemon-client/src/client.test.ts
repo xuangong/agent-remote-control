@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import { CodexAppServerTransport, CodexDaemonClient } from '@agent-remote-controller/codex-daemon-client';
+import { CodexAppServerTransport, CodexDaemonClient } from '@orchardworks/codex-daemon-client';
 // The same application consumer runs against the packed artifact outside the workspace.
 import { createNotebook } from '../examples/notebook.mjs';
 

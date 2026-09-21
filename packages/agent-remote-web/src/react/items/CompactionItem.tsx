@@ -1,5 +1,5 @@
 import { TimelineTitle } from '../TimelineTitle.js';
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 export function CompactionItem({ item }: { readonly item: Extract<AgentTimelineItem, { type: 'compaction' }> }) {
   return <article className="agent-timeline-item agent-compaction" aria-label="Context compaction">

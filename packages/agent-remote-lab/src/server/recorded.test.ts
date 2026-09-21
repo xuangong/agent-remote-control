@@ -196,8 +196,8 @@ describe('recorded Lab Provider', () => {
 });
 
 async function nextRequest(
-  iterator: AsyncIterator<import('@agent-remote-controller/agent-provider-sdk').ProviderStreamItem>,
-  kind: import('@agent-remote-controller/agent-provider-sdk').AgentInteractionRequest['kind'],
+  iterator: AsyncIterator<import('@orchardworks/agent-provider-sdk').ProviderStreamItem>,
+  kind: import('@orchardworks/agent-provider-sdk').AgentInteractionRequest['kind'],
 ) {
   while (true) {
     const next = await iterator.next();

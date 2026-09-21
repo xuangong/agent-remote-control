@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { ClientMessage, HistoryPage } from '@agent-remote-controller/agent-remote-protocol';
+import type { ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { HttpWebSocketTransport, type WebSocketLike } from './http-websocket-transport.js';
 import type { RemoteConnection, RemoteServerMessage } from './transport.js';
 import { AgentReplica } from '../replica/store.js';

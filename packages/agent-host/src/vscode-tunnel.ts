@@ -2,11 +2,12 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { vscodeTunnelLink, type VscodeTunnelSnapshot } from '@agent-remote-controller/agent-remote-protocol';
-import type { RemoteHostControlRequest } from '@agent-remote-controller/agent-remote-relay';
+import { vscodeTunnelLink, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
+import type { RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { vscodeTunnelSupervisorSource } from './vscode-tunnel-supervisor.js';
 import { parseTunnelOutput, tunnelOutputLines } from './vscode-tunnel-output.js';
+import { resolveVscodeExecutable } from './vscode-executable.js';
 
 export interface VscodeTunnelOptions {
   stateDirectory: string;
@@ -34,6 +35,7 @@ export function createVscodeTunnelManager(options: VscodeTunnelOptions) {
   let probeChild: ChildProcess | undefined;
   let capabilityChild: ChildProcess | undefined;
   let capabilityCheck: Promise<void> | undefined;
+  const owned = new Map<ChildProcess, Promise<void>>();
   let checkedAt = 0;
   const executable = options.executable ?? 'code';
   let stopping = false;
@@ -50,10 +52,12 @@ export function createVscodeTunnelManager(options: VscodeTunnelOptions) {
     return { ...env, VSCODE_CLI_MACHINE_STATUS: '1' };
   }
   function spawnOwned(args: string[], timeoutMs?: number) {
-    return spawn(process.execPath, ['-e', vscodeTunnelSupervisorSource, JSON.stringify({
-      executable, args: [...(options.executableArgs ?? []), ...args], cwd: home,
+    const child = spawn(process.execPath, ['-e', vscodeTunnelSupervisorSource, JSON.stringify({
+      executable: resolveVscodeExecutable(executable), args: [...(options.executableArgs ?? []), ...args], cwd: home,
       stopTimeoutMs: options.stopTimeoutMs ?? 2000, timeoutMs,
-    })], { cwd: home, env: environment(), stdio: ['pipe', 'pipe', 'pipe', 'ipc'], detached: true });
+    })], { cwd: home, env: environment(), stdio: ['pipe', 'pipe', 'pipe', 'ipc'], detached: true, windowsHide: true });
+    owned.set(child, new Promise<void>(done => child.once('close', () => { owned.delete(child); done(); })));
+    return child;
   }
   function terminate(target: ChildProcess, signal: NodeJS.Signals) {
     if (!target.pid) return;
@@ -124,10 +128,6 @@ export function createVscodeTunnelManager(options: VscodeTunnelOptions) {
     try {
       await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
       if (closed) return;
-      if (process.platform === 'win32') {
-        update({ status: 'unavailable', processAlive: false, message: 'Managed VS Code tunnels currently require macOS or Linux process groups.' });
-        return;
-      }
       const query = spawnOwned(['tunnel', '--help'], 3000);
       capabilityChild = query;
       let help = ''; let spawnFailed = false;
@@ -146,8 +146,9 @@ export function createVscodeTunnelManager(options: VscodeTunnelOptions) {
       update(supported ? { status: 'stopped', processAlive: false } : { status: 'unavailable', processAlive: false,
         message: spawnFailed ? 'VS Code CLI was not found or could not be executed. Install it or configure AGENT_HOST_VSCODE.'
           : 'This CLI does not provide a supported code tunnel command. Install a VS Code CLI with Remote Tunnels support.' });
-    } catch {
-      if (!closed) update({ status: 'unavailable', processAlive: false, message: 'Could not check VS Code tunnel support. Verify the CLI and Controller directory permissions.' });
+    } catch (error) {
+      if (!closed) update({ status: 'unavailable', processAlive: false, message: error instanceof Error && error.message.includes('not found')
+        ? error.message : 'Could not check VS Code tunnel support. Verify the CLI and Controller directory permissions.' });
     }
   }
   function ensureCapability() {
@@ -236,6 +237,11 @@ export function createVscodeTunnelManager(options: VscodeTunnelOptions) {
         return { status: 200, body: JSON.stringify(result) };
       } catch (error) { return { status: 400, body: JSON.stringify({ error: error instanceof Error ? error.message : 'VS Code tunnel operation failed.' }) }; }
     },
-    async close() { closed = true; clearTimeout(disconnectTimer); capabilityChild?.stdin?.end(); await Promise.all([stop(), capabilityCheck]); },
+    async close() {
+      closed = true; clearTimeout(disconnectTimer); capabilityChild?.stdin?.end();
+      await Promise.all([stop(), capabilityCheck]);
+      for (const child of owned.keys()) child.stdin?.end();
+      await Promise.all(owned.values());
+    },
   };
 }

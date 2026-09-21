@@ -2,7 +2,7 @@ import {
   decodeCreateAgentRequest, decodeUplinkMessage, encodeUplinkMessage,
   UPLINK_MAX_FRAME_BYTES, UPLINK_MAX_PUBLIC_REQUEST_BYTES, UPLINK_VERSION,
   type UplinkMessage,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 import type { AgentRemoteRelay } from '../relay.js';
 import { createSessionWire, type SessionWire } from '../session-wire.js';
 import {

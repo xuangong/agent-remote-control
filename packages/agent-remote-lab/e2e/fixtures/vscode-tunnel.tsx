@@ -3,7 +3,7 @@ import { HostVscodeTunnel } from '../../src/components/HostVscodeTunnel.js';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { HttpVscodeTunnelClient, VscodeTunnelScope } from '../../src/vscode-tunnel.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 import '../../src/app.css';
 
 const state = { ...replicaState, agent: { ...replicaState.agent!, cwd: '/Users/me/My project#1' } };

@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { expect, it } from 'vitest';
-import type { AgentToolResultJson } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentToolResultJson } from '@orchardworks/agent-remote-protocol';
 import { render } from '../../test/setup.js';
 import { ToolCallItem } from './ToolCallItem.js';
 

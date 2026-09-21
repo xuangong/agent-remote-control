@@ -1,13 +1,13 @@
 # Borgee Agent Remote Debugger
 
-`@agent-remote-controller/agent-remote-debugger` provides `bdb`, a terminal presentation adapter for an Agent Remote Relay. It uses the same public transport, session client, and Replica as the Web package; it does not connect to a Provider runtime or implement a second synchronization algorithm.
+`@orchardworks/agent-remote-debugger` provides `bdb`, a terminal presentation adapter for an Agent Remote Relay. It uses the same public transport, session client, and Replica as the Web package; it does not connect to a Provider runtime or implement a second synchronization algorithm.
 
 ## Run locally
 
 Build the package before invoking the executable:
 
 ```bash
-pnpm --filter @agent-remote-controller/agent-remote-debugger build
+pnpm --filter @orchardworks/agent-remote-debugger build
 node packages/agent-remote-debugger/dist/cli.js --help
 ```
 

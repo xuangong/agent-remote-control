@@ -1,7 +1,7 @@
 import {
   AgentReplica, HttpWebSocketTransport, RemoteActivityClient, RemoteSessionClient,
   type RemoteSessionStatus,
-} from '@agent-remote-controller/agent-remote-web/headless';
+} from '@orchardworks/agent-remote-web/headless';
 
 type Label = 'a' | 'b';
 type WindowName = 'primary' | 'side';

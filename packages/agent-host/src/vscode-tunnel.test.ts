@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterEach, expect, test, vi } from 'vitest';
 import { createVscodeTunnelManager } from './vscode-tunnel.js';
 
+const poll = <T>(actual: () => T, options?: { timeout?: number }) => expect.poll(actual, { timeout: 5000, ...options });
+
 const disposers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposers.splice(0).reverse()) await dispose(); vi.unstubAllEnvs(); });
 
@@ -30,7 +32,9 @@ if (args.includes('--help')) {
     process.stderr.write('  ➜  Tunnel:   test-machine\\n');
     process.stdout.write('__VSCODE_CLI_STATUS__'+JSON.stringify({type:'connected',tunnelName:'test-machine',isAttached:${JSON.stringify(mode)} === 'attached'})+'\\n');
   }, 100);
-  if (${JSON.stringify(mode)} === 'exit') setTimeout(() => process.exit(7), 300);
+  if (${JSON.stringify(mode)} === 'exit') setInterval(() => {
+    if (fs.existsSync(path.join(root, 'fixture-exit'))) process.exit(7);
+  }, 25);
   if (${JSON.stringify(mode)} === 'stubborn') process.on('SIGTERM', () => {});
   if (${JSON.stringify(mode)} === 'noise') process.stdout.write('x'.repeat(100000));
   setInterval(() => {}, 1000);
@@ -46,12 +50,12 @@ test('captures split authorization output and shares one process between starts'
   const { value } = await manager();
   expect(value.snapshot()).toMatchObject({ status: 'checking', processAlive: false });
   await Promise.all([value.start(true), value.start(true)]);
-  await expect.poll(() => value.snapshot().authorization?.code).toBe('9491-B98B');
+  await poll(() => value.snapshot().authorization?.code).toBe('9491-B98B');
   const pid = value.snapshot().pid;
   expect(value.snapshot().authorization?.url).toBe('https://github.com/login/device');
   await value.start(true);
   expect(value.snapshot().pid).toBe(pid);
-  await expect.poll(() => value.snapshot().status).toBe('connected');
+  await poll(() => value.snapshot().status).toBe('connected');
   expect(value.snapshot()).toMatchObject({ processAlive: true, tunnelName: 'test-machine', link: 'https://vscode.dev/tunnel/test-machine' });
   expect(value.snapshot().authorization).toBeUndefined();
   await value.stop();
@@ -60,10 +64,11 @@ test('captures split authorization output and shares one process between starts'
 });
 
 test('reports external termination and clears authorization and stale links', async () => {
-  const { value } = await manager('exit');
+  const { value, directory } = await manager('exit');
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('connected');
-  await expect.poll(() => value.snapshot().status).toBe('exited');
+  await poll(() => value.snapshot().status).toBe('connected');
+  await writeFile(join(directory, 'vscode-tunnel', 'fixture-exit'), '');
+  await poll(() => value.snapshot().status).toBe('exited');
   expect(value.snapshot()).toMatchObject({ exitCode: 7, processAlive: false });
   expect(value.snapshot().link).toBeUndefined();
 });
@@ -72,7 +77,7 @@ test('requires license consent and escalates stopping an unresponsive process', 
   const { value } = await manager('stubborn');
   await expect(value.start(false)).rejects.toThrow('license');
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('connected');
+  await poll(() => value.snapshot().status).toBe('connected');
   await value.stop();
   expect(value.snapshot().processAlive).toBe(false);
 });
@@ -81,7 +86,7 @@ test('uses the Controller home and dedicated CLI directory without forwarding Ho
   vi.stubEnv('AGENT_HOST_REMOTE_KEY', 'fixture-secret-not-for-child');
   const { value, directory } = await manager('auth');
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('awaiting_auth');
+  await poll(() => value.snapshot().status).toBe('awaiting_auth');
   const { readFile } = await import('node:fs/promises');
   const record = JSON.parse(await readFile(join(directory, 'vscode-tunnel', 'fixture-start.json'), 'utf8'));
   expect(record.cwd).toBe(await realpath(directory));
@@ -92,14 +97,14 @@ test('uses the Controller home and dedicated CLI directory without forwarding Ho
 test('distinguishes a live process from a disconnected tunnel and recovers its link', async () => {
   const { value, directory } = await manager();
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('connected');
+  await poll(() => value.snapshot().status).toBe('connected');
   const status = join(directory, 'vscode-tunnel', 'fixture-status.json');
   await writeFile(status, JSON.stringify({ tunnel: { name: 'test-machine', tunnel: 'Disconnected' } }));
-  await expect.poll(() => value.snapshot().status).toBe('connecting');
+  await poll(() => value.snapshot().status).toBe('connecting');
   expect(value.snapshot().processAlive).toBe(true);
   expect(value.snapshot().link).toBeUndefined();
   await writeFile(status, JSON.stringify({ tunnel: { name: 'test-machine', tunnel: 'Connected' } }));
-  await expect.poll(() => value.snapshot().link).toBe('https://vscode.dev/tunnel/test-machine');
+  await poll(() => value.snapshot().link).toBe('https://vscode.dev/tunnel/test-machine');
 });
 
 test('reports a missing executable and rejects starts after shutdown', async () => {
@@ -108,7 +113,7 @@ test('reports a missing executable and rejects starts after shutdown', async () 
   const value = createVscodeTunnelManager({ stateDirectory: directory, installationId: 'missing', executable: join(directory, 'missing') });
   disposers.push(() => value.close());
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('unavailable');
+  await poll(() => value.snapshot().status).toBe('unavailable');
   expect(value.snapshot().message).toContain('not found');
   expect(value.snapshot().processAlive).toBe(false);
   await value.close();
@@ -118,7 +123,7 @@ test('reports a missing executable and rejects starts after shutdown', async () 
 test('keeps short Relay interruptions but reclaims a tunnel after sustained disconnection', async () => {
   const { value } = await manager('auth', 150);
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('awaiting_auth');
+  await poll(() => value.snapshot().status).toBe('awaiting_auth');
   value.setRelayConnected(false);
   value.setRelayConnected(true);
   await new Promise(resolve => setTimeout(resolve, 200));
@@ -126,14 +131,14 @@ test('keeps short Relay interruptions but reclaims a tunnel after sustained disc
   value.setRelayConnected(false);
   // Connecting retries must not extend the original disconnection deadline.
   value.setRelayConnected(false);
-  await expect.poll(() => value.snapshot().processAlive).toBe(false);
+  await poll(() => value.snapshot().processAlive).toBe(false);
   expect(value.snapshot().message).toContain('disconnected');
   expect(value.snapshot().authorization).toBeUndefined();
   await expect(value.start(true)).rejects.toThrow('Reconnect');
   value.setRelayConnected(true);
   expect(value.snapshot().processAlive).toBe(false);
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('awaiting_auth');
+  await poll(() => value.snapshot().status).toBe('awaiting_auth');
 });
 
 test('disables a CLI without the tunnel subcommand without starting a tunnel', async () => {
@@ -157,7 +162,7 @@ test('disables the feature when code is absent from the Controller PATH', async 
 test('refuses to adopt a tunnel whose singleton belongs to another process', async () => {
   const { value } = await manager('attached');
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('failed');
+  await poll(() => value.snapshot().status).toBe('failed');
   expect(value.snapshot().processAlive).toBe(false);
   expect(value.snapshot().link).toBeUndefined();
   expect(value.snapshot().message).toContain('will not attach');
@@ -166,10 +171,10 @@ test('refuses to adopt a tunnel whose singleton belongs to another process', asy
 test('reclaims the native process even if its supervisor is externally killed', async () => {
   const { value, directory } = await manager('stubborn');
   await value.start(true);
-  await expect.poll(() => value.snapshot().status).toBe('connected');
+  await poll(() => value.snapshot().status).toBe('connected');
   const { readFile } = await import('node:fs/promises');
   const record = JSON.parse(await readFile(join(directory, 'vscode-tunnel', 'fixture-start.json'), 'utf8'));
   process.kill(value.snapshot().pid!, 'SIGKILL');
-  await expect.poll(() => value.snapshot().status).toBe('exited');
-  await expect.poll(() => { try { process.kill(record.pid, 0); return true; } catch { return false; } }).toBe(false);
+  await poll(() => value.snapshot().status).toBe('exited');
+  await poll(() => { try { process.kill(record.pid, 0); return true; } catch { return false; } }).toBe(false);
 });

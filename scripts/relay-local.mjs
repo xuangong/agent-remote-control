@@ -51,7 +51,7 @@ async function run(command, args, timeoutMs) {
 }
 if (action === 'up' && values.build) {
   await run('pnpm', ['build:relay'], 540_000);
-  if (config.runtime === 'workers') await run('pnpm', ['--filter', '@agent-remote-controller/agent-remote-cloudflare', 'run', 'build'], 120_000);
+  if (config.runtime === 'workers') await run('pnpm', ['--filter', '@orchardworks/agent-remote-cloudflare', 'run', 'build'], 120_000);
 }
 const args = ['compose', '--project-name', config.projectName, '--file', join(root, 'compose.yaml'), '--env-file', envFile, '--profile', config.runtime,
   ...(action === 'up' ? ['up', '-d', '--wait', '--wait-timeout', '120', ...(values.build ? ['--build'] : [])] : action === 'down' ? ['down'] : ['ps'])];

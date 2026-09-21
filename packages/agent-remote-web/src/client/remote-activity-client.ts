@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type TimelineCursor, type AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
+import { PROTOCOL_VERSION, type TimelineCursor, type AgentStatus } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport, RemoteConnection, RemoteServerMessage } from './transport.js';
 
 export interface RemoteActivityState {

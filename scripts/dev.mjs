@@ -27,7 +27,7 @@ function shutdown(code = 0) {
   }
 }
 function start(args) {
-  const child = spawn('pnpm', ['--filter', '@agent-remote-controller/agent-remote-lab', 'exec', ...args], {
+  const child = spawn('pnpm', ['--filter', '@orchardworks/agent-remote-lab', 'exec', ...args], {
     stdio: 'inherit', detached: process.platform !== 'win32',
     env: { ...process.env, AGENT_REMOTE_WORKSPACE: process.env.AGENT_REMOTE_WORKSPACE ?? process.cwd(), AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_ORIGIN: `http://${host}:${webPort}`, VITE_AGENT_REMOTE_RELAY_TARGET: `http://${host}:${relayPort}`, ...(['local', 'codex', 'recorded'].includes(mode) ? { VITE_AGENT_REMOTE_FIXTURE_ENDPOINT: '/v1/lab/recorded' } : {}) },
   });

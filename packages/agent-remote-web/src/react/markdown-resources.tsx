@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from 'react';
-import type { ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import { FilePreviewContext } from './FilePreviewContext.js';
 import { MarkdownImageFrame } from './MarkdownImageFrame.js';

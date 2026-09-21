@@ -1,17 +1,17 @@
 import { useSessionStars } from './hooks/useSessionStars.js';
 import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
-import type { TimelineCursor } from '@agent-remote-controller/agent-remote-protocol';
+import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
 import { FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
 import { ToastProvider, useFeedbackToast } from './components/Toast.js';
 import { SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
-import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
-import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
+import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
+import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
 import type { ScannedSession } from './session-transfer.js';
 import { SessionLink, SessionTransferDialog } from './components/SessionLink.js';
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
 import {
   useCallback,
   useEffect,
@@ -28,7 +28,7 @@ import type {
   AgentSessionConfig,
   AgentSessionResponse,
   ResourceBinding,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 import {
   AgentReplica,
   RemoteOperationError,
@@ -38,7 +38,7 @@ import {
   type AgentReplicaState,
   type RemoteAgentTransport,
   type RemoteSessionStatus,
-} from '@agent-remote-controller/agent-remote-web';
+} from '@orchardworks/agent-remote-web';
 import { ReadingPositions, RecoveryScope, readDrafts, saveDrafts, readLastSession, saveLastSession } from './conversation-recovery.js';
 import { recoverMessages } from './message-recovery.js';
 import { restoreSession } from './session-restoration.js';
@@ -52,7 +52,7 @@ import { useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionActivity } from './session-activity.js';
 import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { PreviewProvider, PreviewWorkspace, TimelineDisplay, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@agent-remote-controller/agent-remote-web/react';
+import { PreviewProvider, PreviewWorkspace, TimelineDisplay, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
@@ -66,7 +66,7 @@ import { referenceForkContext, captureForkContext, forkDisplayState, ForkStore, 
 import { CollapsedConversations } from './components/CollapsedConversations.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
-import type { QuestionDraft } from '@agent-remote-controller/agent-remote-web/react';
+import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';

@@ -1,10 +1,10 @@
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
+import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
 import { sessionAttachFailure } from './session-errors.js';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { createHostPreviews, type HostPreviewState } from './host-previews.js';
-import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
+import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 
 type RpcResponse = { status: number; body: string; requestId?: string };

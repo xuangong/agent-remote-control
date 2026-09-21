@@ -1,4 +1,4 @@
-import { controllerContentSecurityPolicy } from '@agent-remote-controller/agent-remote-hosted';
+import { controllerContentSecurityPolicy } from '@orchardworks/agent-remote-hosted';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';

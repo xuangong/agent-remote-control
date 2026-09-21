@@ -1,13 +1,13 @@
 import type { InputImageStore } from './resources/input-image-store.js';
 import { randomUUID } from 'node:crypto';
 
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentProviderDescriptor } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentProviderAdapter, AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentSessionResponse,
   type CreateAgentRequest,
   type ResumeAgentRequest,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { AgentManager } from './agent-manager.js';
 import { ProviderRegistry } from './provider-registry.js';

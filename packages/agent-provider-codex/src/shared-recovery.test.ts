@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 

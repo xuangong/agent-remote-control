@@ -1,4 +1,4 @@
-import type { AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-provider-sdk';
 import { isRecord, readString } from './native.js';
 import { mapCodexPermissions } from './permissions.js';
 

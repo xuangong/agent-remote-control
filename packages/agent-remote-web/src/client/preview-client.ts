@@ -1,4 +1,4 @@
-import type { PreviewRegistrationSnapshot } from '@agent-remote-controller/agent-remote-protocol';
+import type { PreviewRegistrationSnapshot } from '@orchardworks/agent-remote-protocol';
 
 type ProtocolPreviewRegistration = PreviewRegistrationSnapshot['registrations'][number];
 export type PreviewPathMode = ProtocolPreviewRegistration['pathMode'];

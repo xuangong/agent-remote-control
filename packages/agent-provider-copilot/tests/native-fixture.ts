@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {CopilotAgentProvider} from '../src/provider.js';
 import {TimelineStore} from '../../agent-remote-relay/src/timeline-store.js';
 import {projectTimelineRows} from '../../agent-remote-relay/src/timeline-projector.js';
-import type {AgentSession, ProviderStreamItem} from '@agent-remote-controller/agent-provider-sdk';
+import type {AgentSession, ProviderStreamItem} from '@orchardworks/agent-provider-sdk';
 
 export type ModelRequest = {model: string; messages: Array<{role: string; content: unknown}>};
 export function reply(res: ServerResponse, body: ModelRequest, content: string | {name: string; arguments: object}) {

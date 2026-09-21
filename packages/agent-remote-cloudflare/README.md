@@ -15,10 +15,10 @@ From the repository root:
 
 ```sh
 pnpm build:relay
-pnpm --filter @agent-remote-controller/agent-remote-cloudflare build
-pnpm --filter @agent-remote-controller/agent-remote-cloudflare typecheck
+pnpm --filter @orchardworks/agent-remote-cloudflare build
+pnpm --filter @orchardworks/agent-remote-cloudflare typecheck
 pnpm test:cloudflare
-pnpm --filter @agent-remote-controller/agent-remote-cloudflare deploy:dry-run
+pnpm --filter @orchardworks/agent-remote-cloudflare deploy:dry-run
 ```
 
 The bundle is `dist/cloudflare/worker.js`; Controller assets are `dist/relay/web`.

@@ -1,7 +1,7 @@
 # Shared Codex sessions across devices
 
 The Codex provider can connect to an existing native app-server through its local
-Unix WebSocket. A desktop CLI and the Remote Controller can then send messages,
+Unix WebSocket or, on Windows, an authenticated loopback WebSocket. A desktop CLI and the Remote Controller can then send messages,
 steer active work, and respond to interactions on the same native thread. There
 is one writer in the daemon and multiple subscribed clients, with no history fork
 or process takeover.
@@ -12,7 +12,7 @@ Use a Codex installation with native local app-server support. This integration
 was tested with Codex 0.154.0 on macOS. Keep the complete native installation,
 including `codex-code-mode-host`, instead of copying only the main executable.
 
-Start the native daemon and connect the desktop terminal to it:
+On macOS and Linux, start the native daemon and connect the desktop terminal to it:
 
 ```sh
 codex app-server daemon start
@@ -43,11 +43,37 @@ Open the same Host and native session from the phone. The desktop client can
 remain open. Multiple Remote browser windows reuse the Host's existing session
 binding as before.
 
+### Windows setup
+
+Windows uses a Controller-managed native app-server because native Codex does not
+implement the Unix daemon lifecycle there. This integration was tested with native
+Codex 0.153.4. From PowerShell, with the same Codex home for both clients:
+
+```powershell
+$env:AGENT_HOST_CODEX_CONNECTION = 'shared'
+$env:AGENT_HOST_CODEX_TRUST_SHARED = '1'
+agent-remote-controller codex daemon start
+agent-remote-controller start
+agent-remote-controller codex
+```
+
+The manager chooses a free loopback port and requires a random bearer token. The
+Controller discovers and verifies the endpoint through an authenticated named
+pipe; the terminal proxy passes the token through the environment. State is stored
+in `<CODEX_HOME>/agent-remote-daemon`. Keep that directory private to your account.
+Unix socket and file-descriptor-limit overrides must be unset on Windows.
+
+Use `agent-remote-controller codex daemon status|restart|stop` to manage this
+independent runtime. Stopping the Controller or closing a client leaves it running.
+A Windows Job Object reclaims its native process tree if its manager crashes.
+See [Windows shared daemon](../../../packages/agent-host/README.md#windows-shared-daemon)
+for requirements and lifecycle details.
+
 ### Starting from the terminal
 
 Run `agent-remote-controller codex` from the project directory to create an
 interactive session in that directory. With the automatically selected shared
-socket, the Controller explicitly passes the invoking shell's current directory
+endpoint, the Controller explicitly passes the invoking shell's current directory
 to Codex; the saved Host workspace and the daemon's startup directory do not
 replace it. `-C` / `--cd` overrides remain supported, including paths with spaces.
 
@@ -60,7 +86,8 @@ connections retain their native argument semantics.
 - `private` remains the default connection mode and creates an isolated
   app-server process for each provider session. `shared` never silently falls
   back to a private runtime if the daemon is missing or disconnected.
-- Shared mode uses native WebSocket JSON-RPC over the local Unix socket. The
+- Shared mode uses native WebSocket JSON-RPC over the local Unix socket or an
+  authenticated Windows loopback connection. The
   native `app-server proxy` command forwards bytes; it does not translate the
   WebSocket handshake into newline-delimited JSON.
 - `AGENT_HOST_CODEX_TRUST_SHARED=1` explicitly accepts the shared daemon's native
@@ -82,13 +109,13 @@ connections retain their native argument semantics.
   a shared daemon. Release it once, then reopen the saved thread through the
   shared daemon. Never remove a live writer lock. Compatibility with a desktop
   app that does not expose the native socket is not established.
-- This adds no TCP listener, cloud endpoint, new Remote protocol message or
-  capability for terminating arbitrary processes. Windows socket transport has
-  not been validated.
+- Windows adds an authenticated TCP listener bound only to `127.0.0.1`; Unix
+  continues to use its native socket. This adds no cloud endpoint, new Remote
+  protocol message or capability for terminating arbitrary processes.
 
 ## Recovery behavior
 
-The reusable `@agent-remote-controller/codex-daemon-client` package owns one recovery loop for each loaded native root and all of its child sessions. It depends only on `ws` at runtime and accepts the embedding application's native initialization identity. The Provider retains its existing `codex_app_server_daemon` identity and `Agent Remote Control` title. Its `runtime.ts` maps native callbacks to SDK sessions and child descriptors; observation queues, timeline projection, interaction receipts and active-turn publication remain in the Provider. See the [native client API and independent consumer](../../../packages/codex-daemon-client/README.md).
+The reusable `@orchardworks/codex-daemon-client` package owns one recovery loop for each loaded native root and all of its child sessions. It depends only on `ws` at runtime and accepts the embedding application's native initialization identity. The Provider retains its existing `codex_app_server_daemon` identity and `Agent Remote Control` title. Its `runtime.ts` maps native callbacks to SDK sessions and child descriptors; observation queues, timeline projection, interaction receipts and active-turn publication remain in the Provider. See the [native client API and independent consumer](../../../packages/codex-daemon-client/README.md).
 Transient failures retry indefinitely with jittered exponential backoff from
 500 milliseconds to 30 seconds. Each connection attempt has a 10-second
 deadline, each restoration has a 30-second deadline, and at most four roots

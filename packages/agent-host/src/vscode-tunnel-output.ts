@@ -1,4 +1,4 @@
-import { vscodeTunnelLink } from '@agent-remote-controller/agent-remote-protocol';
+import { vscodeTunnelLink } from '@orchardworks/agent-remote-protocol';
 
 export type TunnelOutput = { type: 'authorization'; url: string; code: string }
   | { type: 'connected'; name: string; attached?: boolean } | { type: 'tokenError' };

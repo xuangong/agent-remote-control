@@ -188,8 +188,8 @@ readonly PLUGIN_BUILD
 unset NO_COLOR
 printf '%s\n' 'live-dsh-fixture-content' > "$AGENT_WORKSPACE/live-fixture.txt"
 
-"$PNPM_BIN" --dir "$LAB_ROOT" --filter @agent-remote-controller/agent-provider-dsh run build
-"$PNPM_BIN" --dir "$LAB_ROOT" --filter @agent-remote-controller/dsh run build
+"$PNPM_BIN" --dir "$LAB_ROOT" --filter @orchardworks/agent-provider-dsh run build
+"$PNPM_BIN" --dir "$LAB_ROOT" --filter @orchardworks/dsh run build
 
 "$PNPM_BIN" --dir "$LAB_ROOT" exec tsc \
   --target ES2022 \

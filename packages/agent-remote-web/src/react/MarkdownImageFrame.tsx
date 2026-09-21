@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ImageDimensions } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageDimensions } from '@orchardworks/agent-remote-protocol';
 
 export function MarkdownImageFrame({ src, alt, dimensions, failure }: {
   readonly src?: string;

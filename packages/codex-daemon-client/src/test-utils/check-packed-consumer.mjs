@@ -20,7 +20,7 @@ await writeFile(join(consumer, 'package.json'), JSON.stringify({
   private: true,
   type: 'module',
   packageManager: 'pnpm@10.34.5',
-  dependencies: { '@agent-remote-controller/codex-daemon-client': 'file:./client.tgz', ws: '8.21.1' },
+  dependencies: { '@orchardworks/codex-daemon-client': 'file:./client.tgz', ws: '8.21.1' },
   devDependencies: { typescript: '5.9.3', '@types/node': '24.13.3' },
 }, null, 2));
 await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({

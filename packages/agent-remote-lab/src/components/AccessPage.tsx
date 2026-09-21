@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { accessBrandMark, accessCopy, accessPageStyle, type AccessPageState } from '@agent-remote-controller/agent-remote-hosted/access-page';
+import { accessBrandMark, accessCopy, accessPageStyle, type AccessPageState } from '@orchardworks/agent-remote-hosted/access-page';
 
 export function AccessPage({ state, sessionLink, loginUrl, onLogin, onRetry }: {
   state: AccessPageState; sessionLink: boolean; loginUrl: string; onLogin(): void; onRetry(): void;

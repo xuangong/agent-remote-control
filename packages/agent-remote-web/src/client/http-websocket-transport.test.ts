@@ -6,7 +6,7 @@ import {
   encodeServerMessage,
   type AgentSnapshot,
   type HistoryPage,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 import type NodeWebSocket from 'ws';
 
 import { HttpWebSocketTransport, type HttpWebSocketTransportDependencies } from './http-websocket-transport.js';

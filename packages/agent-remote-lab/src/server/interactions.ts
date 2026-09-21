@@ -5,7 +5,7 @@ import {
   validateInteractionResponse,
   type AgentCapabilities, type AgentInteractionRequest, type AgentInteractionResponse,
   type AgentProviderAdapter, type AgentSession, type AgentStreamEvent, type ProviderStreamItem,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 import { createProtocolValidationServer } from '../server.js';
 
 const providerId = 'interaction-fixture';

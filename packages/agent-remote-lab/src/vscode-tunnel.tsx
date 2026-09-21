@@ -1,6 +1,6 @@
-import { watchPagePolling } from '@agent-remote-controller/agent-remote-web';
+import { watchPagePolling } from '@orchardworks/agent-remote-web';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@agent-remote-controller/agent-remote-protocol';
+import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHost } from './components/HostPairing.js';
 import { DirectoryError } from './directory-client.js';
 

@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { CodexEventProjector } from '@agent-remote-controller/agent-provider-codex';
-import { DshProjector } from '@agent-remote-controller/agent-provider-dsh';
-import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
-import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@agent-remote-controller/agent-remote-web';
+import { CodexEventProjector } from '@orchardworks/agent-provider-codex';
+import { DshProjector } from '@orchardworks/agent-provider-dsh';
+import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-remote-web';
 import { createProtocolValidationServer } from './server.js';
 
 it.each(['codex', 'dsh', 'codex-files', 'codex-activity', 'codex-wait', 'codex-wait-any'])('preserves %s results over live transport, history, and reconnection without duplicating calls', async (scenario) => {

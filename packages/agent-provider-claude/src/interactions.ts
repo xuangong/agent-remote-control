@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@agent-remote-controller/agent-provider-sdk';
+import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import { record, toolDetail } from './projector.js';
 
 interface Pending { responding?: boolean; request: AgentInteractionRequest; input: Record<string, unknown>; resolve(result: PermissionResult): void; cleanup(): void }

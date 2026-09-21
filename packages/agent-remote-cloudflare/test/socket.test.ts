@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { WorkerRelaySocket } from '../src/socket.js';
 
 // Resolve the shared transport contract from source without requiring a package build.
-vi.mock('@agent-remote-controller/agent-remote-hosted', () => import('../../agent-remote-hosted/src/transport.js'));
+vi.mock('@orchardworks/agent-remote-hosted', () => import('../../agent-remote-hosted/src/transport.js'));
 
 it('receives and sends a maximum-size image preview without closing the Host socket', () => {
   class NativeSocket extends EventTarget {

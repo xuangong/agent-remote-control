@@ -15,7 +15,7 @@ import {
   type ResumeAgentRequest,
   type TimelineCursor,
   type TimelineDirection,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { watchPageResume } from './page-resume.js';
 import { SessionChannelPool } from './session-channel-transport.js';

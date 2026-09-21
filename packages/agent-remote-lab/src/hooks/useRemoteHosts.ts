@@ -1,4 +1,4 @@
-import { watchPageResume } from '@agent-remote-controller/agent-remote-web';
+import { watchPageResume } from '@orchardworks/agent-remote-web';
 import { useCallback, useEffect, useState } from 'react';
 import type { HostPairingService, RemoteHost } from '../components/HostPairing.js';
 

@@ -8,7 +8,7 @@
 // file inspects the parse result instead of merely running it:
 //
 //   1. IT DOES NOT PARSE, and renders as an error box. mermaid 11 lexes an
-//      unquoted `@` inside a node label as a link id, so `sdk[@agent-remote-controller/agent-provider-sdk]`
+//      unquoted `@` inside a node label as a link id, so `sdk[@orchardworks/agent-provider-sdk]`
 //      — a label that reads perfectly in the source — is a parse error.
 //   2. IT PARSES AND IS WRONG. A flowchart edge may name a node that no
 //      declaration introduces; mermaid invents one labelled with the raw id and
@@ -266,7 +266,7 @@ if (failures.length > 0) {
   if (failures.some((failure) => failure.kind === 'parse')) {
     console.error('  A block that does not parse renders as an error box. Common cause: mermaid 11');
     console.error('  lexes an unquoted @ or : inside a node label as syntax, so quote the label —');
-    console.error('  sdk[@agent-remote-controller/agent-provider-sdk] must be written sdk["@agent-remote-controller/agent-provider-sdk"].');
+    console.error('  sdk[@orchardworks/agent-provider-sdk] must be written sdk["@orchardworks/agent-provider-sdk"].');
   }
   if (failures.some((failure) => failure.kind === 'undeclared')) {
     console.error('  An undeclared endpoint still renders: mermaid invents a node labelled with the');

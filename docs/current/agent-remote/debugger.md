@@ -2,11 +2,11 @@
 
 ## Role
 
-`@agent-remote-controller/agent-remote-debugger` is a terminal presentation adapter that drives and observes an Agent Remote Relay through the shared headless client rather than becoming another protocol implementation (`packages/agent-remote-debugger/src/runtime.ts:65-173`).
+`@orchardworks/agent-remote-debugger` is a terminal presentation adapter that drives and observes an Agent Remote Relay through the shared headless client rather than becoming another protocol implementation (`packages/agent-remote-debugger/src/runtime.ts:65-173`).
 
 ## Boundary
 
-The package owns CLI parsing, command orchestration, Replica-to-record projection, one command cancellation/deadline signal, output streams, atomic local resource output, process interruption, and exit categories; `@agent-remote-controller/agent-remote-web/headless` owns public-wire decoding, synchronization, correlation, and Replica reduction (`packages/agent-remote-debugger/src/cli.ts:18-117`, `packages/agent-remote-debugger/src/commands.ts:32-94`, `packages/agent-remote-debugger/src/output.ts:59-76`, `packages/agent-remote-debugger/src/records.ts:31-120`).
+The package owns CLI parsing, command orchestration, Replica-to-record projection, one command cancellation/deadline signal, output streams, atomic local resource output, process interruption, and exit categories; `@orchardworks/agent-remote-web/headless` owns public-wire decoding, synchronization, correlation, and Replica reduction (`packages/agent-remote-debugger/src/cli.ts:18-117`, `packages/agent-remote-debugger/src/commands.ts:32-94`, `packages/agent-remote-debugger/src/output.ts:59-76`, `packages/agent-remote-debugger/src/records.ts:31-120`).
 
 ## Collaborators
 

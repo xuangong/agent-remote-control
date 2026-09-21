@@ -1,4 +1,4 @@
-import type { ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
 import { createRecordedDshProvider } from './recorded-provider.js';

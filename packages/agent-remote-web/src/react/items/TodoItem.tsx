@@ -1,5 +1,5 @@
 import { TimelineTitle } from '../TimelineTitle.js';
-import type { AgentTaskItem, AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTaskItem, AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 function status(item: AgentTaskItem): 'pending' | 'in_progress' | 'completed' {
   if (item.status) return item.status;

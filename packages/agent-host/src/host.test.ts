@@ -1,6 +1,6 @@
-import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
+import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/src/index.js';
-import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';

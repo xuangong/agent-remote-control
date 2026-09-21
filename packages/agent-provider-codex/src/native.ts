@@ -83,9 +83,12 @@ export function spawnCodexAppServer(
       throw error;
     }
   }
-  return spawn(options.executable ?? 'codex', ['app-server'], {
+  const executable = options.executable ?? 'codex';
+  const nodeEntry = /\.(?:[cm]?js)$/i.test(executable);
+  return spawn(nodeEntry ? process.execPath : executable, [...(nodeEntry ? [executable] : []), 'app-server'], {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
     stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
   });
 }

@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type ResourceBinding,
   type ResourceResponse,
   type ResourceState,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { detectMediaType } from './media-type.js';
 import { readImageDimensions } from './image-dimensions.js';

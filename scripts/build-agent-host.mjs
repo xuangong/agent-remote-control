@@ -4,14 +4,13 @@ import { createRequire } from 'node:module';
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { packageManager } from './lib/package-manager.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
 const args = process.argv.slice(2);
 if (args.length && !(args.length === 2 && args[0] === '--out-dir')) throw new Error('Usage: node scripts/build-agent-host.mjs [--out-dir PATH]');
 const output = resolve(args[1] ?? join(root, 'dist/agent-remote-controller'));
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const manifest = await readJson(join(root, 'packages/agent-host/package.json'));
 const sdkDependencies = {};
@@ -22,7 +21,7 @@ for (const provider of ['claude', 'copilot']) {
   }
 }
 console.log('Building Agent Host and its workspace dependencies...');
-await exec(pnpm, ['--filter', '@agent-remote-controller/agent-remote-controller...', 'run', 'build'], { cwd: root, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+await exec(...packageManager('pnpm', ['--filter', '@orchardworks/agent-remote-controller...', 'run', 'build']), { cwd: root, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
 const require = createRequire(join(root, 'packages/agent-remote-lab/package.json'));
 const { build } = require('esbuild');
 const stage = await mkdtemp(join(tmpdir(), 'agent-host-package-'));
@@ -35,11 +34,11 @@ try {
   });
   await chmod(join(stage, 'dist/cli.js'), 0o755);
   await writeFile(join(stage, 'package.json'), JSON.stringify({
-    name: '@orchardworks/agent-remote-controller', version: manifest.version,
+    name: manifest.name, version: manifest.version,
     repository: { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-host' },
     publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
     description: 'Agent Remote Controller CLI: connect local Codex, Claude Code and Copilot to a Relay.',
-    type: 'module', bin: { 'agent-remote-controller': 'dist/cli.js' }, engines: { node: '>=22' }, os: ['darwin', 'linux'],
+    type: 'module', bin: { 'agent-remote-controller': 'dist/cli.js' }, engines: { node: '>=22' }, os: ['darwin', 'linux', 'win32'],
     files: ['dist', 'README.md', 'licenses', 'NOTICE', 'build-info.json'],
     dependencies: sdkDependencies,
   }, null, 2) + '\n');
@@ -52,7 +51,7 @@ try {
   await mkdir(join(stage, 'licenses/codex'), { recursive: true });
   for (const name of ['LICENSE', 'NOTICE']) await cp(join(root, 'packages/agent-provider-codex', name), join(stage, 'licenses/codex', name));
   await mkdir(output, { recursive: true });
-  const { stdout } = await exec(npm, ['pack', '--offline', '--ignore-scripts', '--json', '--pack-destination', output], { cwd: stage, timeout: 60000 });
+  const { stdout } = await exec(...packageManager('npm', ['pack', '--offline', '--ignore-scripts', '--json', '--pack-destination', output]), { cwd: stage, timeout: 60000 });
   const [{ filename }] = JSON.parse(stdout);
   console.log(`Agent Host package: ${join(output, filename)}`);
   console.log(`Install: npm install -g ${join(output, filename)} --registry=https://mirrors.cloud.tencent.com/npm/`);

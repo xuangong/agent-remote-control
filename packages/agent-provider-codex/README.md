@@ -1,6 +1,6 @@
 # Borgee Codex app-server Provider
 
-This package adapts the native `codex app-server` JSON-RPC protocol to `@agent-remote-controller/agent-provider-sdk`. It owns session creation and resume policy, native event projection, typed interaction mapping, and Provider history/live handoff. The [Codex daemon client](../codex-daemon-client/README.md) owns JSON-RPC transport, native thread discovery, snapshot reconciliation and automatic shared-connection recovery. Existing Provider transport and history-helper imports remain available through re-exports.
+This package adapts the native `codex app-server` JSON-RPC protocol to `@orchardworks/agent-provider-sdk`. It owns session creation and resume policy, native event projection, typed interaction mapping, and Provider history/live handoff. The [Codex daemon client](../codex-daemon-client/README.md) owns JSON-RPC transport, native thread discovery, snapshot reconciliation and automatic shared-connection recovery. Existing Provider transport and history-helper imports remain available through re-exports.
 
 | Capability | Support |
 |---|---|

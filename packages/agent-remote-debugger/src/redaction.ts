@@ -1,4 +1,4 @@
-import type { AgentInteractionRequest } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
 
 /** Public output must stay safe even when a custom transport supplies raw response values. */
 export function redactDebuggerValue(value: unknown, request?: AgentInteractionRequest): unknown {

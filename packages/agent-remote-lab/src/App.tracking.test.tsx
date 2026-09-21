@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { RemoteTransportListener } from '@agent-remote-controller/agent-remote-web';
+import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { SessionStarsClient, type SessionStar } from './session-stars-client.js';

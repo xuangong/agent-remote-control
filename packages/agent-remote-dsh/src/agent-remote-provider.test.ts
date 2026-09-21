@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDshWebInteractionAdapter } from '@agent-remote-controller/agent-provider-dsh';
+import { createDshWebInteractionAdapter } from '@orchardworks/agent-provider-dsh';
 
 import { createDshAgentRemoteProvider } from './agent-remote-provider.js';
 

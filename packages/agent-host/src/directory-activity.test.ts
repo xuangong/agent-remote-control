@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { AgentRuntimeInfo, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentRuntimeInfo, AgentSession } from '@orchardworks/agent-provider-sdk';
 import { createCodexSessionDirectory } from './directory.js';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import { createCopilotSessionDirectory } from './copilot-directory.js';

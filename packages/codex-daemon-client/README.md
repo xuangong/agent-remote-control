@@ -1,13 +1,13 @@
 # Codex daemon client
 
-`@agent-remote-controller/codex-daemon-client` is a Node.js ESM client for Codex app-server JSON-RPC. It owns native transport, thread discovery, automatic reconnection and snapshot handoffs. Its only executable runtime dependency is `ws`; `@types/ws` and `@types/node` are delivered as transitive dependencies because the public transport declarations reference WebSocket and Node types. TypeScript consumers can check the public entrypoint with `strict: true` and `skipLibCheck: false` without installing `@types/ws` themselves. It has no Provider SDK, Remote, Relay, Host or browser dependency. Node.js 22 or newer is required.
+`@orchardworks/codex-daemon-client` is a Node.js ESM client for Codex app-server JSON-RPC. It owns native transport, thread discovery, automatic reconnection and snapshot handoffs. Its only executable runtime dependency is `ws`; `@types/ws` and `@types/node` are delivered as transitive dependencies because the public transport declarations reference WebSocket and Node types. TypeScript consumers can check the public entrypoint with `strict: true` and `skipLibCheck: false` without installing `@types/ws` themselves. It has no Provider SDK, Remote, Relay, Host or browser dependency. Node.js 22 or newer is required.
 
 ## Attach an existing thread
 
 The caller chooses the native socket, initialization identity and existing thread ID. Connecting the socket does not initialize the native protocol or attach a thread. The constructor accepts an open transport and binds its handlers. Call `initialize()` once for the initial connection; recovery initializes replacement connections automatically.
 
 ```js
-import { CodexAppServerTransport } from '@agent-remote-controller/codex-daemon-client';
+import { CodexAppServerTransport } from '@orchardworks/codex-daemon-client';
 import { createNotebook } from './notebook.mjs';
 
 const connect = () => CodexAppServerTransport.connectShared('/absolute/path/to/codex.sock');

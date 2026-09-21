@@ -4,7 +4,7 @@ import type {
   AgentTimelineItem,
   HistoryPage,
   ProjectedTimelineEntry,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import {
   applyHistoryPage,

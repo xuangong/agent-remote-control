@@ -9,9 +9,9 @@ const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 function alive(pid: number) { try { process.kill(pid, 0); return true; } catch { return false; } }
 
-test.each(['SIGTERM', 'SIGKILL'] as const)('reclaims a stubborn tunnel and its descendants when the Controller receives %s', async signal => {
+test.each((['SIGTERM', 'SIGKILL', 'native exit', 'supervisor SIGKILL'] as const).filter(value => process.platform === 'win32' || value !== 'supervisor SIGKILL'))('reclaims a tunnel and its descendants after %s', async signal => {
   const directory = await mkdtemp(join(tmpdir(), 'arc-vscode-orphan-'));
-  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  cleanup.push(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const pidsPath = join(directory, 'pids.json');
   const tunnel = join(directory, 'tunnel.cjs');
   await writeFile(tunnel, `
@@ -19,6 +19,7 @@ test.each(['SIGTERM', 'SIGKILL'] as const)('reclaims a stubborn tunnel and its d
     const child=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{stdio:'ignore'});
     require('node:fs').writeFileSync(${JSON.stringify(pidsPath)},JSON.stringify({tunnel:process.pid,descendant:child.pid}));
     process.on('SIGTERM',()=>{});setInterval(()=>{},1000);
+    ${signal === 'native exit' ? 'setTimeout(()=>process.exit(7),500);' : ''}
   `);
   const config = { executable: process.execPath, args: [tunnel], cwd: directory, stopTimeoutMs: 100 };
   const controller = spawn(process.execPath, ['-e', `
@@ -37,7 +38,10 @@ test.each(['SIGTERM', 'SIGKILL'] as const)('reclaims a stubborn tunnel and its d
   });
   await expect.poll(async () => {
     try { pids = JSON.parse(await readFile(pidsPath, 'utf8')); supervisorPid = Number(await readFile(join(directory, 'supervisor'), 'utf8')); return true; } catch { return false; }
-  }).toBe(true);
-  controller.kill(signal);
-  await expect.poll(() => [controller.pid!, supervisorPid!, pids!.tunnel, pids!.descendant].filter(alive), { timeout: 5000 }).toEqual([]);
+  }, { timeout: 5000 }).toBe(true);
+  if (signal === 'supervisor SIGKILL') process.kill(supervisorPid!, 'SIGKILL');
+  else if (signal !== 'native exit') controller.kill(signal);
+  const expected = signal === 'supervisor SIGKILL' || signal === 'native exit' ? [supervisorPid!, pids!.tunnel, pids!.descendant]
+    : [controller.pid!, supervisorPid!, pids!.tunnel, pids!.descendant];
+  await expect.poll(() => expected.filter(alive), { timeout: 5000 }).toEqual([]);
 });

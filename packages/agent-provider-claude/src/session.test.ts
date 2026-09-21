@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
-import type { ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { ClaudeAgentSession } from './session.js';
 
 function runtime() {

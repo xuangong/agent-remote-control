@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
-import { createTunnelPeer, type PreviewRegistration, type TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
-import { createLoopbackTunnelHandlers } from '@agent-remote-controller/agent-remote-tunnel/node';
+import { createTunnelPeer, type PreviewRegistration, type TunnelSocket } from '@orchardworks/agent-remote-tunnel';
+import { createLoopbackTunnelHandlers } from '@orchardworks/agent-remote-tunnel/node';
 import { afterEach, expect, it, vi } from 'vitest';
 import { event, fixture, issuer, origin, previewOrigin, send, sign } from './fixture.js';
 

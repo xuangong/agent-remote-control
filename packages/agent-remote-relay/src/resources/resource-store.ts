@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ImageDimensions } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageDimensions } from '@orchardworks/agent-remote-protocol';
 
 export type StoredResourceState =
   | { status: 'pending'; retryAfterMs: number }

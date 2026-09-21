@@ -4,7 +4,7 @@ import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
   ProjectedTimelineEntry,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { applyResourceUpdate, createReplicaState } from '../replica/reducer.js';
 import type { AgentReplicaState } from '../replica/types.js';

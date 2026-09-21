@@ -1,7 +1,7 @@
 import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
-import type { CodexAppServerProvider, CodexSessionSummary } from '@agent-remote-controller/agent-provider-codex';
-import type { AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@agent-remote-controller/agent-provider-sdk';
+import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
+import type { AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */

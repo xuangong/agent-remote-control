@@ -1,4 +1,4 @@
-import type { AgentReplica, OutgoingMessage } from '@agent-remote-controller/agent-remote-web';
+import type { AgentReplica, OutgoingMessage } from '@orchardworks/agent-remote-web';
 
 export function recoverMessages(replica: AgentReplica, relay: string, session: string, agentId: string): () => void {
   const key = `agent-remote:recovery:${relay}:outbox:${session}`;

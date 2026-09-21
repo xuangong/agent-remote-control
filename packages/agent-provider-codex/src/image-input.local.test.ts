@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { expect, it } from 'vitest';
-import type { AgentSession, AgentUserMessagePart } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSession, AgentUserMessagePart } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerProvider } from './provider.js';
 
 function pixel(red: number, green: number): Buffer {

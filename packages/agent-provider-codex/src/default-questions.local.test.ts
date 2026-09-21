@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AgentSession, AgentStreamEvent, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSession, AgentStreamEvent, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerProvider } from './provider.js';
 import { spawnCodexAppServer } from './native.js';
 

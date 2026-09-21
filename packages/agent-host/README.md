@@ -3,9 +3,9 @@
 The `@orchardworks/agent-remote-controller` npm package provides the
 `agent-remote-controller` command. It runs the local Agent Host and connects
 Codex, Claude Code and GitHub Copilot sessions to a Relay for the browser
-controller. Supports macOS and Linux with Node.js 22 or newer. No repository
-checkout or pnpm is needed after installation. Native Windows is not supported;
-the npm package declares only `darwin` and `linux`. The package contains the latest bundled provider
+controller. Supports macOS, Linux and native Windows with Node.js 22 or newer. No repository
+checkout or pnpm is needed after installation. The npm package declares
+`darwin`, `linux` and `win32`. The package contains the latest bundled provider
 implementation, including Codex Default-mode structured questions.
 
 ## Build and install
@@ -17,7 +17,7 @@ has been published to npm, install it with:
 npm install -g @orchardworks/agent-remote-controller --registry=https://registry.npmjs.org/
 ```
 
-The internal workspace package remains `@agent-remote-controller/agent-remote-controller`;
+The internal workspace package remains `@orchardworks/agent-remote-controller`;
 the build script assigns the public name to the standalone tarball. The generated
 manifest targets public publication on npmjs.org. Building and installing a tarball
 do not publish it; publishing is a separate release operation.
@@ -187,6 +187,72 @@ On macOS, the first `start` enables login startup by default. A per-user LaunchA
 
 `autostart disable` stops a supervisor-managed Controller and persistently disables login startup. Later `start` commands respect that choice and run a manual background daemon until `autostart enable` is used. If a manual daemon is already running, enabling login startup preserves it and takes effect on the next login; stop it and start again to use the system supervisor immediately. Keep the same `AGENT_HOST_STATE_DIR` when managing an installation.
 
+### Windows
+
+Use PowerShell or CMD with Windows-native Node and provider CLIs. Install and authenticate
+the providers locally before pairing. After installing the Controller:
+
+```powershell
+$env:AGENT_HOST_SERVER = 'https://your-relay.example'
+$env:AGENT_HOST_REMOTE_KEY = 'paste-the-generated-key'
+$env:AGENT_HOST_WORKSPACE = 'C:\Users\me\projects\app'
+$env:AGENT_HOST_PROVIDERS = 'codex'
+agent-remote-controller start
+agent-remote-controller status
+Remove-Item Env:AGENT_HOST_SERVER, Env:AGENT_HOST_REMOTE_KEY
+```
+
+For CMD, use `set` instead of PowerShell's `$env:` or Unix `export`:
+
+```bat
+set "AGENT_HOST_SERVER=https://your-relay.example"
+set "AGENT_HOST_REMOTE_KEY=paste-the-generated-key"
+set "AGENT_HOST_WORKSPACE=C:\Users\me\projects\app"
+set "AGENT_HOST_PROVIDERS=codex"
+agent-remote-controller start
+agent-remote-controller status
+set "AGENT_HOST_SERVER="
+set "AGENT_HOST_REMOTE_KEY="
+```
+
+npm installs both PowerShell (`.ps1`) and CMD (`.cmd`) entry points. If your
+PowerShell execution policy blocks the `.ps1` entry point, invoke
+`agent-remote-controller.cmd` explicitly; changing the execution policy is not
+required. Commands and arguments are the same in both shells.
+
+`start` runs a detached background process without opening another console window.
+`status`, `pair`, `share`, and `stop` use a token-authenticated Windows named pipe.
+`stop` closes the uplink and owned resources and removes daemon state. Credentials
+and native settings are restored on subsequent starts. The default state directory
+is `%USERPROFILE%\.agent-remote-control\agent-host`; keep it in a private user
+directory with Windows ACLs that exclude other users. Unix file modes do not set
+Windows ACLs. Credential files are flushed before atomic replacement; directory
+fsync is unavailable through Node on Windows.
+
+Native `.exe` and JavaScript entry points are supported, including paths containing
+spaces. Standard npm `codex.cmd`, `claude.cmd`, and `copilot.cmd` installations are
+resolved to their package entry points without a command shell. Custom batch wrappers
+must be replaced with an explicit `.exe` or JavaScript path in `AGENT_HOST_CODEX`,
+`AGENT_HOST_CLAUDE`, or `AGENT_HOST_COPILOT`.
+
+Windows `start` enables login startup by default through a per-installation script
+in the current user's Startup folder. No administrator account or stored Windows
+password is required. `autostart status`, `enable`, and `disable` manage that script.
+`stop` retains it for the next login; `disable` removes it and stops a managed Host.
+A manually started Host remains running when login startup is enabled or disabled.
+The launcher stores paths and PATH, while pairing credentials remain in the state
+directory. Windows Script Host and Windows PowerShell must be available. Windows
+login startup does not provide automatic crash restart or pre-login boot startup.
+
+Shared Codex and managed VS Code tunnels are supported on Windows as described
+below. The Host still defaults to private Codex mode until shared mode is explicitly selected.
+Native sandbox availability remains provider-specific. Claude's restricted command
+sandbox still fails closed on unsupported platforms; Windows support does not
+automatically enable trusted full control or weaken local execution policy.
+
+For a user-owned npm prefix on Windows, add the prefix itself to PATH (not its
+`bin` subdirectory). Use `Get-Content -Wait` on `agent-host.log` for live diagnostics.
+
 ### Linux
 
 On Linux, `start` uses a **systemd user service** by default when `systemctl --user` can reach the current user's manager. It installs `agent-remote-controller-<state-directory-hash>.service` under `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user`, enables login startup, and starts the service. Use the same user, `HOME`, `XDG_CONFIG_HOME`, and `AGENT_HOST_STATE_DIR` for all lifecycle commands; the configuration directory must be one that the user's systemd manager searches. Do not run the CLI with `sudo`. Install Node and the Controller in persistent locations: the service stores absolute executable paths and the current PATH, and does not source shell startup files. Reinstall the service with `start` after changing those paths.
@@ -297,7 +363,7 @@ native tool.
 New durable enrollment exchanges the invitation for a device credential. The CLI
 advertises `credentialRotation: true` because it has a durable persistence
 callback. On `credential_issued`, it writes the private connection file using a
-synced temporary file and atomic rename, syncs the containing directory, updates
+synced temporary file and atomic rename, syncs the containing directory on Unix, updates
 the current reconnect key, then sends `credential_saved`. `registered` remains
 the final registration acknowledgment. Later rotation uses the same exchange.
 The saved device credential is authoritative after a disconnected acknowledgment;
@@ -320,6 +386,42 @@ completed; it does not prove OS process termination. Revoking browser access or
 rotating a device credential does not cancel already running native work.
 ## Shared Codex runtime
 
+### Windows shared daemon
+
+Windows Codex does not implement the Unix `app-server daemon` lifecycle. The
+Controller manages an independent `codex app-server` with an authenticated
+loopback WebSocket instead. This uses the native Codex protocol and has been
+verified with Codex **0.153.4**. Use a version that supports `--ws-auth` and
+`--ws-token-file`; older CLIs fail startup without silently removing authentication.
+
+```powershell
+$env:CODEX_HOME = "$env:USERPROFILE\.codex"
+agent-remote-controller codex daemon start
+$env:AGENT_HOST_CODEX_CONNECTION = 'shared'
+$env:AGENT_HOST_CODEX_TRUST_SHARED = '1'
+agent-remote-controller start
+agent-remote-controller codex resume <session-id>
+```
+
+Stop and start an existing Host to change its provider configuration. Use the same
+Codex home and native executable for the Host and terminal clients. The proxy
+selects the saved local address and passes its bearer token through an environment
+variable, never a command-line argument. `AGENT_HOST_CODEX_SOCKET` and
+`AGENT_HOST_CODEX_NOFILE` are Unix-only settings and must be unset on Windows.
+
+`codex daemon status`, `restart`, and `stop` manage this shared runtime. Its state,
+token and log are under `<CODEX_HOME>/agent-remote-daemon`. The port is chosen from
+available loopback ports at startup. Multiple clients use one native process;
+closing a client or stopping the Host does not stop the shared daemon. Restarting
+the daemon disconnects all clients and may interrupt active work. A Windows Job
+Object reclaims its native process tree if the daemon manager itself crashes.
+Daemon startup is explicit and independent of Controller login startup.
+
+Keep the Codex home private to your Windows account. A custom network endpoint or
+an untrusted remote server cannot be substituted through the saved daemon address.
+
+### macOS and Linux shared daemon
+
 To use the same native session from a desktop CLI and the Remote Controller,
 start `codex app-server daemon start` and connect the CLI with
 `codex --remote unix://`. Configure this Host with
@@ -341,7 +443,7 @@ The managed Controller enables authenticated loopback previews on the Relay orig
 
 The Host owner can manage one VS Code tunnel from the web sidebar. The Controller checks `code tunnel --help` before enabling the feature, starts from its state directory, exposes device authorization and connection state, and supplies per-session workspace links. `AGENT_HOST_VSCODE` explicitly selects a local CLI executable; otherwise `code` must be available on the Controller’s PATH. Missing or unsupported CLIs disable the controls.
 
-The managed tunnel is reclaimed when the Controller exits or crashes, or after five minutes continuously disconnected from the Relay. Set `AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS` to a positive millisecond duration to change that grace period. Reclamation and Controller restart require an explicit start from the UI. Short interruptions and browser closure retain the running tunnel. macOS and Linux are supported; Windows process-tree management is not implemented. See the [Host VS Code tunnel design](../../docs/current/agent-remote/host-vscode-tunnel.md).
+The managed tunnel is reclaimed when the Controller exits or crashes, or after five minutes continuously disconnected from the Relay. Set `AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS` to a positive millisecond duration to change that grace period. Reclamation and Controller restart require an explicit start from the UI. Short interruptions and browser closure retain the running tunnel. macOS, Linux and Windows are supported. On Windows, the Host resolves the VS Code installation's `code-tunnel.exe` (including from a configured `code.cmd` path), and uses a Job Object to reclaim descendants even if the tunnel or its supervisor exits first. Windows PowerShell must be available to create the job. License consent and native device authorization are still required. See the [Host VS Code tunnel design](../../docs/current/agent-remote/host-vscode-tunnel.md).
 
 ## Native Codex commands
 
@@ -356,13 +458,13 @@ agent-remote-controller codex daemon status
 agent-remote-controller codex daemon restart
 ```
 
-Interactive commands receive `--remote unix://<socket>`. Resolution uses explicit environment settings, then privately saved Controller settings: `AGENT_HOST_CODEX` / `AGENT_REMOTE_CODEX_EXECUTABLE`, `AGENT_REMOTE_CODEX_HOME` / `CODEX_HOME`, and `AGENT_HOST_CODEX_SOCKET`. Without a socket override, the socket is `<CODEX_HOME>/app-server-control/app-server-control.sock`. Use the same `AGENT_HOST_STATE_DIR` as your Controller installation. Relay pairing is not required for an unconfigured local invocation.
+On macOS and Linux, interactive commands receive `--remote unix://<socket>`. Windows uses the authenticated loopback endpoint described above. Resolution uses explicit environment settings, then privately saved Controller settings: `AGENT_HOST_CODEX` / `AGENT_REMOTE_CODEX_EXECUTABLE`, `AGENT_REMOTE_CODEX_HOME` / `CODEX_HOME`, and `AGENT_HOST_CODEX_SOCKET`. Without a socket override, the socket is `<CODEX_HOME>/app-server-control/app-server-control.sock`. Use the same `AGENT_HOST_STATE_DIR` as your Controller installation. Relay pairing is not required for an unconfigured local invocation.
 
 Native commands inherit the terminal and run with `LC_ALL=C`. Relay credentials are not passed to the child. Native exit codes are preserved. An explicit native `--remote` overrides the automatic address. Help, version, and local management commands retain their native behavior.
 
-`codex daemon start|restart|stop` maps to `codex app-server daemon ...`; `status` maps to native `daemon version`, which reports the running and local versions. Both the shorthand and the full native daemon spelling use the same checks. Lifecycle commands do not receive `--remote`; a custom socket is rejected because the CLI cannot establish that the daemon under the configured home owns it. Connecting never implicitly starts or restarts a daemon.
+On macOS and Linux, `codex daemon start|restart|stop` maps to `codex app-server daemon ...`; `status` maps to native `daemon version`, which reports the running and local versions. Both the shorthand and the full native daemon spelling use the same checks. Lifecycle commands do not receive `--remote`; a custom socket is rejected because the CLI cannot establish that the daemon under the configured home owns it. Connecting never implicitly starts or restarts a daemon.
 
-`daemon start` and `restart` default to a soft file descriptor limit of `8192`. Override it with `AGENT_HOST_CODEX_NOFILE` in the saved Controller configuration or explicit environment. The proxy sets the child's soft limit before executing Codex; if the requested limit cannot be set, it fails before invoking the native lifecycle command and leaves the running daemon alone. This setting does not alter an already running daemon and does not elevate privileges.
+On macOS and Linux, `daemon start` and `restart` default to a soft file descriptor limit of `8192`. Override it with `AGENT_HOST_CODEX_NOFILE` in the saved Controller configuration or explicit environment. The proxy sets the child's soft limit before executing Codex; if the requested limit cannot be set, it fails before invoking the native lifecycle command and leaves the running daemon alone. This setting does not alter an already running daemon and does not elevate privileges.
 
 The web session-link dialog includes **Resume locally** for native Codex sessions. Copy the command and run it on the Host computer with the same Controller state directory; opening a session on the web does not require opening its local terminal first.
 

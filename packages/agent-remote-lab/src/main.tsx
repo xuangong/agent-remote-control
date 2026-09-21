@@ -5,7 +5,7 @@ import { GatewayController } from './GatewayController.js';
 import { App } from './App.js';
 import { trackFocusModality } from './focus-modality.js';
 import './app.css';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 
 const stopTrackingFocus = trackFocusModality(document);
 if (import.meta.hot) import.meta.hot.dispose(stopTrackingFocus);

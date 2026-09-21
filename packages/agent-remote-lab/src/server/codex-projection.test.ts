@@ -1,5 +1,5 @@
-import { CodexEventProjector } from '@agent-remote-controller/agent-provider-codex';
-import { PROTOCOL_VERSION, encodeAgentStreamMessage } from '@agent-remote-controller/agent-remote-protocol';
+import { CodexEventProjector } from '@orchardworks/agent-provider-codex';
+import { PROTOCOL_VERSION, encodeAgentStreamMessage } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 describe('Codex projected wire events', () => {

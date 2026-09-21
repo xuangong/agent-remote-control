@@ -11,7 +11,7 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'esbuild';
 import { expect, it, vi } from 'vitest';
-import { controllerContentSecurityPolicy } from '@agent-remote-controller/agent-remote-hosted';
+import { controllerContentSecurityPolicy } from '@orchardworks/agent-remote-hosted';
 import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
 
 it('opens a root-mounted React Vite app with isolated login, manifest, API, navigation and HMR', async () => {

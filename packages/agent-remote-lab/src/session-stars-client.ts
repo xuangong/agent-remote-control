@@ -1,4 +1,4 @@
-import { validSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from '@agent-remote-controller/agent-remote-hosted/session-stars';
+import { validSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from '@orchardworks/agent-remote-hosted/session-stars';
 export type { SessionStar, StarIdentity, VisibleSessionStar };
 export type StarInput = Omit<SessionStar, 'starredAt'>;
 export class SessionStarsClient {

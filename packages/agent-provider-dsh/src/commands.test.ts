@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentInteractionRequest, ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentInteractionRequest, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { createCordisDshRuntime } from './runtime.js';
 import { LiveDshSession } from './live-session.js';
 

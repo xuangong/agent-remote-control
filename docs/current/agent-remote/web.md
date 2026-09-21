@@ -2,7 +2,7 @@
 
 ## Role
 
-`@agent-remote-controller/agent-remote-web` provides a browser transport client, a headless Agent/Timeline replica, and React DOM renderers that project strict public remote-protocol values without Provider-specific code (`packages/agent-remote-web/src/client/remote-session-client.ts:20-224`, `packages/agent-remote-web/src/react/AgentTimeline.tsx:25-69`).
+`@orchardworks/agent-remote-web` provides a browser transport client, a headless Agent/Timeline replica, and React DOM renderers that project strict public remote-protocol values without Provider-specific code (`packages/agent-remote-web/src/client/remote-session-client.ts:20-224`, `packages/agent-remote-web/src/react/AgentTimeline.tsx:25-69`).
 
 ## Boundary
 

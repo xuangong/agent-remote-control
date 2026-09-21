@@ -1,4 +1,4 @@
-import { watchPageResume } from '@agent-remote-controller/agent-remote-web';
+import { watchPageResume } from '@orchardworks/agent-remote-web';
 import { DirectoryError } from './directory-client.js';
 
 /** Reattaching observes an existing session; it never replays user input. */

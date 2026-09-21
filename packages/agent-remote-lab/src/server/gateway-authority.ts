@@ -1,1 +1,1 @@
-export * from '@agent-remote-controller/agent-remote-hosted/authority';
+export * from '@orchardworks/agent-remote-hosted/authority';

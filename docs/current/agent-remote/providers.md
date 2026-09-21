@@ -8,7 +8,7 @@ The Provider layer terminates Provider-native protocols and exposes the common A
 
 ## Boundary
 
-`@agent-remote-controller/agent-provider-sdk` owns the adapter/Session contract and `AgentStreamEvent`; `@agent-remote-controller/agent-provider-dsh`, `@agent-remote-controller/agent-provider-codex`, and `@agent-remote-controller/agent-provider-claude` own their native projection, response mapping, and runtime lifecycle.
+`@orchardworks/agent-provider-sdk` owns the adapter/Session contract and `AgentStreamEvent`; `@orchardworks/agent-provider-dsh`, `@orchardworks/agent-provider-codex`, and `@orchardworks/agent-provider-claude` own their native projection, response mapping, and runtime lifecycle.
 
 ## Collaborators
 

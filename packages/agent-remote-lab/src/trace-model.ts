@@ -1,4 +1,4 @@
-import type { AgentTimelineItem, ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 
 export interface TraceEntryRequest { readonly key: string; readonly requestId: number }
 

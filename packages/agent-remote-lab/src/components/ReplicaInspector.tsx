@@ -1,4 +1,4 @@
-import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
+import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
 
 export function ReplicaInspector({ state, sessionStatus, providerName }: { state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; providerName?: string }) {
   const snapshot = state?.agent;

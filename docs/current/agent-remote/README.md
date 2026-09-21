@@ -6,7 +6,7 @@ Agent Remote is the independent session-control and validation boundary that car
 
 ## Boundary
 
-This area covers `@agent-remote-controller/agent-provider-sdk`, the DSH, Codex and Claude adapters, `@agent-remote-controller/agent-remote-controller`, `@agent-remote-controller/agent-remote-protocol`, `@agent-remote-controller/agent-remote-relay`, `@agent-remote-controller/agent-remote-web`, `@agent-remote-controller/agent-remote-debugger`, `@agent-remote-controller/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-remote-relay/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
+This area covers `@orchardworks/agent-provider-sdk`, the DSH, Codex and Claude adapters, `@orchardworks/agent-remote-controller`, `@orchardworks/agent-remote-protocol`, `@orchardworks/agent-remote-relay`, `@orchardworks/agent-remote-web`, `@orchardworks/agent-remote-debugger`, `@orchardworks/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-remote-relay/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
 
 The Agent Host owns native Provider directories, runtime lifetime, and outbound uplink replacement. The DSH runtime owns its native catalog and outbound plugin. The Lab production server owns only the Recorded fixture, pairing broker, and public-protocol workbench; temporary Host keys and public bindings have no account or Borgee service dependency (`packages/agent-host/src/host.ts`, `packages/agent-remote-lab/src/server/local.ts`, `packages/agent-remote-lab/src/server/remote-host-broker.ts`).
 

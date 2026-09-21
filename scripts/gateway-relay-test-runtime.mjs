@@ -39,7 +39,7 @@ export async function gatewayRelayTestRuntime({ root, gateway, temporary, env, r
       });
       await ready(relayReady, relay);
     } else {
-      relay = launch('pnpm', ['--filter', '@agent-remote-controller/agent-remote-cloudflare', 'exec', 'wrangler', 'dev', '--local', '--config', join(workerDirectory, 'wrangler.json'),
+      relay = launch('pnpm', ['--filter', '@orchardworks/agent-remote-cloudflare', 'exec', 'wrangler', 'dev', '--local', '--config', join(workerDirectory, 'wrangler.json'),
         '--ip', '127.0.0.1', '--port', String(relayPort), '--persist-to', join(temporary, 'workers-state')], root, { WRANGLER_SEND_METRICS: 'false' });
       await processReady();
     }

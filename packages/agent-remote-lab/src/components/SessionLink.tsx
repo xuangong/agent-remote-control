@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { NativeSessionCommand } from './NativeSessionCommands.js';
 import { useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { controllerPath } from '@agent-remote-controller/agent-remote-hosted/controller-location';
 import type { OpenedSession } from '../directory-client.js';
 import { readSessionCode, type ScannedSession } from '../session-transfer.js';
@@ -28,6 +29,8 @@ export function SessionTransferDialog({ session, onOpen, onClose }: {
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [qr, setQr] = useState<string>();
+  const [qrFailure, setQrFailure] = useState<string>();
+  const [qrAttempt, setQrAttempt] = useState(0);
   const [failure, setFailure] = useState<string>();
   const [copied, setCopied] = useState(false);
   const [scanning, setScanning] = useState(true);
@@ -40,12 +43,12 @@ export function SessionTransferDialog({ session, onOpen, onClose }: {
   useEffect(() => {
     if (!url) return;
     let retired = false;
-    setQr(undefined); setFailure(undefined); setCopied(false);
-    void import('qrcode').then(QRCode => QRCode.toDataURL(url, { width: 320, margin: 4, errorCorrectionLevel: 'M' }))
+    setQr(undefined); setQrFailure(undefined); setFailure(undefined); setCopied(false);
+    void Promise.resolve().then(() => QRCode.toDataURL(url, { width: 320, margin: 4, errorCorrectionLevel: 'M' }))
       .then(value => { if (!retired) setQr(value); })
-      .catch(() => { if (!retired) setFailure('The QR code could not be generated. Copy the session link instead.'); });
+      .catch(() => { if (!retired) setQrFailure('The QR code could not be generated. Copy the session link instead.'); });
     return () => { retired = true; };
-  }, [url]);
+  }, [url, qrAttempt]);
   async function copyLink() {
     try { await navigator.clipboard.writeText(url); setCopied(true); setFailure(undefined); }
     catch { setFailure('Copy failed. Expand Session link to select and copy the URL.'); }
@@ -67,7 +70,10 @@ export function SessionTransferDialog({ session, onOpen, onClose }: {
         {session ? <>
           <div className="lab-session-transfer-identity"><strong title={session.title}>{session.title || session.nativeSessionId}</strong><small>{session.providerId}</small></div>
           <p className="lab-session-transfer-hint">On your other device, tap Scan beside Discover sessions.</p>
-          <div className="lab-session-qr-frame">{qr ? <img className="lab-session-qr" src={qr} width="320" height="320" alt="Session QR code" /> : <p role="status">{failure ?? 'Generating QR code…'}</p>}</div>
+          <div className="lab-session-qr-frame">{qr ? <img className="lab-session-qr" src={qr} width="320" height="320" alt="Session QR code" /> : qrFailure ? <div>
+            <p className="lab-session-transfer-error" role="alert">{qrFailure}</p>
+            <button type="button" onClick={() => setQrAttempt(value => value + 1)}>Retry QR code</button>
+          </div> : <p role="status">Generating QR code…</p>}</div>
           <button type="button" className="lab-session-copy-link" onClick={() => void copyLink()}>{copied ? 'Copied' : 'Copy link'}</button>
           <p className="lab-session-transfer-note">Uses the receiving device’s sign-in. Access stays unchanged.</p>
           <details className="lab-session-transfer-details"><summary>Session link</summary><label className="agent-visually-hidden" htmlFor="session-transfer-url">Session URL</label><input id="session-transfer-url" readOnly value={url} onFocus={event => event.currentTarget.select()} /></details>

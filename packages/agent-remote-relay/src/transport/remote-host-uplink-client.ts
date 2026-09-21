@@ -2,7 +2,7 @@ import { WebSocket } from 'ws';
 
 import {
   decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
-  type RemoteHostHeartbeat,
+  type RemoteHostHeartbeat, type HostEnvironment,
   type PreviewRegistrationSnapshot,
 } from '@agent-remote-controller/agent-remote-protocol';
 
@@ -41,6 +41,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly relay: AgentRemoteRelay;
   readonly installationId: string;
   readonly name: string;
+  readonly environment?: HostEnvironment;
   readonly providers?: readonly { providerId: string; displayName: string }[];
   readonly remoteKey: string;
   /** Must durably persist the offered credential before resolving. */
@@ -190,6 +191,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       writer.send(JSON.stringify({
         uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'register', installationId: options.installationId,
         ...(options.onCredential ? { credentialRotation: true } : {}),
+        ...(options.environment ? { environment: options.environment } : {}),
         name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providers }),
       }));
     });

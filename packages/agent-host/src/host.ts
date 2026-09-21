@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
 import { AgentSessionInUseError, AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
-import { PROTOCOL_VERSION } from '@agent-remote-controller/agent-remote-protocol';
+import { PROTOCOL_VERSION, type HostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
 import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type SessionWireAgent, type SessionWireOperationExecutor } from '@agent-remote-controller/agent-remote-relay';
@@ -56,6 +56,7 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
   installationId: string;
   name: string;
+  environment?: HostEnvironment;
   onDiagnostic?: (diagnostic: AgentHostUplinkDiagnostic) => void | Promise<void>;
   uplink: { url: string; remoteKey: string; onCredential?: (credential: string) => Promise<void> };
 }
@@ -80,7 +81,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   let credentialPersistence: Promise<void> = Promise.resolve();
   const connect = (config: AgentHostOptions['uplink']): Connection => {
     const current = ++generation;
-    return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name,
+    return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment,
       providers: options.registrations.map(({ adapter }) => adapter.descriptor), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {

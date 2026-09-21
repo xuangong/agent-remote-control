@@ -332,3 +332,32 @@ it('rejects expired credentials and prevents a bound key from registering anothe
   expect((await closing)[0]).toBe(1008);
   expect(await (await fetch(f.url + '/v1/remote/hosts')).json()).toMatchObject({ hosts: [{ id: original.id, online: true }] });
 });
+
+it('advertises Controller environment over a real uplink and preserves it across Relay restart', async () => {
+  const { createAgentHost } = await import('../../../agent-host/src/host.js');
+  const environment = { detectedAt: 1234, os: { platform: 'linux', name: 'Ubuntu', release: '6.8', arch: 'arm64' },
+    wsl: false, container: true, shell: { name: 'bash', source: 'account' as const }, shells: [],
+    browsers: [{ id: 'chromium', name: 'Chromium', status: 'found' as const }], vscode: { status: 'not-found' as const } };
+  const adapter = { descriptor: { providerId: 'example', displayName: 'Example' },
+    createSession: async () => { throw Error('unused'); }, resumeSession: async () => { throw Error('unused'); } };
+  const registrations = [{ adapter, directory: { providerId: adapter.descriptor.providerId, list: async () => [], workspaces: async () => [],
+    create: async () => { throw Error('unused'); }, open: async () => { throw Error('unused'); }, close: async () => {} } }];
+  let saved: import('./remote-host-broker.js').RemoteHostBrokerState | undefined;
+  const f = await setup({ onStateChange: (state: typeof saved) => { saved = state; } });
+  const pair = await (await f.post('/v1/remote/pairings')).json();
+  const native = createAgentHost({ registrations, installationId: 'environment', name: 'Container', environment,
+    uplink: { url: f.url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: pair.key } });
+  cleanup.push(() => native.close());
+  await native.ready;
+  expect(await (await fetch(f.url + '/v1/remote/hosts')).json()).toMatchObject({ hosts: [{ online: true, environment }] });
+  expect(saved?.hosts[0]?.environment).toEqual(environment);
+  await native.close();
+  const restored = await setup({ initialState: saved });
+  expect(await (await fetch(restored.url + '/v1/remote/hosts')).json()).toMatchObject({ hosts: [{ online: false, environment }] });
+  const legacy = createAgentHost({ registrations, installationId: 'environment', name: 'Legacy',
+    uplink: { url: restored.url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: pair.key } });
+  cleanup.push(() => legacy.close());
+  await legacy.ready;
+  const listing = await (await fetch(restored.url + '/v1/remote/hosts')).json();
+  expect(listing.hosts[0].environment).toBeUndefined();
+}, 10_000);

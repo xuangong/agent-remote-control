@@ -1,6 +1,8 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
+import { HostEnvironment } from './host-environment.js';
+
 import type { WireDecodeResult, WireEncodeResult } from './codec.js';
 
 export const REMOTE_HOST_UPLINK_VERSION = 2;
@@ -38,9 +40,9 @@ const requestPath = Type.String({
 
 export const RemoteHostUplinkMessage = Type.Union([
   Type.Union([
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), credentialRotation: Type.Optional(Type.Literal(true)),
       providers: Type.Array(provider, { minItems: 0, maxItems: 64 }) }, object),
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),

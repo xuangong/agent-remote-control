@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage } from '@agent-remote-controller/agent-remote-protocol';
+import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
 import { sessionAttachFailure } from './session-errors.js';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { createHostPreviews, type HostPreviewState } from './host-previews.js';
@@ -10,6 +10,7 @@ type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string };
 type DeviceCredential = { expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
+  environment?: HostEnvironment;
   tunnelToken?: string;
   ready?: boolean; credentialRotation?: boolean; gatewayKeyRequested?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
@@ -25,7 +26,7 @@ export interface RemoteHostBrokerState {
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
@@ -81,7 +82,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   function snapshot(): RemoteHostBrokerState {
     return { previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested }) => ({ id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment }) => ({ ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -139,7 +140,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
   }
   function visibleHosts(subject?: string) {
-    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation }) => ({
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment }) => ({
+      ...(environment ? { environment } : {}),
       ...(credentialRotation ? {credentialRotation:true} : {}), id, name, online: ready === true && socket?.readyState === RELAY_SOCKET_OPEN, providers,
       ...(options.durable && owner(subject) ? { managed: true } : {}),
       ...(options.ownerSubject ? { access: owner(subject) ? 'owner' as const : 'shared' as const } : {}),
@@ -287,7 +289,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           const existing = [...hosts.values()].find(value => value.installationId === message.installationId);
           if (!existing && hosts.size >= 128) throw new BrokerError(429, 'host_capacity', 'Host capacity reached');
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name,
+          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);

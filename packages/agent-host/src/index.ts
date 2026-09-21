@@ -11,3 +11,4 @@ export * from './execution-policy.js';
 export * from './workspace-folders.js';
 
 export * from './session-reference.js';
+export * from './environment.js';

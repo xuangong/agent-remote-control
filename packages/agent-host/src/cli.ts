@@ -8,6 +8,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAgentHost, type AgentHost, type AgentHostUplinkDiagnostic } from './host.js';
+import { detectHostEnvironment } from './environment.js';
 import { createHostRegistrations } from './registrations.js';
 import { createHostExecutionPolicy } from './execution-policy.js';
 import { boundedDiagnosticLine, createDiagnosticLog, type DiagnosticLog } from './diagnostic-log.js';
@@ -37,6 +38,7 @@ if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(
 async function main(): Promise<void> {
   if (command === 'help' || command === '--help' || command === '-h') help();
   else if (command === 'codex') process.exitCode = await runCodexCommand(args.slice(1), stateDir, process.env);
+  else if (command === 'environment') process.stdout.write(`${JSON.stringify(await detectHostEnvironment(), null, 2)}\n`);
   else if (command === 'foreground') await serve(false);
   else if (command === '_serve') await serve(true);
   else if (command === 'start') await start();
@@ -48,7 +50,7 @@ async function main(): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with launchd or systemd\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup and crash recovery\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux, stop stops the managed job without disabling future login startup.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
+  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with launchd or systemd\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup and crash recovery\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux, stop stops the managed job without disabling future login startup.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
@@ -73,6 +75,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const launch = supervisor ? await resolveAutostartConnection(stateDir, process.env) : undefined;
   const configuration = launch?.connection ?? await resolveHostConnection(stateDir, process.env);
   const { serverUrl, environment } = configuration;
+  const hostEnvironment = await detectHostEnvironment(undefined, environment);
   if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') managedCodexHome(stateDir, environment);
   if (daemon) {
     const existing = await readState();
@@ -85,7 +88,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') {
     const relay = createAgentRemoteRelay({ providers: [] });
     const enrollment = createRemoteHostUplinkClient({ relay, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
-      providers: [], url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey,
+      environment: hostEnvironment, providers: [], url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey,
       resolveSession: () => undefined, control: async () => ({ status: 503, body: JSON.stringify({ error: 'Host initialization is in progress.' }) }),
       onCredential: credential => { diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential); },
     });
@@ -109,7 +112,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   const registrations = await createHostRegistrations(environment,
     (line) => writeDiagnostic(line, diagnosticSecrets));
-  const host = createAgentHost({ registrations, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+  const host = createAgentHost({ registrations, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     vscodeTunnel: { stateDirectory: stateDir, executable: environment.AGENT_HOST_VSCODE?.trim() || undefined,
       disconnectTimeoutMs: environment.AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS ? Number(environment.AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS) : undefined },
     preview: { stateDirectory: stateDir, ttlMs: Number(environment.AGENT_HOST_PREVIEW_TTL_MS ?? 3_600_000),

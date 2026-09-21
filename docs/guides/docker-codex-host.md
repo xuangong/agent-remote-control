@@ -86,3 +86,10 @@ Host revocation revokes the LLM key before deleting the device. If Gateway is te
 Use the Gateway repository's `bun run agent-remote:fixture` for isolated simulated accounts; it does not perform Google login and does not provide a model upstream. Its readiness file supplies test account bearer sessions. Follow the real `/auth/login` → Gateway `/api/agent-remote/launch` → Relay `/auth/session` flow, then create a pairing key.
 
 A Docker container's loopback is not the macOS host's loopback. For integration tests, use an explicitly configured loopback forwarder or a reachable HTTPS endpoint; do not weaken the bootstrap HTTPS/origin checks. Testing against a real existing upstream should use an isolated database copy, short-lived simulated login and private test artifacts.
+
+## Environment discovery
+
+Docker and native Controllers advertise their detected OS, shell, installed browsers,
+and VS Code to the Host selector. Use keywords such as `linux bash` to choose a session
+execution environment. See [Host environment discovery](host-environment.md) for the
+local inspection command, detection limits, and Relay-first rollout order.

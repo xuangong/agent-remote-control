@@ -1306,3 +1306,11 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-native-daemon-recovery { margin-block: 12px; }
 .lab-native-daemon-recovery summary { cursor: pointer; padding-block: 8px; }
 .lab-native-daemon-recovery p { max-width: 65ch; line-height: 1.5; }
+
+.lab-host-pairing input[type="search"] { min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; min-height: 38px; padding: 8px 11px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); color: var(--obs-text); background: var(--obs-surface); }
+.lab-host-environment { min-width: 0; color: var(--obs-text-secondary); font-size: .8rem; }
+.lab-host-environment-tags { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 4px; }
+.lab-host-environment-tags > span { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--obs-border); border-radius: 5px; white-space: nowrap; }
+.lab-host-environment summary { cursor: pointer; padding-block: 4px; }
+.lab-host-environment dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 8px; margin-block: 6px; }
+.lab-host-environment dd { margin: 0; overflow-wrap: anywhere; }

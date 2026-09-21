@@ -1,3 +1,5 @@
+import type { HostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
+import { hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useEffect, useState } from 'react';
 import { HostSecurityActions } from './HostSecurityActions.js';
@@ -7,7 +9,7 @@ import { needsReauthentication } from '../security-client.js';
 export interface HostProvider { providerId: string; displayName: string }
 export interface RemoteHost {
   id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
-  credentialRotation?: boolean;
+  credentialRotation?: boolean; environment?: HostEnvironment;
   access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
 }
 export interface PairingInvitation { id?: string; key: string; expiresAt: string; serverUrl: string; command?: string }
@@ -25,6 +27,8 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
   managementVisible?: boolean;
   service: HostPairingService; selectedHostId: string; selectionLocked?: boolean; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
 }) {
+  const [filter, setFilter] = useState('');
+  const matchingHosts = hosts.filter(host => matchesHostEnvironment(host, filter));
   const [revokeTarget, setRevokeTarget] = useState<RemoteHost>();
   const [revoking, setRevoking] = useState(false);
   const selectedHost = hosts.find(host => host.id === selectedHostId);
@@ -67,11 +71,32 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
   const configuration = invitation?.command ?? (invitation ? `serverUrl: ${invitation.serverUrl}\nremoteKey: ${invitation.key}` : '');
   return <section className="lab-host-pairing" aria-label="Remote Hosts">
     <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
+    <label htmlFor="host-environment-filter">Find an execution environment</label>
+    <input id="host-environment-filter" type="search" value={filter} disabled={selectionLocked}
+      placeholder="Filter Hosts: Linux, zsh, Chrome…" autoComplete="off" spellCheck={false}
+      onChange={event => setFilter(event.target.value)} />
+    {filter.trim() ? <small role="status">{matchingHosts.length ? `${matchingHosts.length} matching Hosts` : 'No matching Hosts'}</small> : null}
     <label htmlFor="remote-host">Connected Host</label>
     <select id="remote-host" value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
       {hosts.length > 0 && !selectedHost ? <option value={selectedHostId}>Select a Host</option> : null}
-      {hosts.length ? hosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}{host.access === 'shared' ? ' · Shared' : ''}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
+      {selectedHost && !matchingHosts.includes(selectedHost) ? <option value={selectedHost.id} disabled>{selectedHost.name} · Current selection (filtered out)</option> : null}
+      {hosts.length ? matchingHosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}{host.access === 'shared' ? ' · Shared' : ''}{host.environment ? ` · ${hostEnvironmentLabels(host).join(' · ')}` : ' · Environment unknown'}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
     </select>
+    {selectedHost ? <div className="lab-host-environment" aria-label="Host environment">
+      {selectedHost.environment ? <>
+        <div className="lab-host-environment-tags">{hostEnvironmentLabels(selectedHost).map((label, index) => <span key={`${index}:${label}`}>{label}</span>)}</div>
+        <details><summary>Detection details</summary>
+          <dl><dt>System release</dt><dd>{selectedHost.environment.os.release}</dd>
+            <dt>Primary shell</dt><dd>{selectedHost.environment.shell.name ?? 'Unknown'} · {selectedHost.environment.shell.source}</dd>
+            <dt>WSL / Container</dt><dd>{[selectedHost.environment.wsl, selectedHost.environment.container].map(value => value === null ? 'Unknown' : value ? 'Yes' : 'No').join(' / ')}</dd>
+            <dt>Browsers</dt><dd>{selectedHost.environment.browsers.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
+            <dt>Shells</dt><dd>{selectedHost.environment.shells.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
+            <dt>VS Code</dt><dd>{detectionLabel(selectedHost.environment.vscode.status)}</dd>
+          </dl>
+          <p>Detected at {new Date(selectedHost.environment.detectedAt).toLocaleString()}. Restart the Controller to refresh. Installed software does not imply a running desktop or remote browser control.</p>
+        </details>
+      </> : <small>Environment unknown · This Host has not reported detection results.</small>}
+    </div> : null}
     {selectedHost?.access ? <p className="lab-control-note">{selectedHost.access === 'shared' ? 'Shared with you' : 'You own this Host'}</p> : null}
     {quota ? <p className="lab-control-note" role="status">Session creation allowance used: {quota.used} / {quota.limit}. This total does not reset when sessions finish.{quotaExhausted ? ' Creation limit reached. Existing sessions remain available.' : ''}</p> : null}
     <div hidden={!managementVisible}>
@@ -102,4 +127,8 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
       <button type="button" disabled={pairing} onClick={() => void pair()}>{pairing ? 'Generating…' : invitation ? 'Generate new key' : 'Generate pairing key'}</button>
     </div> : null}
   </section>;
+}
+
+function detectionLabel(status: 'found' | 'not-found' | 'unknown'): string {
+  return status === 'found' ? 'Installed' : status === 'not-found' ? 'Not found' : 'Unknown';
 }

@@ -101,3 +101,16 @@ it('prunes expired replay records and schedules the earliest remaining durable d
   expect(saved?.loginChallenges).toEqual([initial.loginChallenges[1]]); expect(saved?.consumedProofs).toEqual([]);
   expect(deadlines.at(-1)).toBe(now + 30_000);
 }, 10000);
+
+it('validates persisted Host environment snapshots without requiring metadata from older Hosts', () => {
+  const initial = emptyRelayState(auth);
+  const environment = { detectedAt: 1234, os: { platform: 'linux', name: 'Linux', arch: 'x64', release: '6.8' },
+    wsl: false, container: true, shell: { name: 'bash', source: 'account' as const }, shells: [], browsers: [], vscode: { status: 'unknown' as const } };
+  const host = { id: 'host', installationId: 'installation', name: 'Host', providers: [], legacyDsh: false, environment };
+  initial.tenants.push({ subject: 'alice', namespace: createHash('sha256').update(JSON.stringify([auth.issuer, 'alice'])).digest('hex'),
+    broker: { keys: [], hosts: [host], bindings: [], creations: [] } });
+  expect(migrateLegacyNodeState(initial, auth)?.tenants[0]?.broker.hosts[0]?.environment).toEqual(environment);
+  expect(() => migrateLegacyNodeState({ ...initial, tenants: [{ ...initial.tenants[0], broker: {
+    ...initial.tenants[0]!.broker, hosts: [{ ...host, environment: { ...environment, secret: 'unexpected' } }],
+  } }] }, auth)).toThrow(/state/i);
+});

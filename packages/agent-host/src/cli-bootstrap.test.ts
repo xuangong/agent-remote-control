@@ -119,6 +119,9 @@ it('rejects managed live pairing on the authenticated management socket without 
   await vi.waitFor(async () => {
     state = JSON.parse(await readFile(join(f.root, 'daemon.json'), 'utf8'));
     expect(f.registrations).toHaveLength(2);
+    // Registration reaches the fixture before the daemon persists its initialized environment.
+    const saved = JSON.parse(await readFile(join(f.root, 'connection.json'), 'utf8'));
+    expect(saved.environment.CODEX_HOME).toBe(join(f.root, 'gateway-codex'));
   }, { timeout: 5000 });
   const connection = await readFile(join(f.root, 'connection.json'), 'utf8');
   const credentials = await readFile(join(f.root, 'gateway-codex', 'gateway-credentials.json'), 'utf8');

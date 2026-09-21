@@ -6,10 +6,16 @@ export interface ShareContext {
   hostId: string;
   providers: Array<{ providerId: string; displayName: string }>;
 }
+export interface ShareChoice {
+  value: string;
+  label: string;
+  description?: string[];
+}
 export interface ShareIO {
   write(text: string): void;
   ask(prompt: string): Promise<string>;
   qr(url: string): Promise<string>;
+  select?(prompt: string, choices: readonly ShareChoice[]): Promise<string | undefined>;
 }
 export type ShareRequest = (request: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
@@ -48,9 +54,18 @@ export async function runShare(args: string[], request: ShareRequest, io: ShareI
   if (args[0] === 'list-sessions') {
     selected = await chooseRecent(context, catalog, validate, io);
   } else {
-    io.write('\nProviders on this Host:\n');
-    context.providers.forEach((provider, index) => io.write(`  ${index + 1}. ${safe(provider.displayName)} (${provider.providerId})\n`));
     let provider: ShareContext['providers'][number] | undefined;
+    if (io.select) {
+      const choice = await io.select('Providers on this Host', context.providers.map(value => ({
+        value: value.providerId, label: safe(value.displayName), description: [`Provider: ${value.providerId}`],
+      })));
+      if (choice === undefined) return cancel(io);
+      provider = context.providers.find(value => value.providerId === choice);
+      if (!provider) throw new Error('The selected provider is no longer available. Run share again.');
+    } else {
+      io.write('\nProviders on this Host:\n');
+      context.providers.forEach((value, index) => io.write(`  ${index + 1}. ${safe(value.displayName)} (${value.providerId})\n`));
+    }
     while (!provider) {
       const answer = (await io.ask('Choose provider number or name: ')).trim();
       if (cancelled(answer)) return cancel(io);
@@ -100,16 +115,38 @@ async function chooseRecent(context: ShareContext,
     return page;
   }
   io.write('Loading recent sessions…\n');
-  let page = await nextPage();
-  if (!page.length) { io.write('No sessions found on this Host.\n'); return; }
+  const pages = [await nextPage()];
+  let pageIndex = 0;
+  if (!pages[0]!.length) { io.write('No sessions found on this Host.\n'); return; }
   while (true) {
-    io.write('\nRecent sessions (newest first):\n');
-    page.forEach((item, index) => io.write(`  ${index + 1}. [${safe(item.providerId)}] ${safe(item.title || item.nativeSessionId)}\n`
-      + `     ${safe(item.nativeSessionId)} | ${safe(item.workspace ?? '(no directory)')} | ${safe(item.updatedAt)}\n`));
-    const more = sources.some(source => source.items.length || source.more);
-    const answer = (await io.ask(`Choose session number${more ? ', n for older sessions' : ''}: `)).trim();
-    if (cancelled(answer)) { cancel(io); return; }
-    if (answer === 'n' && more) { page = await nextPage(); if (!page.length) { io.write('No more sessions.\n'); return; } continue; }
+    const page = pages[pageIndex]!;
+    const more = pageIndex < pages.length - 1 || sources.some(source => source.items.length || source.more);
+    let answer: string | undefined;
+    if (io.select) {
+      const choices: ShareChoice[] = page.map((item, index) => ({ value: String(index + 1),
+        label: `[${safe(item.providerId)}] ${safe(item.title || item.nativeSessionId)}`,
+        description: [`Session: ${item.nativeSessionId}`, `Directory: ${item.workspace ?? '(no directory)'}`, `Updated: ${item.updatedAt}`],
+      }));
+      if (more) choices.push({ value: 'n', label: 'Older sessions →' });
+      if (pageIndex > 0) choices.push({ value: 'p', label: '← Newer sessions' });
+      answer = await io.select(`Recent sessions — page ${pageIndex + 1} (newest first)`, choices);
+    } else {
+      io.write('\nRecent sessions (newest first):\n');
+      page.forEach((item, index) => io.write(`  ${index + 1}. [${safe(item.providerId)}] ${safe(item.title || item.nativeSessionId)}\n`
+        + `     ${safe(item.nativeSessionId)} | ${safe(item.workspace ?? '(no directory)')} | ${safe(item.updatedAt)}\n`));
+      answer = (await io.ask(`Choose session number${more ? ', n for older sessions' : ''}${pageIndex ? ', p for newer sessions' : ''}: `)).trim();
+    }
+    if (answer === undefined || cancelled(answer)) { cancel(io); return; }
+    if (answer === 'p' && pageIndex > 0) { pageIndex -= 1; continue; }
+    if (answer === 'n' && more) {
+      if (pageIndex === pages.length - 1) {
+        const older = await nextPage();
+        if (!older.length) { io.write('No more sessions.\n'); continue; }
+        pages.push(older);
+      }
+      pageIndex += 1;
+      continue;
+    }
     const item = /^[1-9]\d*$/.test(answer) ? page[Number(answer) - 1] : undefined;
     if (!item) { io.write('Choose a session from this page.\n'); continue; }
     const verified = await validate(item.providerId, item.nativeSessionId);

@@ -59,8 +59,14 @@ native session ID. For Codex, run `/status` in the native CLI and copy the
 
 `share list-sessions` shows recent sessions across enabled providers, ordered by
 activity. Each entry includes the provider, title, native ID, directory, and
-update time. Choose a number, or enter `n` for the next 20 older entries. Both
-commands accept `q`, Ctrl+C, or end of input to cancel.
+update time. In a terminal, both provider and session choices use **↑/↓** to move
+and **Enter** to select. Choose **Older sessions** or **Newer sessions** to browse
+pages of 20 entries. **Home/End** jump to the first/last choice; **Page Up/Down**
+move by ten choices. **Esc**, `q`, or Ctrl+C cancel a selection. Session IDs are
+still entered as text (`q`, Ctrl+C, or end of input cancel).
+
+Non-terminal input retains numbered choices for scripts, with `n` for older
+sessions and `p` for newer sessions.
 
 Before displaying a link and terminal QR code, the Controller checks the selected
 identity against its current native catalog. Sharing does not resume a session,

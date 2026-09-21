@@ -20,6 +20,7 @@ import { createSystemdAutostart, systemdUnavailable } from './systemd.js';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@agent-remote-controller/agent-remote-relay';
 import { configureGatewayProviders } from './gateway-setup.js';
 import { runShare } from './share-command.js';
+import { selectTerminalChoice } from './terminal-select.js';
 import { createInterface } from 'node:readline';
 import { renderSessionQr } from './share-qr.js';
 
@@ -272,16 +273,29 @@ async function start(enableAutostart = false): Promise<void> {
 async function share(): Promise<void> {
   if (args.length > 2 || (args[1] !== undefined && args[1] !== 'list-sessions')) throw new Error('Usage: agent-remote-controller share [list-sessions]');
   const state = await requiredState();
-  const lines = createInterface({ input: process.stdin, output: process.stdout, terminal: !!process.stdin.isTTY && !!process.stdout.isTTY });
-  const answers = lines[Symbol.asyncIterator]();
-  lines.on('SIGINT', () => lines.close());
+  const terminal = !!process.stdin.isTTY && !!process.stdout.isTTY;
+  let lines: ReturnType<typeof createInterface> | undefined;
+  let answers: AsyncIterator<string> | undefined;
+  const startTextInput = () => {
+    lines = createInterface({ input: process.stdin, output: process.stdout, terminal });
+    answers = lines[Symbol.asyncIterator]();
+    lines.on('SIGINT', () => lines!.close());
+  };
+  // Buffer piped answers immediately; interactive text input starts after keyboard selection.
+  if (!terminal) startTextInput();
   try {
     await runShare(args.slice(1), payload => request(state, payload), {
       write: text => { process.stdout.write(text); },
-      ask: async prompt => { process.stdout.write(prompt); const answer = await answers.next(); return answer.done ? 'q' : answer.value; },
+      ask: async prompt => {
+        if (!answers) startTextInput();
+        process.stdout.write(prompt);
+        const answer = await answers!.next();
+        return answer.done ? 'q' : answer.value;
+      },
+      select: terminal ? selectTerminalChoice : undefined,
       qr: renderSessionQr,
     });
-  } finally { lines.close(); }
+  } finally { lines?.close(); }
 }
 async function status(): Promise<void> {
   const state = await readState();

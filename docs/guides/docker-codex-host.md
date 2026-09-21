@@ -18,11 +18,13 @@ Once the matching Gateway and Relay are deployed and the Controller image is ava
 bash scripts/controller/create-host.sh
 ```
 
-Paste one pairing key at the private prompt. No further Google login, account cookie or manually created LLM token is required. The script creates private persistent volumes, starts the Host and waits for Codex initialization and Relay registration. It transfers the pairing key through stdin into the state volume, without host-file bind mounts or placing the key in Docker arguments/environment.
+Missing options are prompted interactively with a short explanation; press Enter to accept each default. The Relay defaults to `https://agents.xianliao.de5.net`, and the Host name suggestion uses weather, city and a random suffix (for example `sunny-kyoto-a1b2c3`). Explicit options skip their prompts. Then paste one pairing key at the private prompt. No further Google login, account cookie or manually created LLM token is required. The script creates private persistent volumes, starts the Host and waits for Codex initialization and Relay registration. It transfers the pairing key through stdin into the state volume, without host-file bind mounts or placing the key in Docker arguments/environment.
 
 The default Relay is `https://agents.xianliao.de5.net` and the default local image is `arc-controller-bootstrap-controller:latest`. Build the image below first; this feature branch does not publish an image or deploy the production services. After that, the script itself only needs Bash and Docker, not a source checkout, Node or pnpm. Use `--server` or `--image` for another deployment.
 
-Running the script again with the same name starts the saved container without requesting a key. Use `--name my-second-host` and a new pairing key for an additional Host. Existing unrelated containers/volumes are left intact. A new Host is not reported ready until it has initialized Codex and registered with Relay; if initialization fails, its state is retained and the script shows the logs command.
+To resume an existing Host, pass its previous `--name` or enter that name at the prompt; omitting the name generates a new suggestion each time. The saved container starts without requesting a key. Use `--name my-second-host` and a new pairing key for an additional Host. Existing unrelated containers/volumes are left intact. A new Host is not reported ready until it has initialized Codex and registered with Relay; if initialization fails, its state is retained and the script shows the logs command.
+
+For automation, pass options explicitly and pipe the pairing key into stdin. Non-interactive invocations use defaults for omitted values and reserve stdin exclusively for the key.
 
 A pairing key enrolls one Host. That Host receives one stable Gateway key; retries and restarts return the same binding. Revoked keys are not recreated. The device credential and Relay service signature are automatic internal authorization steps, not additional user authentication.
 

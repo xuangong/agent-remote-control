@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 
-export function useVisualViewport() {
+export function useVisualViewport(onUpdate?: () => void) {
+  const latestUpdate = useRef(onUpdate);
+  latestUpdate.current = onUpdate;
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -18,6 +20,7 @@ export function useVisualViewport() {
         shell.style.setProperty('--lab-viewport-top', `${viewport.offsetTop}px`);
         // Ignore small browser-chrome changes when adapting floating input panels.
         shell.dataset.viewportOccluded = String(window.innerHeight - viewport.height > 100);
+        latestUpdate.current?.();
       });
     };
     const cancelSettling = () => { settling.forEach(clearTimeout); settling = []; };

@@ -1,4 +1,4 @@
-import { useFeedbackToast } from './Toast.js';
+import { useFeedbackToast, useToastAnchor } from './Toast.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -42,6 +42,8 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
   const readingPositions = recoveryPositions ?? localPositions;
   const [composerHidden, setComposerHidden] = useState(false);
   const composerId = useId();
+  const toastAnchor = useToastAnchor(visible && !!state?.agent && !composerHidden);
+  const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent && !compact);
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
@@ -141,8 +143,8 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
       </div>
       {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
     </div>
-    <div className="lab-composer-dock" hidden={!state?.agent} data-collapsed={composerHidden || undefined}>
-      <button hidden={compact} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
+    <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent} data-collapsed={composerHidden || undefined}>
+      <button ref={toastToggleAnchor} hidden={compact} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
         aria-label={composerHidden ? 'Show message input' : 'Hide message input'} title={composerHidden ? 'Show message input' : 'Hide message input'}
         onClick={() => setComposerHidden(hidden => !hidden)}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

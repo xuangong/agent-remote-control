@@ -1188,6 +1188,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 @keyframes lab-toast-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 1180px) {
   .lab-toast-region { right: max(12px, env(safe-area-inset-right)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + max(0px, 100dvh - var(--lab-viewport-height, 100dvh) - var(--lab-viewport-top, 0px))); width: calc(100vw - 24px); max-height: min(35dvh, calc(var(--lab-viewport-height, 100dvh) - 24px)); }
+  .lab-toast-region[data-composer-anchored="true"] { top: var(--lab-toast-anchor); bottom: auto; transform: translateY(-100%); max-height: min(35dvh, var(--lab-toast-room)); }
   .lab-toast-heading button { width: 44px; height: 44px; margin-top: -10px; margin-bottom: -7px; }
 }
 @media (prefers-reduced-motion: reduce) { .lab-toast { animation: none; } }

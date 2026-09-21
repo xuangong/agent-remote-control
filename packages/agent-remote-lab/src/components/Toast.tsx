@@ -1,17 +1,22 @@
-import { useVisualViewport } from '../hooks/useVisualViewport.js';
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useToastPlacement } from '../hooks/useToastPlacement.js';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 type ToastTone = 'info' | 'error';
 interface ToastMessage { id: string; title: string; message: string; tone: ToastTone; revision: number }
 interface ToastService {
   show(id: string, title: string, message: string, tone: ToastTone): void;
   dismiss(id: string): void;
+  registerAnchor(element: HTMLElement): () => void;
 }
 const ToastContext = createContext<ToastService | undefined>(undefined);
 
 /** Transient notifications supplement persistent, actionable feedback at its source. */
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const viewport = useVisualViewport();
+  const [anchors, setAnchors] = useState<HTMLElement[]>([]);
+  const registerAnchor = useCallback((element: HTMLElement) => {
+    setAnchors(current => [...current, element]);
+    return () => setAnchors(current => current.filter(item => item !== element));
+  }, []);
   const [messages, setMessages] = useState<ToastMessage[]>([]);
   const dismiss = useCallback((id: string) => setMessages(current => current.some(item => item.id === id) ? current.filter(item => item.id !== id) : current), []);
   const show = useCallback((id: string, title: string, message: string, tone: ToastTone) => {
@@ -21,12 +26,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       return [...current.filter(item => item.id !== id), { id, title, message, tone, revision: (prior?.revision ?? 0) + 1 }].slice(-3);
     });
   }, []);
-  const service = useMemo(() => ({ show, dismiss }), [show, dismiss]);
+  const viewport = useToastPlacement(anchors, messages.length > 0);
+  const service = useMemo(() => ({ show, dismiss, registerAnchor }), [show, dismiss, registerAnchor]);
   return <ToastContext.Provider value={service}>{children}
     <section ref={viewport} className="lab-toast-region" aria-label="Notifications">
       {messages.map(message => <Toast key={`${message.id}:${message.revision}`} value={message} dismiss={dismiss} />)}
     </section>
   </ToastContext.Provider>;
+}
+
+/** Visible composers reserve their input area without changing conversation layout. */
+export function useToastAnchor<T extends HTMLElement = HTMLDivElement>(enabled: boolean) {
+  const service = useContext(ToastContext);
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => {
+    if (enabled && ref.current) return service?.registerAnchor(ref.current);
+  }, [service, enabled]);
+  return ref;
 }
 
 /** A stable source updates one toast; polling the same failure never restarts its timer. */

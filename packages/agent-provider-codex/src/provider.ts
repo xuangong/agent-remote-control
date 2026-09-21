@@ -116,6 +116,11 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); } finally { await transport.dispose(); }
   }
 
+  canReleaseSession(nativeSessionId: string): boolean {
+    return this.options.connectionMode === 'shared'
+      && [...this.sessions].some(session => session.canReleaseIdle(nativeSessionId));
+  }
+
   async openChildSession(parentNativeSessionId: string, childNativeSessionId: string): Promise<AgentSession> {
     const owners = [...this.sessions].filter((session) => session.hasNativeChild(parentNativeSessionId, childNativeSessionId));
     if (owners.length > 1) throw new Error('Codex native child ownership is ambiguous across loaded runtimes');

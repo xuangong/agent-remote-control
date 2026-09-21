@@ -3,7 +3,7 @@ import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/sr
 import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createCodexSessionDirectory } from './directory.js';
 import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory, type AgentHostUplinkDiagnostic } from './host.js';
@@ -683,6 +683,9 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
     openStream(streamId: string, sessionId: string) {
       socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_open', streamId, sessionId }));
     },
+    closeStream(streamId: string) {
+      socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }));
+    },
     sendStream(streamId: string, message: object) {
       socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId, message: JSON.stringify(message) }));
     },
@@ -918,4 +921,222 @@ it('preserves file-limit guidance across create retries without redispatching', 
     }
     expect(creates).toBe(1);
   } finally { await host.close(); }
+});
+
+it('releases an idle shared projection after grace and restores the same binding over real uplink streams', async () => {
+  const broker = await uplinkBroker('idle-host');
+  const registration = fixture('codex');
+  registration.directory.canReleaseSession = () => true;
+  registration.directory.open = async id => {
+    const old = registration.sessions.get(id);
+    if (old && !old.disposed) return old;
+    const session = new Session('codex', id); registration.sessions.set(id, session); return session;
+  };
+  const host = createAgentHost({ registrations: [registration], idleGraceMs: 150,
+    installationId: 'idle-host', name: 'Host', uplink: { url: broker.url, remoteKey: 'key' } });
+  const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  try {
+    await host.ready;
+    expect((await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
+    broker.openStream('main', 'agent'); broker.openStream('track', 'agent');
+    await expect.poll(() => broker.streamOpened('track')).toBe(true);
+    broker.sendStream('main', { protocolVersion: '1.5.0', type: 'negotiate' });
+    broker.sendStream('track', { protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' });
+    await expect.poll(() => !!broker.streamMessage('track', 'agent_activity')).toBe(true);
+    const original = registration.sessions.get('native')!;
+    broker.closeStream('main');
+    await pause(220);
+    expect(original.disposed).toBe(false);
+    broker.closeStream('track');
+    await pause(70);
+    broker.openStream('wake', 'agent');
+    await expect.poll(() => broker.streamOpened('wake')).toBe(true);
+    expect(registration.sessions.get('native')).toBe(original);
+    await pause(220);
+    expect(original.disposed).toBe(false);
+    broker.closeStream('wake');
+    await expect.poll(() => original.disposed).toBe(true);
+    broker.openStream('restore', 'agent');
+    await expect.poll(() => broker.streamOpened('restore')).toBe(true);
+    expect(registration.sessions.get('native')).not.toBe(original);
+    expect((await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.5.0', 'agent')).status).toBe(200);
+    expect(JSON.parse((await broker.rpc('POST', '/remote/attach', 'new-proposal', { providerId: 'codex', nativeSessionId: 'native' })).body).agentId).toBe('agent');
+  } finally { await host.close(); await broker.close(); }
+});
+
+function idleFixture() {
+  const registration = fixture('codex');
+  registration.directory.canReleaseSession = () => true;
+  registration.directory.open = async id => {
+    const old = registration.sessions.get(id);
+    if (old && !old.disposed) return old;
+    const session = new Session('codex', id); registration.sessions.set(id, session); return session;
+  };
+  const host = createAgentHostRuntime({ registrations: [registration], idleGraceMs: 1000 });
+  const attach = (id: string, parent?: string) => host.control({ method: 'POST', path: parent ? '/remote/child/attach' : '/remote/attach', sessionId: id,
+    body: JSON.stringify({ providerId: 'codex', nativeSessionId: id, ...(parent ? { parentNativeSessionId: parent } : {}) }) });
+  return { host, registration, attach };
+}
+
+it('preserves sessions through extended uplink outages and resets the whole grace on registration', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  try {
+    await f.attach('native');
+    const session = f.registration.sessions.get('native')!;
+    await vi.advanceTimersByTimeAsync(900);
+    f.host.setRelayConnected(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(session.disposed).toBe(false);
+    f.host.setRelayConnected(true);
+    await vi.advanceTimersByTimeAsync(900);
+    expect(session.disposed).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(session.disposed).toBe(true);
+  } finally { await f.host.close(); vi.useRealTimers(); }
+});
+
+it('protects running turns, pending interactions and native recovery without any browser', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  try {
+    await f.attach('native');
+    const session = f.registration.sessions.get('native')!;
+    let seq = 0;
+    const emit = (event: Extract<ProviderStreamItem, {type: 'observation'}>['event']) => session.emit({ type: 'observation', sourceKey: String(++seq), occurredAt: Date.now(), delivery: 'live', event });
+    emit({ type: 'turn_started', provider: 'codex', turnId: 'turn' });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(session.disposed).toBe(false);
+    emit({ type: 'turn_completed', provider: 'codex', turnId: 'turn' });
+    emit({ type: 'interaction_requested', provider: 'codex', request: { requestId: 'approval', kind: 'tool_approval', toolCallId: 'call', toolName: 'shell', summary: 'Run', detail: { type: 'shell', command: 'pwd' }, allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] } });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(session.disposed).toBe(false);
+    emit({ type: 'interaction_invalidated', provider: 'codex', requestId: 'approval', reason: 'Resolved elsewhere' });
+    emit({ type: 'runtime_updated', provider: 'codex', runtimeInfo: { ...(await session.runtimeInfo()), connection: { state: 'reconnecting' } } });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(session.disposed).toBe(false);
+    emit({ type: 'runtime_updated', provider: 'codex', runtimeInfo: { ...(await session.runtimeInfo()), connection: { state: 'connected' } } });
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(session.disposed).toBe(true);
+  } finally { await f.host.close(); vi.useRealTimers(); }
+});
+
+it('keeps unconfirmed mutations pinned beyond the operation-cache retention interval', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  try {
+    await f.attach('native');
+    const lease = await f.host.acquireSession('native');
+    let finish!: () => void;
+    const pending = f.host.executeOperation('test')(lease!.agent,
+      { operationId: operationId('unknown-idle'), kind: 'send_message', parameters: { text: 'only once' } },
+      { dispatch: () => new Promise<void>((_resolve, reject) => { finish = () => reject(new Error('Outcome unknown')); }) });
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+    lease!.release();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.registration.sessions.get('native')!.disposed).toBe(false);
+    finish(); await rejected;
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    expect(f.registration.sessions.get('native')!.disposed).toBe(false);
+  } finally { await f.host.close(); vi.useRealTimers(); }
+});
+
+it('detaches idle child projections before their parent and restores the family on demand', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  f.registration.directory.openChild = async (_parent, id) => f.registration.directory.open(id);
+  try {
+    await f.attach('parent'); await f.attach('child', 'parent');
+    const parent = f.registration.sessions.get('parent')!, child = f.registration.sessions.get('child')!;
+    const lease = await f.host.acquireSession('child');
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(parent.disposed || child.disposed).toBe(false);
+    lease!.release();
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(child.disposed).toBe(true); expect(parent.disposed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(parent.disposed).toBe(true);
+    const [first, second] = await Promise.all([f.host.acquireSession('child'), f.host.acquireSession('child')]);
+    expect(first!.agent).toBe(second!.agent);
+    expect(f.registration.sessions.get('child')).not.toBe(child);
+    expect(f.registration.sessions.get('parent')).not.toBe(parent);
+    first!.release(); second!.release();
+  } finally { await f.host.close(); vi.useRealTimers(); }
+});
+
+it('does not opt private or unspecified providers into automatic disposal', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  delete f.registration.directory.canReleaseSession;
+  try {
+    await f.attach('native');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.registration.sessions.get('native')!.disposed).toBe(false);
+  } finally { await f.host.close(); vi.useRealTimers(); }
+});
+
+it('serializes a returning viewer behind an in-progress native disposal', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  let finish!: () => void;
+  try {
+    await f.attach('native');
+    const original = f.registration.sessions.get('native')!;
+    const dispose = original.dispose.bind(original);
+    original.dispose = () => new Promise<void>(resolve => { finish = () => { void dispose().then(resolve); }; });
+    await vi.advanceTimersByTimeAsync(1100);
+    let acquired = false;
+    const returning = f.host.acquireSession('native').then(lease => { acquired = true; return lease; });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(acquired).toBe(false);
+    expect(f.registration.sessions.get('native')).toBe(original);
+    finish();
+    const lease = await returning;
+    expect(f.registration.sessions.get('native')).not.toBe(original);
+    lease!.release();
+  } finally { finish?.(); await f.host.close(); vi.useRealTimers(); }
+});
+
+it('retries a failed dormant restoration without changing the binding or poisoning later opens', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  try {
+    await f.attach('native');
+    await vi.advanceTimersByTimeAsync(1100);
+    const open = f.registration.directory.open;
+    f.registration.directory.open = async () => { throw new Error('Native socket temporarily unavailable'); };
+    await expect(f.host.acquireSession('native')).rejects.toThrow('temporarily unavailable');
+    f.registration.directory.open = open;
+    const lease = await f.host.acquireSession('native');
+    expect(lease!.agent.snapshot().payload.id).toBe('native');
+    lease!.release();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(f.registration.sessions.get('native')!.disposed).toBe(true);
+  } finally { await f.host.close(); vi.useRealTimers(); }
+});
+
+it('keeps native subscriptions across a real broken uplink until renewed browser demand arrives', async () => {
+  const broker = await uplinkBroker('outage-host', false);
+  const registration = fixture('codex'); registration.directory.canReleaseSession = () => true;
+  const host = createAgentHost({ registrations: [registration], idleGraceMs: 100, installationId: 'outage', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'key' } });
+  try {
+    await expect.poll(() => broker.registrations()).toBe(1); broker.register(); await host.ready;
+    await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'codex', nativeSessionId: 'native' });
+    broker.openStream('before-sleep', 'agent');
+    await expect.poll(() => broker.streamOpened('before-sleep')).toBe(true);
+    const native = registration.sessions.get('native')!;
+    broker.pauseHeartbeat().terminate();
+    await expect.poll(() => broker.registrations(), { timeout: 4000 }).toBe(2);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(native.disposed).toBe(false);
+    broker.register();
+    await expect.poll(() => host.state, { interval: 5 }).toBe('registered');
+    broker.openStream('after-sleep', 'agent');
+    await expect.poll(() => broker.streamOpened('after-sleep'), { interval: 5 }).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(native.disposed).toBe(false);
+    broker.closeStream('after-sleep');
+    await expect.poll(() => native.disposed).toBe(true);
+  } finally { await host.close(); await broker.close(); }
 });

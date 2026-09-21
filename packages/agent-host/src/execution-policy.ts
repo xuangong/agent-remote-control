@@ -94,6 +94,8 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   return {
     providerId: directory.providerId,
     supportsSourceReferences: directory.supportsSourceReferences,
+    canReleaseSession: directory.canReleaseSession?.bind(directory),
+    sessionReleased: directory.sessionReleased?.bind(directory),
     async list() {
       const entries = await directory.list();
       return (await Promise.all(entries.map(async entry => {

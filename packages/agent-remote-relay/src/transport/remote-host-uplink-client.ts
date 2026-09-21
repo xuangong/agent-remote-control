@@ -48,6 +48,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly onCredential?: (credential: string) => Promise<void>;
   readonly url: string;
   readonly resolveSession: RemoteHostPluginHostOptions['resolveSession'];
+  readonly acquireSession?: RemoteHostPluginHostOptions['acquireSession'];
   readonly control: RemoteHostPluginHostOptions['control'];
   readonly operationExecutor?: (scope: string) => SessionWireOperationExecutor;
   readonly registrationTimeoutMs?: number;
@@ -136,6 +137,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     const host = createRemoteHostPluginHost(options.relay, {
       resolveSession: options.resolveSession,
+      acquireSession: options.acquireSession,
       imageScope: () => { if (!operationScope) throw new Error('Image scope is unavailable before Host registration.'); return operationScope; },
       control: request => options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
       ...(options.operationExecutor ? { executeOperation: (agent, operation, work) => {

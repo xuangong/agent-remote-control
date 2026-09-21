@@ -173,3 +173,31 @@ AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE=/path/to/codex \
 
 Native tests opt in through this executable setting; ordinary provider tests
 cover configuration rejection and missing-socket errors without running Codex.
+
+## Idle Controller subscriptions
+
+The Controller detaches its shared Codex connection after five minutes without
+remote demand and with a safely idle native runtime. Full session windows (Main,
+Side and Ask), activity-only observers (Track and Ask), other devices, and active
+requests all retain the connection. A favorite alone does not retain a connection.
+
+Short browser disconnects and mobile sleep do not immediately dispose a session.
+Returning demand resets the grace interval. Cleanup pauses while the Controller's
+Relay uplink is disconnected; registration starts a fresh full grace interval.
+Running turns, pending interactions, native recovery, and unconfirmed mutations
+prevent release. An unknown mutation outcome conservatively pins that binding for
+the remaining Controller lifetime, even after its deduplication record expires.
+Native child projections are detached before their owning parent connection; this
+can extend the parent's grace period.
+
+Reopening restores the same native session and stable remote identity, including
+history created by other native clients while the Controller was detached. The
+normal timeline reset/catch-up protocol handles the new projection. No send is
+replayed as part of restoration. Lifecycle diagnostics record
+`session_idle_released` and `session_idle_restored` without conversation content.
+
+This cleanup closes only the Controller-owned connection. It does not cancel work,
+archive history, stop the daemon, or close another CLI/client's subscription. Codex
+controls when an unsubscribed native thread is unloaded, so a reduction in
+`thread/loaded/list` is not guaranteed to be immediate. Private Codex runtimes,
+Claude and Copilot are not automatically disposed by this mechanism.

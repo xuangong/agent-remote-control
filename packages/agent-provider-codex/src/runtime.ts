@@ -7,6 +7,7 @@ import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
 export { historyOverlapsNotifications } from '@orchardworks/codex-daemon-client';
 
 export interface CodexThreadSession {
+  hasIdleState(): boolean;
   receiveNotification(method: string, params: unknown): void;
   receiveRequest(method: string, params: unknown, id: string | number): Promise<unknown>;
   receiveTermination(error: Error): void;
@@ -77,6 +78,11 @@ export class CodexSessionRuntime {
   hasChild(parentId: string, childId: string): boolean { return this.client.hasChild(parentId, childId); }
   inspectHistory(parentId: string, history: unknown): void { this.client.inspectHistory(parentId, history); }
   terminate(error: Error): void { this.client.terminate(error); }
+
+  canReleaseIdle(): boolean {
+    return !this.client.hasUnresolvedChildren() && [...this.uniqueSessions()].every(session => session.hasIdleState())
+      && [...this.children.values()].every(child => child.session || child.descriptor.status === 'closed');
+  }
 
   private uniqueSessions(): Set<CodexThreadSession> { return new Set([this.root, ...this.sessions.values()]); }
 

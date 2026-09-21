@@ -1,3 +1,4 @@
+import { createIdleSessions } from './idle-sessions.js';
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { createControllerPreviews } from './previews.js';
@@ -10,12 +11,15 @@ import { AgentSessionInUseError, AgentRuntimeError } from '@orchardworks/agent-p
 import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
 import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
-  type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
+  type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
   readonly providerId: string;
   readonly supportsSourceReferences?: boolean;
+  /** Must guarantee disposal only detaches this client's idle runtime connection. */
+  canReleaseSession?(nativeSessionId: string): boolean;
+  sessionReleased?(nativeSessionId: string): Promise<void> | void;
   sessionWorkspace?(nativeSessionId: string): Promise<string | undefined>;
   setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
@@ -30,6 +34,8 @@ export interface AgentHostProviderRegistration { adapter: AgentProviderAdapter; 
 export interface AgentHostRuntimeOptions {
   registrations: readonly AgentHostProviderRegistration[];
   onRequestDiagnostic?: (diagnostic: AgentHostRequestDiagnostic) => void;
+  idleGraceMs?: number;
+  onSessionLifecycleDiagnostic?: (diagnostic: { event: 'session_idle_released' | 'session_idle_restored'; agentId: string; providerId: string }) => void;
   shutdownTimeoutMs?: number;
   cancelTimeoutMs?: number;
   executionPolicy?: HostExecutionPolicy;
@@ -48,6 +54,8 @@ export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
   executeOperation(scope: string): SessionWireOperationExecutor;
+  acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
+  setRelayConnected(connected: boolean): void;
   resolveSession(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;
   close(): Promise<void>;
 }
@@ -73,6 +81,7 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
   const runtime = createAgentHostRuntime({ ...options, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
+  runtime.setRelayConnected(false);
   const previews = options.preview ? createControllerPreviews(options.preview) : undefined;
   const vscodeTunnel = options.vscodeTunnel ? createVscodeTunnelManager({ ...options.vscodeTunnel, installationId: options.installationId }) : undefined;
   let state: AgentHost['state'] = 'connecting';
@@ -82,6 +91,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   let connection: Connection;
   let credentialPersistence: Promise<void> = Promise.resolve();
   const connect = (config: AgentHostOptions['uplink']): Connection => {
+    runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment,
       providers: options.registrations.map(({ adapter }) => adapter.descriptor), url: config.url, remoteKey: config.remoteKey,
@@ -93,13 +103,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         credentialPersistence = pending;
         return pending;
       } : undefined,
-      resolveSession: runtime.resolveSession, control: request => request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
+      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: request => request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
         : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
       operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
         registered: info => previews.registered({ ...info, url: config.url }) } : undefined,
       onDiagnostic: options.onDiagnostic ? diagnostic => options.onDiagnostic!({ ...diagnostic, uplinkGeneration: current }) : undefined,
-      onStateChange(next) { if (generation === current && !closed) { state = next; vscodeTunnel?.setRelayConnected(next === 'registered'); } } }) };
+      onStateChange(next) { if (generation === current && !closed) { state = next; runtime.setRelayConnected(next === 'registered'); vscodeTunnel?.setRelayConnected(next === 'registered'); } } }) };
   };
   connection = connect(options.uplink);
   const ready = connection.client.ready;
@@ -178,6 +188,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const projections = new Map<string, Projection>();
   const projectionAgents = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
+  const idle = createIdleSessions({ graceMs: options.idleGraceMs });
+  const uncertainAgents = new Set<string>();
   const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
   let closed = false;
@@ -198,28 +210,78 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   }
   function bindingFor(agent: SessionWireAgent): Binding {
     for (const [agentId, binding] of bindingsByAgent) {
-      if (relay.requireAgent(agentId) === agent) return binding;
+      if (liveAgent(agentId) === agent) return binding;
     }
     throw new OperationCacheError('invalid_operation_target', 'The native session binding is unavailable.');
   }
+  function liveAgent(agentId: string) {
+    try { return relay.requireAgent(agentId); } catch { return undefined; }
+  }
   function executeOperation(scope: string): SessionWireOperationExecutor {
-    return (agent, operation, work) => {
+    return async (agent, operation, work) => {
       const binding = bindingFor(agent);
-      return operationCache.execute({
-        operationId: operation.operationId,
-        scope,
-        kind: operation.kind,
-        target: JSON.stringify([binding.providerId, binding.nativeSessionId]),
-        parameters: operation.parameters,
-      }, { ...work, maximumResultBytes: operation.maximumResultBytes });
+      const release = idle.retain(binding.agentId);
+      try {
+        return await operationCache.execute({
+          operationId: operation.operationId, scope, kind: operation.kind,
+          target: JSON.stringify([binding.providerId, binding.nativeSessionId]), parameters: operation.parameters,
+        }, { ...work, maximumResultBytes: operation.maximumResultBytes });
+      } catch (error) {
+        if (error instanceof OperationCacheError && ['operation_outcome_unknown', 'native_file_limit'].includes(error.code)) uncertainAgents.add(binding.agentId);
+        throw error;
+      } finally { release(); }
     };
+  }
+  function lifecycle(event: 'session_idle_released' | 'session_idle_restored', binding: Binding) {
+    try { options.onSessionLifecycleDiagnostic?.({ event, agentId: binding.agentId, providerId: binding.providerId }); }
+    catch { /* Diagnostics cannot change session lifetime. */ }
+  }
+  function watch(binding: Binding) {
+    idle.watch(binding.agentId, () => {
+      if (closed || uncertainAgents.has(binding.agentId) || projections.has(JSON.stringify([binding.providerId, binding.nativeSessionId]))) return false;
+      const source = registration(binding.providerId).directory;
+      if (!source.canReleaseSession?.(binding.nativeSessionId) || !liveAgent(binding.agentId)?.canReleaseIdle()) return false;
+      // A native child projection shares its ancestor's connection, even with no browser currently attached.
+      for (const child of bindingsByAgent.values()) {
+        if (child.providerId === binding.providerId && child.parentNativeSessionId === binding.nativeSessionId
+          && (liveAgent(child.agentId) || idle.hasDemand(child.agentId))) return false;
+      }
+      return true;
+    }, async () => {
+      await relay.closeAgent(binding.agentId);
+      await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
+      lifecycle('session_idle_released', binding);
+    });
+  }
+  async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {
+    const binding = bindingsByAgent.get(agentId);
+    if (closed || !binding) return undefined;
+    const release = idle.retain(agentId);
+    let parent: RemoteHostSessionLease | undefined;
+    try {
+      if (binding.parentNativeSessionId) {
+        const parentBinding = bindingsByNative.get(JSON.stringify([binding.providerId, binding.parentNativeSessionId]));
+        if (parentBinding) {
+          parent = await acquireSession(parentBinding.agentId);
+          if (!parent) throw new Error('Native parent session is unavailable.');
+        }
+      }
+      await idle.wait(agentId);
+      await tracked(project(binding.providerId, agentId, binding.nativeSessionId, binding.parentNativeSessionId));
+      const agent = closed ? undefined : liveAgent(agentId);
+      if (!agent) { release(); parent?.release(); return undefined; }
+      let released = false;
+      return { agent, release() { if (released) return; released = true; release(); parent?.release(); } };
+    } catch (error) { release(); parent?.release(); throw error; }
   }
   async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string): Promise<Binding> {
     const key = JSON.stringify([providerId, nativeSessionId]);
     const existing = bindingsByNative.get(key);
     if (existing) {
       if (existing.parentNativeSessionId !== parentNativeSessionId) throw new HostRequestError(409, 'session_binding_conflict', 'The native session already has different ownership.');
-      return existing;
+      proposedAgentId = existing.agentId;
+      await idle.wait(proposedAgentId);
+      if (liveAgent(proposedAgentId)) { idle.touch(proposedAgentId); return existing; }
     }
     const inFlight = projections.get(key);
     if (inFlight) {
@@ -227,38 +289,51 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return inFlight.operation;
     }
     const agentKey = projectionAgents.get(proposedAgentId);
-    if ((agentKey && agentKey !== key) || bindingsByAgent.has(proposedAgentId)) {
+    if ((agentKey && agentKey !== key) || !existing && bindingsByAgent.has(proposedAgentId)) {
       throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already bound.');
     }
     projectionAgents.set(proposedAgentId, key);
     const source = registration(providerId).directory;
     const operation = (async () => {
-      const session = parentNativeSessionId === undefined ? await source.open(nativeSessionId)
-        : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
-        : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
-      if (closed) {
-        await session.dispose().catch(() => undefined);
-        throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
-      }
-      prepared.set(proposedAgentId, session);
-      const response = await relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: {
-        requestId: `host:${proposedAgentId}`, operationId: randomUUID(), agentId: proposedAgentId, providerId, config: { sessionId: proposedAgentId },
-      } }).catch(async (error: unknown) => {
-        if (prepared.get(proposedAgentId) === session) {
-          prepared.delete(proposedAgentId);
-          await session.dispose().catch(() => undefined);
+      let parent: RemoteHostSessionLease | undefined;
+      try {
+        if (parentNativeSessionId) {
+          const parentBinding = bindingsByNative.get(JSON.stringify([providerId, parentNativeSessionId]));
+          if (parentBinding?.agentId === proposedAgentId) throw new Error('Native parent binding is invalid.');
+          if (parentBinding) {
+            parent = await acquireSession(parentBinding.agentId);
+            if (!parent) throw new Error('Native parent session is unavailable.');
+          }
         }
-        throw error;
-      });
-      if (response.payload.sessionId !== nativeSessionId) throw new Error('Provider returned a different native session identity.');
-      const binding = { agentId: proposedAgentId, providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
-      bindingsByNative.set(key, binding); bindingsByAgent.set(proposedAgentId, binding);
-      return binding;
+        const session = parentNativeSessionId === undefined ? await source.open(nativeSessionId)
+          : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
+          : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
+        if (closed) {
+          await session.dispose().catch(() => undefined);
+          throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
+        }
+        prepared.set(proposedAgentId, session);
+        const response = await relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: {
+          requestId: `host:${proposedAgentId}`, operationId: randomUUID(), agentId: proposedAgentId, providerId, config: { sessionId: proposedAgentId },
+        } }).catch(async (error: unknown) => {
+          if (prepared.get(proposedAgentId) === session) {
+            prepared.delete(proposedAgentId);
+            await session.dispose().catch(() => undefined);
+          }
+          throw error;
+        });
+        if (response.payload.sessionId !== nativeSessionId) throw new Error('Provider returned a different native session identity.');
+        const binding = { agentId: proposedAgentId, providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+        bindingsByNative.set(key, binding); bindingsByAgent.set(proposedAgentId, binding);
+        watch(binding);
+        if (existing) lifecycle('session_idle_restored', binding);
+        return binding;
+      } finally { parent?.release(); }
     })();
     projections.set(key, { agentId: proposedAgentId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}), operation });
     try { return await operation; } catch (error) {
-      prepared.delete(proposedAgentId); projections.delete(key); projectionAgents.delete(proposedAgentId); throw error;
-    }
+      prepared.delete(proposedAgentId); throw error;
+    } finally { projections.delete(key); projectionAgents.delete(proposedAgentId); }
   }
   async function create(request: RemoteHostControlRequest, payload: Record<string, unknown>): Promise<AgentRemoteHttpResult> {
     const providerId = string(payload.providerId, 'providerId');
@@ -347,7 +422,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             throw new HostRequestError(400, 'invalid_request', 'Stop requires only an operation identity.');
           }
           const operationId = string(payload.operationId, 'operationId');
-          const targets = [...bindingsByAgent.keys()];
+          const targets = [...bindingsByAgent.keys()].filter(id => liveAgent(id));
           const results = await operationCache.execute({
             operationId,
             scope: operationScope(request),
@@ -384,6 +459,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
   }
   async function cancelAgent(agentId: string) {
+    const release = idle.retain(agentId);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([relay.requireAgent(agentId).cancel(), new Promise<never>((_resolve, reject) => {
@@ -394,13 +470,15 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return error instanceof UnsupportedAgentCapabilityError
         ? { agentId, status: 'unsupported' as const, message: 'The native session does not support cancellation.' }
         : { agentId, status: 'failed' as const, message: 'Native cancellation did not complete.' };
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); release(); }
   }
-  return { relay, control, executeOperation, resolveSession(agentId) { try { return relay.requireAgent(agentId); } catch { return undefined; } },
+  return { relay, control, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+    resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },
     close(): Promise<void> { return closePromise ??= (async () => {
       closed = true;
+      const releasing = idle.close();
       for (const catalog of catalogs.values()) catalog.dispose();
-      const cleanup = Promise.allSettled([relay.close(), operationCache.close(), ...options.registrations.map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
+      const cleanup = Promise.allSettled([releasing, relay.close(), operationCache.close(), ...options.registrations.map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
       await bounded(cleanup, shutdownTimeoutMs);
     })(); } };
 }

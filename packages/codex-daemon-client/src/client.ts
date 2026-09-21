@@ -43,6 +43,7 @@ export class CodexDaemonClient {
 
   async initialize(): Promise<void> { await initializeCodexTransport(this.transport, this.options.initialization); }
   registerRoot(id: string): void { this.router.registerRoot(id); }
+  hasUnresolvedChildren(): boolean { return this.router.hasUnresolvedChildren(); }
   hasThread(id: string): boolean { return this.router.hasThread(id); }
   hasChild(parentId: string, id: string): boolean { return this.router.hasChild(parentId, id); }
   waitForChild(parentId: string, id: string): Promise<void> { return this.router.waitForChild(parentId, id); }

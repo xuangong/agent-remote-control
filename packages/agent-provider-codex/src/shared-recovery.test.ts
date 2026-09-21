@@ -804,3 +804,46 @@ it('restores ten latest turns over Unix WebSocket and serves older history throu
     expect(server.requests.filter(request => request.method === 'thread/turns/list').map(request => request.params.limit)).toEqual([10, 10, 10]);
   } finally { wire.close(); }
 });
+
+it('permits idle detach only when the shared runtime and its children are safe', async () => {
+  const { server, provider, session, iterator } = await harness({ initialDelayMs: 50, maximumDelayMs: 50 });
+  expect(provider.canReleaseSession('root')).toBe(true);
+  expect(provider.canReleaseSession('missing')).toBe(false);
+  server.children.set('child', { id: 'child', parentThreadId: 'root', status: { type: 'active', activeFlags: [] },
+    canAcceptDirectInput: false, turns: [{ id: 'child-turn', status: 'inProgress', items: [] }] });
+  server.thread.turns = [{ id: 'root-turn', items: [{ id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent',
+    receiverThreadIds: ['child'], prompt: 'Inspect', status: 'completed' }] }];
+  server.disconnectClients();
+  await expect.poll(async () => (await session.runtimeInfo()).connection?.state, { interval: 5 }).toBe('reconnecting');
+  expect(provider.canReleaseSession('root')).toBe(false);
+  await nextItem(iterator, 'timeline_replacement');
+  await expect.poll(async () => (await session.runtimeInfo()).childSessions?.map(child => child.nativeSessionId)).toContain('child');
+  const child = await provider.openChildSession('root', 'child'); sessions.push(child);
+  expect(provider.canReleaseSession('root')).toBe(false);
+  server.notify('turn/completed', { threadId: 'child', turn: { id: 'child-turn', status: 'completed', items: [] } });
+  await expect.poll(() => provider.canReleaseSession('root')).toBe(true);
+  server.requestInteraction('approval', 'child');
+  await expect.poll(() => provider.canReleaseSession('root')).toBe(false);
+  server.resolveInteraction('approval', 'child');
+  await expect.poll(() => provider.canReleaseSession('root')).toBe(true);
+});
+
+it('retains an idle parent when a known child cannot yet be discovered', async () => {
+  const { server, provider } = await harness();
+  const blocked = deferred<RpcOverride | undefined>();
+  server.children.set('unresolved', { id: 'unresolved', parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: false, turns: [] });
+  server.requestHook = ({ method, params }) => method === 'thread/read' && params.threadId === 'unresolved' ? blocked.promise : undefined;
+  const announce = () => server.notify('item/completed', { threadId: 'root', turnId: 'turn', item: {
+    id: 'spawn-unresolved', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['unresolved'], status: 'completed',
+  } });
+  announce();
+  await expect.poll(() => server.requests.some(request => request.method === 'thread/read' && request.params.threadId === 'unresolved')).toBe(true);
+  try {
+    expect(provider.canReleaseSession('root')).toBe(false);
+    blocked.resolve({ kind: 'error', code: -32603, message: 'Child temporarily unavailable' });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(provider.canReleaseSession('root')).toBe(false);
+    server.requestHook = undefined; announce();
+    await expect.poll(() => provider.canReleaseSession('root')).toBe(true);
+  } finally { blocked.resolve(undefined); }
+});

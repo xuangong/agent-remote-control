@@ -208,6 +208,15 @@ export class AgentManager {
     }
   }
 
+  /** Small safety predicate without cloning the potentially large snapshot. */
+  canReleaseIdle(): boolean {
+    const state = this.state.payload;
+    return !this.closed && this.listeners.size === 0 && !this.historyLoading
+      && this.pendingCommandExecutions === 0 && (state.status === 'idle' || state.status === 'closed') && state.activeTurn === null
+      && state.pendingInteractions.length === 0
+      && (!state.runtimeInfo.connection || state.runtimeInfo.connection.state === 'connected');
+  }
+
   snapshot(): AgentSnapshot {
     return structuredClone(this.state);
   }

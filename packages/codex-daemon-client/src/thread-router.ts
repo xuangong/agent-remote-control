@@ -9,6 +9,7 @@ export class CodexThreadRouter {
   readonly threads = new Set<string>();
   rootId: string | undefined;
   private readonly children = new Map<string, string>();
+  private readonly unresolvedChildren = new Set<string>();
   private readonly discoveries = new Map<string, Promise<boolean>>();
   private readonly buffered = new Map<string, Array<CodexRawNotification & { sequence: number }>>();
   private readonly origins = new Map<string, CodexThreadOrigin>();
@@ -23,6 +24,9 @@ export class CodexThreadRouter {
   registerRoot(id: string): void { this.rootId = id; this.threads.add(id); }
   hasThread(id: string): boolean { return !this.closed && this.threads.has(id); }
   hasChild(parentId: string, id: string): boolean { return this.hasThread(parentId) && this.children.get(id) === parentId; }
+
+  /** Failed child discovery remains unsafe until authoritative child state arrives. */
+  hasUnresolvedChildren(): boolean { return this.discoveries.size > 0 || this.unresolvedChildren.size > 0; }
 
   async waitForChild(parentId: string, id: string): Promise<void> {
     if (this.closed) throw new Error('Codex runtime is closed');
@@ -44,6 +48,8 @@ export class CodexThreadRouter {
     if (this.closed) return;
     const thread = isRecord(params) && isRecord(params.thread) ? params.thread : undefined;
     const id = notificationThreadId(params);
+    const parent = thread && parentThreadId(thread);
+    if (id && parent && this.threads.has(parent) && !this.children.has(id)) this.unresolvedChildren.add(id);
     if (!id) { this.callbacks.onNotification?.(method, params); return; }
     if (isRecord(params) && (method === 'item/started' || method === 'item/completed')) this.inspectItem(id, readString(params.turnId), params.item);
     if (this.threads.has(id)) { this.callbacks.onNotification?.(method, params); return; }
@@ -87,6 +93,7 @@ export class CodexThreadRouter {
   private recordOrigin(id: string, origin: CodexThreadOrigin): void {
     if (this.origins.has(id)) return;
     this.origins.set(id, origin);
+    if (!this.children.has(id)) this.unresolvedChildren.add(id);
     if (this.children.get(id) === origin.parentThreadId) this.callbacks.onChildOrigin?.(id, origin);
   }
 
@@ -116,6 +123,7 @@ export class CodexThreadRouter {
     if (!parentId || parentId === id) return false;
     if (!this.threads.has(parentId) && !await this.discover(parentId, [...ancestry, id])) return false;
     if (generation !== this.generation || this.closed) return false;
+    this.unresolvedChildren.add(id);
     const previous = this.children.get(id);
     if (previous && previous !== parentId) return false;
     let snapshotStart = this.notificationSequence;
@@ -130,6 +138,7 @@ export class CodexThreadRouter {
         notifications: reconcileCodexHistoryNotifications(history, id, this.buffered.get(id) ?? []), historyState,
         requiresRefresh: this.overflowed.delete(id), discoveryOrder: this.discoveryOrder.get(id)!,
         origin: origin?.parentThreadId === parentId ? origin : undefined });
+      this.unresolvedChildren.delete(id);
     };
     if (!loaded && thread.ephemeral === true && (!Array.isArray(thread.turns) || !thread.turns.length)) {
       handoff('unavailable');

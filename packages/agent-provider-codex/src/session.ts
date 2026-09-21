@@ -149,6 +149,20 @@ export class CodexAppServerSession implements AgentSession {
   private interactionGeneration = 1;
   private sharedInteractionIdentity: string | undefined;
 
+  /** Adapter-owned safety check; the Controller must also protect observer leases. */
+  canReleaseIdle(nativeSessionId: string): boolean {
+    return this.ownsRuntime && this.runtime.hasThread(nativeSessionId)
+      && this.runtime.connectionInfo()?.state === 'connected' && this.runtime.canReleaseIdle();
+  }
+
+  hasIdleState(): boolean {
+    return this.ready && !this.transportFailure && !this.disposed
+      && (this.runtimeStatus === 'idle' || !this.ownsRuntime && this.runtimeStatus === 'closed')
+      && !this.activeTurnId && !this.startingTurn && !this.sendingMessage && !this.changingSetting
+      && !this.executingCommand && !this.settingConfirmation && !this.preparingObservation
+      && this.pendingInteractions.size === 0;
+  }
+
   onRuntimeClosed(listener: () => void): void {
     if (this.disposed || this.transportFailure) listener();
     else this.runtimeClosedListeners.add(listener);

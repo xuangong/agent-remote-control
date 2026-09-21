@@ -1,3 +1,5 @@
+import { createAgentHostRuntime } from '../../agent-host/src/host.js';
+import { createCodexSessionDirectory } from '../../agent-host/src/directory.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, rm, writeFile, stat } from 'node:fs/promises';
@@ -243,3 +245,38 @@ it.runIf(executable)('dispatches persisted dynamic source tools through a real d
     expect(calls).toBe(2);
   } finally { await f.close(); }
 }, 30_000);
+
+
+it.runIf(executable)('releases and resumes the Controller subscription while an independent native client keeps working', async () => {
+  const f = await fixture();
+  const provider = f.provider();
+  const directory = createCodexSessionDirectory(provider, []);
+  const host = createAgentHostRuntime({ registrations: [{ adapter: provider, directory }], idleGraceMs: 100 });
+  try {
+    const desktop = await f.provider().createSession({ sessionId: 'desktop', cwd: f.home }); f.sessions.push(desktop);
+    const stream = desktop.observe()[Symbol.asyncIterator]();
+    await desktop.sendMessage('History before mobile sleep');
+    await until(stream, event => event.type === 'turn_completed');
+    const id = (await desktop.runtimeInfo()).sessionId!;
+    const attached = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'mobile',
+      body: JSON.stringify({ providerId: 'codex', nativeSessionId: id }) });
+    expect(attached.status).toBe(200);
+    const lease = await host.acquireSession('mobile');
+    expect(lease).toBeDefined();
+    const original = await directory.open(id);
+    await expect.poll(() => provider.canReleaseSession(id)).toBe(true);
+    lease!.release();
+    await expect.poll(async () => (await original.runtimeInfo()).status).toBe('closed');
+    expect(f.daemon.exitCode).toBeNull();
+    await desktop.sendMessage('Desktop continues while mobile is detached');
+    await until(stream, event => event.type === 'turn_completed');
+    const restored = await host.acquireSession('mobile');
+    expect(restored!.agent.snapshot().payload.runtimeInfo.sessionId).toBe(id);
+    const history = host.relay.requireAgent('mobile').fetchTimeline({ requestId: 'tail', agentId: 'mobile', direction: 'tail', limit: 100 });
+    expect(JSON.stringify(history)).toContain('History before mobile sleep');
+    expect(JSON.stringify(history)).toContain('Desktop continues while mobile is detached');
+    await restored!.agent.sendMessage('Mobile resumes the same conversation');
+    await until(stream, event => event.type === 'turn_completed');
+    restored!.release();
+  } finally { await host.close(); await f.close(); }
+}, 30000);

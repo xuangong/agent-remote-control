@@ -22,7 +22,13 @@ export interface RemoteHostPluginHost {
   close(): void;
 }
 
+export interface RemoteHostSessionLease {
+  readonly agent: SessionWireAgent;
+  release(): void;
+}
+
 export interface RemoteHostPluginHostOptions {
+  acquireSession?(sessionId: string): Promise<RemoteHostSessionLease | undefined>;
   resolveSession(sessionId: string): SessionWireAgent | undefined;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> | AgentRemoteHttpResult;
   send(json: string): void;
@@ -36,7 +42,8 @@ export interface RemoteHostPluginHostOptions {
 }
 
 interface VirtualStream {
-  readonly wire: SessionWire;
+  wire?: SessionWire;
+  lease?: RemoteHostSessionLease;
   receiving: Promise<void>;
   pending: number;
   bytes: number;
@@ -57,7 +64,7 @@ export function createRemoteHostPluginHost(
   function close(): void {
     if (closed) return;
     closed = true;
-    for (const stream of streams.values()) stream.wire.close();
+    for (const stream of streams.values()) retireStream(stream);
     streams.clear();
     for (const request of pending.values()) request.cancelled = true;
     pending.clear();
@@ -82,8 +89,14 @@ export function createRemoteHostPluginHost(
     }
   }
 
+  function retireStream(stream: VirtualStream): void {
+    stream.wire?.close();
+    void stream.receiving.finally(() => stream.lease?.release()).catch(() => undefined);
+  }
+
   function closeStream(streamId: string, code: number, reason: string, notify = true): void {
-    streams.get(streamId)?.wire.close();
+    const stream = streams.get(streamId);
+    if (stream) retireStream(stream);
     streams.delete(streamId);
     if (notify) emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_close', streamId, code, reason });
   }
@@ -91,22 +104,30 @@ export function createRemoteHostPluginHost(
   function openStream(streamId: string, sessionId: string): void {
     if (streams.has(streamId)) { fail(new Error('Duplicate Remote Host stream identity.')); return; }
     if (streams.size >= maxStreams) { closeStream(streamId, 1013, 'Remote Host stream capacity exceeded.'); return; }
-    const agent = options.resolveSession(sessionId);
-    if (!agent) { closeStream(streamId, 1008, 'Remote Session is unavailable.'); return; }
-    let stream: VirtualStream;
-    const wire = createSessionWire(agent, (message) => {
-      if (streams.get(streamId) === stream) {
-        emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_message', streamId, message });
-      }
-    }, {
-      authorize: () => true,
-      ...(options.imageScope ? { imageScope: options.imageScope } : {}),
-      ...(options.executeOperation ? { executeOperation: options.executeOperation } : {}),
-      onFailure: () => closeStream(streamId, 1011, 'Remote Session delivery failed.'),
-    });
-    stream = { wire, receiving: Promise.resolve(), pending: 0, bytes: 0 };
+    const stream: VirtualStream = { receiving: Promise.resolve(), pending: 0, bytes: 0 };
     streams.set(streamId, stream);
-    emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_opened', streamId });
+    const initialize = (lease: RemoteHostSessionLease | undefined) => {
+      if (closed || streams.get(streamId) !== stream) { lease?.release(); return; }
+      if (!lease) { closeStream(streamId, 1008, 'Remote Session is unavailable.'); return; }
+      stream.lease = lease;
+      stream.wire = createSessionWire(lease.agent, message => {
+        if (streams.get(streamId) === stream) emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_message', streamId, message });
+      }, {
+        authorize: () => true,
+        ...(options.imageScope ? { imageScope: options.imageScope } : {}),
+        ...(options.executeOperation ? { executeOperation: options.executeOperation } : {}),
+        onFailure: () => { if (streams.get(streamId) === stream) closeStream(streamId, 1011, 'Remote Session delivery failed.'); },
+      });
+      emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_opened', streamId });
+    };
+    if (options.acquireSession) {
+      stream.receiving = options.acquireSession(sessionId).then(initialize).catch(() => {
+        if (streams.get(streamId) === stream) closeStream(streamId, 1011, 'Remote Session restoration failed.');
+      });
+    } else {
+      const agent = options.resolveSession(sessionId);
+      initialize(agent ? { agent, release() {} } : undefined);
+    }
   }
 
   function receiveStream(streamId: string, message: string): void {
@@ -121,8 +142,8 @@ export function createRemoteHostPluginHost(
     stream.pending += 1;
     stream.bytes += bytes;
     stream.receiving = stream.receiving.then(async () => {
-      if (!closed && streams.get(streamId) === stream) await stream.wire.receive(message);
-    }).catch(() => closeStream(streamId, 1011, 'Remote Session failed.')).finally(() => {
+      if (!closed && streams.get(streamId) === stream) await stream.wire?.receive(message);
+    }).catch(() => { if (streams.get(streamId) === stream) closeStream(streamId, 1011, 'Remote Session failed.'); }).finally(() => {
       stream.pending -= 1;
       stream.bytes -= bytes;
     });
@@ -141,10 +162,7 @@ export function createRemoteHostPluginHost(
       if (request.method !== 'GET' || request.sessionId === undefined) {
         return agentRemoteHttpError(404, 'route_not_found', 'Remote Host route was not found.', true);
       }
-      if (!options.resolveSession(request.sessionId)) {
-        return agentRemoteHttpError(403, 'forbidden', 'Remote Session target is unavailable.', false);
-      }
-      return executeAgentRemoteHttpRequest(relay, request);
+      return executeLeasedRequest(request);
     }
     if (!match || request.method !== 'GET' || request.sessionId === undefined) {
       return agentRemoteHttpError(404, 'route_not_found', 'Remote Host route was not found.', true);
@@ -153,10 +171,21 @@ export function createRemoteHostPluginHost(
     try { pathSessionId = decodeURIComponent(match[1]!); } catch {
       return agentRemoteHttpError(400, 'invalid_request', 'Remote Session path is invalid.', true);
     }
-    if (pathSessionId !== request.sessionId || !options.resolveSession(request.sessionId)) {
+    if (pathSessionId !== request.sessionId) {
       return agentRemoteHttpError(403, 'forbidden', 'Remote Session target is unavailable.', false);
     }
-    return executeAgentRemoteHttpRequest(relay, request);
+    return executeLeasedRequest(request);
+  }
+
+  async function executeLeasedRequest(request: Extract<RemoteHostUplinkMessage, { type: 'rpc_request' }>): Promise<AgentRemoteHttpResult> {
+    const id = request.sessionId!;
+    const lease = options.acquireSession ? await options.acquireSession(id) : undefined;
+    try {
+      if (options.acquireSession ? !lease : !options.resolveSession(id)) {
+        return agentRemoteHttpError(403, 'forbidden', 'Remote Session target is unavailable.', false);
+      }
+      return await executeAgentRemoteHttpRequest(relay, request);
+    } finally { lease?.release(); }
   }
 
   function receiveRpc(message: Extract<RemoteHostUplinkMessage, { type: 'rpc_request' }>): void {

@@ -63,3 +63,25 @@ it('rechecks source workspace on every tool call, including native child sources
     expect(native.requests.some(request => request.method === 'thread/items/list')).toBe(false);
   } finally { lines.close(); await directory.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('restores idle source sessions with native saved settings and the granted source tools', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'idle-reference-'));
+  const natives: ReturnType<typeof createScriptedAppServer>[] = [];
+  const provider = new CodexAppServerProvider({ spawn: () => {
+    const native = createScriptedAppServer({ 'thread/start': () => ({ thread: { id: 'side' }, cwd: '/old', model: 'old-model' }),
+      'thread/resume': () => ({ thread: { id: 'side' }, cwd: '/new', model: 'new-model' }),
+      'thread/read': () => ({ thread: { id: 'side', turns: [] } }) });
+    natives.push(native); return native.child;
+  } });
+  const directory = createCodexSessionDirectory(provider, [], new SessionReferenceStore(root));
+  try {
+    await directory.create({ cwd: '/old', model: 'old-model', sourceNativeSessionId: 'source' });
+    await (await directory.open('side')).dispose();
+    await directory.sessionReleased!('side');
+    const restored = await directory.open('side');
+    const request = natives[1]!.requests.find(request => request.method === 'thread/resume')!.params as Record<string, unknown>;
+    expect(request.cwd).toBeUndefined(); expect(request.model).toBeUndefined();
+    expect(request.developerInstructions).toContain('read_source_session');
+    expect(await restored.runtimeInfo()).toMatchObject({ sessionId: 'side', cwd: '/new', model: 'new-model' });
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+});

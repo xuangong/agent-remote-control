@@ -153,40 +153,44 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
       {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
     </div>
     <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent} data-collapsed={composerHidden || undefined}>
-      <button ref={toastToggleAnchor} hidden={compact} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
-        aria-label={composerHidden ? 'Show message input' : 'Hide message input'} title={composerHidden ? 'Show message input' : 'Hide message input'}
-        onClick={() => setComposerHidden(hidden => !hidden)}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d={composerHidden ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'} />
-        </svg>
-      </button>
-      <div id={composerId} className="lab-composer-body" hidden={composerHidden}>
+      <div hidden={composerHidden}>
         {composerContext}
         {composerNotice}
-        <LiveControlPanel
-          compact={compact}
-          consoleCommands={sessionStatus === 'ready' ? consoleCommands : []}
-          onExecuteConsoleCommand={sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
-          sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
-          state={state}
-          sessionKey={draftSessionKey ?? state?.agent?.id}
-          draftScope={recoveryPositions?.scope}
-          visible={visible}
-          onSendMessageContent={suppliedFeedbackActions.sendMessageContent}
-          onUploadImage={visible ? actions.uploadImage : undefined}
-          draft={messageDraft}
-          onDraftChange={onMessageDraftChange}
-          disabled={sessionStatus !== 'ready'}
-          recovering={!runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
-          onSendMessage={suppliedFeedbackActions.sendMessage}
-          onCancel={actions.cancel}
-          onSetSessionSetting={actions.setSessionSetting}
-          onListCommands={actions.listCommands}
-          onExecuteCommand={actions.executeCommand}
-          onRequestResource={actions.requestResource}
-          onResolveResource={actions.resolveResource}
-          onInspectCommand={(command) => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }}
-        />
+      </div>
+      <div className="lab-composer-input-shell">
+        <button ref={toastToggleAnchor} hidden={compact} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
+          aria-label={composerHidden ? 'Show message input' : 'Hide message input'} title={composerHidden ? 'Show message input' : 'Hide message input'}
+          onClick={() => setComposerHidden(hidden => !hidden)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d={composerHidden ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'} />
+          </svg>
+        </button>
+        <div id={composerId} className="lab-composer-body" hidden={composerHidden}>
+          <LiveControlPanel
+            compact={compact}
+            consoleCommands={sessionStatus === 'ready' ? consoleCommands : []}
+            onExecuteConsoleCommand={sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
+            sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
+            state={state}
+            sessionKey={draftSessionKey ?? state?.agent?.id}
+            draftScope={recoveryPositions?.scope}
+            visible={visible}
+            onSendMessageContent={suppliedFeedbackActions.sendMessageContent}
+            onUploadImage={visible ? actions.uploadImage : undefined}
+            draft={messageDraft}
+            onDraftChange={onMessageDraftChange}
+            disabled={sessionStatus !== 'ready'}
+            recovering={!runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
+            onSendMessage={suppliedFeedbackActions.sendMessage}
+            onCancel={actions.cancel}
+            onSetSessionSetting={actions.setSessionSetting}
+            onListCommands={actions.listCommands}
+            onExecuteCommand={actions.executeCommand}
+            onRequestResource={actions.requestResource}
+            onResolveResource={actions.resolveResource}
+            onInspectCommand={(command) => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }}
+          />
+        </div>
       </div>
     </div>
     {selectedCommand && state ? <AgentCommandDetails key={`${state.agent?.id}:${selectedCommand.id}`} command={selectedCommand} resources={state.resources}

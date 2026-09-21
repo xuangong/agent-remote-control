@@ -23,7 +23,8 @@ async function openReconnectingSession(page: Page, ask = false) {
     await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   }
   const toast = page.locator('.lab-toast').filter({ hasText: 'Native runtime is reconnecting' });
-  await expect(toast).toBeVisible();
+  // Recovery notices appear after the foreground reconnect grace period.
+  await expect(toast).toBeVisible({ timeout: 10_000 });
   await toast.hover(); // Pause the countdown while checking viewport transitions.
   return ask ? page.getByRole('dialog', { name: 'Ask', exact: true }) : page.locator('.lab-primary-conversation');
 }

@@ -201,3 +201,41 @@ it('lets a downward gesture reach the end before resuming automatic following', 
   act(() => root.render(<Surface entryCount={11} />));
   expect(viewport().scrollTop).toBe(1000);
 });
+
+it('finds a reading anchor in long history without measuring every earlier entry', () => {
+  act(() => root.render(<Surface entryCount={1000} />));
+  const entries = [...container.querySelectorAll<HTMLElement>('[data-entry-key]')];
+  let reads = 0;
+  for (const entry of entries) {
+    const bounds = entry.getBoundingClientRect;
+    entry.getBoundingClientRect = () => { reads++; return bounds(); };
+  }
+  act(() => {
+    viewport().dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    viewport().scrollTop = 73420;
+    viewport().dispatchEvent(new Event('scroll'));
+  });
+  expect(positions.get('epoch-one')?.anchor?.key).toBe('epoch-one:734');
+  expect(reads).toBeLessThan(60);
+});
+
+it('positions only when the explicit content revision changes', () => {
+  const revision = {};
+  let reads = 0;
+  function StableSurface({ contentRevision = revision }: { contentRevision?: object }) {
+    const scroll = useTimelineScroll('stable', true, positions, undefined, undefined, contentRevision);
+    return <div ref={element => {
+      (scroll.viewportRef as MutableRefObject<HTMLDivElement | null>).current = element;
+      if (element && !element.dataset.configured) {
+        element.dataset.configured = 'true';
+        Object.defineProperties(element, { clientHeight: { get: () => 100 }, scrollHeight: { get: () => { reads++; return 1000; } } });
+      }
+    }}><div ref={scroll.contentRef}><div data-entry-key="one">Stable text</div></div></div>;
+  }
+  act(() => root.render(<StableSurface />));
+  reads = 0;
+  act(() => root.render(<StableSurface />));
+  expect(reads).toBe(0);
+  act(() => root.render(<StableSurface contentRevision={{}} />));
+  expect(reads).toBeGreaterThan(0);
+});

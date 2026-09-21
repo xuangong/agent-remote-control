@@ -80,3 +80,17 @@ test('a missing ticket or unavailable callback shows recovery and never redirect
     await page.screenshot({ path: testInfo.outputPath('06-callback-unavailable.png') });
   } finally { await f.close(); }
 });
+
+test('loads a lightweight sign-in entry before the conversation renderer is needed', async ({ page }) => {
+  const f = await sessionLinkFixture();
+  try {
+    await page.route('**/auth/status', route => route.fulfill({ status: 401, json: {} }));
+    await page.goto(f.url);
+    await expect(page.getByRole('heading', { name: 'Sign in to continue' })).toBeVisible();
+    const scriptBytes = await page.evaluate(() => performance.getEntriesByType('resource')
+      .filter(entry => new URL(entry.name).pathname.endsWith('.js'))
+      .reduce((sum, entry) => sum + (entry as PerformanceResourceTiming).decodedBodySize, 0));
+    expect(scriptBytes).toBeGreaterThan(0);
+    expect(scriptBytes).toBeLessThan(300_000);
+  } finally { await f.close(); }
+});

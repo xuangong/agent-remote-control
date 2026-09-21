@@ -31,7 +31,7 @@ test('keeps tags through reconnect, session switch and a full page reload', asyn
   await page.getByRole('button', { name: 'Toggle connection' }).click();
   await expect(editor).toHaveAttribute('contenteditable', 'true');
   await editor.press('End'); await editor.pressSequentially('draft offline');
-  await expect(page.getByTestId('prompt-submit')).toBeDisabled();
+  await expect(page.getByTestId('prompt-submit')).toBeEnabled();
   await page.getByRole('button', { name: 'Switch session' }).click();
   await expect(editor.locator('[data-image-id]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Switch session' }).click();

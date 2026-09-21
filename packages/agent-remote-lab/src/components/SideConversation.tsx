@@ -1,3 +1,4 @@
+import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
 import { useEffect, useRef } from 'react';
 import { useConversationSession } from '../hooks/useConversationSession.js';
@@ -11,11 +12,11 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { sessionActivity } from '../session-activity.js';
 import { sessionKey } from '../session-tree.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild }: {
   replica?: AgentReplica;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
   initialInput?: { pending: boolean; error?: string };
-  session: OpenedSession; transport: RemoteAgentTransport; store: ForkStore; draft: string; onDraftChange(text: string): void;
+  session: OpenedSession; transport: RemoteAgentTransport; store: ForkStore; draftBinding?: DraftBinding; draft?: string; onDraftChange?(text: string): void;
   onActivityChange?(agentId: string, status: ReturnType<typeof sessionActivity>): void;
   onFocus?(): void; onClose(): void; onOpenSource(session: OpenedSession): void; onOpenFork(fork: SessionFork): void;
   onFork(state: AgentReplicaState, session: OpenedSession, id: string, args: string): Promise<AgentCommandResult>; visible?: boolean;
@@ -29,7 +30,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   const title = record?.firstInput?.trim().slice(0, 72) || session.title;
   return <aside className="lab-side-conversation" aria-label="Side conversation" ref={panel} onFocusCapture={onFocus} hidden={!expanded} style={{ order: position }}>
     <LabWorkbench draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
-      visible={visible && expanded} actions={forkActions(actions, store, record, transport)} messageDraft={draft} onMessageDraftChange={onDraftChange}
+      visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       conversationPath={<span className="lab-side-title" title={title}><span className="lab-window-number">{position + 1}</span><span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}
       sessionManager={<><SessionLink session={session} /><button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>

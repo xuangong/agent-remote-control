@@ -1,3 +1,4 @@
+import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import { useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } from 'react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { TimelineDisplay, type TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
@@ -11,10 +12,10 @@ import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
 import { LabWorkbench } from './LabWorkbench.js';
 
-export function AskConversation({ entry, store, replica, transport, draft, onDraftChange, onClose, onToggleEnabled, onClean, onRetry, onSendInput, simple, onToggleSimple, triggerRef, positionRef }: {
+export function AskConversation({ entry, store, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, simple, onToggleSimple, triggerRef, positionRef }: {
   positionRef: RefObject<FloatingPosition>; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
   simple: boolean; onToggleSimple(): void;
-  draft: string; onDraftChange(value: string): void; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void;
+  draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void;
 }) {
   const panel = useRef<HTMLElement>(null);
   useAskPosition(panel, triggerRef, positionRef);
@@ -38,17 +39,17 @@ export function AskConversation({ entry, store, replica, transport, draft, onDra
     {entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => input.text).join(" · ")}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={entry.busy} onClick={onRetry}>Retry</button></div> : null}
     {entry.record?.target ? <AskChat key={entry.record.id} record={store.get(entry.record.id)} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
-      onToggleEnabled={onToggleEnabled} mode={simple ? 'simple' : 'content'} busy={entry.busy} draft={draft} onDraftChange={onDraftChange} tools={tools} /> : <>
+      onToggleEnabled={onToggleEnabled} mode={simple ? 'simple' : 'content'} busy={entry.busy} draftBinding={draftBinding} tools={tools} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       <div className="lab-ask-opening" role="status">{entry.busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div>
-      <textarea className="lab-ask-draft" aria-label="Ask draft" rows={2} placeholder="Ask anything…" value={draft} onChange={event => onDraftChange(event.target.value)} />
+      <AskDraft binding={draftBinding} />
     </>}
   </section></div>;
 }
 
-function AskChat({ mode, record, inputs, onSendInput, replica, transport, draft, onDraftChange, tools, busy, onToggleEnabled }: {
+function AskChat({ mode, record, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled }: {
   onToggleEnabled(): void; mode: TimelineDisplayMode; record: SessionFork; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
-  draft: string; onDraftChange(value: string): void; tools: ReactNode; busy?: boolean;
+  draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
 }) {
   const session = record.target!;
   const { state, status, actions, questions, setQuestions, sendQueuedInput } = useConversationSession(session, transport, replica, busy);
@@ -64,8 +65,13 @@ function AskChat({ mode, record, inputs, onSendInput, replica, transport, draft,
       return {};
     }}
     sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
-    draftSessionKey={sessionKey(session)} messageDraft={draft} onMessageDraftChange={onDraftChange}
+    draftSessionKey={sessionKey(session)} draftBinding={draftBinding}
     questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title" data-session-status={sessionActivity(state)}>Ask</strong>}
     sessionManager={tools} /></TimelineDisplay.Provider>;
+}
+
+function AskDraft({ binding }: { binding: DraftBinding }) {
+  const draft = useBoundDraft(binding);
+  return <textarea className="lab-ask-draft" aria-label="Ask draft" rows={2} placeholder="Ask anything…" value={draft.text} onChange={event => draft.set(event.target.value)} />;
 }

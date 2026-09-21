@@ -1,3 +1,5 @@
+import { ReplicaCache } from './replica-cache.js';
+import { DraftStore } from './draft-store.js';
 import { useSessionStars } from './hooks/useSessionStars.js';
 import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
@@ -39,7 +41,7 @@ import {
   type RemoteAgentTransport,
   type RemoteSessionStatus,
 } from '@orchardworks/agent-remote-web';
-import { ReadingPositions, RecoveryScope, readDrafts, saveDrafts, readLastSession, saveLastSession } from './conversation-recovery.js';
+import { ReadingPositions, RecoveryScope, readLastSession, saveLastSession } from './conversation-recovery.js';
 import { recoverMessages } from './message-recovery.js';
 import { restoreSession } from './session-restoration.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
@@ -166,9 +168,7 @@ function AppContent({
   const hostClient = useMemo(() => hostService ?? new RemoteHostClient(baseUrl), [baseUrl, hostService]);
   const previewClient = useMemo(() => new HttpPreviewClient(baseUrl), [baseUrl]);
   const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
-  const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined);
   const [askSimple, setAskSimple] = useState(false);
-  const ask = useAskConversations(baseUrl, transport, directory, selectedHost.id, retryHosts);
   const restoredHostSelection = useRef(false);
   const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory ? readOpenedSessions(baseUrl) : []);
   const openedSessionsRef = useRef(openedSessions);
@@ -193,14 +193,12 @@ function AppContent({
   const [creationLocked, setCreationLocked] = useState(false);
   const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
   useEffect(() => beginCatchUp(), [baseUrl, transport, beginCatchUp]);
-  const replicas = useMemo(() => new Map<string, AgentReplica>(), [baseUrl, transport]);
+  const replicas = useMemo(() => new ReplicaCache(), [baseUrl, transport]);
   const replicaFor = useCallback((agentId: string) => {
-    let replica = replicas.get(agentId);
-    if (!replica) { replica = new AgentReplica(); replicas.set(agentId, replica); }
-    return replica;
+    return replicas.obtain(agentId);
   }, [replicas]);
   const [uncertainMutation, setUncertainMutation] = useState(false);
-  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>(() => readDrafts(baseUrl));
+  const messageDrafts = useMemo(() => new DraftStore(baseUrl), [baseUrl]);
   const clientRef = useRef<RemoteSessionClient>();
   const primaryBinding = useRef<{ baseUrl: string; transport: LabTransport; agentId: string }>();
   const replicaRef = useRef<AgentReplica>();
@@ -247,7 +245,8 @@ function AppContent({
   const [desktopContextVisible, setDesktopContextVisible] = useState(true);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
 
-  useEffect(() => { saveDrafts(baseUrl, messageDrafts); }, [baseUrl, messageDrafts]);
+  const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
+  const ask = useAskConversations(baseUrl, transport, directory, selectedHost.id, retryHosts);
   useEffect(() => {
     if (compactLayout && !contextOpen) return;
     const panel = shellRef.current?.querySelector<HTMLElement>('#lab-context');
@@ -767,6 +766,14 @@ function AppContent({
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
     && primaryBinding.current.transport === transport && primaryBinding.current.agentId === stackRoot?.agentId);
   const openWindows = useMemo(() => [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [stackRoot, primaryIsBound, sideSessions]);
+  useEffect(() => {
+    replicas.retain([
+      ...(primaryBinding.current?.agentId ? [primaryBinding.current.agentId] : []),
+      ...sideSessions.map(session => session.agentId),
+      ...(askVisible && askEntry?.record?.target ? [askEntry.record.target.agentId] : []),
+      ...(addressSession ? [addressSession.agentId] : []),
+    ]);
+  });
   const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
     liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, askEntry?.record?.target, askEntry?.attached, askVisible]);
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions);
@@ -887,14 +894,14 @@ function AppContent({
       await configureFork(transport, forkStore, forkStore.get(record.id));
       rememberSession(source); rememberSession(session);
       setDirectoryRevision((value) => value + 1);
-      if (args.trim()) setMessageDrafts((current) => ({ ...current, [session.agentId]: args.trim() }));
+      if (args.trim()) messageDrafts.set(session.agentId, args.trim());
       if (id === 'console:side') selectSide(source, session);
       if (args.trim() && forkStore.get(record.id).delivery !== 'sent') {
         setForkInputStatus({ agentId: session.agentId, pending: true });
         try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
         catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: message(error, 'The first fork input failed.') }); throw error; }
         setForkInputStatus(undefined);
-        setMessageDrafts((current) => current[session.agentId] === args.trim() ? { ...current, [session.agentId]: '' } : current);
+        if (messageDrafts.get(session.agentId) === args.trim()) messageDrafts.set(session.agentId, '');
       }
       forkStore.finishCreation(record.id);
       forkReservation.current = undefined;
@@ -951,7 +958,7 @@ function AppContent({
       observation={askEntry?.record?.target ? tracking.observations[sessionKey(askEntry.record.target)] : undefined} onOpen={() => openAsk()} />
       {askVisible ? <AskConversation positionRef={askPositionRef} triggerRef={askTriggerRef} simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
       entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
-      onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draft={ask.drafts[askKey!] ?? ''} onDraftChange={text => ask.setDraft(askKey!, text)} onClose={ask.close} onToggleEnabled={ask.toggle} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
+      onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draftBinding={{ store: ask.drafts, key: askKey! }} onClose={ask.close} onToggleEnabled={ask.toggle} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
       : null}</> : null}
     {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
@@ -1127,8 +1134,7 @@ function AppContent({
           resolveSessionLink={resolveSessionLink}
           childrenFor={currentSession ? nativeSessionId => sessionChildren({ ...currentSession, nativeSessionId }, sessionEntries) : undefined}
           onOpenChildSession={directory && !hostOffline && !transitioning ? openChildSession : undefined}
-          messageDraft={activeAgentId ? messageDrafts[activeAgentId] ?? '' : ''}
-          onMessageDraftChange={activeAgentId ? (text) => setMessageDrafts((current) => ({ ...current, [activeAgentId]: text })) : undefined}
+          draftBinding={activeAgentId ? { store: messageDrafts, key: activeAgentId } : undefined}
           questionDrafts={activeAgentId ? questionDrafts[activeAgentId] ?? {} : undefined}
           onQuestionDraftChange={activeAgentId ? (requestId, draft) => setQuestionDrafts((current) => ({
             ...current, [activeAgentId]: { ...current[activeAgentId], [requestId]: draft },
@@ -1142,8 +1148,7 @@ function AppContent({
           focused={focusedWindow !== undefined && sessionKey(focusedWindow) === sessionKey(session)}
           selectedChild={sideSelections[sessionKey(session)]}
           initialInput={forkInputStatus?.agentId === session.agentId ? forkInputStatus : undefined}
-          visible={activeView === 'workbench'} draft={messageDrafts[session.agentId] ?? ''}
-          onDraftChange={(text) => setMessageDrafts((current) => ({ ...current, [session.agentId]: text }))}
+          visible={activeView === 'workbench'} draftBinding={{ store: messageDrafts, key: session.agentId }}
           onFocus={() => { if (sideFocus !== sessionKey(session)) setSideFocus(sessionKey(session)); }} onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(stackRange.end + 1)} offset={stackRange.end + 1} onExpand={revealSession} />
         </div>

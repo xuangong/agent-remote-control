@@ -1,4 +1,4 @@
-import { watchPageResume } from '@orchardworks/agent-remote-web';
+import { watchPageResume } from '@orchardworks/agent-remote-web/headless';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 

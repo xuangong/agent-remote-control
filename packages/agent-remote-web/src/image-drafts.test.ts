@@ -13,7 +13,9 @@ it('round-trips ordered draft metadata and blobs through IndexedDB', async () =>
   const restored = await readImageDraft(saved.key);
   expect(restored?.parts).toEqual(saved.parts);
   expect(restored?.nextLabel).toBe(5);
-  expect(await restored?.images.roundtrip?.blob?.text()).toBe('image bytes');
+  expect(restored?.images.roundtrip?.blob?.size).toBe(11);
+  const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(restored!.images.roundtrip!.blob!); });
+  expect(text).toBe('image bytes');
 });
 it('signout revokes old writes and local clipboard blobs only for the selected scope', async () => {
   const first = draft('account-one'); const second = draft('account-two');
@@ -33,22 +35,50 @@ it('signout revokes old writes and local clipboard blobs only for the selected s
   expect(await readImageDraft(first.key)).toBeUndefined();
 });
 
- it('recovers binary images when a WebKit storage backend rejects Blob records', async () => {
+it('stores portable image bytes once and never asks IndexedDB to prepare a Blob', async () => {
+  const saved = draft('portable-binary');
+  const convert = vi.spyOn(saved.images[saved.scope]!.blob!, 'arrayBuffer');
   const original = IDBObjectStore.prototype.put;
-  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value: ImageDraft, key?: IDBValidKey) {
-    if (Object.values(value.images ?? {}).some(image => image.blob)) throw new DOMException('Error preparing Blob/File data to be stored in object store', 'UnknownError');
+  let imageWrites = 0;
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+    if (this.name === 'images') {
+      expect(value.blob).toBeUndefined();
+      expect(value.blobBytes.byteLength).toBe(11);
+      imageWrites++;
+    }
     return key === undefined ? original.call(this, value) : original.call(this, value, key);
   });
   try {
-    const saved = draft('webkit-binary');
+    await writeImageDraft(saved);
+    saved.parts.push({ type: 'text', text: ' more' });
     await writeImageDraft(saved);
     const restored = await readImageDraft(saved.key);
     expect(restored?.parts).toEqual(saved.parts);
-    expect(restored?.images['webkit-binary']?.blob?.type).toBe('image/png');
-    expect(restored?.images['webkit-binary']?.blob?.size).toBe(11);
-  } finally { put.mockRestore(); }
+    expect(restored?.images[saved.scope]?.blob?.size).toBe(11);
+    expect(restored?.images[saved.scope]?.blob?.type).toBe('image/png');
+    expect(convert).toHaveBeenCalledTimes(1);
+    expect(imageWrites).toBe(1);
+  } finally { put.mockRestore(); convert.mockRestore(); }
 });
 
+
+it('aborts metadata with failed image bytes and permits a later retry', async () => {
+  const saved = draft('atomic-write');
+  const original = IDBObjectStore.prototype.put;
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+    if (this.name === 'images') {
+      original.call(this, { key: 'duplicate' });
+      return this.add({ key: 'duplicate' });
+    }
+    return key === undefined ? original.call(this, value) : original.call(this, value, key);
+  });
+  try {
+    await expect(writeImageDraft(saved)).rejects.toMatchObject({ name: 'ConstraintError' });
+    expect(await readImageDraft(saved.key)).toBeUndefined();
+  } finally { put.mockRestore(); }
+  await writeImageDraft(saved);
+  expect((await readImageDraft(saved.key))?.parts).toEqual(saved.parts);
+});
 
 it('does not persist image bytes for removed tags while retaining them for undo in memory', async () => {
   const saved = draft('removed-images');
@@ -57,4 +87,84 @@ it('does not persist image bytes for removed tags while retaining them for undo 
   const restored = await readImageDraft(saved.key);
   expect(restored?.images).toEqual({});
   expect(saved.images['removed-images']?.blob).toBeDefined();
+});
+
+it('updates text metadata without rewriting retained image bytes', async () => {
+  const saved = draft('metadata-only');
+  await writeImageDraft(saved);
+  let bytes = 0;
+  const original = IDBObjectStore.prototype.put;
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+    if (value.blob || value.blobBytes || Object.values(value.images ?? {}).some((image: any) => image.blob || image.blobBytes)) bytes++;
+    return key === undefined ? original.call(this, value) : original.call(this, value, key);
+  });
+  try {
+    saved.parts.push({ type: 'text', text: ' a later caption' });
+    await writeImageDraft(saved);
+    expect((await readImageDraft(saved.key))?.parts).toEqual(saved.parts);
+    expect((await readImageDraft(saved.key))?.images['metadata-only']?.blob?.size).toBe(11);
+    expect(bytes).toBe(0);
+  } finally { put.mockRestore(); }
+});
+
+it('bounds unowned clipboard images while preserving an editor-owned image', async () => {
+  const { retainDraftImages } = await import('./image-drafts.js');
+  const scope = 'cache-budget';
+  const owner = {};
+  const blob = new NativeBlob([new Uint8Array(8 * 1024 * 1024)], { type: 'image/png' }) as Blob;
+  cacheDraftImage(scope, 'protected', blob, 0);
+  retainDraftImages(owner, scope, ['protected']);
+  for (let i = 0; i < 8; i++) cacheDraftImage(scope, `evictable-${i}`, blob, 0);
+  expect(lookupDraftImage(scope, 'evictable-0')).toBeUndefined();
+  expect(lookupDraftImage(scope, 'evictable-7')).toBe(blob);
+  expect(lookupDraftImage(scope, 'protected')).toBe(blob);
+  retainDraftImages(owner, scope, []);
+  await clearImageDraftScope(scope);
+});
+
+it('rehydrates an evicted clipboard image from durable bytes only within its scope', async () => {
+  const { restoreCachedDraftImage } = await import('./image-drafts.js');
+  const saved = draft('durable-clipboard');
+  await writeImageDraft(saved);
+  expect(lookupDraftImage(saved.scope, saved.scope)).toBeUndefined();
+  const restored = await restoreCachedDraftImage(saved.scope, saved.scope);
+  expect(restored?.size).toBe(11);
+  expect(lookupDraftImage(saved.scope, saved.scope)).toBe(restored);
+  expect(await restoreCachedDraftImage('another-account', saved.scope)).toBeUndefined();
+});
+
+it('upgrades embedded version-one drafts without losing image bytes and can read both forms', async () => {
+  const { IDBFactory } = await import('fake-indexeddb');
+  const isolated = new IDBFactory();
+  const saved = draft('version-one');
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const open = isolated.open('agent-remote-image-drafts', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('drafts', { keyPath: 'key' });
+    open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
+  });
+  await new Promise<void>((resolve, reject) => {
+    const tx = database.transaction('drafts', 'readwrite');
+    tx.objectStore('drafts').put(saved);
+    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+  });
+  database.close();
+  vi.stubGlobal('indexedDB', isolated);
+  vi.resetModules();
+  try {
+    const storage = await import('./image-drafts.js');
+    const embedded = await storage.readImageDraft(saved.key);
+    expect(embedded?.images['version-one']?.blob?.size).toBe(11);
+    await storage.writeImageDraft(embedded!);
+    const separated = await storage.readImageDraft(saved.key);
+    expect(separated?.parts).toEqual(saved.parts);
+    expect(separated?.images['version-one']?.blob?.size).toBe(11);
+    const open = isolated.open('agent-remote-image-drafts', 2);
+    const upgraded = await new Promise<IDBDatabase>(resolve => { open.onsuccess = () => resolve(open.result); });
+    const tx = upgraded.transaction('drafts', 'readonly');
+    const request = tx.objectStore('drafts').get(saved.key);
+    await new Promise<void>(resolve => { tx.oncomplete = () => resolve(); });
+    expect(request.result.images['version-one'].blob).toBeUndefined();
+    expect(request.result.images['version-one'].blobKey).toBeDefined();
+    upgraded.close();
+  } finally { vi.unstubAllGlobals(); }
 });

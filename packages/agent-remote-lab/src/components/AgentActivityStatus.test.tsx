@@ -93,3 +93,18 @@ describe('composer activity', () => {
     expect((container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+it('pauses hidden elapsed clocks and catches up from the timestamp on return', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-09-10T00:00:10Z'));
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  try {
+    const container = await render(<LiveControlPanel state={active} onCancel={async () => {}} />);
+    expect(container.querySelector('time')?.textContent).toBe('10s');
+    await act(async () => { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(container.querySelector('time')?.textContent).toBe('10s');
+    await act(async () => { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+    expect(container.querySelector('time')?.textContent).toBe('15s');
+  } finally { visibility.mockRestore(); vi.useRealTimers(); }
+});

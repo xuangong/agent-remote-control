@@ -3,7 +3,7 @@ import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agen
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
 import { ForkStore, referenceForkContext, type SessionFork } from '../session-forks.js';
 import { configureFork } from '../fork-actions.js';
-import { readDrafts, saveDrafts } from '../conversation-recovery.js';
+import { DraftStore } from '../draft-store.js';
 import { sessionKey } from '../session-tree.js';
 
 export type AskInputSender = (text: string, operationId: string) => Promise<unknown>;
@@ -57,17 +57,14 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
   const [, refresh] = useState(0);
   const [openKey, setOpenKeyState] = useState<string>();
   function setOpenKey(key: string | undefined) { openKeyRef.current = key; setOpenKeyState(key); }
-  const [drafts, setDrafts] = useState(() => readDrafts(`${baseUrl}:ask`));
-  const draftsRef = useRef(drafts); draftsRef.current = drafts;
-  useEffect(() => saveDrafts(`${baseUrl}:ask`, drafts), [baseUrl, drafts]);
+  const drafts = useMemo(() => new DraftStore(`${baseUrl}:ask`), [baseUrl]);
   useEffect(() => store.subscribe(() => refresh(value => value + 1)), [store]);
   function update(key: string, change: Partial<AskEntry>) {
     entries.set(key, { ...entries.get(key)!, ...change });
     refresh(value => value + 1);
   }
   function setDraft(key: string, text: string) {
-    draftsRef.current = { ...draftsRef.current, [key]: text };
-    setDrafts(draftsRef.current);
+    drafts.set(key, text);
   }
   function sendInput(key: string, id: string, send: AskInputSender) {
     const entry = entries.get(key);
@@ -108,7 +105,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('Open the source session before starting Ask.');
     const replacing = clean || !!(entry.pending && entry.record && entry.pending.id !== entry.record.id);
-    const draftAtStart = draftsRef.current[key];
+    const draftAtStart = drafts.get(key);
     const target = (source.hostId ?? 'local') === selectedHostId ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
     update(key, { busy: true, error: undefined });
     const queueQuestion = () => {
@@ -138,7 +135,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       await configureFork(transport, store, store.get(record.id), preparation.signal);
       store.finishCreation(record.id);
       update(key, { record: store.get(record.id), pending: undefined, attached: true });
-      if (replacing && draftsRef.current[key] === draftAtStart) setDraft(key, '');
+      if (replacing && drafts.get(key) === draftAtStart) setDraft(key, '');
       onCreated?.();
       queueQuestion();
       return {};

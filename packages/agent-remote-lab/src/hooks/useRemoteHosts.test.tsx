@@ -21,9 +21,10 @@ it('restores mobile conversation actions when its Host reconnects while Context 
     const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
     expect(input.disabled).toBe(false);
     expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+    const beforeReconnect = hosts.mock.calls.length;
     online = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-    expect(hosts).toHaveBeenCalledTimes(2);
+    expect(hosts).toHaveBeenCalledTimes(beforeReconnect + 1);
     expect(container.querySelector('#lab-context')).toBeNull();
     expect(input.disabled).toBe(false);
     await act(async () => {
@@ -54,4 +55,29 @@ it('restores the Host and Provider directory for an opened remote conversation',
     expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Codex · Codex Host');
     expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toContain('Online');
   } finally { window.localStorage.removeItem(`agent-remote-opened:${baseUrl}`); }
+});
+
+it('polls quiet chat less often and refreshes immediately when discovery opens', async () => {
+  vi.useFakeTimers();
+  const hosts = vi.fn(async () => ({ hosts: [] }));
+  const service = { hosts, pair: vi.fn() };
+  const { useRemoteHosts } = await import('./useRemoteHosts.js');
+  const { useState } = await import('react');
+  function Harness() {
+    const [discovery, setDiscovery] = useState(false);
+    useRemoteHosts(service, true, discovery);
+    return <button onClick={() => setDiscovery(true)}>Discover</button>;
+  }
+  try {
+    const container = await render(<Harness />);
+    expect(hosts).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(29_000));
+    expect(hosts).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(hosts).toHaveBeenCalledTimes(2);
+    await act(async () => container.querySelector('button')!.click());
+    expect(hosts).toHaveBeenCalledTimes(3);
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(hosts).toHaveBeenCalledTimes(4);
+  } finally { vi.useRealTimers(); }
 });

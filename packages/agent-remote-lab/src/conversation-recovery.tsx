@@ -1,10 +1,16 @@
 import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite } from './recovery-writes.js';
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
-import { clearImageDraftScope } from '@orchardworks/agent-remote-web/react';
+import { clearImageDraftScope } from '@orchardworks/agent-remote-web/headless';
 import type { TimelineReadingPosition } from '@orchardworks/agent-remote-web/react';
 
 const prefix = 'agent-remote:recovery:';
+const generations = new Map<string, number>();
+export function recoveryGeneration(scope: string): number {
+  const generation = generations.get(scope) ?? 0;
+  generations.set(scope, generation);
+  return generation;
+}
 export const RecoveryScope = createContext<ReadingPositions | undefined>(undefined);
 
 export function readLastSession(scope: string): ControllerLocation | undefined {
@@ -35,6 +41,7 @@ export function saveDrafts(scope: string, drafts: Record<string, string>): void 
 }
 
 export function clearConversationRecovery(scope?: string): void {
+  for (const [key, generation] of generations) if (!scope || key === scope || key.startsWith(`${scope}:`)) generations.set(key, generation + 1);
   cancelRecoveryWrites(scope ? `${prefix}${scope}:` : prefix);
   if (scope) void clearImageDraftScope(scope).catch(() => { /* Signout still completes when browser storage is unavailable. */ });
   try {

@@ -1,3 +1,4 @@
+import { TimelineEntryIndex } from './timeline-entry-index.js';
 import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type TouchEvent, type WheelEvent } from 'react';
 import { captureReadingText, readingTextTop, type ReadingTextAnchor } from './reading-text-anchor.js';
 
@@ -10,9 +11,10 @@ export interface TimelineReadingContinuity { identity: string; positions: Timeli
 
 interface TimelineHistoryLoading { hasOlder: boolean; cursor?: string; load(): void | Promise<void> }
 
-export function useTimelineScroll(identity: string, visible = true, positions?: TimelineReadingPositions, continuity?: TimelineReadingContinuity, history?: TimelineHistoryLoading) {
+export function useTimelineScroll(identity: string, visible = true, positions?: TimelineReadingPositions, continuity?: TimelineReadingContinuity, history?: TimelineHistoryLoading, contentRevision: unknown = Symbol()) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const entryIndex = useRef(new TimelineEntryIndex());
   const following = useRef(true);
   const anchor = useRef<ReadingAnchor>();
   const expectedScroll = useRef<number>();
@@ -65,9 +67,14 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   function captureAnchor(): void {
     const viewport = viewportRef.current;
     if (!viewport || !viewport.clientHeight) return;
+    if (following.current) {
+      if (currentIdentity.current !== undefined) positionsRef.current?.set(currentIdentity.current, { following: true });
+      captureReadingContinuity(viewport.scrollTop);
+      return;
+    }
     const bounds = viewport.getBoundingClientRect();
     const top = bounds.top;
-    const entry = Array.from(viewport.querySelectorAll<HTMLElement>('[data-entry-key]')).find((element) => element.getBoundingClientRect().bottom > top);
+    const entry = entryIndex.current.refresh(viewport).at(top);
     if (!entry?.dataset.entryKey) {
       // A reconnect can temporarily remove entries before the same epoch returns.
       if (!positionsRef.current) anchor.current = undefined;
@@ -91,7 +98,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       if (bottom - viewport.scrollTop > 1) viewport.scrollTop = bottom;
     } else if (anchor.current) {
       const saved = anchor.current;
-      const entry = Array.from(viewport.querySelectorAll<HTMLElement>('[data-entry-key]')).find((element) => element.dataset.entryKey === saved.key);
+      const entry = entryIndex.current.refresh(viewport).get(saved.key);
       if (entry) {
         const textTop = saved.text ? readingTextTop(entry, saved.text) : undefined;
         const adjustment = (textTop ?? entry.getBoundingClientRect().top) - viewport.getBoundingClientRect().top
@@ -125,7 +132,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       draggingScrollbar.current = false;
     }
     updatePosition();
-  });
+  }, [identity, visible, contentRevision]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -134,7 +141,10 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     const observer = new ResizeObserver(() => updateRef.current());
     observer.observe(viewport);
     observer.observe(content);
-    return () => observer.disconnect();
+    // A replacement can move the reading line without changing the outer height.
+    const mutations = new MutationObserver(() => updateRef.current());
+    mutations.observe(content, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['open', 'hidden'] });
+    return () => { observer.disconnect(); mutations.disconnect(); };
   }, []);
 
   function pauseFollowing(): void {
@@ -146,7 +156,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     captureAnchor();
   }
 
-  useLayoutEffect(() => () => { loading.current = undefined; currentIdentity.current = undefined; }, []);
+  useLayoutEffect(() => () => { loading.current = undefined; currentIdentity.current = undefined; entryIndex.current.dispose(); }, []);
 
   useLayoutEffect(() => {
     const end = () => { draggingScrollbar.current = false; };
@@ -189,7 +199,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
 
   function revealEntry(key: string): boolean {
     const viewport = viewportRef.current;
-    const entry = Array.from(contentRef.current?.querySelectorAll<HTMLElement>('[data-entry-key]') ?? []).find(node => node.dataset.entryKey === key);
+    const entry = viewport ? entryIndex.current.refresh(viewport).get(key) : undefined;
     if (!viewport || !entry || !isVisible.current) return false;
     pauseFollowing();
     historyIntent.current = false;
@@ -206,8 +216,8 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   function loadOlder(action: () => void | Promise<void>): Promise<void> {
     if (loading.current && loading.current.identity === currentIdentity.current) return loading.current.promise;
     const requestIdentity = currentIdentity.current ?? identity;
-    captureAnchor();
     following.current = false;
+    captureAnchor();
     captureReadingContinuity();
     attemptedCursor.current = historyRef.current?.cursor;
     setHistoryState({ identity: requestIdentity, pending: true });

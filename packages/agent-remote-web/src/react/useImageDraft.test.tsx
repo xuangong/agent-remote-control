@@ -79,7 +79,7 @@ it('counts all newly imported image bytes before accepting a clipboard range', a
   const copied = draft.parts;
   await rerender(container, <Harness session="b" active={false} />);
   await act(async () => draft.setParts(draft.addFiles([blob])));
-  await act(async () => draft.setParts([...draft.parts, ...draft.importParts(copied)]));
+  await act(async () => draft.setParts([...draft.parts, ...await draft.importParts(copied)]));
   expect(draft.parts.filter(part => part.type === 'image')).toHaveLength(2);
   expect(draft.error).toContain('20 MiB');
 });
@@ -91,7 +91,7 @@ it('checks retained image bytes when pasting an earlier deleted atom', async () 
   const copied = draft.parts;
   await act(async () => draft.setParts([]));
   await act(async () => draft.setParts(draft.addFiles([blob, blob])));
-  await act(async () => draft.setParts([...draft.parts, ...draft.importParts(copied)]));
+  await act(async () => draft.setParts([...draft.parts, ...await draft.importParts(copied)]));
   expect(draft.parts.filter(part => part.type === 'image')).toHaveLength(2);
   expect(draft.error).toContain('20 MiB');
 });
@@ -135,18 +135,22 @@ it('counts an image still referenced elsewhere when replacing one repeated atom'
   expect(draft.error).toContain('20 MiB');
 });
 
-it('starts saving immediately and coalesces edits made while storage is busy', async () => {
+it('coalesces edits while storage is busy after the first write window', async () => {
+  vi.useFakeTimers();
   vi.mocked(readImageDraft).mockResolvedValue(undefined);
   await render(<Harness scope="batched-draft" />);
   let finish!: () => void;
   vi.mocked(writeImageDraft).mockClear();
   vi.mocked(writeImageDraft).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
-  for (let i = 0; i < 10; i++) await act(async () => draft.setText(`Edit ${i}`));
+  await act(async () => draft.setText('Edit 0'));
+  await act(async () => vi.advanceTimersByTimeAsync(250));
+  for (let i = 1; i < 10; i++) await act(async () => draft.setText(`Edit ${i}`));
   expect(writeImageDraft).toHaveBeenCalledTimes(1);
   expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Edit 0' }] }), 0);
   await act(async () => finish());
   expect(writeImageDraft).toHaveBeenCalledTimes(2);
   expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Edit 9' }] }), 0);
+  vi.useRealTimers();
 });
 
 
@@ -155,7 +159,10 @@ it('clears the image storage warning after a later successful save', async () =>
   vi.mocked(writeImageDraft).mockRejectedValueOnce(new Error('temporary storage failure'));
   await act(async () => draft.setParts(draft.addFiles([new Blob(['x'], { type: 'image/png' })])));
   expect(draft.storageError).toContain('Images are not saved');
+  vi.useFakeTimers();
   await act(async () => draft.setParts([...draft.parts, { type: 'text', text: 'caption' }]));
+  await act(async () => vi.advanceTimersByTimeAsync(250));
+  vi.useRealTimers();
   expect(draft.storageError).toBeUndefined();
   expect(draft.hasImages).toBe(true);
 });
@@ -216,4 +223,23 @@ it('uploads images recovered by a later successful read', async () => {
   expect(upload).toHaveBeenCalledTimes(1);
   expect(draft.ready).toBe(true);
   expect(draft.storageError).toBeUndefined();
+});
+
+it('batches normal typing in fixed windows and flushes the latest text on pagehide', async () => {
+  vi.useFakeTimers();
+  try {
+    await render(<Harness scope="typing-window" />);
+    vi.mocked(writeImageDraft).mockClear();
+    for (let i = 0; i < 3; i++) {
+      await act(async () => draft.setText(`Edit ${i}`));
+      await act(async () => vi.advanceTimersByTimeAsync(70));
+    }
+    expect(writeImageDraft).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(40));
+    expect(writeImageDraft).toHaveBeenCalledTimes(1);
+    expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Edit 2' }] }), 0);
+    await act(async () => draft.setText('Last edit'));
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Last edit' }] }), 0);
+  } finally { vi.useRealTimers(); }
 });

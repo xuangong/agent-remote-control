@@ -1,17 +1,18 @@
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, PreviewDock, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import { AgentCommandDetails, AgentTimeline, PreviewDock, TimelineDisplay, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 
 import { sessionActivity } from '../session-activity.js';
 import { RecoveryScope } from '../conversation-recovery.js';
-import { LiveControlPanel } from './LiveControlPanel.js';
+import { DraftComposer } from './DraftComposer.js';
+import type { DraftBinding } from '../draft-store.js';
 import { PlanningControl } from './PlanningControl.js';
 import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
@@ -36,7 +37,7 @@ export interface LabWorkbenchActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
-export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftBinding, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { draftBinding?: DraftBinding; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const suppliedFeedbackActions = useActionFeedback(suppliedActions, state?.agent?.id);
   const actions = sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
   const recoveryPositions = useContext(RecoveryScope);
@@ -48,14 +49,6 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
   const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent && !compact);
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
-  const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
-    actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined);
-  const consumedReveal = useRef<string>();
-  useLayoutEffect(() => {
-    if (!visible || !revealEntry) return;
-    const request = JSON.stringify([state?.agent?.id, state?.timeline.epoch, revealEntry.requestId]);
-    if (consumedReveal.current !== request && scroll.revealEntry(revealEntry.key)) consumedReveal.current = request;
-  }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries]);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
   const loadingLabel = sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session';
@@ -111,47 +104,11 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span>
     </header>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
-    <div className="lab-timeline-stage">
-      <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
-        <div className="lab-conversation-content" ref={scroll.contentRef}>
-          {hasReplica ? <>
-            {agentFailure ? <p className="lab-control-note" role="alert">Agent failed: {agentFailure}</p>
-              : connectionFailure ? <p className="lab-control-note" role="alert">Agent connection failed: {connectionFailure.message}</p>
-              : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">Timeline synchronization is reconnecting.</p> : null}
-            {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
-            <AgentTimeline
-              state={state}
-              onRetryMessage={runtimeMutationDisabled ? undefined : actions.retryMessage}
-              onDeleteMessage={actions.deleteMessage}
-              onInspectEntry={onInspectEntry}
-              inspectedEntryKey={revealEntry?.key}
-              showHeader={false}
-              historyLoading={scroll.historyLoading}
-              historyError={scroll.historyError}
-              onOpenChildSession={onOpenChildSession}
-              childrenFor={childrenFor}
-              resolveSessionLink={resolveSessionLink}
-              onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
-              onInteractionResponse={actions.respondToInteraction}
-              interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
-              onResourceRequest={actions.requestResource}
-              onResourceResolve={actions.resolveResource}
-              questionDrafts={questionDrafts}
-              onQuestionDraftChange={onQuestionDraftChange}
-            />
-          </> : isAttaching ? <div className="lab-empty-state">
-            <span className="lab-empty-icon" aria-hidden="true">↗</span>
-            <h3>{sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} {attachingAgentId}</h3>
-            <p>The Timeline will appear when the Agent Snapshot is available.</p>
-          </div> : <div className="lab-empty-state">
-            <span className="lab-empty-icon" aria-hidden="true">↗</span>
-            <h3>Start with a Provider</h3>
-            <p>Open a registered Agent to observe its Timeline, interactions, and durable resources.</p>
-          </div>}
-        </div>
-      </div>
-      {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
-    </div>
+    <WorkbenchTimeline state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
+      visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
+      agentFailure={agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
+      onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
+      questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} />
     <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent} data-collapsed={composerHidden || undefined}>
       <div hidden={composerHidden}>
         {composerContext}
@@ -166,7 +123,7 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
           </svg>
         </button>
         <div id={composerId} className="lab-composer-body" hidden={composerHidden}>
-          <LiveControlPanel
+          <DraftComposer binding={draftBinding}
             compact={compact}
             consoleCommands={sessionStatus === 'ready' ? consoleCommands : []}
             onExecuteConsoleCommand={sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
@@ -175,6 +132,7 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
             sessionKey={draftSessionKey ?? state?.agent?.id}
             draftScope={recoveryPositions?.scope}
             visible={visible}
+            activityVisible={visible && !composerHidden}
             onSendMessageContent={suppliedFeedbackActions.sendMessageContent}
             onUploadImage={visible ? actions.uploadImage : undefined}
             draft={messageDraft}
@@ -226,3 +184,64 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): La
     loadOlder: report('Load conversation history', actions.loadOlder),
   }), [actions, sessionId]);
 }
+
+const WorkbenchTimeline = memo(function WorkbenchTimeline({ state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
+  agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
+  questionDrafts, onQuestionDraftChange }: Pick<Parameters<typeof LabWorkbench>[0], 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
+    readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; agentFailure?: string;
+    connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean;
+  }) {
+  const display = useContext(TimelineDisplay);
+  const contentRevision = useMemo(() => ({}), [state, display, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
+  const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
+    actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined, contentRevision);
+  const consumedReveal = useRef<string>();
+  useLayoutEffect(() => {
+    if (!visible || !revealEntry) return;
+    const request = JSON.stringify([state?.agent?.id, state?.timeline.epoch, revealEntry.requestId]);
+    if (consumedReveal.current !== request && scroll.revealEntry(revealEntry.key)) consumedReveal.current = request;
+  }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries]);
+  const hasReplica = state !== undefined;
+  const isAttaching = !hasReplica && attachingAgentId !== undefined;
+  return <div className="lab-timeline-stage">
+      <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
+        <div className="lab-conversation-content" ref={scroll.contentRef}>
+          {hasReplica ? <>
+            {agentFailure ? <p className="lab-control-note" role="alert">Agent failed: {agentFailure}</p>
+              : connectionFailure ? <p className="lab-control-note" role="alert">Agent connection failed: {connectionFailure.message}</p>
+              : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">Timeline synchronization is reconnecting.</p> : null}
+            {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
+            <AgentTimeline
+              state={state}
+              onRetryMessage={runtimeMutationDisabled ? undefined : actions.retryMessage}
+              onDeleteMessage={actions.deleteMessage}
+              onInspectEntry={onInspectEntry}
+              inspectedEntryKey={revealEntry?.key}
+              showHeader={false}
+              historyLoading={scroll.historyLoading}
+              historyError={scroll.historyError}
+              onOpenChildSession={onOpenChildSession}
+              childrenFor={childrenFor}
+              resolveSessionLink={resolveSessionLink}
+              onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
+              onInteractionResponse={actions.respondToInteraction}
+              interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
+              onResourceRequest={actions.requestResource}
+              onResourceResolve={actions.resolveResource}
+              questionDrafts={questionDrafts}
+              onQuestionDraftChange={onQuestionDraftChange}
+            />
+          </> : isAttaching ? <div className="lab-empty-state">
+            <span className="lab-empty-icon" aria-hidden="true">↗</span>
+            <h3>{sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} {attachingAgentId}</h3>
+            <p>The Timeline will appear when the Agent Snapshot is available.</p>
+          </div> : <div className="lab-empty-state">
+            <span className="lab-empty-icon" aria-hidden="true">↗</span>
+            <h3>Start with a Provider</h3>
+            <p>Open a registered Agent to observe its Timeline, interactions, and durable resources.</p>
+          </div>}
+        </div>
+      </div>
+      {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
+    </div>;
+});

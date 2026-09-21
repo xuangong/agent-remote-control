@@ -30,7 +30,7 @@ export interface ComposerEditorHandle { focus(): void; openImage(imageId: string
 interface Props {
   id: string; parts: readonly DraftPart[]; images: Readonly<Record<string, DraftImage>>; disabled: boolean;
   onChange(parts: DraftPart[]): void; onFiles(files: readonly Blob[], replacingImageId?: string): DraftPart[];
-  onImport(parts: readonly DraftPart[]): DraftPart[]; onRetry(imageId: string): void;
+  onImport(parts: readonly DraftPart[]): DraftPart[] | Promise<DraftPart[]>; onRetry(imageId: string): void;
   onKeyDown(event: globalThis.KeyboardEvent): void;
   describedBy?: string; controls?: string; activeDescendant?: string;
 }
@@ -40,6 +40,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
   const latest = useRef(props); latest.current = props;
   const bookmark = useRef<SelectionBookmark>();
   const previewSelection = useRef<SelectionBookmark>();
+  const pendingPastes = useRef(new Map<object, SelectionBookmark>());
   const [selected, setSelected] = useState<string>();
   const [previewOpen, setPreviewOpen] = useState(false);
   const replaceInput = useRef<HTMLInputElement>(null);
@@ -76,6 +77,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
       editable: () => !latest.current.disabled,
       dispatchTransaction(transaction) {
         if (bookmark.current) bookmark.current = bookmark.current.map(transaction.mapping);
+        for (const [key, selection] of pendingPastes.current) pendingPastes.current.set(key, selection.map(transaction.mapping));
         if (previewSelection.current) previewSelection.current = previewSelection.current.map(transaction.mapping);
         editor.updateState(editor.state.apply(transaction));
         const selection = editor.state.selection;
@@ -104,7 +106,20 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
           try {
             const value: unknown = JSON.parse(data);
             if (Array.isArray(value) && value.length <= 1000 && value.every(part => part && typeof part === 'object' && ((part.type === 'text' && typeof part.text === 'string') || (part.type === 'image' && typeof part.imageId === 'string' && typeof part.label === 'string')))) {
-              insertParts(latest.current.onImport(value as DraftPart[])); return true;
+              const imported = latest.current.onImport(value as DraftPart[]);
+              if (Array.isArray(imported)) insertParts(imported);
+              else {
+                const request = {};
+                pendingPastes.current.set(request, editor.state.selection.getBookmark());
+                void imported.then(parts => {
+                  const selection = pendingPastes.current.get(request);
+                  if (!parts.length || !selection || view.current !== editor || latest.current.disabled) return;
+                  const transaction = editor.state.tr.setSelection(selection.resolve(editor.state.doc));
+                  transaction.replaceWith(transaction.selection.from, transaction.selection.to, toDocument(parts).content);
+                  editor.dispatch(transaction.scrollIntoView());
+                }).finally(() => pendingPastes.current.delete(request));
+              }
+              return true;
             }
           } catch { /* Untrusted clipboard data falls back to plain text. */ }
         }
@@ -134,7 +149,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
       event.preventDefault(); if (cut && !latest.current.disabled) editor.dispatch(editor.state.tr.deleteSelection()); return true;
     }
     view.current = editor;
-    return () => { editor.destroy(); view.current = undefined; };
+    return () => { pendingPastes.current.clear(); editor.destroy(); view.current = undefined; };
   }, []);
   useLayoutEffect(() => {
     const editor = view.current;

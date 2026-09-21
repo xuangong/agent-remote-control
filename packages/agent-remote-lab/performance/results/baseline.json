@@ -1,0 +1,134 @@
+{
+  "browser": "153.0.8010.53",
+  "runs": 5,
+  "instrumented": false,
+  "rich": false,
+  "results": [
+    {
+      "count": 100,
+      "run": 0,
+      "taskMs": 321.03299999999996,
+      "scriptMs": 186.60700000000003,
+      "nodes": 2260
+    },
+    {
+      "count": 100,
+      "run": 1,
+      "taskMs": 291.857,
+      "scriptMs": 172.089,
+      "nodes": 2260
+    },
+    {
+      "count": 100,
+      "run": 2,
+      "taskMs": 299.939,
+      "scriptMs": 176.425,
+      "nodes": 2260
+    },
+    {
+      "count": 100,
+      "run": 3,
+      "taskMs": 311.81699999999995,
+      "scriptMs": 181.068,
+      "nodes": 2260
+    },
+    {
+      "count": 100,
+      "run": 4,
+      "taskMs": 303.314,
+      "scriptMs": 177.301,
+      "nodes": 2260
+    },
+    {
+      "count": 500,
+      "run": 0,
+      "taskMs": 841.6190000000001,
+      "scriptMs": 645.4309999999999,
+      "nodes": 10929
+    },
+    {
+      "count": 500,
+      "run": 1,
+      "taskMs": 823.8570000000001,
+      "scriptMs": 619.9780000000001,
+      "nodes": 10929
+    },
+    {
+      "count": 500,
+      "run": 2,
+      "taskMs": 789.9990000000001,
+      "scriptMs": 606.6560000000001,
+      "nodes": 10929
+    },
+    {
+      "count": 500,
+      "run": 3,
+      "taskMs": 851.191,
+      "scriptMs": 646.36,
+      "nodes": 10929
+    },
+    {
+      "count": 500,
+      "run": 4,
+      "taskMs": 826.2270000000001,
+      "scriptMs": 621.097,
+      "nodes": 10929
+    },
+    {
+      "count": 1000,
+      "run": 0,
+      "taskMs": 1383.858,
+      "scriptMs": 1136.942,
+      "nodes": 21760
+    },
+    {
+      "count": 1000,
+      "run": 1,
+      "taskMs": 1422.558,
+      "scriptMs": 1158.7859999999998,
+      "nodes": 21760
+    },
+    {
+      "count": 1000,
+      "run": 2,
+      "taskMs": 1386.069,
+      "scriptMs": 1134.491,
+      "nodes": 21760
+    },
+    {
+      "count": 1000,
+      "run": 3,
+      "taskMs": 1358.431,
+      "scriptMs": 1114.91,
+      "nodes": 21760
+    },
+    {
+      "count": 1000,
+      "run": 4,
+      "taskMs": 1306.4260000000002,
+      "scriptMs": 1063.7229999999997,
+      "nodes": 21760
+    }
+  ],
+  "medians": [
+    {
+      "count": 100,
+      "taskMs": 303.314
+    },
+    {
+      "count": 500,
+      "taskMs": 826.2270000000001
+    },
+    {
+      "count": 1000,
+      "taskMs": 1383.858
+    }
+  ],
+  "baselineCommit": "db2df7974d0749ce4475008be3dc54a60f94f658",
+  "source": {
+    "baselineCommit": "db2df7974d0749ce4475008be3dc54a60f94f658",
+    "candidateBranch": "perf/frontend-interactions",
+    "candidateBaseCommit": "5ad6d37",
+    "candidateState": "implementation working tree; see the commit containing this result"
+  }
+}

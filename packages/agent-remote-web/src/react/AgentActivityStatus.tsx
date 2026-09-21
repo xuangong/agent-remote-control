@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useVisibleClock } from './visible-clock.js';
 import type { AgentReplicaState } from '../replica/types.js';
 
 export interface AgentActivityStatusProps {
   state: AgentReplicaState;
+  visible?: boolean;
   disabled: boolean;
   commandPending?: boolean;
   interruptDisabled: boolean;
@@ -10,7 +11,7 @@ export interface AgentActivityStatusProps {
   onInterrupt(): void;
 }
 
-export function AgentActivityStatus({ state, disabled, commandPending = false, interruptDisabled, interruptLabel, onInterrupt }: AgentActivityStatusProps) {
+export function AgentActivityStatus({ state, visible = true, disabled, commandPending = false, interruptDisabled, interruptLabel, onInterrupt }: AgentActivityStatusProps) {
   const agent = state.agent;
   const terminal = agent?.status === 'failed' || agent?.status === 'closed';
   const active = Boolean(agent?.activeTurn) && !terminal;
@@ -32,13 +33,7 @@ export function AgentActivityStatus({ state, disabled, commandPending = false, i
   const timestamp = agent?.activeTurn?.startedAt;
   const startedAt = typeof timestamp === 'string' ? Date.parse(timestamp) : NaN;
   const timed = active && !unavailable && Number.isFinite(startedAt);
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    setNow(Date.now());
-    if (!timed) return;
-    const interval = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(interval);
-  }, [agent?.id, agent?.activeTurn?.turnId, startedAt, timed]);
+  const now = useVisibleClock(timed && visible);
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
   return <div className="agent-activity" data-active={runtimeUnavailable || terminal || working || waiting || commandPending || agent?.status === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
     <div className="agent-activity-summary">

@@ -1,0 +1,58 @@
+{
+  "browser": "153.0.8010.53",
+  "runs": 1,
+  "instrumented": true,
+  "rich": true,
+  "results": [
+    {
+      "count": 100,
+      "run": 0,
+      "taskMs": 150.96299999999997,
+      "scriptMs": 54.348000000000006,
+      "nodes": 2264,
+      "rects": 0,
+      "opens": 0,
+      "puts": 5
+    },
+    {
+      "count": 500,
+      "run": 0,
+      "taskMs": 194.79099999999994,
+      "scriptMs": 54.72599999999994,
+      "nodes": 10933,
+      "rects": 0,
+      "opens": 0,
+      "puts": 5
+    },
+    {
+      "count": 1000,
+      "run": 0,
+      "taskMs": 201.95600000000002,
+      "scriptMs": 56.64100000000016,
+      "nodes": 21764,
+      "rects": 0,
+      "opens": 0,
+      "puts": 5
+    }
+  ],
+  "medians": [
+    {
+      "count": 100,
+      "taskMs": 150.96299999999997
+    },
+    {
+      "count": 500,
+      "taskMs": 194.79099999999994
+    },
+    {
+      "count": 1000,
+      "taskMs": 201.95600000000002
+    }
+  ],
+  "source": {
+    "baselineCommit": "db2df7974d0749ce4475008be3dc54a60f94f658",
+    "candidateBranch": "perf/frontend-interactions",
+    "candidateBaseCommit": "5ad6d37",
+    "candidateState": "implementation working tree; see the commit containing this result"
+  }
+}

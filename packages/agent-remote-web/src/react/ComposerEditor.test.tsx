@@ -82,3 +82,31 @@ it('pastes at the current selection after a file picker was cancelled', async ()
   await act(async () => editor.dispatchEvent(paste));
   expect(parts).toEqual([{ type: 'text', text: 'Hello' }, atom]);
 });
+
+it('pastes restored image bytes at the mapped selection and ignores completion after remount', async () => {
+  const ref = createRef<ComposerEditorHandle>();
+  let finish!: (parts: DraftPart[]) => void;
+  const restored = new Promise<DraftPart[]>(resolve => { finish = resolve; });
+  let parts: DraftPart[] = [{ type: 'text', text: 'After' }];
+  const atom: DraftPart = { type: 'image', imageId: 'restored', label: 'image #1' };
+  const change = (value: DraftPart[]) => { parts = value; };
+  const surface = (key: string) => <ComposerEditor key={key} ref={ref} id={key} parts={parts} images={{}} disabled={false} onChange={change}
+    onFiles={() => []} onImport={() => restored} onRetry={() => {}} onKeyDown={() => {}} />;
+  const container = await render(surface('first'));
+  function paste() {
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [], getData: (type: string) => type === 'application/x-agent-remote-image-draft+json' ? JSON.stringify([atom]) : '' } });
+    container.querySelector('[role="textbox"]')!.dispatchEvent(event);
+  }
+  await act(async () => { paste(); ref.current!.insertText('Before '); });
+  await act(async () => finish([atom]));
+  expect(parts).toEqual([{ type: 'text', text: 'Before ' }, atom, { type: 'text', text: 'After' }]);
+  const delayed = new Promise<DraftPart[]>(resolve => { finish = resolve; });
+  await rerender(container, <ComposerEditor key="delayed" id="delayed" parts={[]} images={{}} disabled={false} onChange={change}
+    onFiles={() => []} onImport={() => delayed} onRetry={() => {}} onKeyDown={() => {}} />);
+  await act(async () => paste());
+  await rerender(container, surface('new-session'));
+  const before = parts;
+  await act(async () => finish([atom]));
+  expect(parts).toBe(before);
+});

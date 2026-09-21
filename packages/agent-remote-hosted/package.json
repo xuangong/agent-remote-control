@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-remote-hosted",
+  "name": "@orchardworks/agent-remote-hosted",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -24,8 +24,8 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
-    "@agent-remote-controller/agent-remote-tunnel": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-tunnel": "workspace:*",
     "parse5": "^7.3.0",
     "postcss": "^8.5.24"
   },

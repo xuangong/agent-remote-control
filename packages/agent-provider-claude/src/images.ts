@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import type { AgentResourceReadResult, AgentTimelineItem, AgentUserMessagePart, ProviderResourceReference } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult, AgentTimelineItem, AgentUserMessagePart, ProviderResourceReference } from '@orchardworks/agent-provider-sdk';
 
 interface ImageProjection {
   item: Extract<AgentTimelineItem, { type: 'assistant_message' }>;

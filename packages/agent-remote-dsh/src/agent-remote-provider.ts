@@ -5,7 +5,7 @@ import {
   type CordisDshRuntimeOptions,
   type DshToolRegistry,
   type LiveDshProvider,
-} from '@agent-remote-controller/agent-provider-dsh';
+} from '@orchardworks/agent-provider-dsh';
 
 export interface DshAgentRemoteProviderOptions {
   setup?: CordisDshRuntimeOptions['setup'];

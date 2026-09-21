@@ -7,7 +7,7 @@ import type { GatewayAuthOptions, GatewayGrant } from './auth.js';
 import type { RemoteHostBrokerState } from './broker.js';
 import type { HostPreviewState } from './host-previews.js';
 import { validPreviewNames } from './preview-names.js';
-import { decodeRemoteHostUplinkMessage, isHostEnvironment, isPairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
+import { decodeRemoteHostUplinkMessage, isHostEnvironment, isPairingPurpose } from '@orchardworks/agent-remote-protocol';
 
 export interface SavedGatewaySession { hash: string; grant: GatewayGrant; sessionExpiresAt: number; id?: string; label?: string; createdAt?: number; lastSeenAt?: number }
 export interface HostedRelayState {

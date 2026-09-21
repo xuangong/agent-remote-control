@@ -6,7 +6,7 @@ import type {
   HistoryPage,
   ProjectedTimelineEntry,
   ResourceBinding,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import {
   applyAgentSnapshot,

@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentProviderAdapter } from '@agent-remote-controller/agent-provider-sdk';
-import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore } from '@agent-remote-controller/agent-remote-relay';
+import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
+import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore } from '@orchardworks/agent-remote-relay';
 
 import { createRemoteHostBroker } from './server/remote-host-broker.js';
 import { createSessionDirectory, type SessionDirectorySource } from './server/session-directory.js';

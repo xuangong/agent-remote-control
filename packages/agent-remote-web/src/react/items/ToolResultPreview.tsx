@@ -1,4 +1,4 @@
-import type { AgentToolResult } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentToolResult } from '@orchardworks/agent-remote-protocol';
 import { ContentPreview } from './ContentPreview.js';
 import { FileChangesPreview, readFileChanges } from './FileChangesView.js';
 

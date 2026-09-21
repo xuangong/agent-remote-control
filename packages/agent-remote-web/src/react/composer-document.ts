@@ -1,4 +1,4 @@
-import type { MessagePart } from '@agent-remote-controller/agent-remote-protocol';
+import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 
 export type DraftPart = { type: 'text'; text: string } | { type: 'image'; imageId: string; label: string };
 

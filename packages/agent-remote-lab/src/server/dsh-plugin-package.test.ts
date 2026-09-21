@@ -29,7 +29,7 @@ describe('installable DSH Lab plugin', () => {
     execFileSync('tar', ['-xzf', archive, '-C', root], { timeout: 10_000 });
     const packedRoot = join(root, 'package');
     const metadata = JSON.parse(await readFile(join(packedRoot, 'package.json'), 'utf8'));
-    expect(metadata.name).toBe('@agent-remote-controller/agent-remote-lab-dsh');
+    expect(metadata.name).toBe('@orchardworks/agent-remote-lab-dsh');
     expect(metadata.dsh.bundle.patch).toBe('./cordis.patch.yml');
     expect(metadata.dependencies).toBeUndefined();
     expect(metadata.peerDependencies).toEqual({

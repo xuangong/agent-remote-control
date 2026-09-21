@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentInteractionRequest, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentInteractionRequest, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerProvider } from './provider.js';
 import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 

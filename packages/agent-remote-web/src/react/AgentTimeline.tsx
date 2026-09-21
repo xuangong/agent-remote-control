@@ -1,9 +1,9 @@
-import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useContext, useMemo, useRef, useState } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
 import type { SessionLinkResolver } from './items/ToolCallItem.js';

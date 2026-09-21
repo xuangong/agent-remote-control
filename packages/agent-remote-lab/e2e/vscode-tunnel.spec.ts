@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { VscodeTunnelSnapshot } from '@agent-remote-controller/agent-remote-protocol';
+import type { VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
 
 test('authorizes one Host tunnel, opens the workspace and removes stale links', async ({ page }, testInfo) => {
   let state: VscodeTunnelSnapshot = { status: 'stopped', processAlive: false, revision: 0 };

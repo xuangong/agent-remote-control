@@ -1,4 +1,4 @@
-import type { ImageUploadReceipt } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import type { DraftPart } from './react/composer-document.js';
 
 export interface DraftImage {

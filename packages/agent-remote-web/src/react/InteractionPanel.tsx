@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { FormCard } from './interactions/FormCard.js';
 import { PermissionApprovalCard } from './interactions/PermissionApprovalCard.js';

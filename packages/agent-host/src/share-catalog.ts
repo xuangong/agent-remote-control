@@ -1,4 +1,4 @@
-import type { RemoteCatalogPage, RemoteSessionSummary } from '@agent-remote-controller/agent-remote-relay';
+import type { RemoteCatalogPage, RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
 
 export type ReadShareCatalog = (providerId: string, query?: { cursor?: string }) => Promise<RemoteCatalogPage>;
 

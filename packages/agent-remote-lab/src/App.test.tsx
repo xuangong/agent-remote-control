@@ -4,8 +4,8 @@ import {
   PROTOCOL_VERSION,
   type AgentProviderDescriptor,
   type AgentSessionResponse,
-} from '@agent-remote-controller/agent-remote-protocol';
-import type { RemoteTransportListener } from '@agent-remote-controller/agent-remote-web';
+} from '@orchardworks/agent-remote-protocol';
+import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 
 import { App, type LabTransport } from './App.js';
 import { render } from './test/setup.js';

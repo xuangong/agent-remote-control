@@ -6,3 +6,4 @@ export * from './projector.js';
 export * from './provider.js';
 export * from './catalog.js';
 export * from './session.js';
+export { serveWindowsCodexDaemon, readWindowsCodexDaemon, requestWindowsCodexDaemon, windowsCodexSharedEndpoint, windowsCodexDaemonDirectory } from './windows-daemon.js';

@@ -9,7 +9,7 @@ import type {
   ServerMessage,
   TimelineCursor,
   TimelineDirection,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { AgentReplica } from '../replica/store.js';
 import { RemoteSessionClient } from './remote-session-client.js';

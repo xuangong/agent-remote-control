@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-remote-protocol",
+  "name": "@orchardworks/agent-remote-protocol",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {

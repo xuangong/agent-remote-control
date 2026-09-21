@@ -1,4 +1,4 @@
-import { acceptSessionChannel } from '@agent-remote-controller/agent-remote-protocol';
+import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
 import { unavailableRoute } from './session-errors.js';
 import { createSecurityPolicy } from './security.js';
@@ -22,7 +22,7 @@ import { createPreviewAccess } from './preview-access.js';
 import { previewRequest, previewResponseHeaders } from './preview-http.js';
 import { previewTrafficBody, previewTrafficSocket } from './preview-traffic.js';
 import { adaptPreviewContent, PreviewContentError } from './preview-content.js';
-import type { TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
+import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import type { BrokerRequestContext, RelaySocket } from './transport.js';
 import { gatewayCookieName, readGatewayCookie, validateGatewayOrigin, verifyGatewayGrant, type GatewayAuthOptions, type GatewayGrant } from './auth.js';
 

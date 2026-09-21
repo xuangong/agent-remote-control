@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 
 import { MarkdownContent } from '../MarkdownContent.js';
 

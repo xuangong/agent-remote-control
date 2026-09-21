@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { HttpPreviewClient } from '@agent-remote-controller/agent-remote-web';
-import { PreviewProvider } from '@agent-remote-controller/agent-remote-web/react';
+import { HttpPreviewClient } from '@orchardworks/agent-remote-web';
+import { PreviewProvider } from '@orchardworks/agent-remote-web/react';
 import { render } from '../test/setup.js';
 import { HostPreviewGroups } from './HostPreviewGroups.js';
 

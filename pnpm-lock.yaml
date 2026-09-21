@@ -37,31 +37,31 @@ importers:
 
   packages/agent-host:
     dependencies:
-      '@agent-remote-controller/agent-remote-hosted':
+      '@orchardworks/agent-remote-hosted':
         specifier: workspace:*
         version: link:../agent-remote-hosted
       qrcode:
         specifier: 1.5.4
         version: 1.5.4
-      '@agent-remote-controller/agent-remote-tunnel':
+      '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
-      '@agent-remote-controller/agent-provider-claude':
+      '@orchardworks/agent-provider-claude':
         specifier: workspace:*
         version: link:../agent-provider-claude
-      '@agent-remote-controller/agent-provider-codex':
+      '@orchardworks/agent-provider-codex':
         specifier: workspace:*
         version: link:../agent-provider-codex
-      '@agent-remote-controller/agent-provider-copilot':
+      '@orchardworks/agent-provider-copilot':
         specifier: workspace:*
         version: link:../agent-provider-copilot
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@agent-remote-controller/agent-remote-protocol':
+      '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@agent-remote-controller/agent-remote-relay':
+      '@orchardworks/agent-remote-relay':
         specifier: workspace:*
         version: link:../agent-remote-relay
       ws:
@@ -92,7 +92,7 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.247
         version: 0.3.247(@anthropic-ai/sdk@0.125.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(zod@4.4.3)
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
     devDependencies:
@@ -108,10 +108,10 @@ importers:
 
   packages/agent-provider-codex:
     dependencies:
-      '@agent-remote-controller/codex-daemon-client':
+      '@orchardworks/codex-daemon-client':
         specifier: workspace:*
         version: link:../codex-daemon-client
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
       ws:
@@ -133,7 +133,7 @@ importers:
 
   packages/agent-provider-copilot:
     dependencies:
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
       '@github/copilot':
@@ -155,7 +155,7 @@ importers:
 
   packages/agent-provider-dsh:
     dependencies:
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
       '@deepseek-ai/cordis':
@@ -198,10 +198,10 @@ importers:
 
   packages/agent-remote-debugger:
     dependencies:
-      '@agent-remote-controller/agent-remote-protocol':
+      '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@agent-remote-controller/agent-remote-web':
+      '@orchardworks/agent-remote-web':
         specifier: workspace:*
         version: link:../agent-remote-web
       ws:
@@ -223,13 +223,13 @@ importers:
 
   packages/agent-remote-dsh:
     dependencies:
-      '@agent-remote-controller/agent-provider-dsh':
+      '@orchardworks/agent-provider-dsh':
         specifier: workspace:*
         version: link:../agent-provider-dsh
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@agent-remote-controller/agent-remote-relay':
+      '@orchardworks/agent-remote-relay':
         specifier: workspace:*
         version: link:../agent-remote-relay
       '@deepseek-ai/cordis':
@@ -266,10 +266,10 @@ importers:
 
   packages/agent-remote-hosted:
     dependencies:
-      '@agent-remote-controller/agent-remote-tunnel':
+      '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
-      '@agent-remote-controller/agent-remote-protocol':
+      '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
       parse5:
@@ -291,31 +291,31 @@ importers:
 
   packages/agent-remote-lab:
     dependencies:
-      '@agent-remote-controller/agent-remote-tunnel':
+      '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
-      '@agent-remote-controller/dsh':
+      '@orchardworks/dsh':
         specifier: workspace:*
         version: link:../agent-remote-dsh
-      '@agent-remote-controller/agent-provider-codex':
+      '@orchardworks/agent-provider-codex':
         specifier: workspace:*
         version: link:../agent-provider-codex
-      '@agent-remote-controller/agent-provider-dsh':
+      '@orchardworks/agent-provider-dsh':
         specifier: workspace:*
         version: link:../agent-provider-dsh
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@agent-remote-controller/agent-remote-hosted':
+      '@orchardworks/agent-remote-hosted':
         specifier: workspace:*
         version: link:../agent-remote-hosted
-      '@agent-remote-controller/agent-remote-protocol':
+      '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@agent-remote-controller/agent-remote-relay':
+      '@orchardworks/agent-remote-relay':
         specifier: workspace:*
         version: link:../agent-remote-relay
-      '@agent-remote-controller/agent-remote-web':
+      '@orchardworks/agent-remote-web':
         specifier: workspace:*
         version: link:../agent-remote-web
       '@deepseek-ai/dsh-agent':
@@ -334,7 +334,7 @@ importers:
         specifier: ^18.3.0
         version: 18.3.1(react@18.3.1)
     devDependencies:
-      '@agent-remote-controller/agent-remote-controller':
+      '@orchardworks/agent-remote-controller':
         specifier: workspace:*
         version: link:../agent-host
       '@playwright/test':
@@ -395,10 +395,10 @@ importers:
 
   packages/agent-remote-relay:
     dependencies:
-      '@agent-remote-controller/agent-provider-sdk':
+      '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@agent-remote-controller/agent-remote-protocol':
+      '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
       image-size:
@@ -423,7 +423,7 @@ importers:
 
   packages/agent-remote-web:
     dependencies:
-      '@agent-remote-controller/agent-remote-protocol':
+      '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
       '@codemirror/language':
@@ -502,10 +502,10 @@ importers:
 
   packages/agent-remote-cloudflare:
     dependencies:
-      '@agent-remote-controller/agent-remote-tunnel':
+      '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
-      "@agent-remote-controller/agent-remote-hosted":
+      "@orchardworks/agent-remote-hosted":
         specifier: workspace:*
         version: link:../agent-remote-hosted
     devDependencies:

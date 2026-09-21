@@ -1,4 +1,4 @@
-import type { AgentProviderAdapter, AgentProviderDescriptor } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
 
 export class DuplicateProviderError extends Error {
   constructor(readonly providerId: string) {

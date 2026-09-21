@@ -1,4 +1,4 @@
-import type { AgentCapabilities, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentCapabilities, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 import { createCopilotSessionDirectory } from './copilot-directory.js';
 

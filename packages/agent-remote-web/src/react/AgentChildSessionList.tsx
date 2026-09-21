@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import type { AgentChildSession } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentChildSession } from '@orchardworks/agent-remote-protocol';
 
 export type AgentChildSessionView = Pick<AgentChildSession, 'nativeSessionId' | 'title'> & Partial<AgentChildSession>;
 

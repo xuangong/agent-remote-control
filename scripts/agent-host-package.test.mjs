@@ -4,10 +4,12 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { once } from 'node:events';
+import { createConnection } from 'node:net';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import { packageManager } from './lib/package-manager.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
@@ -20,11 +22,12 @@ test('packs the public Controller name with the unchanged command and npm regist
   const { stdout } = await exec('tar', ['-xOf', artifact, 'package/package.json'], { timeout: 10000 });
   const manifest = JSON.parse(stdout);
   assert.equal(manifest.name, '@orchardworks/agent-remote-controller');
+  assert.equal(manifest.name, hostManifest.name);
   assert.equal(manifest.version, hostManifest.version);
   assert.deepEqual(manifest.repository, { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-host' });
   assert.notEqual(manifest.private, true);
   assert.deepEqual(manifest.publishConfig, { access: 'public', registry: 'https://registry.npmjs.org/' });
-  assert.deepEqual(manifest.os, ['darwin', 'linux']);
+  assert.deepEqual(manifest.os, ['darwin', 'linux', 'win32']);
   assert.deepEqual(manifest.bin, { 'agent-remote-controller': 'dist/cli.js' });
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
 });
@@ -33,16 +36,20 @@ test('installs the tarball independently and manages a paired daemon from a path
   const directory = await mkdtemp(join(tmpdir(), 'agent host installed '));
   const prefix = join(directory, 'prefix with spaces');
   const state = join(directory, 'state');
-  const bin = join(prefix, 'bin/agent-remote-controller');
+  const windows = process.platform === 'win32';
+  const packageRoot = join(prefix, windows ? 'node_modules/@orchardworks/agent-remote-controller' : 'lib/node_modules/@orchardworks/agent-remote-controller');
+  const bin = join(prefix, windows ? 'agent-remote-controller.cmd' : 'bin/agent-remote-controller');
   const home = join(directory, 'home'); await mkdir(home);
-  const env = { PATH: process.env.PATH, HOME: home, TMPDIR: process.env.TMPDIR, AGENT_HOST_STATE_DIR: state,
+  const env = { PATH: process.env.PATH, PATHEXT: process.env.PATHEXT, HOME: home, USERPROFILE: home, APPDATA: join(home, 'AppData/Roaming'), SystemRoot: process.env.SystemRoot,
+    TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR, AGENT_HOST_STATE_DIR: state,
     AGENT_HOST_PROVIDERS: 'codex,claude,copilot', AGENT_HOST_WORKSPACE: directory,
     AGENT_HOST_CLAUDE_HOME: join(home, 'claude'), AGENT_HOST_COPILOT_HOME: join(home, 'copilot') };
   if (process.platform === 'linux') Object.assign(env, { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
     DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config') });
   const run = async (args, overrides = {}) => {
-    try { return await exec(bin, args, { cwd: directory, env: { ...env, ...overrides }, timeout: 60000 }); }
+    try { return await exec(windows ? process.execPath : bin, windows ? [join(packageRoot, 'dist/cli.js'), ...args] : args,
+      { cwd: directory, env: { ...env, ...overrides }, timeout: 60000 }); }
     catch (error) {
       const log = await readFile(join(state, 'agent-host.log'), 'utf8').catch(() => '');
       throw new Error(`${error.message}\n${error.stdout ?? ''}${error.stderr ?? ''}\nDaemon diagnostics: ${log}`, { cause: error });
@@ -50,7 +57,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   };
   t.after(async () => {
     const daemon = JSON.parse(await readFile(join(state, 'daemon.json'), 'utf8').catch(() => 'null'));
-    if (process.platform === 'darwin' || process.platform === 'linux') { try { await run(['autostart', 'disable']); } catch {} }
+    if (['darwin', 'linux', 'win32'].includes(process.platform)) { try { await run(['autostart', 'disable']); } catch {} }
     try { await run(['stop']); } catch {}
     if (daemon) {
       try { process.kill(daemon.pid, 'SIGTERM'); } catch {}
@@ -60,21 +67,32 @@ test('installs the tarball independently and manages a paired daemon from a path
     }
     await rm(directory, { recursive: true, force: true });
   });
-  await exec('npm', ['install', '--global', '--prefix', prefix, artifact,
-    '--registry', process.env.npm_config_registry ?? 'https://mirrors.cloud.tencent.com/npm/', '--no-audit', '--no-fund'],
+  await exec(...packageManager('npm', ['install', '--global', '--prefix', prefix, artifact,
+    '--registry', process.env.npm_config_registry ?? 'https://mirrors.cloud.tencent.com/npm/', '--no-audit', '--no-fund']),
     { cwd: directory, timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
   assert.match((await run(['--help'])).stdout, /Usage: agent-remote-controller/);
   assert.match((await run(['--help'])).stdout, /autostart/);
-  const packageRoot = join(prefix, 'lib/node_modules/@orchardworks/agent-remote-controller');
+  if (windows) {
+    const shim = await exec(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${bin}" --help"`],
+      { cwd: directory, env, windowsVerbatimArguments: true, timeout: 10000 });
+    assert.match(shim.stdout, /Usage: agent-remote-controller/);
+    const powershellRun = exec(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(prefix, 'agent-remote-controller.ps1'), '--help'],
+      { cwd: directory, env, timeout: 10000, windowsHide: true });
+    // This invocation does not provide pipeline input.
+    powershellRun.child.stdin.end();
+    const powershell = await powershellRun;
+    assert.match(powershell.stdout, /Usage: agent-remote-controller/, powershell.stderr);
+  }
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(manifest.name, '@orchardworks/agent-remote-controller');
   assert.deepEqual(Object.keys(manifest.bin), ['agent-remote-controller']);
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
-  assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@agent-remote-controller/')));
+  assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@orchardworks/')));
   await assert.rejects(run(['start']), /AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required/);
   await assert.rejects(run(['start'], { AGENT_HOST_REMOTE_KEY: 'key-without-relay' }), /Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together/);
   for (const [provider, version] of [['codex', 'codex-cli 0.148.0'], ['claude', '2.1.247 (Claude Code)']]) {
-    const executable = join(directory, provider);
+    const executable = join(directory, `${provider}.cjs`);
     await writeFile(executable, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(version)});\n`, { mode: 0o755 });
     env[`AGENT_HOST_${provider.toUpperCase()}`] = executable;
   }
@@ -89,6 +107,7 @@ test('installs the tarball independently and manages a paired daemon from a path
     await new Promise(resolve => server.close(resolve));
   });
   const registrations = [];
+  let rejectRegistration = windows;
   let sendHeartbeats = true;
   const diagnosticLog = async () => (await readFile(join(state, 'agent-host.log'), 'utf8')).split('\n').flatMap(line => {
     try { const event = JSON.parse(line); return typeof event.event === 'string' && event.event.startsWith('uplink_') ? [event] : []; }
@@ -100,6 +119,7 @@ test('installs the tarball independently and manages a paired daemon from a path
     socket.on('message', raw => {
       const message = JSON.parse(String(raw));
       if (message.type === 'register') {
+        if (rejectRegistration) { socket.close(1008, 'Invalid pairing key'); return; }
         registrations.push(message);
         socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'package-smoke-host', heartbeat: { intervalMs: 1000, timeoutMs: 500 } }));
         heartbeat = setInterval(() => {
@@ -109,8 +129,33 @@ test('installs the tarball independently and manages a paired daemon from a path
     });
   });
   const connection = { AGENT_HOST_SERVER: `http://127.0.0.1:${server.address().port}`, AGENT_HOST_REMOTE_KEY: 'local-package-test-key' };
+  if (windows) {
+    const started = Date.now();
+    await assert.rejects(run(['start'], connection), error => {
+      assert.match(error.cause.stderr, /authorization was rejected/);
+      assert.match(error.cause.stderr, /Generate a new pairing key/);
+      assert.ok(!error.cause.stderr.includes(connection.AGENT_HOST_REMOTE_KEY));
+      return true;
+    });
+    assert.ok(Date.now() - started < 20000, 'An exited login daemon must not wait for the readiness deadline');
+    rejectRegistration = false;
+  }
   assert.match((await run(['start'], connection)).stdout, /daemon started/);
   await waitFor(async () => /uplink: registered/.test((await run(['status'])).stdout));
+  const management = JSON.parse(await readFile(join(state, 'daemon.json'), 'utf8'));
+  const denied = await new Promise((resolve, reject) => {
+    const socket = createConnection(management.socket); let output = '';
+    socket.setTimeout(5000, () => socket.destroy(new Error('Management test timed out')));
+    socket.on('error', reject);
+    socket.on('connect', () => {
+      socket.write('{"action":"stop",');
+      socket.write('"token":"wrong-token"}\n');
+    });
+    socket.on('data', chunk => { output += chunk; });
+    socket.on('close', () => { try { resolve(JSON.parse(output)); } catch (error) { reject(error); } });
+  });
+  assert.deepEqual(denied, { error: 'Unauthorized local management request.' });
+  assert.match((await run(['status'])).stdout, /uplink: registered/);
   assert.deepEqual(registrations[0].providers, []);
   assert.deepEqual(registrations.at(-1).providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot']);
   assert.equal(registrations.at(-1).installationId, registrations[0].installationId);
@@ -137,7 +182,9 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.ok((await diagnosticLog()).some(event => event.event === 'uplink_disconnected' && event.closeCode === 1012));
   assert.match((await run(['pair'], { ...connection, AGENT_HOST_REMOTE_KEY: 'replacement-package-test-key' })).stdout, /without restarting sessions/);
   const daemon = JSON.parse(await readFile(join(state, 'daemon.json'), 'utf8'));
+  if (windows) assert.ok(daemon.socket.startsWith('\\\\.\\pipe\\agent-host-'));
   await run(['stop']);
+  await assert.rejects(readFile(join(state, 'daemon.json')), { code: 'ENOENT' });
   await waitFor(async () => {
     try { process.kill(daemon.pid, 0); return false; } catch { return true; }
   });
@@ -202,6 +249,24 @@ test('installs the tarball independently and manages a paired daemon from a path
     await run(['autostart', 'enable']);
     await waitFor(async () => /uplink: registered/.test((await run(['status'])).stdout));
     assert.match((await run(['autostart', 'status'])).stdout, /enabled/i);
+  } else if (supervised === 'windows') {
+    assert.match((await run(['autostart', 'status'])).stdout, /enabled.*installed/);
+    await run(['stop']);
+    await assert.rejects(run(['status']), /not running/);
+    const startup = join(env.APPDATA, 'Microsoft/Windows/Start Menu/Programs/Startup');
+    const launchers = (await readdir(startup)).filter(name => name.endsWith('.vbs'));
+    assert.equal(launchers.length, 1);
+    await exec('wscript.exe', ['//B', '//Nologo', join(startup, launchers[0])], { env, timeout: 10000, windowsHide: true });
+    await waitFor(async () => /uplink: registered/.test((await run(['status'])).stdout));
+    await run(['autostart', 'disable']);
+    assert.match((await run(['autostart', 'status'])).stdout, /disabled.*not installed/);
+    await assert.rejects(run(['status']), /not running/);
+    await run(['start']);
+    assert.match((await run(['status'])).stdout, /supervisor: manual/);
+    await run(['autostart', 'enable']);
+    assert.match((await run(['status'])).stdout, /supervisor: manual/);
+    await run(['stop']); await run(['start']);
+    assert.match((await run(['status'])).stdout, /supervisor: windows/);
   } else if (process.platform === 'linux') {
     assert.match((await run(['autostart', 'status'])).stdout, /systemd user manager unavailable/);
     await assert.rejects(run(['autostart', 'enable']), /systemd user manager is unavailable/);

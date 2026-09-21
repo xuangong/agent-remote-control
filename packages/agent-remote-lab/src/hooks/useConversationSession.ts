@@ -1,6 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react';
-import { AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
-import type { QuestionDraft } from '@agent-remote-controller/agent-remote-web/react';
+import { AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
 import type { OpenedSession } from '../directory-client.js';
 import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
 import { RecoveryScope } from '../conversation-recovery.js';

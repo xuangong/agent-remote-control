@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-provider-sdk",
+  "name": "@orchardworks/agent-provider-sdk",
   "version": "0.1.0",
   "private": false,
   "publishConfig": {

@@ -2,8 +2,8 @@ import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentInputPart } from '@agent-remote-controller/agent-provider-sdk';
-import { IMAGE_INPUT_CAPABILITIES } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentInputPart } from '@orchardworks/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
 
 export async function claudeMessageContent(parts: readonly AgentInputPart[]): Promise<SDKUserMessage['message']['content']> {
   const blocks: Exclude<SDKUserMessage['message']['content'], string> = [];

@@ -1,4 +1,4 @@
-import type { TunnelData, TunnelSocket } from '@agent-remote-controller/agent-remote-tunnel';
+import type { TunnelData, TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 
 /** Application WS has no Workers drain signal, so a lifetime byte budget bounds native egress. */
 export class WorkerPreviewSocket implements TunnelSocket {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerProvider } from './provider.js';
 import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 

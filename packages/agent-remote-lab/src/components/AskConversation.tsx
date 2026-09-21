@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } from 'react';
-import type { AgentReplica, RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
-import { TimelineDisplay, type TimelineDisplayMode } from '@agent-remote-controller/agent-remote-web/react';
+import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { TimelineDisplay, type TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
 import type { AskEntry, AskInput, AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { ForkStore, SessionFork } from '../session-forks.js';

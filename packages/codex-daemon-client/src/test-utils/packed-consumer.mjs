@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { WebSocketServer } from 'ws';
-import { CodexAppServerTransport } from '@agent-remote-controller/codex-daemon-client';
+import { CodexAppServerTransport } from '@orchardworks/codex-daemon-client';
 import { createNotebook } from '../../examples/notebook.mjs';
 
 test('packed client recovers an independent notebook over a Unix socket', { timeout: 10000 }, async () => {

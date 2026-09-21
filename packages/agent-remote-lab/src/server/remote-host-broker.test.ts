@@ -4,11 +4,11 @@ import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart } from '@agent-remote-controller/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart } from '@orchardworks/agent-provider-sdk';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRemoteHostBroker } from './remote-host-broker.js';
-import type { AgentMessageOptions, AgentSession } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentMessageOptions, AgentSession } from '@orchardworks/agent-provider-sdk';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -223,8 +223,8 @@ describe('Remote Host broker', () => {
 });
 
 it('carries native-host discovery, creation, snapshots, and chat through the production uplink client', async () => {
-  const { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } = await import('@agent-remote-controller/agent-remote-relay');
-  const { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@agent-remote-controller/agent-remote-web/headless');
+  const { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } = await import('@orchardworks/agent-remote-relay');
+  const { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-remote-web/headless');
   const { createRecordedLabProvider } = await import('./recorded.js');
   const { vi } = await import('vitest');
   const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json();

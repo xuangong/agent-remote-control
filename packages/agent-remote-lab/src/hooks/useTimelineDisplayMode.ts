@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { TimelineDisplayMode } from '@agent-remote-controller/agent-remote-web/react';
+import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
 
 const key = 'agent-remote:timeline-display';
 export function useTimelineDisplayMode() {

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/codex-daemon-client",
+  "name": "@orchardworks/codex-daemon-client",
   "version": "0.1.0",
   "private": false,
   "publishConfig": {

@@ -38,20 +38,20 @@ describe('live DSH launcher', () => {
   });
 
   it('runs the caller-supplied pnpm executable', () => {
-    const result = runLauncher({ BORGEE_TEST_PNPM_EXIT: '73', BORGEE_TEST_PNPM_FAIL_MATCH: '@agent-remote-controller/dsh' });
+    const result = runLauncher({ BORGEE_TEST_PNPM_EXIT: '73', BORGEE_TEST_PNPM_FAIL_MATCH: '@orchardworks/dsh' });
 
     expect(result.status, result.stderr).toBe(73);
-    expect(readFileSync(pnpmLog, 'utf8')).toContain('--filter @agent-remote-controller/dsh run build');
+    expect(readFileSync(pnpmLog, 'utf8')).toContain('--filter @orchardworks/dsh run build');
   });
 
   it('validates compatibility when launched outside the Lab directory', () => {
     const result = runLauncher(
-      { BORGEE_TEST_PNPM_EXIT: '73', BORGEE_TEST_PNPM_FAIL_MATCH: '@agent-remote-controller/agent-provider-dsh' },
+      { BORGEE_TEST_PNPM_EXIT: '73', BORGEE_TEST_PNPM_FAIL_MATCH: '@orchardworks/agent-provider-dsh' },
       join(packageRoot, '../..'),
     );
 
     expect(result.status, result.stderr).toBe(73);
-    expect(readFileSync(pnpmLog, 'utf8')).toContain('--filter @agent-remote-controller/agent-provider-dsh run build');
+    expect(readFileSync(pnpmLog, 'utf8')).toContain('--filter @orchardworks/agent-provider-dsh run build');
   });
 
   it('rejects a DSH checkout that is not the compatibility-manifest commit', () => {
@@ -81,7 +81,7 @@ describe('live DSH launcher', () => {
     const result = runLauncher({
       BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST: manifest,
       BORGEE_TEST_PNPM_EXIT: '73',
-      BORGEE_TEST_PNPM_FAIL_MATCH: '@agent-remote-controller/agent-provider-dsh',
+      BORGEE_TEST_PNPM_FAIL_MATCH: '@orchardworks/agent-provider-dsh',
     });
 
     expect(result.status, result.stderr).toBe(2);

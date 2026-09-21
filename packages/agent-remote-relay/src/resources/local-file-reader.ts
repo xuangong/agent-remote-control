@@ -4,7 +4,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detectMediaType } from './media-type.js';
 
-import type { AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 
 export const DEFAULT_MAX_LOCAL_RESOURCE_BYTES = 4 * 1024 * 1024;
 

@@ -1,6 +1,6 @@
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
-import { CopyTunnelUrl, usePreviewController, type PreviewContextValue } from '@agent-remote-controller/agent-remote-web/react';
+import { CopyTunnelUrl, usePreviewController, type PreviewContextValue } from '@orchardworks/agent-remote-web/react';
 
 export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, hostName }: {
   readonly hostName?: string;

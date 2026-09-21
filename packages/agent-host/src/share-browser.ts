@@ -1,4 +1,4 @@
-import type { RemoteSessionSummary } from '@agent-remote-controller/agent-remote-relay';
+import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
 import type { ShareChoice, ShareIO } from './share-command.js';
 import type { ShareCatalog } from './share-catalog.js';
 

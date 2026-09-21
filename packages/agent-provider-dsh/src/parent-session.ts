@@ -1,4 +1,4 @@
-import type { AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { DshChildSessions, DshObservationQueue, dshRuntimeObservation } from './children.js';
 
 /** Adds native child discovery without taking ownership of the parent's runtime. */

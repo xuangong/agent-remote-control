@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentInteractionRequest, AgentInteractionResponse, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentInteractionRequest, AgentInteractionResponse, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerSession } from './session.js';
 import { CodexAppServerTransport } from './app-server-transport.js';
 import { createScriptedAppServer } from './test-utils/scripted-app-server.js';

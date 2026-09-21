@@ -18,7 +18,7 @@ export function createFakeChildProcess(): FakeChildProcess {
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
-    pid: 12345,
+    pid: undefined,
     killed: false,
     exitCode: null,
     signalCode: null,

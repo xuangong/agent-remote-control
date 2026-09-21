@@ -1,6 +1,6 @@
-import type { CodexAppServerProvider } from '@agent-remote-controller/agent-provider-codex';
+import type { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
 import { join } from 'node:path';
-import { SessionReferenceStore, createCodexSessionDirectory } from '@agent-remote-controller/agent-remote-controller';
+import { SessionReferenceStore, createCodexSessionDirectory } from '@orchardworks/agent-remote-controller';
 import type { SessionDirectorySource } from './session-directory.js';
 
 /** Test-only compatibility adapter for direct native Provider fixtures. */

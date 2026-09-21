@@ -1,8 +1,8 @@
-import { watchPageResume } from '@agent-remote-controller/agent-remote-web';
-import { controllerPath, readControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
+import { watchPageResume } from '@orchardworks/agent-remote-web';
+import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { signInReturnKey } from '@agent-remote-controller/agent-remote-hosted/access-page';
+import { signInReturnKey } from '@orchardworks/agent-remote-hosted/access-page';
 import { SecurityPanel } from './components/SecurityPanel.js';
 import { AccessPage } from './components/AccessPage.js';
 

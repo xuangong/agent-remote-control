@@ -1,4 +1,4 @@
-import type { HostEnvironment, PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
+import type { HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
 import { hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
@@ -11,7 +11,7 @@ export interface RemoteHost {
   credentialRotation?: boolean; environment?: HostEnvironment;
   access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
 }
-export type { PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
+export type { PairingPurpose } from '@orchardworks/agent-remote-protocol';
 export interface PairingInvitation { id?: string; key: string; expiresAt: string; serverUrl: string; command?: string; purpose?: PairingPurpose; createdAt?: string }
 export interface PairingRecord { id: string; purpose: PairingPurpose; createdAt: string; expiresAt: string; status: 'unused' | 'used' | 'obsolete' | 'revoked'; usedAt?: string; revokedAt?: string; hostId?: string; hostName?: string }
 export interface PairingHistory { pairings: PairingRecord[]; availablePurposes?: PairingPurpose[] }

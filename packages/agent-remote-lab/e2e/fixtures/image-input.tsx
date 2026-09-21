@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { MessagePart } from '@agent-remote-controller/agent-remote-protocol';
+import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/app.css';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 
 const scope = new ReadingPositions('image-browser-fixture');
 function Fixture() {

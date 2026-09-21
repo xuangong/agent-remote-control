@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
 

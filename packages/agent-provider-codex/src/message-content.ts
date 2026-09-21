@@ -1,4 +1,4 @@
-import type { AgentInputPart } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentInputPart } from '@orchardworks/agent-provider-sdk';
 
 export type CodexInput = { type: 'text'; text: string; text_elements: never[] } | { type: 'localImage'; path: string };
 export function codexMessageInput(parts: readonly AgentInputPart[]): CodexInput[] {

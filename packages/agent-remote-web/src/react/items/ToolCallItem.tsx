@@ -4,7 +4,7 @@ import { Fragment, useId, useState } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ToolResultPreview } from './ToolResultPreview.js';
 import { ContentPreview } from './ContentPreview.js';
-import type { AgentTimelineItem, AgentToolDetail, AgentToolResult } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem, AgentToolDetail, AgentToolResult } from '@orchardworks/agent-remote-protocol';
 
 const statusLabels = {
   running: 'Running', completed: 'Completed', failed: 'Failed', canceled: 'Canceled',

@@ -1,14 +1,15 @@
 # Controller npm releases
 
 The public package is `@orchardworks/agent-remote-controller`; its executable
-remains `agent-remote-controller`. It supports macOS and Linux, not native Windows.
+remains `agent-remote-controller`. It supports macOS, Linux and native Windows.
 The source workspace stays private. Always publish the generated tarball, never
 the repository root or the internal workspace package.
 
 ## GitHub release workflow
 
-`.github/workflows/publish-controller.yml` builds and tests on GitHub-hosted Linux
-and macOS runners. The publish job waits for both platforms and publishes the
+`.github/workflows/publish-controller.yml` builds and tests on GitHub-hosted Linux,
+macOS and Windows runners. Windows runs the platform-specific suite and the real
+installed-package lifecycle tests. The publish job waits for all three platforms and publishes the
 exact Linux-built tarball using npm Trusted Publishing (OIDC) with provenance.
 No long-lived npm token is needed after initial setup.
 

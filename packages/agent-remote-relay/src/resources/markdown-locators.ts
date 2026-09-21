@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
 
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentTimelineItem } from '@orchardworks/agent-provider-sdk';
 
 export interface MarkdownLocator {
   locator: string;

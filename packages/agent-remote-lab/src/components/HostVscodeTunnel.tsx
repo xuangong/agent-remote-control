@@ -1,6 +1,6 @@
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
-import { vscodeTunnelLink, vscodeWorkspaceLink } from '@agent-remote-controller/agent-remote-protocol';
+import { vscodeTunnelLink, vscodeWorkspaceLink } from '@orchardworks/agent-remote-protocol';
 import { useVscodeTunnel } from '../vscode-tunnel.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 

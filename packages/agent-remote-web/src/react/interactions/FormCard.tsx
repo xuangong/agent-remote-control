@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { AgentFormField, AgentFormValues, AgentInteractionRequest, AgentInteractionResponse } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentFormField, AgentFormValues, AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 
 type FormRequest = Extract<AgentInteractionRequest, { kind: 'form' }>;
 type FormResponse = Extract<AgentInteractionResponse, { kind: 'form' }>;

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-remote-controller",
+  "name": "@orchardworks/agent-remote-controller",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -19,14 +19,14 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-provider-claude": "workspace:*",
-    "@agent-remote-controller/agent-provider-codex": "workspace:*",
-    "@agent-remote-controller/agent-provider-copilot": "workspace:*",
-    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
-    "@agent-remote-controller/agent-remote-hosted": "workspace:*",
-    "@agent-remote-controller/agent-remote-protocol": "workspace:*",
-    "@agent-remote-controller/agent-remote-relay": "workspace:*",
-    "@agent-remote-controller/agent-remote-tunnel": "workspace:*",
+    "@orchardworks/agent-provider-claude": "workspace:*",
+    "@orchardworks/agent-provider-codex": "workspace:*",
+    "@orchardworks/agent-provider-copilot": "workspace:*",
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-relay": "workspace:*",
+    "@orchardworks/agent-remote-tunnel": "workspace:*",
     "qrcode": "1.5.4",
     "ws": "^8.21.0"
   },

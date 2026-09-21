@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import type { VscodeTunnelSnapshot } from '@agent-remote-controller/agent-remote-protocol';
+import type { VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { VscodeTunnelScope, type VscodeTunnelService } from '../vscode-tunnel.js';
 import { HostVscodeTunnel, WorkspaceVscodeLink } from './HostVscodeTunnel.js';

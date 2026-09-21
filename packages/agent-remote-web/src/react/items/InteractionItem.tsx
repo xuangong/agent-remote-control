@@ -1,5 +1,5 @@
 import { TimelineTitle } from '../TimelineTitle.js';
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 import { InteractionReceipt } from './InteractionReceipt.js';
 import { MarkdownContent } from '../MarkdownContent.js';

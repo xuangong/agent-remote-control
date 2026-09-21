@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
-import { ToolCallDetails, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
+import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import { ToolCallDetails, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 import { traceItemLabel, traceItemStatus, traceItemSummary, traceSequence, traceSourceRanges, traceSessionReferences } from '../trace-model.js';
 import { TraceSessionLinks } from './TraceSessionLinks.js';
 

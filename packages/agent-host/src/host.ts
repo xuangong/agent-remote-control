@@ -5,12 +5,12 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from './operation-cache.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
-import { AgentSessionInUseError, AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
-import { PROTOCOL_VERSION, type HostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import { AgentSessionInUseError, AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
+import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
 import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
-  type SessionWireAgent, type SessionWireOperationExecutor } from '@agent-remote-controller/agent-remote-relay';
+  type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {

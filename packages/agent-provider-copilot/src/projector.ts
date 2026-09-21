@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@github/copilot-sdk';
-import { boundToolResult, type AgentStreamEvent, type AgentToolDetail } from '@agent-remote-controller/agent-provider-sdk';
+import { boundToolResult, type AgentStreamEvent, type AgentToolDetail } from '@orchardworks/agent-provider-sdk';
 export const provider = 'copilot';
 export function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 export function detail(name: string, value: unknown): AgentToolDetail {

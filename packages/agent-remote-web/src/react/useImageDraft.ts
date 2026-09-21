@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ImageUploadReceipt, MessagePart } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
 import { readImageDraft, writeImageDraft, imageDraftScopeGeneration, cacheDraftImage, lookupDraftImage, type ImageDraft } from '../image-drafts.js';
 import { draftText, normalizeDraftParts, snapshotContent, type DraftPart } from './composer-document.js';
 

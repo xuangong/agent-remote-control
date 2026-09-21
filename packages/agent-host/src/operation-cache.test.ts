@@ -1,4 +1,4 @@
-import { AgentRuntimeError } from '@agent-remote-controller/agent-provider-sdk';
+import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createOperationCache, OperationCacheError, type OperationDescriptor } from './operation-cache.js';

@@ -2,13 +2,13 @@ import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
   AgentStreamEvent,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 import type {
   AgentSnapshot,
   TimelineCursor,
   ResourceBinding,
   ResourceState,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import type { CanonicalTimelineRow } from './timeline-store.js';
 

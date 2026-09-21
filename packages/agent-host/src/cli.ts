@@ -17,14 +17,17 @@ import { runCodexCommand } from './codex-command.js';
 import { createLaunchdAutostart } from './launchd.js';
 import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
 import { createSystemdAutostart, systemdUnavailable } from './systemd.js';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@agent-remote-controller/agent-remote-relay';
+import { createWindowsAutostart } from './windows-autostart.js';
+import { serveWindowsCodexDaemon } from '@orchardworks/agent-provider-codex';
+import { spawnWindowsJob } from './windows-job.js';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { configureGatewayProviders } from './gateway-setup.js';
 import { runShare } from './share-command.js';
 import { selectTerminalChoice } from './terminal-select.js';
 import { createInterface } from 'node:readline';
 import { renderSessionQr } from './share-qr.js';
 
-interface DaemonState { pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' }
+interface DaemonState { pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' | 'windows' }
 const args = process.argv.slice(2);
 const command = args[0] ?? 'help';
 const stateDir = resolve(process.env.AGENT_HOST_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'agent-host'));
@@ -45,6 +48,11 @@ async function main(): Promise<void> {
   else if (command === 'environment') process.stdout.write(`${JSON.stringify(await detectHostEnvironment(), null, 2)}\n`);
   else if (command === 'foreground') await serve(false);
   else if (command === '_serve') await serve(true);
+  else if (command === '_login') { if (await autostartEnabled(stateDir)) await start(); }
+  else if (command === '_codex-daemon') {
+    if (process.platform !== 'win32' || !args[1] || !args[2]) throw new Error('Invalid Windows Codex daemon invocation.');
+    await serveWindowsCodexDaemon(args[1], args[2], spawnWindowsJob);
+  }
   else if (command === 'start') await start();
   else if (command === 'status') await status();
   else if (command === 'stop') await stop();
@@ -55,7 +63,7 @@ async function main(): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  share       Choose a provider and enter a session ID to generate a QR code\n  share list-sessions  Browse recent sessions and generate a QR code\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with launchd or systemd\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup and crash recovery\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux, stop stops the managed job without disabling future login startup.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
+  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  share       Choose a provider and enter a session ID to generate a QR code\n  share list-sessions  Browse recent sessions and generate a QR code\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with the platform login manager\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup (crash recovery on macOS/Linux)\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux/Windows, stop stops the managed job without disabling future login startup.\nWindows uses the current user Startup folder; shared Codex uses a managed authenticated local WebSocket.\nWindows managed VS Code tunnels require code-tunnel.exe and Windows PowerShell.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
@@ -75,7 +83,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
     if (diagnosticLog) diagnosticLog.write(line, secrets);
     else process.stderr.write(daemonDiagnosticLine(line, secrets));
   };
-  const supervisor = daemon ? (process.env.AGENT_HOST_SUPERVISOR === 'systemd' ? 'systemd'
+  const supervisor = daemon ? (process.env.AGENT_HOST_SUPERVISOR === 'windows' ? 'windows' : process.env.AGENT_HOST_SUPERVISOR === 'systemd' ? 'systemd'
     : process.env.AGENT_HOST_LAUNCHD === '1' ? 'launchd' : undefined) : undefined;
   const launch = supervisor ? await resolveAutostartConnection(stateDir, process.env) : undefined;
   const configuration = launch?.connection ?? await resolveHostConnection(stateDir, process.env);
@@ -121,28 +129,48 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
     writeDiagnostic(error instanceof Error ? error.message : 'Could not save registered Host connection.', diagnosticSecrets);
   });
   const scope = createHash('sha256').update(stateDir).digest('hex').slice(0, 16);
-  const socket = join(tmpdir(), `agent-host-${scope}-${process.pid}.sock`);
-  await rm(socket, { force: true });
+  const socket = process.platform === 'win32'
+    ? `\\\\.\\pipe\\agent-host-${scope}-${process.pid}`
+    : join(tmpdir(), `agent-host-${scope}-${process.pid}.sock`);
+  if (process.platform !== 'win32') await rm(socket, { force: true });
   const management = createServer({ allowHalfOpen: true }, (connection) => {
     let input = '';
+    let handled = false;
+    const handle = () => {
+      if (handled || connection.destroyed) return;
+      handled = true;
+      void handleManagement(input, token, host, configuration, diagnosticSecrets, connection, stopDaemon);
+    };
     connection.setEncoding('utf8');
-    connection.on('data', (chunk) => { input += chunk; if (input.length > 64 * 1024) connection.destroy(); });
-    connection.on('end', () => void handleManagement(input, token, host, configuration, diagnosticSecrets, connection));
+    connection.setTimeout(30_000, () => connection.destroy());
+    connection.on('data', (chunk) => {
+      input += chunk;
+      if (input.length > 64 * 1024) connection.destroy();
+      else if (input.includes('\n')) handle();
+    });
+    connection.on('error', () => connection.destroy());
+    connection.on('end', handle);
   });
   await new Promise<void>((resolve, reject) => { management.once('error', reject); management.listen(socket, resolve); });
-  await chmod(socket, 0o600);
+  if (process.platform !== 'win32') await chmod(socket, 0o600);
   await atomicJson(stateFile, { pid: process.pid, token, socket, startedAt: new Date().toISOString(), ...(supervisor ? { supervisor } : {}) });
   const shutdown = async () => {
     management.close();
     try { await within(host.close(), shutdownTimeout()); }
     finally {
       diagnosticLog?.dispose();
-      await rm(socket, { force: true });
+      if (process.platform !== 'win32') await rm(socket, { force: true });
       await removeOwnedDaemonState(stateFile, { pid: process.pid, token });
     }
   };
-  process.once('SIGTERM', () => void shutdown().finally(() => process.exit()));
-  process.once('SIGINT', () => void shutdown().finally(() => process.exit()));
+  let stopping = false;
+  function stopDaemon() {
+    if (stopping) return;
+    stopping = true;
+    void shutdown().finally(() => process.exit());
+  }
+  process.once('SIGTERM', stopDaemon);
+  process.once('SIGINT', stopDaemon);
   await new Promise<void>(() => undefined);
 }
 
@@ -175,7 +203,7 @@ async function enrollHost(configuration: HostConnection, installationId: string,
   }
 }
 
-async function handleManagement(input: string, token: string, host: AgentHost, configuration: HostConnection, diagnosticSecrets: Set<string>, connection: import('node:net').Socket): Promise<void> {
+async function handleManagement(input: string, token: string, host: AgentHost, configuration: HostConnection, diagnosticSecrets: Set<string>, connection: import('node:net').Socket, stopDaemon: () => void): Promise<void> {
   try {
     const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string; hostId?: string; providerId?: string; nativeSessionId?: string; cursor?: string; serverUrl?: string };
     if (request.token !== token) throw new Error('Unauthorized local management request.');
@@ -214,8 +242,8 @@ async function handleManagement(input: string, token: string, host: AgentHost, c
           response = { running: true, uplink: host.state, hostId: registered.hostId };
         }
       });
-      connection.end(JSON.stringify(response), () => { if (restartRequired) process.kill(process.pid, 'SIGTERM'); });
-    } else if (request.action === 'stop') { connection.end(JSON.stringify({ stopping: true })); process.kill(process.pid, 'SIGTERM'); }
+      connection.end(JSON.stringify(response), () => { if (restartRequired) stopDaemon(); });
+    } else if (request.action === 'stop') { connection.end(JSON.stringify({ stopping: true }), stopDaemon); }
     else throw new Error('Unknown local management action.');
   } catch (error) { connection.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })); }
 }
@@ -244,15 +272,19 @@ async function start(enableAutostart = false): Promise<void> {
     if (existing) await rm(stateFile, { force: true });
     const log = await open(daemonLogFile, 'a', 0o600);
     await log.chmod(0o600);
+    const logOffset = (await log.stat()).size;
     let childPid: number | undefined;
     try {
       if (managed) {
         await prepareAutostartConnection(stateDir, configuration);
-        await supervisor!.install(); await supervisor!.start();
+        await supervisor!.install();
+        if (supervisor!.kind === 'windows') childPid = await supervisor!.start();
+        else await supervisor!.start();
       } else {
-        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_serve'], { detached: true, stdio: ['ignore', log.fd, log.fd],
+        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_serve'], { detached: true, windowsHide: true, stdio: ['ignore', log.fd, log.fd],
           env: { ...configuration.environment, AGENT_HOST_MANAGEMENT_TOKEN: randomBytes(32).toString('hex'), AGENT_HOST_LAUNCHD: undefined, AGENT_HOST_SUPERVISOR: undefined } });
         childPid = child.pid;
+        await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
         child.unref();
       }
     } finally { await log.close(); }
@@ -263,10 +295,24 @@ async function start(enableAutostart = false): Promise<void> {
       if (state && (managed ? state.supervisor === supervisor!.kind : state.pid === childPid) && await authenticateSavedDaemon(state)) {
         process.stdout.write(`Agent Host daemon started (pid ${state.pid}); ${managed ? 'login startup enabled; ' : ''}log: ${daemonLogFile}.\n`); return;
       }
-      if (!managed && (!childPid || !processAlive(childPid))) break;
+      if (childPid && !processAlive(childPid)) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    throw new Error('Agent Host daemon did not become ready. Run foreground with the same environment for startup diagnostics.');
+    let diagnostic = '';
+    const reader = await open(daemonLogFile, 'r');
+    try {
+      const size = (await reader.stat()).size;
+      const offset = Math.max(logOffset, size - 4096);
+      if (size > offset) {
+        const buffer = Buffer.alloc(size - offset);
+        const { bytesRead } = await reader.read(buffer, 0, buffer.length, offset);
+        diagnostic = boundedDiagnosticLine(buffer.subarray(0, bytesRead).toString('utf8'), [configuration.remoteKey]).trim();
+      }
+    } finally { await reader.close(); }
+    const advice = diagnostic.includes('authorization was rejected')
+      ? 'Generate a new pairing key on the Relay, set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together, then run start again.'
+      : 'Run foreground with the same environment for startup diagnostics.';
+    throw new Error(`Agent Host daemon did not become ready.${diagnostic ? ` ${diagnostic}` : ''} ${advice} Log: ${daemonLogFile}`);
   });
 }
 
@@ -331,17 +377,18 @@ function loginStartup(configuration?: HostConnection) {
     ...createSystemdAutostart({ ...options, configHome: process.env.XDG_CONFIG_HOME }) };
   if (process.platform === 'darwin') return { kind: 'launchd' as const,
     ...createLaunchdAutostart({ ...options, uid: process.getuid!() }) };
+  if (process.platform === 'win32') return { kind: 'windows' as const, ...createWindowsAutostart(options) };
   return undefined;
 }
 async function autostart(action: string): Promise<void> {
   const supervisor = loginStartup();
-  if (!supervisor) throw new Error('Agent Host login startup requires macOS or Linux.');
+  if (!supervisor) throw new Error('Agent Host login startup requires macOS, Linux or Windows.');
   if (action === 'enable') { await start(true); return; }
   if (action === 'status') {
     const value = await supervisor.status();
     const details = 'unitFile' in value
       ? `systemd user manager ${value.available ? 'available' : 'unavailable'}; service ${value.serviceEnabled ? 'enabled' : 'not enabled'}; unit: ${value.unitFile}`
-      : `plist: ${value.plist}`;
+      : 'startupFile' in value ? `startup file: ${value.startupFile}` : `plist: ${value.plist}`;
     process.stdout.write(`Agent Host autostart is ${value.enabled ? 'enabled' : 'disabled'}; ${value.installed ? 'installed' : 'not installed'}; ${supervisor.kind} job ${value.loaded ? 'loaded' : 'not loaded'}; ${details}.\n`);
     return;
   }
@@ -362,7 +409,7 @@ async function stop(): Promise<void> {
     const state = await readState();
     const running = state && processAlive(state.pid);
     const supervisor = loginStartup();
-    if (supervisor?.kind === 'launchd' || (supervisor?.kind === 'systemd' && (state?.supervisor === 'systemd' || await supervisor.available()))) await supervisor.stop();
+    if (supervisor?.kind === 'windows' || supervisor?.kind === 'launchd' || (supervisor?.kind === 'systemd' && (state?.supervisor === 'systemd' || await supervisor.available()))) await supervisor.stop();
     if (state && await authenticateSavedDaemon(state)) await request(state, { action: 'stop' });
     if (running) await waitForDaemonExit(state);
     process.stdout.write('Agent Host daemon is stopped. Login startup preference is unchanged.\n');
@@ -384,7 +431,12 @@ async function request(state: DaemonState, payload: Record<string, unknown>): Pr
     connection.setTimeout(payload.action === 'pair' || payload.action === 'share-catalog' ? 30_000 : 5000, () => connection.destroy(new Error(payload.action === 'pair'
       ? 'Pairing result is unknown: the invitation may already be consumed and saved. Check agent-remote-controller status and private saved connection settings before retrying. Restart with saved settings to finish pending Gateway setup; do not blindly reuse the invitation.'
       : 'Local management request timed out.')));
-    connection.on('connect', () => connection.end(JSON.stringify({ ...payload, token: state.token })));
+    // Windows named pipes do not support the Unix socket half-close request framing.
+    connection.on('connect', () => {
+      const message = JSON.stringify({ ...payload, token: state.token });
+      if (process.platform === 'win32') connection.write(`${message}\n`);
+      else connection.end(message);
+    });
     connection.setEncoding('utf8'); connection.on('data', (chunk) => { output += chunk; });
     connection.on('error', reject); connection.on('close', () => {
       let response: Record<string, unknown>;

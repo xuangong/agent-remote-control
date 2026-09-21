@@ -1,4 +1,4 @@
-import type { ImageMediaType, ImageUploadReceipt } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageMediaType, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 
 export type ImageUploadRequest =
   | { type: 'image_upload_begin'; sha256: string; byteLength: number; mediaType: ImageMediaType }

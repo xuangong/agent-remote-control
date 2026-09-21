@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react';
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 export type TimelineDetailRenderer = (item: AgentTimelineItem) => ReactNode;
 

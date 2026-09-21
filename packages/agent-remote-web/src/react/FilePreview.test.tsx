@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { FilePreview } from './FilePreview.js';
 import type { FilePreviewRequest } from './FilePreviewContext.js';
-import type { ResourceBinding, ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceBinding, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 
 vi.mock('./usePreviewVisibility.js', () => ({ usePreviewVisibility: () => {} }));
 vi.mock('./ReadOnlyCode.js', () => ({ default: ({ text }: { text: string }) => <pre>{text}</pre> }));

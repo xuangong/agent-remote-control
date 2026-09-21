@@ -1,4 +1,4 @@
-import { isPairingPurpose, type PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
+import { isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
 
 export interface SavedPairingKey {
   id: string; purpose: PairingPurpose; createdAt: number; expiresAt: number;

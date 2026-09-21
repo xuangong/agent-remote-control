@@ -6,7 +6,7 @@ import type {
   AgentRuntimeInfo,
   AgentSession,
   ProviderStreamItem,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

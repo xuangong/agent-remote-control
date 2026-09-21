@@ -4,7 +4,7 @@ import {
   decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
   type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
   type PreviewRegistrationSnapshot,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
 import { createRemoteHostPluginHost, type RemoteHostPluginHostOptions } from './remote-host-plugin.js';

@@ -1,4 +1,4 @@
-import { boundToolResult, type AgentToolResult, type AgentToolResultContent, type AgentToolResultJson } from '@agent-remote-controller/agent-provider-sdk';
+import { boundToolResult, type AgentToolResult, type AgentToolResultContent, type AgentToolResultJson } from '@orchardworks/agent-provider-sdk';
 import { isRecord, type NativeRecord } from './native.js';
 
 export function dshToolResult(data: NativeRecord): AgentToolResult | undefined {

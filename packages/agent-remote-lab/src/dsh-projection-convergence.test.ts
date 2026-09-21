@@ -5,16 +5,16 @@ import {
   LiveDshSession,
   type DshNativeObservation,
   type DshOwnedAgent,
-} from '@agent-remote-controller/agent-provider-dsh';
-import type { AgentProviderAdapter, AgentSession, ProviderObservation, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-dsh';
+import type { AgentProviderAdapter, AgentSession, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import {
   createAgentRemoteRelay,
   InMemoryResourceStore,
   type AgentManager,
   type AgentManagerEvent,
   type ResourceStore,
-} from '@agent-remote-controller/agent-remote-relay';
-import { AgentReplica } from '@agent-remote-controller/agent-remote-web';
+} from '@orchardworks/agent-remote-relay';
+import { AgentReplica } from '@orchardworks/agent-remote-web';
 
 import { createAgentRemoteRelay as createSourceAgentRemoteRelay } from '../../agent-remote-relay/src/relay.js';
 

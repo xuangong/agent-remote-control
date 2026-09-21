@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
-import type { AgentChildSession, ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentChildSession, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState } from '../replica/reducer.js';
 import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';

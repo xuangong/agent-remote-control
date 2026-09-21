@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:
@@ -60,15 +60,19 @@ jobs:
       - run: pnpm compatibility:check
       - run: pnpm build:agent-remote-controller
       - name: Test Controller
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           python3 - <<'PY'
           import subprocess
           subprocess.run([
-              'pnpm', '--filter', '@agent-remote-controller/agent-remote-controller',
+              'pnpm', '--filter', '@orchardworks/agent-remote-controller',
               'test', '--hookTimeout=30000'
           ], timeout=240, check=True)
           PY
+      - name: Test Windows Controller
+        if: runner.os == 'Windows'
+        run: pnpm test:windows
       - run: pnpm test:agent-remote-controller-package
       - run: git diff --exit-code
       - uses: actions/upload-artifact@v4

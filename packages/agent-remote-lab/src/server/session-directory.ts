@@ -1,9 +1,9 @@
-import { sourceSessionExtensions, browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@agent-remote-controller/agent-remote-controller';
+import { sourceSessionExtensions, browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@orchardworks/agent-remote-controller';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
-import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@agent-remote-controller/dsh';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
-import type { AgentRemoteRelay } from '@agent-remote-controller/agent-remote-relay';
+import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@orchardworks/dsh';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import type { AgentRemoteRelay } from '@orchardworks/agent-remote-relay';
 import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
 export interface SessionDirectorySource {

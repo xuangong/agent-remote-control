@@ -1,7 +1,7 @@
 import { showNewSession } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test } from '@playwright/test';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@agent-remote-controller/agent-remote-relay';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
 
 for (const selected of [{ id: 'codex', name: 'Codex CLI' }, { id: 'claude', name: 'Claude Code' }, { id: 'copilot', name: 'Copilot' }]) {

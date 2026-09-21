@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { expect, it } from 'vitest';
-import type { AgentChildSession } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentChildSession } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../test/setup.js';
 import { AgentChildSessionList } from './AgentChildSessionList.js';
 const child = (id: string, status: AgentChildSession['status'] = 'idle'): AgentChildSession => ({ nativeSessionId: id, title: `/root/${id}`, createdAt: '2026-09-16T00:00:00Z', status, observation: 'live' });

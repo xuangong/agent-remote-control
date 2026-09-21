@@ -1,18 +1,28 @@
+import { windowsJobSource } from './windows-job.js';
+
 /** A separate process observes pipe EOF even when the Controller cannot run cleanup. */
 export const vscodeTunnelSupervisorSource = String.raw`
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
+const { join } = require('node:path');
 const config = JSON.parse(process.argv[1]);
 let child;
 let stopping = false;
 let finished = false;
 let childExited = false;
 let reported = false;
+let windowsStopped = false;
 let result = { code: null, signal: null };
 function report(value) {
   if (process.connected) process.send(value, () => {});
 }
 function signalTree(signal) {
   if (!child || !child.pid) return false;
+  if (process.platform === 'win32') {
+    if (windowsStopped || childExited) return false;
+    windowsStopped = true;
+    try { execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { timeout: 3000, windowsHide: true, stdio: 'ignore' }); } catch {}
+    return true;
+  }
   try { process.kill(-child.pid, signal); return true; } catch (error) {
     if (error.code === 'ESRCH') return false;
     try { return child.kill(signal); } catch { return false; }
@@ -47,8 +57,19 @@ process.stdout.on('error', stop);
 process.stderr.on('error', stop);
 process.stdin.resume();
 const args = config.args.map(value => value === '__ARC_PARENT_PID__' ? String(process.pid) : value);
-child = spawn(config.executable, args, {
-  cwd: config.cwd, env: process.env, detached: true, stdio: ['ignore', 1, 2],
+let executable = config.executable;
+let nativeArgs = args;
+if (process.platform === 'win32') {
+  const quote = value => '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"';
+  const literal = value => "'" + value.replace(/'/g, "''") + "'";
+  const source = ${JSON.stringify(windowsJobSource)};
+  const script = '$ErrorActionPreference = "Stop"; Add-Type -TypeDefinition ' + literal(source)
+    + '; exit [ControllerJob]::Run(' + literal(executable) + ',' + literal([executable, ...args].map(quote).join(' ')) + ',' + literal(config.cwd) + ',' + process.pid + ')';
+  executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  nativeArgs = ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
+}
+child = spawn(executable, nativeArgs, {
+  cwd: config.cwd, env: process.env, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 1, 2],
 });
 child.once('spawn', () => report({ type: 'spawn', pid: child.pid }));
 child.once('error', () => { report({ type: 'spawnError' }); finish(); });

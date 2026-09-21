@@ -6,7 +6,7 @@ import type {
   ServerMessage,
   TimelineCursor,
   TimelineDirection,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 export type RemoteServerMessage = ServerMessage | IncompatibleProtocolVersionErrorMessage;
 

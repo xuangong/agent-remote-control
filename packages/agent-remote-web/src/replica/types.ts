@@ -6,7 +6,7 @@ import type {
   ProjectedTimelineEntry,
   ResourceResponse,
   ResourceState,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 export interface ReplicaDiagnostic {
   readonly code: string;

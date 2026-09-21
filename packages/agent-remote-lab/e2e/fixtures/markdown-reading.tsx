@@ -1,11 +1,11 @@
 import { useLayoutEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
+import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
 import '../../src/app.css';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 
 const binding = { locator: './diagram.png', resourceId: 'diagram', status: 'available' as const };
 const metadata = { status: 'available' as const, mediaType: 'image/png', byteLength: 1024, sha256: 'diagram', imageDimensions: { width: 1200, height: 600 } };

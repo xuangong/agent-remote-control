@@ -31,7 +31,7 @@ it('saves accepted connection settings privately and restores them without envir
   const raw = await readFile(join(path, 'connection.json'), 'utf8');
   expect(raw).toContain('device-secret');
   expect(raw).not.toContain('must-not-persist');
-  expect((await stat(join(path, 'connection.json'))).mode & 0o777).toBe(0o600);
+  if (process.platform !== 'win32') expect((await stat(join(path, 'connection.json'))).mode & 0o777).toBe(0o600);
   const restored = await resolveHostConnection(path, {});
   expect(restored.serverUrl).toBe('https://relay.example');
   expect(restored.remoteKey).toBe('device-secret');

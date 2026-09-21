@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import { AgentReplica, type RemoteAgentTransport, type RemoteTransportListener } from '@agent-remote-controller/agent-remote-web';
-import type { AgentSnapshot, HistoryPage } from '@agent-remote-controller/agent-remote-protocol';
+import { AgentReplica, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import type { AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { SideConversation } from './SideConversation.js';
 import { ForkStore } from '../session-forks.js';
 import { replicaState } from '../test/fixtures.js';

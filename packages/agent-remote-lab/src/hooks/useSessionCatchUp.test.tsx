@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { replicaState } from '../test/fixtures.js';
-import { RemoteSessionClient, type RemoteAgentTransport, type RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
-import { AgentReplica } from '@agent-remote-controller/agent-remote-web';
-import type { HistoryPage, AgentStreamMessage } from '@agent-remote-controller/agent-remote-protocol';
+import { RemoteSessionClient, type RemoteAgentTransport, type RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-remote-web';
+import type { HistoryPage, AgentStreamMessage } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { useSessionCatchUp } from './useSessionCatchUp.js';
 

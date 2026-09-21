@@ -10,7 +10,7 @@ import { afterEach, expect, vi } from 'vitest';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createAgentHost } from '../../../agent-host/src/host.js';
 import type { VscodeTunnelOptions } from '../../../agent-host/src/vscode-tunnel.js';
-import type { AgentSession, AgentProviderAdapter, ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSession, AgentProviderAdapter, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 
 const secret = 'preview-test-only-secret-01234567890123456789';
 const issuer = 'https://gateway.example';

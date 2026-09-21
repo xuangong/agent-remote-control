@@ -1,4 +1,4 @@
-import type { AgentToolCallTimelineItem } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentToolCallTimelineItem } from '@orchardworks/agent-provider-sdk';
 
 import type { DshImageReference } from './content.js';
 

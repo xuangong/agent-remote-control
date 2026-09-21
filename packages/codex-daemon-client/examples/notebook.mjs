@@ -1,4 +1,4 @@
-import { CodexDaemonClient } from '@agent-remote-controller/codex-daemon-client';
+import { CodexDaemonClient } from '@orchardworks/codex-daemon-client';
 
 /** A consumer's own protocol: replace a document, append text, report connection health. */
 export function createNotebook(transport, connect, recovery = {}) {

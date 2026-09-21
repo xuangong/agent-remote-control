@@ -1,13 +1,13 @@
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
-import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
-import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@agent-remote-controller/agent-remote-protocol';
+import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
+import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
-} from '@agent-remote-controller/agent-remote-protocol';
-import type { AgentReplicaState, RemoteSessionStatus } from '@agent-remote-controller/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, PreviewDock, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@agent-remote-controller/agent-remote-web/react';
+} from '@orchardworks/agent-remote-protocol';
+import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import { AgentCommandDetails, AgentTimeline, PreviewDock, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 
 import { sessionActivity } from '../session-activity.js';
 import { RecoveryScope } from '../conversation-recovery.js';

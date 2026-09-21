@@ -3,7 +3,7 @@
 `ClaudeAgentProvider` adapts Claude Code to the provider-neutral Agent SDK. It uses `@anthropic-ai/claude-agent-sdk` 0.3.247; the native validation target is Claude Code 2.1.247. Agent Host owns each persistent streaming-input Query and reuses it across browser and uplink reconnections.
 
 ```typescript
-import { ClaudeAgentProvider } from '@agent-remote-controller/agent-provider-claude';
+import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
 
 const provider = new ClaudeAgentProvider({ executable: '/absolute/path/to/claude' });
 const session = await provider.createSession({ sessionId: 'caller-proposal', cwd: '/workspace' });

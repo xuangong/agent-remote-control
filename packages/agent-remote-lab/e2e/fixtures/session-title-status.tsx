@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AgentChildSessionList } from '@agent-remote-controller/agent-remote-web/react';
+import { AgentChildSessionList } from '@orchardworks/agent-remote-web/react';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { SessionDirectory } from '../../src/components/SessionDirectory.js';
 import { ChatSessionManager } from '../../src/components/ChatSessionManager.js';
@@ -8,7 +8,7 @@ import { CollapsedConversations } from '../../src/components/CollapsedConversati
 import { SessionDirectoryClient } from '../../src/directory-client.js';
 import { useSessionEntries } from '../../src/hooks/useSessionEntries.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '@agent-remote-controller/agent-remote-web/styles.css';
+import '@orchardworks/agent-remote-web/styles.css';
 import '../../src/app.css';
 
 const opened = [{ agentId: 'agent-1', nativeSessionId: 'recorded-session', providerId: 'recorded', title: 'Current session' }];

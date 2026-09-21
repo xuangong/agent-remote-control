@@ -1,23 +1,27 @@
 import { spawn } from 'node:child_process';
+import { packageManager } from './lib/package-manager.mjs';
 
 const mode = process.argv[2] ?? 'unit';
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
-  'preview-browser': ['--filter', '@agent-remote-controller/agent-remote-lab', 'exec', 'vitest', 'run', '--config=vitest.preview.config.ts', '--testTimeout=30000', '--hookTimeout=15000'],
-  'codex-shared': ['--filter', '@agent-remote-controller/agent-provider-codex', 'exec', 'vitest', 'run', 'src/shared-runtime.local.test.ts', '--testTimeout=30000', '--hookTimeout=15000', '--maxWorkers=1'],
+  'preview-browser': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vitest', 'run', '--config=vitest.preview.config.ts', '--testTimeout=30000', '--hookTimeout=15000'],
+  'codex-shared': ['--filter', '@orchardworks/agent-provider-codex', 'exec', 'vitest', 'run', 'src/shared-runtime.local.test.ts', '--testTimeout=30000', '--hookTimeout=15000', '--maxWorkers=1'],
   'host-package': ['exec', 'node', '--test', '--test-timeout=180000', 'scripts/agent-host-cli.test.mjs', 'scripts/agent-host-package.test.mjs'],
-  cloudflare: ['--filter', '@agent-remote-controller/agent-remote-cloudflare', 'run', 'test', '--hookTimeout=30000'],
-  copilot: ['--filter', '@agent-remote-controller/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
+  'host-windows': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/windows.test.ts', 'src/connection-config.test.ts', '--testTimeout=15000', '--hookTimeout=15000'],
+  'codex-transport': ['--filter', '@orchardworks/codex-daemon-client', 'exec', 'vitest', 'run', 'src/app-server-transport.test.ts', '--testTimeout=15000', '--hookTimeout=15000'],
+  'windows-services': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/vscode-tunnel.test.ts', 'src/vscode-tunnel-supervisor.test.ts', 'src/windows-autostart.test.ts', 'src/windows-shared.test.ts', '--testTimeout=30000', '--hookTimeout=15000', '--maxWorkers=1'],
+  cloudflare: ['--filter', '@orchardworks/agent-remote-cloudflare', 'run', 'test', '--hookTimeout=30000'],
+  copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
   setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs'],
   unit: ['-r', 'run', 'test', '--hookTimeout=30000'],
-  e2e: ['--filter', '@agent-remote-controller/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
-  conformance: ['--filter', '@agent-remote-controller/agent-remote-lab', 'run', 'test:conformance'],
+  e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
+  conformance: ['--filter', '@orchardworks/agent-remote-lab', 'run', 'test:conformance'],
 };
 if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);
-const child = spawn('pnpm', commands[mode], { stdio: 'inherit', detached: process.platform !== 'win32' });
+const child = spawn(...packageManager('pnpm', commands[mode]), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32' });
 function stop(signal) {
   try {
-    if (process.platform === 'win32') child.kill(signal);
+    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill(signal));
     else process.kill(-child.pid, signal);
   } catch (error) {
     if (error.code !== 'ESRCH') throw error;

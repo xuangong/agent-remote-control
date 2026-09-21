@@ -1,7 +1,7 @@
-import { CommandInteractions, type AgentCommand, type AgentCommandResult, type AgentInteractionResponse, type AgentSessionSetting, type AgentStreamEvent } from '@agent-remote-controller/agent-provider-sdk';
+import { CommandInteractions, type AgentCommand, type AgentCommandResult, type AgentInteractionResponse, type AgentSessionSetting, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import type { AgentResourceReadResult } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 import { isRecord } from './native.js';
 import type { DshSessionSettings } from './session-settings.js';
 

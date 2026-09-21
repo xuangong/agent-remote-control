@@ -1,4 +1,4 @@
-import type { AgentProviderAdapter, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,13 +21,13 @@ vi.mock('@deepseek-ai/dsh-agent', () => ({
   installModelSelection: composition.installModelSelection,
 }));
 
-vi.mock('@agent-remote-controller/agent-provider-dsh', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@agent-remote-controller/agent-provider-dsh')>(),
+vi.mock('@orchardworks/agent-provider-dsh', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@orchardworks/agent-provider-dsh')>(),
   createDshWebInteractionAdapter: () => composition.interactions,
 }));
 
-vi.mock('@agent-remote-controller/dsh', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@agent-remote-controller/dsh')>(),
+vi.mock('@orchardworks/dsh', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@orchardworks/dsh')>(),
   createDshAgentRemoteProvider: composition.providerFactory,
 }));
 

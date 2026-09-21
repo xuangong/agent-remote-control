@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { BROKER_MAX_FRAME_BYTES } from '@agent-remote-controller/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES } from '@orchardworks/agent-remote-hosted';
 import { event, fixture, origin, send } from './fixture.js';
 
 it('serves hosted assets and health, authenticates browser login, and transports Host RPC and Controller frames', async () => {

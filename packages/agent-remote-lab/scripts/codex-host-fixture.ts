@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
-import { SessionReferenceStore, createAgentHost, createCodexSessionDirectory } from '@agent-remote-controller/agent-remote-controller';
+import { SessionReferenceStore, createAgentHost, createCodexSessionDirectory } from '@orchardworks/agent-remote-controller';
 import { createCodexProviderFixture } from '../src/server/codex.js';
 
 const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE;

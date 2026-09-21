@@ -1,1 +1,1 @@
-export { normalizeRecoverySettings, type CodexSharedRecoverySettings, type CodexSharedRecoveryPlan } from '@agent-remote-controller/codex-daemon-client';
+export { normalizeRecoverySettings, type CodexSharedRecoverySettings, type CodexSharedRecoveryPlan } from '@orchardworks/codex-daemon-client';

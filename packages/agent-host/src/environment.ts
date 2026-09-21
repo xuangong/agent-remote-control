@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import { arch, homedir, platform, release, userInfo } from 'node:os';
 import { posix, win32 } from 'node:path';
-import type { HostDetectionStatus, HostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
+import type { HostDetectionStatus, HostEnvironment } from '@orchardworks/agent-remote-protocol';
 
 /** Probe boundary keeps platform fixtures independent of the machine running tests. */
 export interface EnvironmentProbe {

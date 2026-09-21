@@ -2,7 +2,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { createProtocolValidationServer } from '../server.js';
 import { createSessionDirectory } from './session-directory.js';
-import type { AgentProviderAdapter } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 import { createRecordedLabProvider } from './recorded.js';
 
 const servers: ReturnType<typeof createProtocolValidationServer>[] = [];

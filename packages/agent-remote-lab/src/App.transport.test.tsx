@@ -1,12 +1,12 @@
 import { act, StrictMode, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { HttpWebSocketTransport } from '@agent-remote-controller/agent-remote-web';
+import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from './App.js';
 import { replicaState } from './test/fixtures.js';
 import { render } from './test/setup.js';
 
-vi.mock('@agent-remote-controller/agent-remote-web', async importOriginal => {
-  const original = await importOriginal<typeof import('@agent-remote-controller/agent-remote-web')>();
+vi.mock('@orchardworks/agent-remote-web', async importOriginal => {
+  const original = await importOriginal<typeof import('@orchardworks/agent-remote-web')>();
   return { ...original, HttpWebSocketTransport: vi.fn(function () {
     return { dispose: vi.fn(), connect: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
       onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };

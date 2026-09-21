@@ -12,7 +12,7 @@ import {
   type TimelineDirection,
   type WireDecodeResult,
   type WireEncodeResult,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import { ProviderNotFoundError } from '../provider-registry.js';
 import {

@@ -1,8 +1,8 @@
 import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite } from './recovery-writes.js';
 import { createContext } from 'react';
-import { controllerPath, readControllerLocation, type ControllerLocation } from '@agent-remote-controller/agent-remote-hosted/controller-location';
-import { clearImageDraftScope } from '@agent-remote-controller/agent-remote-web/react';
-import type { TimelineReadingPosition } from '@agent-remote-controller/agent-remote-web/react';
+import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
+import { clearImageDraftScope } from '@orchardworks/agent-remote-web/react';
+import type { TimelineReadingPosition } from '@orchardworks/agent-remote-web/react';
 
 const prefix = 'agent-remote:recovery:';
 export const RecoveryScope = createContext<ReadingPositions | undefined>(undefined);

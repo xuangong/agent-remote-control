@@ -1,6 +1,6 @@
-import type { MessagePart, ImageUploadReceipt } from '@agent-remote-controller/agent-remote-protocol';
+import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import { InputImageError, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
-import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions, AgentStreamEvent } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions, AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentCommand,
@@ -14,7 +14,7 @@ import {
   type ResourceResponse,
   type ResourceResolveResponse,
   type ServerMessage,
-} from '@agent-remote-controller/agent-remote-protocol';
+} from '@orchardworks/agent-remote-protocol';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { AgentBusyError, UnsupportedAgentCapabilityError, type AgentManagerListener } from './agent-manager.js';

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import type { CopilotClient, CopilotSession, SessionConfig, SessionEvent } from '@github/copilot-sdk';
-import { validateCommandDirectory, validateSessionSetting, type AgentCapabilities, type AgentChildSession, type AgentCommand, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionConfig, type AgentStreamEvent, type ProviderStreamItem } from '@agent-remote-controller/agent-provider-sdk';
+import { validateCommandDirectory, validateSessionSetting, type AgentCapabilities, type AgentChildSession, type AgentCommand, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionConfig, type AgentStreamEvent, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { CopilotAgentProviderOptions } from './provider.js';
 import { Channel, deadline } from './channel.js';
 import { Projector, provider, record, detail } from './projector.js';

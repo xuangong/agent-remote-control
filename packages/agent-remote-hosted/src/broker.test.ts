@@ -1,6 +1,6 @@
 import { AgentRuntimeError } from '../../agent-provider-sdk/dist/index.js';
 import { afterEach, expect, it } from 'vitest';
-import { acceptSessionChannel } from '@agent-remote-controller/agent-remote-protocol';
+import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
 import { createOperationCache, OperationCacheError } from '../../agent-host/dist/operation-cache.js';
 

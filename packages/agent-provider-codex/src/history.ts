@@ -1,6 +1,6 @@
-import { readThread } from '@agent-remote-controller/codex-daemon-client';
-export { collectCodexThreadHistoryItems } from '@agent-remote-controller/codex-daemon-client';
-import type { ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
+import { readThread } from '@orchardworks/codex-daemon-client';
+export { collectCodexThreadHistoryItems } from '@orchardworks/codex-daemon-client';
+import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 
 import { isRecord, readNumber, readString } from './native.js';
 import { CodexEventProjector, type CodexEventProjectorOptions } from './projector.js';

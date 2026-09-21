@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { CopilotClient, RuntimeConnection, type SessionConfig } from '@github/copilot-sdk';
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { CopilotAgentSession } from './session.js';
 import { deadline } from './channel.js';
 export interface CopilotAgentProviderOptions { executable?: string; env?: Record<string, string | undefined>; requestTimeoutMs?: number; onDiagnostic?: (message: string) => void; nativeSessionConfig?: Pick<SessionConfig, 'provider' | 'skillDirectories'>; useLoggedInUser?: boolean; }

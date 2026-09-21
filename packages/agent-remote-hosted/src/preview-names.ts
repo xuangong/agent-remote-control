@@ -1,4 +1,4 @@
-import type { PreviewSnapshot } from '@agent-remote-controller/agent-remote-tunnel';
+import type { PreviewSnapshot } from '@orchardworks/agent-remote-tunnel';
 
 export interface PreviewNames {
   pins?: Array<{ target: string; nameId: string }>;

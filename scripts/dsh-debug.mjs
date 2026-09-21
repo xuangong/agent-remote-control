@@ -163,7 +163,7 @@ async function main() {
       const runtime = join(options.stateDir, 'runtime');
       console.log(`Installing DSH ${DSH_VERSION} locally. A different version will not be substituted.`);
       try {
-        if (!await exists(join(runtime, 'package.json'))) await run(pnpm, ['--filter', '@agent-remote-controller/agent-remote-lab', 'prepare:dsh-release', runtime]);
+        if (!await exists(join(runtime, 'package.json'))) await run(pnpm, ['--filter', '@orchardworks/agent-remote-lab', 'prepare:dsh-release', runtime]);
         await run('npm', ['install', '--prefix', runtime, '--no-audit', '--no-fund']);
       } catch (error) {
         throw new Error(`The pinned DSH release could not be installed. Use --dsh /path/to/dsh or --dsh-repo /path/to/deepseek-harness (${DSH_VERSION}).\n${error.message}`);
@@ -203,9 +203,9 @@ async function main() {
     } else console.log('Reusing the running workbench. It will remain running when this script exits.');
 
     console.log('Building and installing the Agent Remote Host plugin...');
-    await run(pnpm, ['--filter', '@agent-remote-controller/dsh', 'build:bundle']);
+    await run(pnpm, ['--filter', '@orchardworks/dsh', 'build:bundle']);
     const plugin = JSON.parse(await readFile(join(root, 'packages/agent-remote-dsh/package.json'), 'utf8'));
-    const archive = join(root, `packages/agent-remote-dsh/dist/host-bundle/agent-remote-controller-dsh-host-${plugin.version}.tgz`);
+    const archive = join(root, `packages/agent-remote-dsh/dist/host-bundle/orchardworks-dsh-host-${plugin.version}.tgz`);
     await mkdir(options.home, { recursive: true, mode: 0o700 });
     const dshEnv = { ...env, ...sourceEnvironment, DSH_HOME: options.home };
     await run(dshCommand, [...dshArgs, 'plugin', '--profile', 'web', 'add', `file:${archive}`], { cwd: options.workspace, env: dshEnv });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentReplicaState, RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
+import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
 import { ForkStore, referenceForkContext, type SessionFork } from '../session-forks.js';
 import { configureFork } from '../fork-actions.js';

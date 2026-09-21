@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-provider-codex",
+  "name": "@orchardworks/agent-provider-codex",
   "version": "0.1.0",
   "private": false,
   "publishConfig": {
@@ -27,9 +27,9 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-provider-sdk": "workspace:*",
     "ws": "^8.21.0",
-    "@agent-remote-controller/codex-daemon-client": "workspace:*"
+    "@orchardworks/codex-daemon-client": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-remote-controller/agent-provider-dsh",
+  "name": "@orchardworks/agent-provider-dsh",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {
@@ -23,7 +23,7 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@agent-remote-controller/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-provider-sdk": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
     "@deepseek-ai/dsh-llm": "0.1.2-rc.1",

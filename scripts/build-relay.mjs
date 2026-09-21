@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
-const build = spawn('pnpm', ['--filter', '@agent-remote-controller/agent-remote-lab...', 'run', 'build'], { cwd: root, stdio: 'inherit' });
+const build = spawn('pnpm', ['--filter', '@orchardworks/agent-remote-lab...', 'run', 'build'], { cwd: root, stdio: 'inherit' });
 const code = await new Promise((resolve, reject) => { build.once('error', reject); build.once('exit', resolve); });
 if (code !== 0) process.exit(code ?? 1);
 const require = createRequire(join(root, 'packages/agent-remote-lab/package.json'));

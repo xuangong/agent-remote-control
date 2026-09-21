@@ -1,6 +1,6 @@
-import type { ResourceResponseState } from '@agent-remote-controller/agent-remote-protocol';
+import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useRef, useState } from 'react';
-import type { AgentCommand, ResourceBinding } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentCommand, ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
 import { MarkdownContent } from './MarkdownContent.js';
 

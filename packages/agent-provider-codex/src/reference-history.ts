@@ -1,4 +1,4 @@
-import type { AgentHistoryPage, AgentHistoryQuery } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
 import { CodexEventProjector } from './projector.js';

@@ -1,4 +1,4 @@
-import { boundToolResult, type AgentUserMessagePart, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@agent-remote-controller/agent-provider-sdk';
+import { boundToolResult, type AgentUserMessagePart, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { ClaudeImageRegistry } from './images.js';
 
 export function record(value: unknown): value is Record<string, any> {

@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
-import type { AgentInteractionRequest } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../test/setup.js';
 import { InteractionPanel } from './InteractionPanel.js';
 import { InteractionItem } from './items/InteractionItem.js';

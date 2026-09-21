@@ -1,6 +1,6 @@
-import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@agent-remote-controller/agent-remote-protocol';
-import type { AgentReplicaState, RemoteAgentTransport } from '@agent-remote-controller/agent-remote-web';
-import { RemoteOperationError } from '@agent-remote-controller/agent-remote-web';
+import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { RemoteOperationError } from '@orchardworks/agent-remote-web';
 import type { CreateSessionOptions, OpenedSession } from './directory-client.js';
 import { sessionKey } from './session-tree.js';
 

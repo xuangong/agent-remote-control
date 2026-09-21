@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@agent-remote-controller/agent-remote-protocol';
+import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { captureForkContext, ForkStore, contextPrefix } from './session-forks.js';
-import { RemoteOperationError } from '@agent-remote-controller/agent-remote-web';
+import { RemoteOperationError } from '@orchardworks/agent-remote-web';
 
 const source = { agentId: 'parent', nativeSessionId: 'native-parent', providerId: 'codex', title: 'Parent', hostId: 'local' };
 const entry = (seq: number, text: string): ProjectedTimelineEntry => ({ providerId: 'codex', item: { type: 'user_message', text }, timestamp: '2026-09-11T00:00:00Z', seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }], resources: [], collapsed: [] });

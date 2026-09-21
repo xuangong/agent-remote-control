@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentProviderAdapter } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 
 import { ProviderRegistry } from './provider-registry.js';
 

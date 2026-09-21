@@ -8,7 +8,7 @@ import type {
   AgentSessionConfig,
   ProviderObservation,
   ProviderStreamItem,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 
 import { DshPlayback, type PlaybackClock, type PlaybackMode } from './playback.js';
 import { DshProjector } from './projector.js';

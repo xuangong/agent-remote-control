@@ -1,5 +1,5 @@
-import type { AgentStatus } from '@agent-remote-controller/agent-remote-protocol';
-import type { AgentReplicaState } from '@agent-remote-controller/agent-remote-web';
+import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
+import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 
 /** Pending input takes precedence over a turn that remains active while waiting. */
 export function sessionActivity(state?: AgentReplicaState): AgentStatus | undefined {

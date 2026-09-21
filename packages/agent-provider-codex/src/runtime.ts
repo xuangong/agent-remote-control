@@ -1,10 +1,10 @@
-import type { AgentChildSession, AgentRuntimeConnection, AgentRuntimeInfo } from '@agent-remote-controller/agent-provider-sdk';
-import { CodexDaemonClient, CodexRestorationSemaphore, type CodexChildSnapshot, type CodexThreadOrigin } from '@agent-remote-controller/codex-daemon-client';
+import type { AgentChildSession, AgentRuntimeConnection, AgentRuntimeInfo } from '@orchardworks/agent-provider-sdk';
+import { CodexDaemonClient, CodexRestorationSemaphore, type CodexChildSnapshot, type CodexThreadOrigin } from '@orchardworks/codex-daemon-client';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { providerInitialization } from './initialize.js';
 import { isRecord, readString } from './native.js';
 import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
-export { historyOverlapsNotifications } from '@agent-remote-controller/codex-daemon-client';
+export { historyOverlapsNotifications } from '@orchardworks/codex-daemon-client';
 
 export interface CodexThreadSession {
   receiveNotification(method: string, params: unknown): void;

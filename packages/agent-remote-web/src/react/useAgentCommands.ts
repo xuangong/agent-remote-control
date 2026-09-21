@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AgentCommand } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentCommand } from '@orchardworks/agent-remote-protocol';
 
 export function useAgentCommands(sessionKey: string, active: boolean, list?: () => Promise<AgentCommand[]>) {
   const listRef = useRef(list);

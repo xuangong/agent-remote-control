@@ -1,1 +1,1 @@
-export { HostSharing, SharingError, type HostSharingState } from '@agent-remote-controller/agent-remote-hosted';
+export { HostSharing, SharingError, type HostSharingState } from '@orchardworks/agent-remote-hosted';

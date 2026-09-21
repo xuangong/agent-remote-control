@@ -53,7 +53,7 @@ for (const engine of [chromium, webkit]) it(`preserves local Markdown images acr
   const source = `
     import React, { useMemo, useState, useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
-    import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@agent-remote-controller/agent-remote-web/headless';
+    import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web/headless';
     import { MarkdownContent } from '../../agent-remote-web/src/react/MarkdownContent.tsx';
     const replica = new AgentReplica();
     const client = new RemoteSessionClient(${JSON.stringify(f.agentId)}, new HttpWebSocketTransport(${JSON.stringify(f.url + f.alice.basePath)}), replica);

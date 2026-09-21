@@ -1,4 +1,4 @@
-import type { AgentSessionExtensions, AgentSessionTool } from '@agent-remote-controller/agent-provider-sdk';
+import type { AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
 import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
 import { randomUUID } from 'node:crypto';
@@ -23,15 +23,15 @@ import type {
   AgentSessionConfig,
   ProviderObservation,
   ProviderStreamItem,
-} from '@agent-remote-controller/agent-provider-sdk';
+} from '@orchardworks/agent-provider-sdk';
 
-import { IMAGE_INPUT_CAPABILITIES, AgentSessionInUseError, CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@agent-remote-controller/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, AgentSessionInUseError, CommandInteractions, validateInteractionResponse, redactInteractionResponse } from '@orchardworks/agent-provider-sdk';
 import { mapCodexQuestion, mapCodexQuestionResponse } from './questions.js';
 import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.js';
 import { mapCodexPermissions } from './permissions.js';
 import { mapCodexToolApproval } from './tool-approval.js';
 import { CodexAppServerRpcError, CodexAppServerTransport, CodexServerRequestCanceled } from './app-server-transport.js';
-import { readCodexHistoryPage } from '@agent-remote-controller/codex-daemon-client';
+import { readCodexHistoryPage } from '@orchardworks/codex-daemon-client';
 import { collectCodexThreadHistoryItems, projectCodexThreadHistory } from './history.js';
 import { CodexImageRegistry } from './images.js';
 import { isRecord, readItem, readItemId, readString } from './native.js';

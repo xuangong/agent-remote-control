@@ -5,8 +5,8 @@ import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
-import { CodexAppServerProvider } from '@agent-remote-controller/agent-provider-codex';
-import type { AgentProviderAdapter, AgentSessionConfig } from '@agent-remote-controller/agent-provider-sdk';
+import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
+import type { AgentProviderAdapter, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 
 import { createProtocolValidationServer } from '../server.js';
 import {

@@ -3,7 +3,7 @@ import { FilePreviewContext } from '../FilePreviewContext.js';
 import { ImagePreview } from '../ImagePreview.js';
 import { loadLocalResource } from '../local-resource.js';
 import { TimelineTitle } from '../TimelineTitle.js';
-import type { AgentTimelineItem } from '@agent-remote-controller/agent-remote-protocol';
+import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent } from '../MarkdownContent.js';
 import type { MessageGroupPosition } from '../timeline-render-model.js';
 import type { MarkdownResourceContext } from '../markdown-resources.js';

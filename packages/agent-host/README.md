@@ -57,16 +57,29 @@ agent-remote-controller share list-sessions
 native session ID. For Codex, run `/status` in the native CLI and copy the
 **Session** value. A missing ID can be corrected without restarting the command.
 
-`share list-sessions` shows recent sessions across enabled providers, ordered by
-activity. Each entry includes the provider, title, native ID, directory, and
-update time. In a terminal, both provider and session choices use **↑/↓** to move
-and **Enter** to select. Choose **Older sessions** or **Newer sessions** to browse
-pages of 20 entries. **Home/End** jump to the first/last choice; **Page Up/Down**
+`share list-sessions` offers two terminal browsing modes: **Recent sessions**
+across enabled providers, and **By folder** to choose a workspace before choosing
+a session. Folders are grouped by their full paths and ordered by their latest
+session activity. Each session shows its provider, title, native ID, directory,
+and update time. Sessions without a workspace appear under **(no directory)**.
+
+Press **/** or select **Search** to enter a query, then **Enter** to see matches.
+Folder searches match full paths; session searches match titles and native IDs.
+Search is case-insensitive; multiple space-separated terms must all match.
+Search inside a folder stays within that exact directory. Choose **Clear search**
+(or submit an empty query) to reset it, or **b** to return to folders/browsing modes.
+Folder browsing and session searches load metadata from all catalog pages, with
+progress displayed; results are cached for this invocation. No conversation
+content is loaded. Use Ctrl+C to interrupt metadata loading.
+
+In a terminal, provider, browsing mode, folder, and session choices use **↑/↓**
+to move and **Enter** to select. Choose **Older entries** or **Newer entries**
+(**n/p**) to browse pages of 20 entries. **Home/End** jump to the first/last choice; **Page Up/Down**
 move by ten choices. **Esc**, `q`, or Ctrl+C cancel a selection. Session IDs are
 still entered as text (`q`, Ctrl+C, or end of input cancel).
 
-Non-terminal input retains numbered choices for scripts, with `n` for older
-sessions and `p` for newer sessions.
+Non-terminal input retains the recent-session numbered choices for scripts,
+with `n` for older sessions and `p` for newer sessions.
 
 Before displaying a link and terminal QR code, the Controller checks the selected
 identity against its current native catalog. Sharing does not resume a session,

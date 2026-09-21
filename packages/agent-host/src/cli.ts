@@ -289,8 +289,13 @@ async function share(): Promise<void> {
       ask: async prompt => {
         if (!answers) startTextInput();
         process.stdout.write(prompt);
-        const answer = await answers!.next();
-        return answer.done ? 'q' : answer.value;
+        try {
+          const answer = await answers!.next();
+          return answer.done ? 'q' : answer.value;
+        } finally {
+          // Release readline before a search result returns to raw keyboard selection.
+          if (terminal) { lines?.close(); lines = undefined; answers = undefined; }
+        }
       },
       select: terminal ? selectTerminalChoice : undefined,
       qr: renderSessionQr,

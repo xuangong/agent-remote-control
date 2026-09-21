@@ -11,7 +11,7 @@ async function terminal(steps: Array<{ wait: string; keys: string }>, args = ['l
   const socket = join(root, 'control.sock');
   const calls: Record<string, unknown>[] = [];
   const summary = (id: string) => ({ providerId: 'codex', nativeSessionId: id, title: 'Same title',
-    workspace: '/project with spaces', updatedAt: '2026-09-21T00:00:00Z', createdAt: '2026-09-21T00:00:00Z', state: 'idle' });
+    workspace: id === 'older-session' ? '/archive/project with spaces' : '/project with spaces', updatedAt: '2026-09-21T00:00:00Z', createdAt: '2026-09-21T00:00:00Z', state: 'idle' });
   const server = createServer({ allowHalfOpen: true }, client => {
     let raw = ''; client.on('data', data => { raw += data; });
     client.on('end', () => {
@@ -70,9 +70,9 @@ it('selects a provider with arrow keys before accepting a typed native session I
 });
 
 it('uses arrow keys and Enter to share the selected identity among identical titles', async () => {
-  const result = await terminal([{ wait: 'Session: session-00', keys: '\u001b[B' }, { wait: 'Session: session-01', keys: '\r' }]);
+  const result = await terminal([{ wait: 'Browse: recent', keys: '\r' }, { wait: 'Session: session-00', keys: '\u001b[B' }, { wait: 'Session: session-01', keys: '\r' }]);
   expect(result.code, result.output).toBe(0);
-  expect(result.steps).toBe(2);
+  expect(result.steps).toBe(3);
   expect(result.output).toContain('https://agents.example/?host=host&provider=codex&session=session-01');
   expect(result.output).not.toContain('Choose session number');
   expect(result.output).not.toContain('test-management-token');
@@ -82,22 +82,65 @@ it('uses arrow keys and Enter to share the selected identity among identical tit
 
 it('browses older sessions and returns to the cached newer page with keyboard choices', async () => {
   const result = await terminal([
+    { wait: 'Browse: recent', keys: '\r' },
     { wait: 'Session: session-00', keys: '\u001b[F\r' },
     { wait: 'Session: older-session', keys: '\u001b[F\r' },
     { wait: 'Session: session-00', keys: '\r' },
   ]);
   expect(result.code, result.output).toBe(0);
-  expect(result.steps).toBe(3);
+  expect(result.steps).toBe(4);
   expect(result.output).toContain('provider=codex&session=session-00');
   expect(result.calls.filter(call => call.action === 'share-catalog' && !call.nativeSessionId)).toHaveLength(2);
 });
 
 it.each(['\u001b', 'q', '\u0003'])('cancels keyboard selection and restores the terminal with %j', async keys => {
-  const result = await terminal([{ wait: 'Session: session-00', keys }]);
+  const result = await terminal([{ wait: 'Browse: recent', keys: '\r' }, { wait: 'Session: session-00', keys }]);
   expect(result.code, result.output).toBe(0);
   expect(result.output).toContain('Sharing cancelled.');
   expect(result.output).toContain('\u001b[?25h');
   expect(result.output).toContain('\u001b[?1049l');
   expect(result.calls.some(call => call.nativeSessionId)).toBe(false);
   expect(result.output).not.toContain('?host=');
+});
+
+it('searches an unloaded older session and returns from text input to keyboard selection', async () => {
+  const result = await terminal([
+    { wait: 'Browse: recent', keys: '\r' },
+    { wait: 'Session: session-00', keys: '/' },
+    { wait: 'Search session title or ID', keys: 'OLDER-session\r' },
+    { wait: 'Session: older-session', keys: '\r' },
+  ]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.steps).toBe(4);
+  expect(result.output).toContain('provider=codex&session=older-session');
+  expect(result.calls.filter(call => call.nativeSessionId).map(call => call.nativeSessionId)).toEqual(['older-session']);
+});
+
+it('searches folders then edits a session search with no results without losing keyboard input', async () => {
+  const result = await terminal([
+    { wait: 'Browse: recent', keys: '\u001b[B\r' },
+    { wait: 'Directory: /project with spaces', keys: '/' },
+    { wait: 'Search folder path', keys: 'ARCHIVE\r' },
+    { wait: 'Directory: /archive/project with spaces', keys: '\r' },
+    { wait: 'Session: older-session', keys: '/' },
+    { wait: 'Search session title or ID', keys: 'not-found\r' },
+    { wait: 'No matches', keys: '/' },
+    { wait: 'Search session title or ID', keys: 'older\r' },
+    { wait: 'Session: older-session', keys: '\r' },
+  ]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.steps).toBe(9);
+  expect(result.output).toContain('provider=codex&session=older-session');
+  expect(result.calls.filter(call => call.action === 'share-catalog' && !call.nativeSessionId)).toHaveLength(2);
+});
+
+it('cancels a search text prompt without sharing or leaving raw terminal input active', async () => {
+  const result = await terminal([
+    { wait: 'Browse: recent', keys: '\r' },
+    { wait: 'Session: session-00', keys: '/' },
+    { wait: 'Search session title or ID', keys: '\u0003' },
+  ]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain('Sharing cancelled.');
+  expect(result.calls.some(call => call.nativeSessionId)).toBe(false);
 });

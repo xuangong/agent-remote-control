@@ -1,5 +1,7 @@
 import { controllerPath } from '@agent-remote-controller/agent-remote-hosted/controller-location';
-import type { RemoteCatalogPage, RemoteSessionSummary } from '@agent-remote-controller/agent-remote-relay';
+import type { RemoteSessionSummary } from '@agent-remote-controller/agent-remote-relay';
+import { ShareCatalog, type ReadShareCatalog } from './share-catalog.js';
+import { browseShareSessions } from './share-browser.js';
 
 export interface ShareContext {
   serverUrl: string;
@@ -10,6 +12,7 @@ export interface ShareChoice {
   value: string;
   label: string;
   description?: string[];
+  shortcut?: string;
 }
 export interface ShareIO {
   write(text: string): void;
@@ -90,61 +93,25 @@ export async function runShare(args: string[], request: ShareRequest, io: ShareI
   io.write('On your phone, open this site and use Scan to open. The receiving device uses its own sign-in and Host access.\n');
 }
 
-async function chooseRecent(context: ShareContext,
-  catalog: (providerId: string, query?: { cursor?: string }) => Promise<RemoteCatalogPage>,
+async function chooseRecent(context: ShareContext, read: ReadShareCatalog,
   validate: (providerId: string, id: string) => Promise<RemoteSessionSummary | undefined>, io: ShareIO): Promise<RemoteSessionSummary | undefined> {
-  const sources = context.providers.map(provider => ({ providerId: provider.providerId, items: [] as RemoteSessionSummary[],
-    cursor: undefined as string | undefined, more: true }));
-  // Merge sorted provider pages so a busy provider cannot hide another provider's recent sessions.
-  async function nextPage() {
-    const page: RemoteSessionSummary[] = [];
-    while (page.length < 20) {
-      await Promise.all(sources.map(async source => {
-        if (source.items.length || !source.more) return;
-        const result = await catalog(source.providerId, { cursor: source.cursor });
-        if (!Array.isArray(result.items) || result.items.some(item => item.providerId !== source.providerId)
-          || (result.hasMore && (!result.nextCursor || result.nextCursor === source.cursor || !result.items.length))) {
-          throw new Error('The Host returned an invalid session page. Run share again.');
-        }
-        source.items = result.items; source.cursor = result.nextCursor; source.more = result.hasMore;
-      }));
-      const source = sources.filter(value => value.items.length).sort((a, b) => compare(a.items[0]!, b.items[0]!))[0];
-      if (!source) break;
-      page.push(source.items.shift()!);
-    }
-    return page;
-  }
+  const catalog = new ShareCatalog(context.providers, read);
+  if (io.select) return browseShareSessions(catalog, io, validate);
   io.write('Loading recent sessions…\n');
-  const pages = [await nextPage()];
   let pageIndex = 0;
-  if (!pages[0]!.length) { io.write('No sessions found on this Host.\n'); return; }
+  if (!(await catalog.page(0)).length) { io.write('No sessions found on this Host.\n'); return; }
   while (true) {
-    const page = pages[pageIndex]!;
-    const more = pageIndex < pages.length - 1 || sources.some(source => source.items.length || source.more);
-    let answer: string | undefined;
-    if (io.select) {
-      const choices: ShareChoice[] = page.map((item, index) => ({ value: String(index + 1),
-        label: `[${safe(item.providerId)}] ${safe(item.title || item.nativeSessionId)}`,
-        description: [`Session: ${item.nativeSessionId}`, `Directory: ${item.workspace ?? '(no directory)'}`, `Updated: ${item.updatedAt}`],
-      }));
-      if (more) choices.push({ value: 'n', label: 'Older sessions →' });
-      if (pageIndex > 0) choices.push({ value: 'p', label: '← Newer sessions' });
-      answer = await io.select(`Recent sessions — page ${pageIndex + 1} (newest first)`, choices);
-    } else {
-      io.write('\nRecent sessions (newest first):\n');
-      page.forEach((item, index) => io.write(`  ${index + 1}. [${safe(item.providerId)}] ${safe(item.title || item.nativeSessionId)}\n`
-        + `     ${safe(item.nativeSessionId)} | ${safe(item.workspace ?? '(no directory)')} | ${safe(item.updatedAt)}\n`));
-      answer = (await io.ask(`Choose session number${more ? ', n for older sessions' : ''}${pageIndex ? ', p for newer sessions' : ''}: `)).trim();
-    }
-    if (answer === undefined || cancelled(answer)) { cancel(io); return; }
-    if (answer === 'p' && pageIndex > 0) { pageIndex -= 1; continue; }
+    const page = await catalog.page(pageIndex);
+    const more = catalog.hasMore(pageIndex);
+    io.write('\nRecent sessions (newest first):\n');
+    page.forEach((item, index) => io.write(`  ${index + 1}. [${safe(item.providerId)}] ${safe(item.title || item.nativeSessionId)}\n`
+      + `     ${safe(item.nativeSessionId)} | ${safe(item.workspace ?? '(no directory)')} | ${safe(item.updatedAt)}\n`));
+    const answer = (await io.ask(`Choose session number${more ? ', n for older sessions' : ''}${pageIndex ? ', p for newer sessions' : ''}: `)).trim();
+    if (cancelled(answer)) { cancel(io); return; }
+    if (answer === 'p' && pageIndex > 0) { pageIndex--; continue; }
     if (answer === 'n' && more) {
-      if (pageIndex === pages.length - 1) {
-        const older = await nextPage();
-        if (!older.length) { io.write('No more sessions.\n'); continue; }
-        pages.push(older);
-      }
-      pageIndex += 1;
+      if ((await catalog.page(pageIndex + 1)).length) pageIndex++;
+      else io.write('No more sessions.\n');
       continue;
     }
     const item = /^[1-9]\d*$/.test(answer) ? page[Number(answer) - 1] : undefined;
@@ -152,10 +119,6 @@ async function chooseRecent(context: ShareContext,
     const verified = await validate(item.providerId, item.nativeSessionId);
     if (verified) return verified;
   }
-}
-function compare(a: RemoteSessionSummary, b: RemoteSessionSummary) {
-  const time = (item: RemoteSessionSummary) => Date.parse(item.updatedAt) || Date.parse(item.createdAt) || 0;
-  return time(b) - time(a) || a.providerId.localeCompare(b.providerId) || a.nativeSessionId.localeCompare(b.nativeSessionId);
 }
 function safe(text: string): string { return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' '); }
 function cancelled(text: string): boolean { return text.toLowerCase() === 'q'; }

@@ -24,7 +24,7 @@ export async function selectTerminalChoice(prompt: string, choices: readonly Sha
       rows.push(active ? `\u001b[7m${line}\u001b[0m` : line);
     });
     if (height >= 6) rows.push(`${selected + 1}/${choices.length}`, ...details);
-    rows.push('↑/↓ Move · Enter Select · Esc/q Cancel');
+    rows.push(`↑/↓ Move · Enter Select${choices.some(choice => choice.shortcut === '/') ? ' · / Search · b Back' : ''} · Esc/q Cancel`);
     // Each physical line stays within the terminal width, including CJK titles.
     output.write('\u001b[H\u001b[J' + rows.map((line, index) =>
       index > 0 && index <= Math.min(capacity, choices.length - offset) ? line : fit(line, width)).join('\r\n'));
@@ -34,6 +34,8 @@ export async function selectTerminalChoice(prompt: string, choices: readonly Sha
       finish(undefined); return;
     }
     if (key.name === 'return' || key.name === 'enter') { finish(choices[selected]!.value); return; }
+    const shortcut = choices.find(choice => choice.shortcut !== undefined && choice.shortcut === _text);
+    if (shortcut) { finish(shortcut.value); return; }
     switch (key.name) {
       case 'up': selected = Math.max(0, selected - 1); break;
       case 'down': selected = Math.min(choices.length - 1, selected + 1); break;

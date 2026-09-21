@@ -43,6 +43,18 @@ Open the same Host and native session from the phone. The desktop client can
 remain open. Multiple Remote browser windows reuse the Host's existing session
 binding as before.
 
+### Starting from the terminal
+
+Run `agent-remote-controller codex` from the project directory to create an
+interactive session in that directory. With the automatically selected shared
+socket, the Controller explicitly passes the invoking shell's current directory
+to Codex; the saved Host workspace and the daemon's startup directory do not
+replace it. `-C` / `--cd` overrides remain supported, including paths with spaces.
+
+`resume` and `fork` retain native directory behavior for existing sessions.
+Daemon management commands, private-mode invocations, and explicit `--remote`
+connections retain their native argument semantics.
+
 ## Ownership and permission boundaries
 
 - `private` remains the default connection mode and creates an isolated

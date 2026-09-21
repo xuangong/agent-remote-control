@@ -71,8 +71,8 @@ async function fixture() {
     const browser = (path: string, body?: unknown) => request(url + basePath + path, { headers: { origin: url, cookie, 'content-type': 'application/json' }, ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }) });
     return { browser, cookie };
   }
-  async function enroll(browser: Awaited<ReturnType<typeof login>>['browser']) {
-    const pairing = await (await browser('v1/remote/pairings', {})).json() as { key: string };
+  async function enroll(browser: Awaited<ReturnType<typeof login>>['browser'], purpose = 'gateway-setup') {
+    const pairing = await (await browser('v1/remote/pairings', { purpose })).json() as { key: string };
     const host = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } });
     cleanups.push(async () => { host.terminate(); });
     await event(host, 'open'); const issued = event(host, 'message');
@@ -198,3 +198,12 @@ it('normalizes Gateway display names without changing Host names or blocking own
   expect(f.calls.at(-1)).toEqual({ operation: 'revoke-host-key', body: { subject: 'alice', hostId: device.hostId, hostName: device.hostId } });
   expect((await f.bootstrap(device.key)).status).toBe(401);
 }, 15000);
+
+
+it('denies Gateway bootstrap to a Host paired only to join, regardless of its native provider', async () => {
+  const f = await fixture(); const alice = await f.login('alice');
+  const device = await f.enroll(alice.browser, 'host-only');
+  const response = await f.bootstrap(device.key);
+  expect(response.status).toBe(403);
+  expect(f.calls).toEqual([]);
+});

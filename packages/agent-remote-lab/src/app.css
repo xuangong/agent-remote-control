@@ -1314,3 +1314,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-host-environment summary { cursor: pointer; padding-block: 4px; }
 .lab-host-environment dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 8px; margin-block: 6px; }
 .lab-host-environment dd { margin: 0; overflow-wrap: anywhere; }
+
+.lab-pairing-history { margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--obs-border); }
+.lab-pairing-history h3 { margin: 0; font-size: .95rem; }
+.lab-pairing-history ul { margin: 0; padding: 0; list-style: none; }
+.lab-pairing-history li { padding: 14px 0; border-bottom: 1px solid var(--obs-border); }
+.lab-pairing-record-heading, .lab-pairing-record-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.lab-pairing-record-heading span { color: var(--obs-text-secondary); font-size: .8rem; }
+.lab-pairing-history dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 10px 0; font-size: .8rem; }
+.lab-pairing-history dt { color: var(--obs-text-secondary); }
+.lab-pairing-history dd { margin: 0; overflow-wrap: anywhere; }
+.lab-pairing-record-actions { justify-content: flex-start; }

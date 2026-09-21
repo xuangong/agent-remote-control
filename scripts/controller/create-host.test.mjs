@@ -124,3 +124,9 @@ test('flags without values prompt interactively and explicit values skip their p
   assert.ok(!result.output.includes('Controller image ['));
   assert.ok(!result.output.includes('Docker network ['));
 });
+
+test('passes the selected native providers when creating a Host', { timeout: 10000 }, async t => {
+  const result = await execute(t, ['--name', 'claude-host', '--providers', 'claude', '--image', 'custom/claude-controller:dev']);
+  assert.equal(result.code, 0, result.output);
+  assert.ok(created(result).includes('AGENT_HOST_PROVIDERS=claude'));
+});

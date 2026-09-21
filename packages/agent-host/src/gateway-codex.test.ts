@@ -91,3 +91,12 @@ it('preserves native project trust settings across bootstrap and protects manage
     await expect(configureGatewayCodex(f.root, f.connection, 'host-one')).rejects.toThrow(/modified/);
   } finally { await f.close(); }
 });
+it('requires completed Codex initialization when the general Gateway setup marker was saved before a failure', async () => {
+  const f = await fixture();
+  try {
+    await expect(loadGatewayCodexEnvironment(f.root, { AGENT_HOST_GATEWAY_SETUP: '1', AGENT_HOST_PROVIDERS: 'codex' })).rejects.toThrow(/initialization is incomplete/);
+    expect(await loadGatewayCodexEnvironment(f.root, { AGENT_HOST_GATEWAY_SETUP: '1', AGENT_HOST_PROVIDERS: 'claude' })).toEqual({ AGENT_HOST_GATEWAY_SETUP: '1', AGENT_HOST_PROVIDERS: 'claude' });
+    const configured = await configureGatewayCodex(f.root, f.connection, 'host-one');
+    expect(await loadGatewayCodexEnvironment(f.root, { AGENT_HOST_GATEWAY_SETUP: '1', AGENT_HOST_BOOTSTRAP_CODEX: '0' })).toMatchObject(configured);
+  } finally { await f.close(); }
+}, 10000);

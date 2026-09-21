@@ -1,4 +1,4 @@
-import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult } from './components/HostPairing.js';
+import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './components/HostPairing.js';
 export interface SessionSummary {
   nativeSessionId: string;
   providerId: string;
@@ -65,7 +65,10 @@ export class RemoteHostClient implements HostPairingService {
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
-  pair(): Promise<PairingInvitation> { return this.request('pairings', 'POST'); }
+  pair(purpose: PairingPurpose = 'host-only'): Promise<PairingInvitation> { return this.request('pairings', 'POST', { purpose }); }
+  pairings(): Promise<PairingHistory> { return this.request('pairings'); }
+  async revokePairing(id: string): Promise<void> { await this.request(`pairings/${encodeURIComponent(id)}/revoke`, 'POST'); }
+  async deletePairing(id: string): Promise<void> { await this.request(`pairings/${encodeURIComponent(id)}`, 'DELETE'); }
   async rotate(hostId: string): Promise<{ ok: true; status: 'pending' | 'rotated' }> {
     const value = await this.request<{ ok?: boolean; status?: string }>(`hosts/${encodeURIComponent(hostId)}/rotate`, 'POST');
     if (value.ok !== true || !['pending', 'rotated'].includes(value.status ?? '')) throw new Error('The rotation result could not be confirmed. Refresh before trying again.');

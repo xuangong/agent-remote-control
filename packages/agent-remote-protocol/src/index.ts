@@ -20,3 +20,4 @@ export * from './session-channel.js';
 export * from './session-channel-wire.js';
 export * from './image-input.js';
 export * from './host-environment.js';
+export * from './pairing.js';

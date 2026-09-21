@@ -18,7 +18,7 @@ import { createLaunchdAutostart } from './launchd.js';
 import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
 import { createSystemdAutostart, systemdUnavailable } from './systemd.js';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@agent-remote-controller/agent-remote-relay';
-import { configureGatewayCodex, managedCodexHome } from './gateway-codex.js';
+import { configureGatewayProviders } from './gateway-setup.js';
 
 interface DaemonState { pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' }
 const args = process.argv.slice(2);
@@ -76,7 +76,6 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const configuration = launch?.connection ?? await resolveHostConnection(stateDir, process.env);
   const { serverUrl, environment } = configuration;
   const hostEnvironment = await detectHostEnvironment(undefined, environment);
-  if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') managedCodexHome(stateDir, environment);
   if (daemon) {
     const existing = await readState();
     if (existing && existing.pid !== process.pid && processAlive(existing.pid))
@@ -85,29 +84,12 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const installationId = await installation();
   const token = process.env.AGENT_HOST_MANAGEMENT_TOKEN ?? randomBytes(32).toString('hex');
   diagnosticSecrets.add(configuration.remoteKey); diagnosticSecrets.add(token);
-  if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') {
-    const relay = createAgentRemoteRelay({ providers: [] });
-    const enrollment = createRemoteHostUplinkClient({ relay, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
-      environment: hostEnvironment, providers: [], url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey,
-      resolveSession: () => undefined, control: async () => ({ status: 503, body: JSON.stringify({ error: 'Host initialization is in progress.' }) }),
-      onCredential: credential => { diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential); },
-    });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const accepted = await Promise.race([enrollment.ready, new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error('Host enrollment timed out. Restart the Controller to retry.')), 15_000);
-      })]);
-      clearTimeout(timer);
-      await saveRegisteredConnection(stateDir, configuration, Promise.resolve(accepted));
-      const managed = await configureGatewayCodex(stateDir, configuration, accepted.hostId);
-      if (managed.CODEX_GATEWAY_API_KEY) diagnosticSecrets.add(managed.CODEX_GATEWAY_API_KEY);
+  await enrollHost(configuration, installationId, hostEnvironment, diagnosticSecrets, async hostId => {
+    if (configuration.pairingPurpose === 'gateway-setup') {
+      const managed = await configureGatewayProviders(stateDir, configuration, hostId, secret => diagnosticSecrets.add(secret));
       Object.assign(environment, managed);
-    } finally {
-      clearTimeout(timer);
-      try { await within(enrollment.close(), shutdownTimeout()); }
-      finally { await within(relay.close(), shutdownTimeout()); }
     }
-  }
+  });
   const executionPolicy = await createHostExecutionPolicy(environment);
   if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   const registrations = await createHostRegistrations(environment,
@@ -159,22 +141,64 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   await new Promise<void>(() => undefined);
 }
 
+async function enrollHost(configuration: HostConnection, installationId: string, hostEnvironment: Awaited<ReturnType<typeof detectHostEnvironment>>,
+  diagnosticSecrets: Set<string>, onAccepted?: (hostId: string) => Promise<void>) {
+  const { environment } = configuration;
+  const relay = createAgentRemoteRelay({ providers: [] });
+  const enrollment = createRemoteHostUplinkClient({ relay, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+    environment: hostEnvironment, providers: [], url: uplinkUrl(configuration.serverUrl), remoteKey: configuration.remoteKey,
+    resolveSession: () => undefined, control: async () => ({ status: 503, body: JSON.stringify({ error: 'Host initialization is in progress.' }) }),
+    onCredential: credential => { diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential); },
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const accepted = await Promise.race([enrollment.ready, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('Host enrollment timed out. Restart the Controller to retry.')), 15_000);
+    })]);
+    clearTimeout(timer);
+    configuration.pairingPurpose = accepted.pairingPurpose ?? 'host-only';
+    delete environment.AGENT_HOST_BOOTSTRAP_CODEX;
+    delete environment.AGENT_HOST_GATEWAY_SETUP;
+    if (configuration.pairingPurpose === 'gateway-setup') environment.AGENT_HOST_GATEWAY_SETUP = '1';
+    await saveRegisteredConnection(stateDir, configuration, Promise.resolve(accepted));
+    await onAccepted?.(accepted.hostId);
+    return accepted;
+  } finally {
+    clearTimeout(timer);
+    try { await within(enrollment.close(), shutdownTimeout()); }
+    finally { await within(relay.close(), shutdownTimeout()); }
+  }
+}
+
 async function handleManagement(input: string, token: string, host: AgentHost, configuration: HostConnection, diagnosticSecrets: Set<string>, connection: import('node:net').Socket): Promise<void> {
   try {
     const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string };
     if (request.token !== token) throw new Error('Unauthorized local management request.');
     if (request.action === 'status') connection.end(JSON.stringify({ running: true, uplink: host.state }));
     else if (request.action === 'pair') {
-      assertLivePairAllowed(configuration.environment);
-      if (!request.server || !request.key) throw new Error('Repair requires a server and key.');
-      diagnosticSecrets.add(request.key);
-      const replacement = { ...configuration, serverUrl: request.server, remoteKey: request.key };
-      const registered = await saveRegisteredConnection(stateDir, replacement,
-        host.replaceUplink({ url: uplinkUrl(request.server), remoteKey: request.key, onCredential: credential => {
-          diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, replacement, credential);
-        } }));
-      Object.assign(configuration, replacement);
-      connection.end(JSON.stringify({ running: true, uplink: host.state, hostId: registered.hostId }));
+      let response: Record<string, unknown> = {};
+      let restartRequired = false;
+      await withDaemonLifecycleLock(stateDir, async () => {
+        assertLivePairAllowed(configuration.environment);
+        if (!request.server || !request.key) throw new Error('Repair requires a server and key.');
+        diagnosticSecrets.add(request.key);
+        const replacement = { ...configuration, environment: { ...configuration.environment }, serverUrl: request.server, remoteKey: request.key };
+        const accepted = await enrollHost(replacement, await installation(), await detectHostEnvironment(undefined, replacement.environment), diagnosticSecrets);
+        if (replacement.pairingPurpose === 'gateway-setup') {
+          Object.assign(configuration, replacement);
+          await within(host.close(), shutdownTimeout());
+          restartRequired = true;
+          response = { running: false, restartRequired: true, hostId: accepted.hostId };
+        } else {
+          const registered = await saveRegisteredConnection(stateDir, replacement,
+            host.replaceUplink({ url: uplinkUrl(replacement.serverUrl), remoteKey: replacement.remoteKey, onCredential: credential => {
+              diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, replacement, credential);
+            } }));
+          Object.assign(configuration, replacement);
+          response = { running: true, uplink: host.state, hostId: registered.hostId };
+        }
+      });
+      connection.end(JSON.stringify(response), () => { if (restartRequired) process.kill(process.pid, 'SIGTERM'); });
     } else if (request.action === 'stop') { connection.end(JSON.stringify({ stopping: true })); process.kill(process.pid, 'SIGTERM'); }
     else throw new Error('Unknown local management action.');
   } catch (error) { connection.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })); }
@@ -237,7 +261,7 @@ async function status(): Promise<void> {
   process.stdout.write(`Agent Host daemon is running (pid ${state.pid}); uplink: ${String(response.uplink)}; supervisor: ${state.supervisor ?? 'manual'}.\n`);
 }
 function assertLivePairAllowed(environment: NodeJS.ProcessEnv): void {
-  if (environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') {
+  if (environment.AGENT_HOST_GATEWAY_SETUP === '1' || environment.AGENT_HOST_BOOTSTRAP_CODEX === '1') {
     throw new Error('Gateway-managed Hosts cannot replace their live pairing. Initialize a new Host with a separate AGENT_HOST_STATE_DIR to change accounts or Relays.');
   }
 }
@@ -247,7 +271,9 @@ async function pair(): Promise<void> {
   const server = requiredEnv('AGENT_HOST_SERVER'); const key = requiredEnv('AGENT_HOST_REMOTE_KEY');
   const state = await requiredState();
   const response = await request(state, { action: 'pair', server, key });
-  process.stdout.write(`Agent Host uplink registered as ${String(response.hostId)} without restarting sessions.\n`);
+  process.stdout.write(response.restartRequired
+    ? `Agent Host pairing saved as ${String(response.hostId)}. The daemon stopped; restart with agent-remote-controller start to initialize Gateway providers using the saved device credential.\n`
+    : `Agent Host uplink registered as ${String(response.hostId)} without restarting sessions.\n`);
 }
 function loginStartup(configuration?: HostConnection) {
   const options = { stateDir, home: homedir(), nodePath: realpathSync(process.execPath), cliPath: fileURLToPath(import.meta.url),
@@ -307,7 +333,9 @@ async function waitForDaemonExit(state: DaemonState): Promise<void> {
 async function request(state: DaemonState, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const connection = createConnection(state.socket); let output = '';
-    connection.setTimeout(5000, () => connection.destroy(new Error('Local management request timed out.')));
+    connection.setTimeout(payload.action === 'pair' ? 30_000 : 5000, () => connection.destroy(new Error(payload.action === 'pair'
+      ? 'Pairing result is unknown: the invitation may already be consumed and saved. Check agent-remote-controller status and private saved connection settings before retrying. Restart with saved settings to finish pending Gateway setup; do not blindly reuse the invitation.'
+      : 'Local management request timed out.')));
     connection.on('connect', () => connection.end(JSON.stringify({ ...payload, token: state.token })));
     connection.setEncoding('utf8'); connection.on('data', (chunk) => { output += chunk; });
     connection.on('error', reject); connection.on('close', () => {

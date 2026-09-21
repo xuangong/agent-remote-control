@@ -80,3 +80,15 @@ it('trusts shared Codex permissions only for Codex, retaining restrictions for t
     undefined, { codex: factory, claude: factory, copilot: factory });
   expect(seen.map(options => options.restrictedNative)).toEqual([false, true, true]);
 });
+
+it('passes managed Gateway credentials only to the matching native provider', async () => {
+  const seen: Array<{ env?: NodeJS.ProcessEnv }> = [];
+  const factory = async (options: { env?: NodeJS.ProcessEnv }) => { seen.push(options); return registration(); };
+  await createHostRegistrations({ AGENT_HOST_PROVIDERS: 'codex,claude', AGENT_HOST_GATEWAY_SETUP: '1',
+    CODEX_GATEWAY_API_KEY: 'codex-secret', ANTHROPIC_API_KEY: 'claude-secret', ANTHROPIC_MODEL: 'managed-model' },
+    undefined, { codex: factory, claude: factory, copilot: factory });
+  expect(seen[0]?.env?.CODEX_GATEWAY_API_KEY).toBe('codex-secret');
+  expect(seen[0]?.env?.ANTHROPIC_API_KEY).toBeUndefined();
+  expect(seen[1]?.env?.ANTHROPIC_API_KEY).toBe('claude-secret');
+  expect(seen[1]?.env?.CODEX_GATEWAY_API_KEY).toBeUndefined();
+});

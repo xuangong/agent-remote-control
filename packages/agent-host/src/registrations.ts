@@ -37,13 +37,18 @@ export async function createHostRegistrations(env: NodeJS.ProcessEnv, onDiagnost
   const registrations: AgentHostProviderRegistration[] = [];
   try {
     for (const provider of providers) {
+      const nativeEnv = { ...common.env };
+      if (env.AGENT_HOST_GATEWAY_SETUP === '1') {
+        if (provider !== 'codex') nativeEnv.CODEX_GATEWAY_API_KEY = undefined;
+        if (provider !== 'claude') nativeEnv.ANTHROPIC_API_KEY = undefined;
+      }
       registrations.push(provider === 'codex'
-        ? await factories.codex({ ...common, executable: env.AGENT_HOST_CODEX ?? env.AGENT_REMOTE_CODEX_EXECUTABLE, codexHome: env.AGENT_REMOTE_CODEX_HOME,
+        ? await factories.codex({ ...common, env: nativeEnv, executable: env.AGENT_HOST_CODEX ?? env.AGENT_REMOTE_CODEX_EXECUTABLE, codexHome: env.AGENT_REMOTE_CODEX_HOME,
           connectionMode: connectionMode as 'private' | 'shared', socketPath: env.AGENT_HOST_CODEX_SOCKET,
           restrictedNative: connectionMode === 'shared' && env.AGENT_HOST_CODEX_TRUST_SHARED === '1' ? false : common.restrictedNative })
         : provider === 'copilot'
-        ? await factories.copilot({ ...common, executable: env.AGENT_HOST_COPILOT, copilotHome: env.AGENT_HOST_COPILOT_HOME })
-        : await factories.claude({ ...common, executable: env.AGENT_HOST_CLAUDE, claudeHome: env.AGENT_HOST_CLAUDE_HOME }));
+        ? await factories.copilot({ ...common, env: nativeEnv, executable: env.AGENT_HOST_COPILOT, copilotHome: env.AGENT_HOST_COPILOT_HOME })
+        : await factories.claude({ ...common, env: nativeEnv, executable: env.AGENT_HOST_CLAUDE, claudeHome: env.AGENT_HOST_CLAUDE_HOME }));
     }
     return registrations;
   } catch (error) {

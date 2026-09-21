@@ -2,7 +2,7 @@ import { WebSocket } from 'ws';
 
 import {
   decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
-  type RemoteHostHeartbeat, type HostEnvironment,
+  type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
   type PreviewRegistrationSnapshot,
 } from '@agent-remote-controller/agent-remote-protocol';
 
@@ -61,7 +61,7 @@ export interface RemoteHostUplinkClientOptions {
 }
 
 export interface RemoteHostUplinkClient {
-  readonly ready: Promise<{ hostId: string }>;
+  readonly ready: Promise<{ hostId: string; pairingPurpose?: PairingPurpose }>;
   close(): Promise<void>;
 }
 
@@ -74,9 +74,9 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   const reconnectBaseDelay = positive(options.reconnectBaseDelayMs ?? 1000);
   const reconnectMaxDelay = positive(options.reconnectMaxDelayMs ?? 30000);
   if (reconnectMaxDelay < reconnectBaseDelay) throw new RangeError('Remote Host reconnect maximum must not precede its base delay.');
-  let resolveReady!: (value: { hostId: string }) => void;
+  let resolveReady!: (value: { hostId: string; pairingPurpose?: PairingPurpose }) => void;
   let rejectReady!: (error: Error) => void;
-  const ready = new Promise<{ hostId: string }>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  const ready = new Promise<{ hostId: string; pairingPurpose?: PairingPurpose }>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   void ready.catch(() => undefined);
   let remoteKey = options.remoteKey;
   let credentialWrite: Promise<void> | undefined;
@@ -235,7 +235,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         options.onStateChange?.('registered');
         diagnose({ ...details(), event: 'registered' });
         attempts = 0;
-        resolveReady({ hostId: decoded.value.hostId });
+        resolveReady({ hostId: decoded.value.hostId, ...(decoded.value.pairingPurpose ? { pairingPurpose: decoded.value.pairingPurpose } : {}) });
         if (options.previews && decoded.value.tunnelToken) {
           const publish = (snapshot: PreviewRegistrationSnapshot) => {
             if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'preview_snapshot', snapshot }));

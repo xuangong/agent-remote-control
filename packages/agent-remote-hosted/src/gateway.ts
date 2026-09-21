@@ -202,6 +202,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const owned = bearer && [...tenants.values()].find(value => value.broker.authenticateDevice(bearer));
     const device = owned && owned.broker.authenticateDevice(bearer!);
     if (!owned || !device) return json(401, { error: 'Device credential is unavailable.' });
+    if (device.pairingPurpose !== 'gateway-setup') return json(403, { code: 'gateway_setup_not_authorized', error: 'This Host was paired to join only. Gateway setup was not authorized.' });
     if (!security.allow('bootstrap:' + device.hostId, 30, 60_000)) return json(429, { error: 'Too many bootstrap requests.' });
     await validateBootstrapBody(request);
     return withHostKey(device.hostId, async () => {
@@ -372,12 +373,12 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (path === '/v1/remote/hosts' && request.method === 'GET') return json(200, { hosts: [...tenants.values()].flatMap(value => value.broker.visibleHosts(grant.subject)) });
     if (request.method !== 'GET') {
       if (!security.allow('mutation:' + grant.subject, 60, 60_000)) return json(429, {error:'Too many control requests.'});
-      const sensitive = path === '/v1/remote/pairings' || /\/rotate$/.test(path);
+      const sensitive = path.startsWith('/v1/remote/pairings') || /\/rotate$/.test(path);
       if (sensitive && durable && !security.recent(grant.authenticatedAt)) {
         await security.record(grant.subject, 'recent_authentication_required', 'denied');
         return json(403, {code:'reauthentication_required',error:'Sign in again before managing device credentials.',loginUrl:'/auth/login?reauthenticate=1'});
       }
-      if (path === '/v1/remote/pairings' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
+      if (path === '/v1/remote/pairings' && request.method === 'POST' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
     }
     if (path === '/v1/stars') {
       try {
@@ -451,7 +452,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       });
     }
     if (request.method !== 'GET' && result) {
-      const action = path === '/v1/remote/pairings' ? 'pairing_created' : /\/revoke$/.test(path) ? 'host_revoked' : /\/rotate$/.test(path) ? 'credential_rotation_requested' : /\/stop$/.test(path) ? 'host_stop_requested' : undefined;
+      const action = path === '/v1/remote/pairings' ? 'pairing_created' : path.startsWith('/v1/remote/pairings/') ? (request.method === 'DELETE' ? 'pairing_deleted' : 'pairing_revoked') : /\/revoke$/.test(path) ? 'host_revoked' : /\/rotate$/.test(path) ? 'credential_rotation_requested' : /\/stop$/.test(path) ? 'host_stop_requested' : undefined;
       if (action) await security.record(grant.subject, action, result.ok ? 'allowed' : 'denied', /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)?.[1]);
     }
     return result ?? (path === '/v1/providers' && request.method === 'GET'

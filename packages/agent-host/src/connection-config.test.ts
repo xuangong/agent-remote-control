@@ -6,7 +6,7 @@ import { resolveHostConnection, saveRegisteredConnection } from './connection-co
 
 const temporary: string[] = [];
 
-it('retains Gateway bootstrap opt-in without copying its LLM credential into connection settings', async () => {
+it('retains the local managed marker without copying its LLM credential into connection settings', async () => {
   const path = await directory();
   const config = await resolveHostConnection(path, { AGENT_HOST_SERVER: 'https://relay.example', AGENT_HOST_REMOTE_KEY: 'device-secret',
     AGENT_HOST_BOOTSTRAP_CODEX: '1', CODEX_GATEWAY_API_KEY: 'must-not-persist-llm-key' });

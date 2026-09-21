@@ -1,3 +1,4 @@
+import { validPairingHistory } from './pairing-keys.js';
 import { validSessionStar, starKey, MAX_USER_STARS, type SavedSessionStar } from './session-stars.js';
 import type { SecurityEvent } from './security.js';
 import { validControllerPath } from './controller-location.js';
@@ -6,7 +7,7 @@ import type { GatewayAuthOptions, GatewayGrant } from './auth.js';
 import type { RemoteHostBrokerState } from './broker.js';
 import type { HostPreviewState } from './host-previews.js';
 import { validPreviewNames } from './preview-names.js';
-import { decodeRemoteHostUplinkMessage, isHostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
+import { decodeRemoteHostUplinkMessage, isHostEnvironment, isPairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
 
 export interface SavedGatewaySession { hash: string; grant: GatewayGrant; sessionExpiresAt: number; id?: string; label?: string; createdAt?: number; lastSeenAt?: number }
 export interface HostedRelayState {
@@ -36,12 +37,13 @@ function unique<T>(values: T[], key: (value: T) => string) { return new Set(valu
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||
     !Array.isArray(value.bindings) || value.bindings.length > 4096 || !Array.isArray(value.creations) || value.creations.length > 4096) return false;
+  if (value.pairings !== undefined && !validPairingHistory(value.pairings)) return false;
   if (value.previews !== undefined && (!Array.isArray(value.previews) || value.previews.length > 128 || !value.previews.every((entry: unknown) => record(entry) && string(entry.hostId)
     && value.hosts.some((host: any) => host.id === entry.hostId) && Array.isArray(entry.pendingRemovals) && entry.pendingRemovals.length <= 1024 && entry.pendingRemovals.every((id: unknown) => string(id))
     && unique(entry.pendingRemovals, (id: string) => id) && validPreviewNames(entry) && decodeRemoteHostUplinkMessage(JSON.stringify({ uplinkVersion: 2, type: 'preview_snapshot', snapshot: entry.snapshot })).status === 'ok')
     || (Array.isArray(value.previews) && !unique(value.previews, (entry: HostPreviewState) => entry.hostId)))) return false;
-  if (!value.keys.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[a-f0-9]{64}$/.test(item[0]) && record(item[1]) && time(item[1].expires) && (item[1].installationId === undefined || string(item[1].installationId)) && (item[1].kind === undefined || item[1].kind === 'device') && (item[1].requiresRotation === undefined || typeof item[1].requiresRotation === 'boolean')) ||
-    !value.hosts.every((host: unknown) => record(host) && string(host.id) && string(host.installationId) && string(host.name) && (host.environment === undefined || isHostEnvironment(host.environment)) && (host.gatewayKeyRequested === undefined || typeof host.gatewayKeyRequested === 'boolean') && typeof host.legacyDsh === 'boolean' && Array.isArray(host.providers) && host.providers.every((provider: unknown) => record(provider) && string(provider.providerId) && string(provider.displayName))) ||
+  if (!value.keys.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[a-f0-9]{64}$/.test(item[0]) && record(item[1]) && time(item[1].expires) && (item[1].purpose === undefined || isPairingPurpose(item[1].purpose)) && (item[1].pairingId === undefined || string(item[1].pairingId, 128)) && (item[1].claimedAt === undefined || time(item[1].claimedAt)) && (item[1].installationId === undefined || string(item[1].installationId)) && (item[1].kind === undefined || item[1].kind === 'device') && (item[1].requiresRotation === undefined || typeof item[1].requiresRotation === 'boolean')) ||
+    !value.hosts.every((host: unknown) => record(host) && string(host.id) && string(host.installationId) && string(host.name) && (host.pairingPurpose === undefined || isPairingPurpose(host.pairingPurpose)) && (host.environment === undefined || isHostEnvironment(host.environment)) && (host.gatewayKeyRequested === undefined || typeof host.gatewayKeyRequested === 'boolean') && typeof host.legacyDsh === 'boolean' && Array.isArray(host.providers) && host.providers.every((provider: unknown) => record(provider) && string(provider.providerId) && string(provider.displayName))) ||
     !value.bindings.every((binding: unknown) => record(binding) && ['hostId', 'providerId', 'nativeSessionId', 'agentId'].every(key => string(binding[key], 4096)) && value.hosts.some((host: any) => host.id === binding.hostId) && (binding.creatorSubject === undefined || string(binding.creatorSubject)) && (binding.parentNativeSessionId === undefined || string(binding.parentNativeSessionId, 4096))) ||
     !value.creations.every((item: unknown) => Array.isArray(item) && item.length === 2 && string(item[0], 16384) && record(item[1]) && string(item[1].fingerprint, 65536) && value.bindings.some((binding: any) => binding.agentId === item[1].agentId))) return false;
   if (!unique(value.keys, item => item[0]) || !unique(value.hosts, item => item.id) || !unique(value.hosts, item => item.installationId) || !unique(value.bindings, item => item.agentId) || !unique(value.bindings, item => JSON.stringify([item.hostId, item.providerId, item.nativeSessionId])) || !unique(value.creations, item => item[0])) return false;

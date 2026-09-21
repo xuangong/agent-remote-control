@@ -52,3 +52,29 @@ it('retains the server request ID, status and error code when opening a session'
     code: 'native_history_timeout', status: 503, requestId: 'request-123', message: 'History deadline',
   });
 });
+
+it('manages pairing invitations using scoped URLs and explicit purposes', async () => {
+  const requests: Array<{ method?: string; path?: string; body: string }> = [];
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const part of request) body += String(part);
+    requests.push({ method: request.method, path: request.url, body });
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(request.method === 'GET' ? { pairings: [], availablePurposes: ['host-only', 'gateway-setup'] } : { ok: true }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new RemoteHostClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/tenant/`);
+    expect(await client.pairings()).toEqual({ pairings: [], availablePurposes: ['host-only', 'gateway-setup'] });
+    await client.pair();
+    await client.pair('gateway-setup');
+    await client.revokePairing('invite/one');
+    await client.deletePairing('invite/one');
+    expect(requests).toEqual([
+      { method: 'GET', path: '/u/tenant/v1/remote/pairings', body: '' },
+      { method: 'POST', path: '/u/tenant/v1/remote/pairings', body: '{"purpose":"host-only"}' },
+      { method: 'POST', path: '/u/tenant/v1/remote/pairings', body: '{"purpose":"gateway-setup"}' },
+      { method: 'POST', path: '/u/tenant/v1/remote/pairings/invite%2Fone/revoke', body: '{}' },
+      { method: 'DELETE', path: '/u/tenant/v1/remote/pairings/invite%2Fone', body: '' },
+    ]);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

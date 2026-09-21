@@ -1,5 +1,6 @@
+import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
+import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
 import { sessionAttachFailure } from './session-errors.js';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { createHostPreviews, type HostPreviewState } from './host-previews.js';
@@ -8,8 +9,9 @@ import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, 
 
 type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string };
-type DeviceCredential = { expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
+type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
+  pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
   tunnelToken?: string;
   ready?: boolean; credentialRotation?: boolean; gatewayKeyRequested?: boolean; issueCredential?(): Promise<void>;
@@ -23,10 +25,11 @@ class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string) { super(message); }
 }
 export interface RemoteHostBrokerState {
+  pairings?: SavedPairingKey[];
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
@@ -61,6 +64,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   function track(client: RelaySocket) { clients.add(client); client.onClose(() => clients.delete(client)); }
   const keys = new Map<string, DeviceCredential>();
   const hosts = new Map<string, Host>();
+  let pairings = structuredClone(options.initialState?.pairings ?? []);
   const bindings = new Map<string, Binding>();
   const activeStreamCount = (subject: string) => [...hosts.values()].reduce((sum, host) => sum + [...host.streams.values()].filter(stream => stream.subject === subject).length, 0);
   const pendingBindingSlots = new Set<symbol>();
@@ -81,8 +85,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
   function snapshot(): RemoteHostBrokerState {
-    return { previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment }) => ({ ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
+    return { pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose }) => ({ ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -253,7 +257,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
@@ -275,26 +279,35 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!decoded || decoded.status !== 'ok') return closeConnection(1008, 'Invalid uplink envelope');
       const message = decoded.value;
       if (!host) {
-        if (message.type !== 'register' || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return closeConnection(1008, 'Registration is not authorized');
+        if (message.type !== 'register' || credential.claimedAt !== undefined || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return closeConnection(1008, 'Registration is not authorized');
         const invitation = credential.requiresRotation === true || credential.installationId === undefined;
         if (credential.requiresRotation && !message.credentialRotation) return closeConnection(1008, 'Update Agent Host to enroll this device');
         registration = commit(draft => {
-          if (keys.get(credentialHash) !== credential || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) throw new BrokerError(401, 'device_revoked', 'Registration is not authorized');
+          if (keys.get(credentialHash) !== credential || credential.claimedAt !== undefined || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) throw new BrokerError(401, 'device_revoked', 'Registration is not authorized');
           const savedCredential = draft.keys.find(([hash]) => hash === credentialHash)![1];
           savedCredential.installationId = message.installationId;
+          if (options.durable && invitation) savedCredential.claimedAt = now();
           if (options.durable) {
             if (!savedCredential.requiresRotation) savedCredential.expires = Number.MAX_SAFE_INTEGER;
             draft.keys = draft.keys.filter(([hash, key]) => hash === credentialHash || key.installationId !== message.installationId);
           }
           const existing = [...hosts.values()].find(value => value.installationId === message.installationId);
           if (!existing && hosts.size >= 128) throw new BrokerError(429, 'host_capacity', 'Host capacity reached');
+          const purpose = existing
+            ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
+            : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment,
+          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, pairingPurpose: purpose,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
+          const pairing = draft.pairings?.find(value => value.id === credential.pairingId);
+          if (pairing && pairing.usedAt === undefined) {
+            pairing.usedAt = now(); pairing.hostId = next.id; pairing.hostName = next.name;
+          }
           return { value: undefined, publish() {
             Object.assign(credential, savedCredential);
+            pairings = draft.pairings ?? [];
             for (const hash of keys.keys()) if (!draft.keys.some(([saved]) => saved === hash)) keys.delete(hash);
             host = existing ?? { ...next, generation: 0, pending: new Map(), streams: new Map() };
             hosts.set(host.id, host);
@@ -659,21 +672,55 @@ export function createHostBroker(options: HostBrokerOptions) {
       return json(405, { error: 'Method is not allowed.' });
     }
     if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(200, { hosts: visibleHosts(subject) });
-    if (url.pathname === '/v1/remote/pairings' && request.method === 'POST') {
+    if (url.pathname === '/v1/remote/pairings') {
       requireOwner(subject);
-      await readBody(request);
-      const key = `arc_${randomBytes(32).toString('base64url')}`; const expires = now() + (options.keyLifetimeMs ?? (options.durable ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
+      if (request.method === 'GET') return json(200, { availablePurposes: options.durable ? ['host-only', 'gateway-setup'] : ['host-only'],
+        pairings: [...pairings].sort((a, b) => b.createdAt - a.createdAt).map(item => visiblePairing(item, now())) });
+      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+      const body = await readBody(request);
+      const purpose = body.purpose ?? 'host-only';
+      if (Object.keys(body).some(key => key !== 'purpose') || !isPairingPurpose(purpose)) throw new BrokerError(400, 'invalid_request', 'Select a supported pairing purpose.');
+      if (!options.durable && purpose !== 'host-only') throw new BrokerError(400, 'unsupported_purpose', 'Gateway setup requires an account-backed Relay.');
+      const key = `arc_${randomBytes(32).toString('base64url')}`;
+      const createdAt = now(); const expires = createdAt + (options.keyLifetimeMs ?? (options.durable ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
+      const item: SavedPairingKey = { id: randomUUID(), purpose, createdAt, expiresAt: expires };
       await commit(draft => {
         draft.keys = draft.keys.filter(([, value]) => value.expires > now());
         if (draft.keys.length >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
-        draft.keys.push([keyHash(key), { expires, ...(options.durable ? {requiresRotation:true} : {}) }]);
+        if ((draft.pairings?.length ?? 0) >= MAX_PAIRING_HISTORY) throw new BrokerError(429, 'pairing_history_full', 'Delete old pairing key records before creating another key.');
+        const credential: DeviceCredential = { expires, purpose, pairingId: item.id, ...(options.durable ? { requiresRotation: true } : {}) };
+        draft.keys.push([keyHash(key), credential]);
+        (draft.pairings ??= []).push(item);
         return { value: undefined, publish() {
           for (const [hash, value] of keys) if (value.expires <= now()) keys.delete(hash);
-          keys.set(keyHash(key), { expires, ...(options.durable ? {requiresRotation:true} : {}) }); options.onPairing?.(key, expires);
+          pairings = draft.pairings!;
+          keys.set(keyHash(key), credential); options.onPairing?.(key, expires);
         } };
       });
-      return json(201, { key, expiresAt: new Date(expires).toISOString(), serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
+      return json(201, { ...visiblePairing(item, now()), key, serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
         ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\nagent-remote-controller start` } : {}) });
+    }
+    const pairingAction = /^\/v1\/remote\/pairings\/([^/]+)(\/revoke)?$/.exec(url.pathname);
+    if (pairingAction) {
+      requireOwner(subject);
+      const revoke = pairingAction[2] === '/revoke';
+      if (request.method !== (revoke ? 'POST' : 'DELETE')) return json(405, { error: 'Method is not allowed.' });
+      const body = await readBody(request);
+      if (Object.keys(body).length) throw new BrokerError(400, 'invalid_request', 'No pairing management parameters are accepted.');
+      await commit(draft => {
+        const item = draft.pairings?.find(item => item.id === pairingAction[1]);
+        if (!item) throw new BrokerError(404, 'pairing_not_found', 'Pairing key record is unavailable.');
+        if (revoke && pairingStatus(item, now()) === 'used') throw new BrokerError(409, 'pairing_used', 'This key has been used. Manage the paired Host to revoke its access.');
+        if (item.usedAt === undefined) draft.keys = draft.keys.filter(([, key]) => key.pairingId !== item.id);
+        if (revoke) item.revokedAt ??= now();
+        else draft.pairings = draft.pairings!.filter(value => value.id !== item.id);
+        return { value: undefined, publish() {
+          pairings = draft.pairings ?? [];
+          for (const hash of keys.keys()) if (!draft.keys.some(([saved]) => saved === hash)) keys.delete(hash);
+          for (const check of expiryChecks) check();
+        } };
+      });
+      return json(200, { ok: true });
     }
     const management = /^\/v1\/remote\/hosts\/([^/]+)\/(rotate|stop)$/.exec(url.pathname);
     if (management && request.method === 'POST') {
@@ -767,9 +814,9 @@ export function createHostBroker(options: HostBrokerOptions) {
       const header = request.headers.get('authorization');
       const hash = header?.startsWith('Bearer ') ? keyHash(header.slice(7)) : undefined;
       const key = hash ? keys.get(hash) : undefined;
-      if (!key || key.expires <= now()) return rejectUpgrade(401);
+      if (!key || key.claimedAt !== undefined || key.expires <= now()) return rejectUpgrade(401);
       return { accept(client: RelaySocket) {
-        if (unavailable || keys.get(hash!) !== key || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
+        if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
         register(client, key, context, hash!);
       } };
@@ -842,7 +889,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!credential || credential.kind !== 'device' || credential.requiresRotation || !credential.installationId || credential.expires <= now()) return undefined;
     const host = [...hosts.values()].find(host => host.installationId === credential.installationId);
     if (!host) return undefined;
-    return { hostId: host.id, hostName: host.name,
+    return { hostId: host.id, hostName: host.name, pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'),
       current: () => !unavailable && keys.get(hash) === credential && credential.expires > now() && hosts.get(host.id) === host };
   }
   return {
@@ -851,7 +898,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     async markGatewayKeyRequested(value: string): Promise<boolean> {
       return commit(draft => {
         const device = authenticateDevice(value);
-        if (!device) return { value: false, publish() {} };
+        if (!device || device.pairingPurpose !== 'gateway-setup') return { value: false, publish() {} };
         draft.hosts.find(host => host.id === device.hostId)!.gatewayKeyRequested = true;
         return { value: true, publish() { hosts.get(device.hostId)!.gatewayKeyRequested = true; } };
       });

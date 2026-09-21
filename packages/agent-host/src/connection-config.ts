@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
 
-export interface HostConnection { serverUrl: string; remoteKey: string; environment: NodeJS.ProcessEnv }
+export interface HostConnection { serverUrl: string; remoteKey: string; environment: NodeJS.ProcessEnv; pairingPurpose?: PairingPurpose }
 const restartSettings = [
   'AGENT_HOST_PROVIDERS', 'AGENT_HOST_CODEX', 'AGENT_HOST_CLAUDE', 'AGENT_HOST_CLAUDE_HOME',
-  'CODEX_HOME', 'LC_ALL', 'AGENT_HOST_CODEX_NOFILE', 'AGENT_HOST_BOOTSTRAP_CODEX',
+  'CODEX_HOME', 'LC_ALL', 'AGENT_HOST_CODEX_NOFILE', 'AGENT_HOST_BOOTSTRAP_CODEX', 'AGENT_HOST_GATEWAY_SETUP',
   'AGENT_HOST_CODEX_CONNECTION', 'AGENT_HOST_CODEX_SOCKET', 'AGENT_HOST_CODEX_TRUST_SHARED',
   'AGENT_HOST_ALLOWED_WORKSPACE_ROOTS', 'AGENT_HOST_TRUSTED_FULL_CONTROL',
   'AGENT_HOST_COPILOT', 'AGENT_HOST_COPILOT_HOME', 'AGENT_HOST_WORKSPACE', 'AGENT_HOST_NAME', 'AGENT_HOST_VSCODE', 'AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS',
@@ -22,7 +23,8 @@ async function readSaved(stateDir: string): Promise<HostConnection | undefined> 
   try {
     const value = JSON.parse(text) as HostConnection;
     if (!value || typeof value.serverUrl !== 'string' || !value.serverUrl.trim() || typeof value.remoteKey !== 'string' || !value.remoteKey.trim() || !value.environment || typeof value.environment !== 'object') throw new Error();
-    return { serverUrl: value.serverUrl, remoteKey: value.remoteKey, environment: retainedHostEnvironment(value.environment) };
+    return { serverUrl: value.serverUrl, remoteKey: value.remoteKey, environment: retainedHostEnvironment(value.environment),
+      ...(value.pairingPurpose === 'host-only' || value.pairingPurpose === 'gateway-setup' ? { pairingPurpose: value.pairingPurpose } : {}) };
   } catch { throw new Error('Private Agent Host connection settings are invalid. Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together to pair again.'); }
 }
 /** Native commands can reuse saved settings without requiring Relay pairing. */
@@ -49,7 +51,7 @@ export async function resolveHostConnection(stateDir: string, env: NodeJS.Proces
   const remoteKey = (hasKey ? env.AGENT_HOST_REMOTE_KEY : saved?.remoteKey)?.trim();
   if (!serverUrl || !remoteKey) throw new Error('AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required for the first pairing.');
   const environment = mergeHostEnvironment(saved?.environment, env);
-  return { serverUrl, remoteKey, environment };
+  return { serverUrl, remoteKey, environment, ...(!hasServer && saved?.pairingPurpose ? { pairingPurpose: saved.pairingPurpose } : {}) };
 }
 export async function saveRegisteredConnection<T>(stateDir: string, connection: HostConnection, accepted: Promise<T>): Promise<T> {
   const registered = await accepted;
@@ -77,7 +79,7 @@ async function writeConnection(stateDir: string, connection: HostConnection): Pr
   try {
     const file = await open(temporary, 'wx', 0o600);
     try {
-      await file.writeFile(JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, environment: retainedHostEnvironment(connection.environment) }));
+      await file.writeFile(JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, ...(connection.pairingPurpose ? { pairingPurpose: connection.pairingPurpose } : {}), environment: retainedHostEnvironment(connection.environment) }));
       await file.sync();
     } finally { await file.close(); }
     await rename(temporary, join(stateDir, 'connection.json'));

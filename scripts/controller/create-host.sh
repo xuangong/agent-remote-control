@@ -6,16 +6,18 @@ server=''
 image=''
 name=''
 network=''
+providers='codex'
 usage() {
   cat <<'HELP'
-Usage: bash create-host.sh [--name NAME] [--server URL] [--image IMAGE] [--network NETWORK]
+Usage: bash create-host.sh [--name NAME] [--server URL] [--image IMAGE] [--network NETWORK] [--providers PROVIDERS]
 
-Create a Docker Codex Host using one pairing key, entered privately or read from stdin.
+Create a Docker Host using one pairing key, entered privately or read from stdin.
 Docker and a built Controller image are required. No account login is performed.
 Omitted values are prompted in a terminal; press Enter to accept the displayed default.
   --server   Agents / Relay URL (default: https://agents.xianliao.de5.net)
   --name     Container and Host name (suggested: weather-city-random suffix)
   --image    Installed Controller image (default: arc-controller-bootstrap-controller:latest)
+  --providers Native CLI selection (default: codex; comma-separated codex,claude,copilot)
   --network  Docker network (default: bridge; host can be used for local integration)
 With piped input, defaults are used and stdin is reserved for the pairing key.
 Run again with the same --name to start the saved Host without another key.
@@ -26,12 +28,12 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
-    --name|--server|--image|--network)
+    --name|--server|--image|--network|--providers)
       option=$1; shift
       value=''
       if [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then value=$1; shift; fi
       case "$option" in
-        --name) name=$value ;; --server) server=$value ;; --image) image=$value ;; --network) network=$value ;;
+        --name) name=$value ;; --server) server=$value ;; --image) image=$value ;; --network) network=$value ;; --providers) providers=$value ;;
       esac ;;
     *) fail 'Unknown option. Use --help. Pairing keys are accepted only through stdin.' ;;
   esac
@@ -56,7 +58,7 @@ if [ -z "$name" ]; then
     'Host name (--name): shown on the agents site; use a previous name to resume that Host.'
 fi
 prompt_value image 'Controller image' 'arc-controller-bootstrap-controller:latest' \
-  'Controller image (--image): the Docker image containing Controller and Codex, already built or pulled.'
+  'Controller image (--image): the Docker image containing Controller and the selected native CLIs, already built or pulled.'
 prompt_value network 'Docker network' 'bridge' \
   'Docker network (--network): keep bridge for normal use; host is available for local integration.'
 [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$ ]] || fail 'Invalid --name. Use letters, digits, dots, underscores or hyphens (up to 80 characters), for example sunny-kyoto-a1b2c3.'
@@ -103,12 +105,13 @@ else
     --network "$network" --ulimit nofile=8192:8192 \
     --label "$label.managed=docker-host" --label "$label.relay=$server" \
     --env "AGENT_HOST_SERVER=$server" --env "AGENT_HOST_NAME=$name" \
+    --env "AGENT_HOST_PROVIDERS=$providers" \
     --env AGENT_HOST_REMOTE_KEY_FILE=/data/host/pairing-key \
     --mount "type=volume,src=$name-state,dst=/data" \
     --mount "type=volume,src=$name-workspace,dst=/workspace" "$image" >/dev/null
   docker start "$name" >/dev/null
 fi
-printf 'Waiting for %s to finish pairing and Codex initialization...\n' "$name"
+printf 'Waiting for %s to finish pairing and provider initialization...\n' "$name"
 deadline=$((SECONDS + 60))
 while [ "$SECONDS" -lt "$deadline" ]; do
   state=$(docker inspect --format '{{.State.Running}} {{.State.StartedAt}}' "$name" 2>/dev/null || true)
@@ -117,7 +120,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
     status=$(docker logs --since "${state#true }" --tail 100 "$name" 2>&1 | grep -E '"event":"uplink_(registered|connecting|disconnected|rejected|closed)"' | tail -1 || true)
   fi
   if [[ "$status" == *'"event":"uplink_registered"'* ]]; then
-    printf 'Host %s is ready. Open %s to create a Codex session.\n' "$name" "$server"
+    printf 'Host %s is ready. Open %s to create a session.\n' "$name" "$server"
     printf 'Restart: docker restart %s\n' "$name"
     exit 0
   fi

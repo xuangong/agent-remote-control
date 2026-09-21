@@ -12,6 +12,16 @@ describe('Remote Host heartbeat envelopes', () => {
     if (decoded.status === 'ok') expect(encodeRemoteHostUplinkMessage(decoded.value)).toEqual({ status: 'ok', json: JSON.stringify(value) });
   });
 
+  it.each(['host-only', 'gateway-setup'])('round trips the authorized %s pairing purpose', pairingPurpose => {
+    const value = { uplinkVersion: 2, type: 'registered', hostId: 'host', pairingPurpose, heartbeat: { intervalMs: 30000, timeoutMs: 10000 } };
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify(value))).toEqual({ status: 'ok', value });
+  });
+
+  it.each(['codex', 'admin', '', null])('rejects an invalid pairing purpose: %j', pairingPurpose => {
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', pairingPurpose,
+      heartbeat: { intervalMs: 30000, timeoutMs: 10000 } })).status).toBe('rejected');
+  });
+
   it('requires heartbeat timing in registration acknowledgements', () => {
     expect(decodeRemoteHostUplinkMessage(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host' })).status).toBe('rejected');
   });

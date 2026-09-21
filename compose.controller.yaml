@@ -13,6 +13,7 @@ services:
     environment:
       AGENT_HOST_SERVER: ${AGENT_HOST_SERVER:?Set the agents Relay URL}
       AGENT_HOST_REMOTE_KEY_FILE: /run/secrets/host_pairing_key
+      AGENT_HOST_PROVIDERS: ${AGENT_HOST_PROVIDERS:-codex}
       AGENT_HOST_NAME: ${AGENT_HOST_NAME:-Docker Codex}
     secrets:
       - host_pairing_key

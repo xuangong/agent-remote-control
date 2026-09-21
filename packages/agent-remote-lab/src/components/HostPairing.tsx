@@ -1,10 +1,9 @@
-import type { HostEnvironment } from '@agent-remote-controller/agent-remote-protocol';
+import type { HostEnvironment, PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
 import { hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { PairingKeys } from './PairingKeys.js';
 import { HostSecurityActions } from './HostSecurityActions.js';
-import { ReauthenticationNotice } from './ReauthenticationNotice.js';
-import { needsReauthentication } from '../security-client.js';
 
 export interface HostProvider { providerId: string; displayName: string }
 export interface RemoteHost {
@@ -12,12 +11,18 @@ export interface RemoteHost {
   credentialRotation?: boolean; environment?: HostEnvironment;
   access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
 }
-export interface PairingInvitation { id?: string; key: string; expiresAt: string; serverUrl: string; command?: string }
+export type { PairingPurpose } from '@agent-remote-controller/agent-remote-protocol';
+export interface PairingInvitation { id?: string; key: string; expiresAt: string; serverUrl: string; command?: string; purpose?: PairingPurpose; createdAt?: string }
+export interface PairingRecord { id: string; purpose: PairingPurpose; createdAt: string; expiresAt: string; status: 'unused' | 'used' | 'obsolete' | 'revoked'; usedAt?: string; revokedAt?: string; hostId?: string; hostName?: string }
+export interface PairingHistory { pairings: PairingRecord[]; availablePurposes?: PairingPurpose[] }
 export interface HostStopResult { agentId: string; status: 'cancelled' | 'unsupported' | 'failed'; message?: string }
 export interface HostPairingService {
   invitation?: PairingInvitation;
   hosts(): Promise<{ hosts: RemoteHost[] }>;
-  pair(): Promise<PairingInvitation>;
+  pair(purpose?: PairingPurpose): Promise<PairingInvitation>;
+  pairings?(): Promise<PairingHistory>;
+  revokePairing?(id: string): Promise<void>;
+  deletePairing?(id: string): Promise<void>;
   revoke?(hostId: string): Promise<void>;
   rotate?(hostId: string): Promise<{ ok: true; status: 'pending' | 'rotated' }>;
   stop?(hostId: string): Promise<{ results: HostStopResult[] }>;
@@ -34,30 +39,9 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
   const selectedHost = hosts.find(host => host.id === selectedHostId);
   const quota = selectedHost?.sessionQuota;
   const quotaExhausted = quota !== undefined && quota.used >= quota.limit;
-  const [reauthenticate, setReauthenticate] = useState(false);
   const [failure, setFailure] = useState<string>();
   useFeedbackToast('Host connection', failure ?? hostError);
-  const [invitation, setInvitation] = useState<PairingInvitation | undefined>(service.invitation);
-  const [pairing, setPairing] = useState(false);
   const [showPairing, setShowPairing] = useState(service.invitation !== undefined);
-  const [copied, setCopied] = useState(false);
-  const [now, setNow] = useState(Date.now());
-  const expired = invitation !== undefined && Date.parse(invitation.expiresAt) <= now;
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 5_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  async function pair(): Promise<void> {
-    if (pairing) return;
-    setPairing(true);
-    setReauthenticate(false);
-    setFailure(undefined);
-    try { const next = await service.pair(); service.invitation = next; setInvitation(next); setCopied(false); setShowPairing(true); }
-    catch (error) { if (needsReauthentication(error)) { setReauthenticate(true); setInvitation(undefined); service.invitation = undefined; } else setFailure(error instanceof Error ? error.message : 'Could not create a pairing key.'); }
-    finally { setPairing(false); }
-  }
 
   async function revoke(): Promise<void> {
     if (!revokeTarget || !service.revoke || revoking) return;
@@ -68,7 +52,6 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     finally { setRevoking(false); }
   }
 
-  const configuration = invitation?.command ?? (invitation ? `serverUrl: ${invitation.serverUrl}\nremoteKey: ${invitation.key}` : '');
   return <section className="lab-host-pairing" aria-label="Remote Hosts">
     <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
     <label htmlFor="host-environment-filter">Find an execution environment</label>
@@ -111,21 +94,8 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>
     </div>
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
-    {managementVisible && reauthenticate ? <ReauthenticationNotice /> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
-    {managementVisible && showPairing ? <div className="lab-pairing-details">
-      <p className="lab-control-note">Generate a pairing key, then run <code>agent-remote-controller start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>agent-remote-controller pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>
-      {invitation?.command ? <p className="lab-control-note">Copy and run the setup command below. After pairing, the managed Host saves its connection privately for restart and stays paired until revoked.</p> : null}
-      {invitation ? <>
-        <label htmlFor="pairing-configuration">Agent Host configuration</label>
-        <textarea id="pairing-configuration" readOnly value={configuration} rows={5} spellCheck={false} />
-        <p className="lab-control-note" role="status">{expired ? 'This key expired. Generate a new key to pair another Host.' : `Pair before ${new Date(invitation.expiresAt).toLocaleTimeString()}. Keep the key private.`}</p>
-        <button type="button" disabled={expired} onClick={() => {
-          void navigator.clipboard.writeText(configuration).then(() => setCopied(true)).catch(() => setFailure('Copy failed. Select and copy the configuration above.'));
-        }}>{copied ? 'Copied' : 'Copy configuration'}</button>
-      </> : null}
-      <button type="button" disabled={pairing} onClick={() => void pair()}>{pairing ? 'Generating…' : invitation ? 'Generate new key' : 'Generate pairing key'}</button>
-    </div> : null}
+    {managementVisible && showPairing ? <PairingKeys service={service} /> : null}
   </section>;
 }
 

@@ -36,6 +36,7 @@ try {
   await chmod(join(stage, 'dist/cli.js'), 0o755);
   await writeFile(join(stage, 'package.json'), JSON.stringify({
     name: '@orchardworks/agent-remote-controller', version: manifest.version,
+    repository: { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-host' },
     publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
     description: 'Agent Remote Controller CLI: connect local Codex, Claude Code and Copilot to a Relay.',
     type: 'module', bin: { 'agent-remote-controller': 'dist/cli.js' }, engines: { node: '>=22' }, os: ['darwin', 'linux'],

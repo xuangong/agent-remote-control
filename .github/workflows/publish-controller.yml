@@ -1,0 +1,124 @@
+name: Publish Controller to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: 'First publication only: use the NPM_BOOTSTRAP_TOKEN secret'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-controller
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: >-
+      github.repository == 'xuangong/agent-remote-control' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (startsWith(github.event.release.tag_name, 'controller-v') && !github.event.release.prerelease))
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      npm_config_registry: https://registry.npmjs.org/
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+          package-manager-cache: false
+      - name: Validate release identity
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF_TYPE" == tag ]]
+          [[ "$RELEASE_TAG" =~ ^controller-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git merge-base --is-ancestor HEAD origin/main
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import assert from "node:assert/strict";
+            const { version } = JSON.parse(readFileSync("packages/agent-host/package.json", "utf8"));
+            assert.equal(process.env.RELEASE_TAG, `controller-v${version}`);
+          '
+      - name: Install build tools and dependencies
+        run: |
+          npm install --global pnpm@10.34.5
+          pnpm install --frozen-lockfile
+      - run: pnpm compatibility:check
+      - run: pnpm build:agent-remote-controller
+      - name: Test Controller
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          subprocess.run([
+              'pnpm', '--filter', '@agent-remote-controller/agent-remote-controller',
+              'test', '--hookTimeout=30000'
+          ], timeout=240, check=True)
+          PY
+      - run: pnpm test:agent-remote-controller-package
+      - run: git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: controller-npm-package
+          path: dist/agent-remote-controller/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+      - run: npm install --global npm@11.15.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: controller-npm-package
+          path: package
+      - name: Publish using npm Trusted Publishing
+        if: ${{ !inputs.bootstrap }}
+        shell: bash
+        run: |
+          npm publish "package/orchardworks-agent-remote-controller-${RELEASE_TAG#controller-v}.tgz" \
+            --access public --provenance --ignore-scripts --registry=https://registry.npmjs.org/
+      - name: Publish first version using the temporary token
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
+            echo 'Set the NPM_BOOTSTRAP_TOKEN Actions secret for the first publication.' >&2
+            exit 1
+          fi
+          npm publish "package/orchardworks-agent-remote-controller-${RELEASE_TAG#controller-v}.tgz" \
+            --access public --provenance --ignore-scripts --registry=https://registry.npmjs.org/
+      - name: Verify the published version
+        shell: bash
+        run: |
+          npm view "@orchardworks/agent-remote-controller@${RELEASE_TAG#controller-v}" \
+            version dist.integrity --registry=https://registry.npmjs.org/

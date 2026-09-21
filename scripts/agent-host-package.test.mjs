@@ -13,12 +13,15 @@ const root = resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
 const require = createRequire(join(root, 'packages/agent-host/package.json'));
 const { WebSocketServer } = require('ws');
-const artifact = process.env.AGENT_HOST_PACKAGE ?? join(root, 'dist/agent-remote-controller/orchardworks-agent-remote-controller-0.1.0.tgz');
+const hostManifest = JSON.parse(await readFile(join(root, 'packages/agent-host/package.json'), 'utf8'));
+const artifact = process.env.AGENT_HOST_PACKAGE ?? join(root, `dist/agent-remote-controller/orchardworks-agent-remote-controller-${hostManifest.version}.tgz`);
 
 test('packs the public Controller name with the unchanged command and npm registry target', { timeout: 15000 }, async () => {
   const { stdout } = await exec('tar', ['-xOf', artifact, 'package/package.json'], { timeout: 10000 });
   const manifest = JSON.parse(stdout);
   assert.equal(manifest.name, '@orchardworks/agent-remote-controller');
+  assert.equal(manifest.version, hostManifest.version);
+  assert.deepEqual(manifest.repository, { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-host' });
   assert.notEqual(manifest.private, true);
   assert.deepEqual(manifest.publishConfig, { access: 'public', registry: 'https://registry.npmjs.org/' });
   assert.deepEqual(manifest.os, ['darwin', 'linux']);

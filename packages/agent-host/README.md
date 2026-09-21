@@ -22,6 +22,10 @@ the build script assigns the public name to the standalone tarball. The generate
 manifest targets public publication on npmjs.org. Building and installing a tarball
 do not publish it; publishing is a separate release operation.
 
+Maintainers can publish through GitHub Actions with npm Trusted Publishing.
+See the [release setup guide](https://github.com/xuangong/agent-remote-control/blob/main/docs/controller-npm-release.md)
+for the one-time bootstrap and release-tag workflow.
+
 From the source checkout, install dependencies and run:
 
 ```sh

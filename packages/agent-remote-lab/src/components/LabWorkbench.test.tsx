@@ -47,7 +47,7 @@ describe('LabWorkbench', () => {
       notice: 'Native runtime is unavailable. Changes are unavailable.',
       composerNotice: 'Native runtime is unavailable. Your draft is preserved.',
     },
-  ])('keeps $connectionState recovery state mounted while disabling native mutations', async ({ connectionState, heading, notice, composerNotice }) => {
+  ])('keeps $connectionState recovery mounted and restricts control operations', async ({ connectionState, heading, notice, composerNotice }) => {
     const state = {
       ...replicaState,
       pendingInteractions: [{
@@ -92,7 +92,7 @@ describe('LabWorkbench', () => {
     expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({
       disabled: false, value: 'Keep my recovery draft',
     });
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(connectionState === 'unavailable');
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);

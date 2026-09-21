@@ -37,7 +37,8 @@ export interface LabWorkbenchActions {
 }
 
 export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
-  const actions = useActionFeedback(sessionStatus === 'ready' ? suppliedActions : { deleteMessage: suppliedActions.deleteMessage }, state?.agent?.id);
+  const suppliedFeedbackActions = useActionFeedback(suppliedActions, state?.agent?.id);
+  const actions = sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
   const readingPositions = recoveryPositions ?? localPositions;
@@ -171,12 +172,13 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
           sessionKey={draftSessionKey ?? state?.agent?.id}
           draftScope={recoveryPositions?.scope}
           visible={visible}
-          onSendMessageContent={actions.sendMessageContent}
+          onSendMessageContent={suppliedFeedbackActions.sendMessageContent}
           onUploadImage={visible ? actions.uploadImage : undefined}
           draft={messageDraft}
           onDraftChange={onMessageDraftChange}
           disabled={sessionStatus !== 'ready'}
-          onSendMessage={actions.sendMessage}
+          recovering={!runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
+          onSendMessage={suppliedFeedbackActions.sendMessage}
           onCancel={actions.cancel}
           onSetSessionSetting={actions.setSessionSetting}
           onListCommands={actions.listCommands}

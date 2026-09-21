@@ -737,3 +737,17 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-composer .agent-image-upload-status[data-failed="true"] button { color: var(--agent-danger); }
 .agent-composer .agent-image-upload-status button:hover { background: var(--agent-surface-selected); }
 .agent-image-tag[data-state="uploading"] { background: linear-gradient(to right, color-mix(in srgb, currentColor 12%, transparent) var(--image-upload-progress, 0%), transparent 0); }
+
+.agent-composer-send-status { min-height: 32px; min-width: 0; color: var(--agent-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.agent-composer-send-status > div { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 32px; }
+.agent-composer-send-status [role="status"] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-composer .agent-composer-send-status button { flex: none; min-height: 32px; padding: 0 6px; background: transparent; color: inherit; font-size: 12px; }
+.agent-composer [data-testid="pending-send"][data-state="warning"] { color: var(--agent-pending-text, #956400); }
+.agent-composer[data-send-state="waiting"] .agent-composer-input { color: var(--agent-muted); }
+.agent-composer[data-send-state="warning"] .agent-composer-input { color: var(--agent-pending-text, #956400); }
+.agent-composer[data-send-state] textarea { color: inherit; opacity: 1; }
+
+@media (max-width: 760px), (pointer: coarse) {
+  .agent-composer-send-status, .agent-composer-send-status > div { min-height: 44px; }
+  .agent-composer .agent-composer-send-status button { min-width: 44px; min-height: 44px; }
+}

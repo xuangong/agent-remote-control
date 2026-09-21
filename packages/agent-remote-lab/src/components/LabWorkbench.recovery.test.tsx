@@ -170,3 +170,27 @@ it('cancels the recovery timer when the workbench unmounts', async () => {
   await advance(6000);
   expect(container.querySelector('.lab-toast')).toBeNull();
 });
+
+
+it('keeps an unsent message pending across recovery phases and uses the ready action once', async () => {
+  const staleSend = vi.fn(async () => {}), send = vi.fn(async () => {});
+  const view = await workbench({ sessionStatus: 'disconnected', actions: { sendMessage: staleSend } });
+  await act(async () => {
+    const input = view.container.querySelector('textarea')!;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Send after recovery');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  const pending = () => view.container.querySelector('[data-testid="pending-send"]');
+  expect(pending()?.textContent).toContain('10s');
+  await advance(2000);
+  await view.update({ sessionStatus: 'connecting' });
+  await advance(2000);
+  await view.update({ sessionStatus: 'catching_up' });
+  expect(pending()?.textContent).toContain('6s');
+  expect(staleSend).not.toHaveBeenCalled();
+  await view.update({ sessionStatus: 'ready', actions: { sendMessage: send } });
+  expect(send).toHaveBeenCalledExactlyOnceWith('Send after recovery');
+  expect(staleSend).not.toHaveBeenCalled();
+  expect(pending()).toBeNull();
+});

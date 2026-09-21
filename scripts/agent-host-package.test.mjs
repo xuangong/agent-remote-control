@@ -13,7 +13,18 @@ const root = resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
 const require = createRequire(join(root, 'packages/agent-host/package.json'));
 const { WebSocketServer } = require('ws');
-const artifact = process.env.AGENT_HOST_PACKAGE ?? join(root, 'dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz');
+const artifact = process.env.AGENT_HOST_PACKAGE ?? join(root, 'dist/agent-remote-controller/orchardworks-agent-remote-controller-0.1.0.tgz');
+
+test('packs the public Controller name with the unchanged command and npm registry target', { timeout: 15000 }, async () => {
+  const { stdout } = await exec('tar', ['-xOf', artifact, 'package/package.json'], { timeout: 10000 });
+  const manifest = JSON.parse(stdout);
+  assert.equal(manifest.name, '@orchardworks/agent-remote-controller');
+  assert.notEqual(manifest.private, true);
+  assert.deepEqual(manifest.publishConfig, { access: 'public', registry: 'https://registry.npmjs.org/' });
+  assert.deepEqual(manifest.os, ['darwin', 'linux']);
+  assert.deepEqual(manifest.bin, { 'agent-remote-controller': 'dist/cli.js' });
+  assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
+});
 
 test('installs the tarball independently and manages a paired daemon from a path containing spaces', { timeout: 180000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'agent host installed '));
@@ -51,9 +62,9 @@ test('installs the tarball independently and manages a paired daemon from a path
     { cwd: directory, timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
   assert.match((await run(['--help'])).stdout, /Usage: agent-remote-controller/);
   assert.match((await run(['--help'])).stdout, /autostart/);
-  const packageRoot = join(prefix, 'lib/node_modules/@agent-remote-controller/agent-remote-controller');
+  const packageRoot = join(prefix, 'lib/node_modules/@orchardworks/agent-remote-controller');
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
-  assert.equal(manifest.name, '@agent-remote-controller/agent-remote-controller');
+  assert.equal(manifest.name, '@orchardworks/agent-remote-controller');
   assert.deepEqual(Object.keys(manifest.bin), ['agent-remote-controller']);
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
   assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@agent-remote-controller/')));
@@ -97,13 +108,16 @@ test('installs the tarball independently and manages a paired daemon from a path
   const connection = { AGENT_HOST_SERVER: `http://127.0.0.1:${server.address().port}`, AGENT_HOST_REMOTE_KEY: 'local-package-test-key' };
   assert.match((await run(['start'], connection)).stdout, /daemon started/);
   await waitFor(async () => /uplink: registered/.test((await run(['status'])).stdout));
-  assert.deepEqual(registrations[0].providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot']);
+  assert.deepEqual(registrations[0].providers, []);
+  assert.deepEqual(registrations.at(-1).providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot']);
+  assert.equal(registrations.at(-1).installationId, registrations[0].installationId);
   const saved = JSON.parse(await readFile(join(state, 'connection.json'), 'utf8'));
   assert.equal(saved.remoteKey, connection.AGENT_HOST_REMOTE_KEY);
+  const beforeHeartbeatTimeout = registrations.length;
   sendHeartbeats = false;
   await waitFor(async () => (await diagnosticLog()).some(event => event.event === 'uplink_disconnected' && event.reason === 'heartbeat_timeout'));
   sendHeartbeats = true;
-  await waitFor(async () => registrations.length >= 2 && /uplink: registered/.test((await run(['status'])).stdout));
+  await waitFor(async () => registrations.length > beforeHeartbeatTimeout && /uplink: registered/.test((await run(['status'])).stdout));
   const timeoutEvent = (await diagnosticLog()).find(event => event.reason === 'heartbeat_timeout');
   assert.equal(timeoutEvent.heartbeatTimeoutMs, 1500);
   assert.ok(Number.isFinite(Date.parse(timeoutEvent.timestamp)));

@@ -1,19 +1,32 @@
 # Agent Remote Controller CLI
 
-The `@agent-remote-controller/agent-remote-controller` package provides the
+The `@orchardworks/agent-remote-controller` npm package provides the
 `agent-remote-controller` command. It runs the local Agent Host and connects
 Codex, Claude Code and GitHub Copilot sessions to a Relay for the browser
-controller. Supports macOS and Linux with Node.js 22 or newer. No repository checkout or pnpm is
-needed after installation. The package contains the latest bundled provider
+controller. Supports macOS and Linux with Node.js 22 or newer. No repository
+checkout or pnpm is needed after installation. Native Windows is not supported;
+the npm package declares only `darwin` and `linux`. The package contains the latest bundled provider
 implementation, including Codex Default-mode structured questions.
 
 ## Build and install
+
+The public package name is `@orchardworks/agent-remote-controller`. Once a version
+has been published to npm, install it with:
+
+```sh
+npm install -g @orchardworks/agent-remote-controller --registry=https://registry.npmjs.org/
+```
+
+The internal workspace package remains `@agent-remote-controller/agent-remote-controller`;
+the build script assigns the public name to the standalone tarball. The generated
+manifest targets public publication on npmjs.org. Building and installing a tarball
+do not publish it; publishing is a separate release operation.
 
 From the source checkout, install dependencies and run:
 
 ```sh
 pnpm build:agent-remote-controller
-npm install -g ./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz \
+npm install -g ./dist/agent-remote-controller/orchardworks-agent-remote-controller-0.1.0.tgz \
   --registry=https://mirrors.cloud.tencent.com/npm/
 agent-remote-controller --help
 ```
@@ -27,7 +40,7 @@ For installation without administrator permissions, use a user-owned prefix and
 add its bin directory to PATH:
 
 ```sh
-npm install -g --prefix "$HOME/.local" ./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz \
+npm install -g --prefix "$HOME/.local" ./dist/agent-remote-controller/orchardworks-agent-remote-controller-0.1.0.tgz \
   --registry=https://mirrors.cloud.tencent.com/npm/
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -36,7 +49,7 @@ To run the tarball without a global installation, use:
 
 ```sh
 npm exec --yes --registry=https://mirrors.cloud.tencent.com/npm/ \
-  --package=./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz \
+  --package=./dist/agent-remote-controller/orchardworks-agent-remote-controller-0.1.0.tgz \
   -- agent-remote-controller foreground
 ```
 

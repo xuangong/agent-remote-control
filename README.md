@@ -31,8 +31,8 @@ The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages 
 
 ## Install Agent Host as a standalone command
 
-Run `pnpm build:agent-remote-controller` to create `dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz`.
-Install it with `npm install -g ./dist/agent-remote-controller/agent-remote-controller-agent-remote-controller-0.1.0.tgz --registry=https://mirrors.cloud.tencent.com/npm/`.
+Run `pnpm build:agent-remote-controller` to create `dist/agent-remote-controller/orchardworks-agent-remote-controller-0.1.0.tgz`.
+Install it with `npm install -g ./dist/agent-remote-controller/orchardworks-agent-remote-controller-0.1.0.tgz --registry=https://mirrors.cloud.tencent.com/npm/`.
 The installed `agent-remote-controller` command runs without a repository checkout or pnpm.
 See the [Agent Host CLI guide](packages/agent-host/README.md) for native CLI requirements,
 pairing, background operation and upgrades. Run `pnpm test:agent-remote-controller-package` after

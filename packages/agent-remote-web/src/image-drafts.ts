@@ -82,6 +82,8 @@ export async function readImageDraft(key: string): Promise<ImageDraft | undefine
 }
 export async function writeImageDraft(draft: ImageDraft, generation = imageDraftScopeGeneration(draft.scope)): Promise<void> {
   if (generation !== imageDraftScopeGeneration(draft.scope)) return;
+  const referenced = new Set(draft.parts.flatMap(part => part.type === 'image' ? [part.imageId] : []));
+  draft = { ...draft, images: Object.fromEntries(Object.entries(draft.images).filter(([id]) => referenced.has(id))) };
   const save = async (record: ImageDraft) => {
     await transaction('readwrite', store => generation === imageDraftScopeGeneration(draft.scope) ? store.put(record) : store.get(draft.key));
   };

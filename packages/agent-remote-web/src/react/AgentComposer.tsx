@@ -398,7 +398,10 @@ export function AgentComposer({ compact = false, state, sessionControls, session
         <button type="button" aria-label="Cancel pending send" onClick={waiting.cancel}>Cancel</button>
       </div> : null}
     </div>
-    {richEnabled && imageDraft.storageError ? <p className="agent-composer-note" role="alert">{imageDraft.storageError}</p> : null}
+    {richEnabled && imageDraft.storageError ? <div className="agent-composer-note agent-draft-storage-status" role="status">
+      <span>{imageDraft.storageError}</span>
+      <button type="button" onClick={imageDraft.retryStorage} disabled={imageDraft.storageBusy} aria-label="Retry draft storage">Retry</button>
+    </div> : null}
     {richEnabled && imageDraft.error ? <p className="agent-composer-note" role="alert">{imageDraft.error}</p> : null}
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
     {runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>

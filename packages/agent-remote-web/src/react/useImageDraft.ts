@@ -4,7 +4,7 @@ import { readImageDraft, writeImageDraft, imageDraftScopeGeneration, cacheDraftI
 import { draftText, normalizeDraftParts, snapshotContent, type DraftPart } from './composer-document.js';
 
 export type UploadImage = (file: Blob, uploadId: string, options?: { signal?: AbortSignal; onProgress?(loaded: number, total: number): void }) => Promise<NonNullable<ImageUploadReceipt['attachment']>>;
-interface DraftEntry { draft: ImageDraft; inputText: string; revision: number; hydrated: boolean; storageError?: string; error?: string; saving?: Promise<void>; dirty: boolean; generation: number; wake?: () => void }
+interface DraftEntry { draft: ImageDraft; inputText: string; revision: number; hydrated: boolean; restoring?: boolean; readFailed?: boolean; storageError?: string; error?: string; saving?: Promise<void>; dirty: boolean; generation: number; wake?: () => void }
 export function useImageDraft({ scope, sessionKey, text, enabled, active, upload, onTextChange }: {
   scope?: string; sessionKey: string; text: string; enabled: boolean; active: boolean; upload?: UploadImage; onTextChange(text: string): void;
 }) {
@@ -28,13 +28,14 @@ export function useImageDraft({ scope, sessionKey, text, enabled, active, upload
     const snapshot: ImageDraft = { ...current.draft, parts: current.draft.parts.map(part => ({ ...part })),
       images: Object.fromEntries(Object.entries(current.draft.images).map(([id, image]) => [id, { ...image }])) };
     current.saving = writeImageDraft(snapshot, current.generation)
-      .catch(() => { current.storageError = 'Draft recovery is unavailable. Keep this page open to preserve your images.'; notify(); })
-      .finally(() => { current.saving = undefined; if (current.dirty) flush(); });
+      .then(() => { current.storageError = undefined; })
+      .catch(() => { current.storageError = 'Images are not saved on this device. Keep this page open.'; })
+      .finally(() => { current.saving = undefined; if (current.dirty) flush(); notify(); });
   }
   function persist(): void {
     if (!scope || !current.hydrated) return;
     current.dirty = true;
-    flush();
+    if (!current.readFailed) flush();
   }
   function changed(document = false): void {
     if (document) { current.revision++; if (mounted.current && currentKey.current === key) callbacks.current.onTextChange(draftText(current.draft.parts)); }
@@ -48,11 +49,12 @@ export function useImageDraft({ scope, sessionKey, text, enabled, active, upload
     current.revision++;
     changed();
   }, [key, text]);
-  useEffect(() => {
-    if (!enabled || current.hydrated) return;
-    if (!scope) { current.hydrated = true; return; }
+  function restore(): void {
+    if (!scope || current.restoring) return;
+    current.restoring = true;
     const revision = current.revision;
     void readImageDraft(key).then(saved => {
+      current.readFailed = false;
       if (saved && revision === 0 && revision === current.revision) {
         current.draft = saved;
         for (const image of Object.values(saved.images)) {
@@ -61,8 +63,38 @@ export function useImageDraft({ scope, sessionKey, text, enabled, active, upload
         }
         if (mounted.current && currentKey.current === key) callbacks.current.onTextChange(draftText(saved.parts));
       }
-    }).catch(() => { current.storageError = 'Draft recovery is unavailable. Keep this page open to preserve your images.'; }).finally(() => { current.hydrated = true; persist(); notify(); });
+    }).catch(() => { current.readFailed = true; }).finally(() => {
+      current.hydrated = true;
+      current.restoring = false;
+      // A failed read must not replace a potentially recoverable saved draft.
+      if (!current.readFailed) { persist(); current.wake?.(); }
+      notify();
+    });
+  }
+  function retryStorage(): void {
+    if (current.restoring || current.saving) return;
+    if (current.readFailed || !current.hydrated) restore();
+    else if (current.storageError) persist();
+    else return;
+    notify();
+  }
+  useEffect(() => {
+    if (!enabled || current.hydrated) return;
+    restore();
   }, [key, enabled]);
+  useEffect(() => {
+    if (!enabled || !scope) return;
+    const retry = () => { if (document.visibilityState !== 'hidden') retryStorage(); };
+    if (active) retry();
+    document.addEventListener('visibilitychange', retry);
+    window.addEventListener('pageshow', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      document.removeEventListener('visibilitychange', retry);
+      window.removeEventListener('pageshow', retry);
+      window.removeEventListener('focus', retry);
+    };
+  }, [key, enabled, active]);
   useEffect(() => {
     if (!enabled || !active || !upload || !current.hydrated) return;
     const abort = new AbortController();
@@ -116,10 +148,13 @@ export function useImageDraft({ scope, sessionKey, text, enabled, active, upload
     notify(); return parts;
   }
   const images = current.draft.images;
+  const hasImages = current.draft.parts.some(part => part.type === 'image');
   return {
-    parts: current.draft.parts, images, error: current.error, storageError: current.storageError,
+    parts: current.draft.parts, images, error: current.error,
+    storageError: current.readFailed ? 'Saved draft could not be restored.' : hasImages ? current.storageError : undefined,
+    storageBusy: Boolean(current.restoring || current.saving), retryStorage,
     ready: current.draft.parts.every(part => part.type === 'text' || images[part.imageId]?.status === 'ready'),
-    hasImages: current.draft.parts.some(part => part.type === 'image'),
+    hasImages,
     setParts(parts: readonly DraftPart[]) { current.draft.parts = normalizeDraftParts(parts); changed(true); },
     setText(value: string) { current.draft.parts = value ? [{ type: 'text', text: value }] : []; changed(true); },
     addFiles,

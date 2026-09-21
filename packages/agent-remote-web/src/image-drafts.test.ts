@@ -48,3 +48,13 @@ it('signout revokes old writes and local clipboard blobs only for the selected s
     expect(restored?.images['webkit-binary']?.blob?.size).toBe(11);
   } finally { put.mockRestore(); }
 });
+
+
+it('does not persist image bytes for removed tags while retaining them for undo in memory', async () => {
+  const saved = draft('removed-images');
+  saved.parts = [{ type: 'text', text: 'Images already sent' }];
+  await writeImageDraft(saved);
+  const restored = await readImageDraft(saved.key);
+  expect(restored?.images).toEqual({});
+  expect(saved.images['removed-images']?.blob).toBeDefined();
+});

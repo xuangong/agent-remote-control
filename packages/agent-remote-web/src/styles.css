@@ -751,3 +751,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 @media (max-width: 760px), (pointer: coarse) {
   .agent-composer .agent-composer-send-status button { min-width: 44px; min-height: 44px; }
 }
+
+.agent-draft-storage-status { display: flex; align-items: center; gap: 8px; }
+.agent-draft-storage-status > span { flex: 1; min-width: 0; }
+.agent-composer .agent-draft-storage-status button { flex: none; min-height: 32px; padding: 0 6px; background: transparent; color: inherit; font-size: 12px; }

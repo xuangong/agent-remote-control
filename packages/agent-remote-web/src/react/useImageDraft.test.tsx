@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ImageDraft } from '../image-drafts.js';
 import { readImageDraft, writeImageDraft } from '../image-drafts.js';
 import { render, rerender } from '../test/setup.js';
@@ -11,7 +11,8 @@ function Harness({ session = 'a', active = true, scope, upload, text = '', enabl
   return <span>{draft.storageError}</span>;
 }
 const attachment = { attachmentId: 'a', sha256: 'a'.repeat(64), mediaType: 'image/png' as const, byteLength: 1, imageDimensions: { width: 1, height: 1 } };
-beforeEach(() => { vi.mocked(readImageDraft).mockReset(); vi.mocked(writeImageDraft).mockClear(); });
+beforeEach(() => { vi.mocked(readImageDraft).mockReset().mockResolvedValue(undefined); vi.mocked(writeImageDraft).mockReset().mockResolvedValue(undefined); });
+afterEach(() => vi.restoreAllMocks());
 
 it('does not overwrite a new edit when saved draft hydration finishes late', async () => {
   let resolve!: (value: ImageDraft) => void;
@@ -53,7 +54,7 @@ it('keeps editable unavailable tags and reports storage failure without sending 
   expect(upload).not.toHaveBeenCalled();
   vi.mocked(readImageDraft).mockRejectedValue(new Error('denied'));
   const second = await render(<Harness session="denied" scope="account" />);
-  expect(second.textContent).toContain('Draft recovery is unavailable');
+  expect(second.textContent).toContain('Saved draft could not be restored');
   await act(async () => draft.setText('Still editable'));
   expect(draft.parts).toEqual([{ type: 'text', text: 'Still editable' }]);
 });
@@ -146,4 +147,73 @@ it('starts saving immediately and coalesces edits made while storage is busy', a
   await act(async () => finish());
   expect(writeImageDraft).toHaveBeenCalledTimes(2);
   expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Edit 9' }] }), 0);
+});
+
+
+it('clears the image storage warning after a later successful save', async () => {
+  await render(<Harness scope="recover-save" active={false} />);
+  vi.mocked(writeImageDraft).mockRejectedValueOnce(new Error('temporary storage failure'));
+  await act(async () => draft.setParts(draft.addFiles([new Blob(['x'], { type: 'image/png' })])));
+  expect(draft.storageError).toContain('Images are not saved');
+  await act(async () => draft.setParts([...draft.parts, { type: 'text', text: 'caption' }]));
+  expect(draft.storageError).toBeUndefined();
+  expect(draft.hasImages).toBe(true);
+});
+
+it('does not warn about preserving images in a text-only or cleared draft', async () => {
+  await render(<Harness scope="empty-storage" active={false} />);
+  vi.mocked(writeImageDraft).mockRejectedValue(new Error('storage denied'));
+  await act(async () => draft.setText('Text only'));
+  expect(draft.storageError).toBeUndefined();
+  await act(async () => draft.setParts(draft.addFiles([new Blob(['x'], { type: 'image/png' })])));
+  expect(draft.storageError).toBeDefined();
+  await act(async () => draft.setText(''));
+  expect(draft.storageError).toBeUndefined();
+});
+
+it('retries failed persistence on foreground return without requiring another edit', async () => {
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  await render(<Harness scope="foreground-save" active={false} />);
+  vi.mocked(writeImageDraft).mockRejectedValueOnce(new Error('storage interrupted'));
+  await act(async () => draft.setParts(draft.addFiles([new Blob(['x'], { type: 'image/png' })])));
+  expect(draft.storageError).toBeDefined();
+  const calls = vi.mocked(writeImageDraft).mock.calls.length;
+  await act(async () => { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); });
+  expect(writeImageDraft).toHaveBeenCalledTimes(calls);
+  await act(async () => { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+  expect(writeImageDraft).toHaveBeenCalledTimes(calls + 1);
+  expect(draft.storageError).toBeUndefined();
+});
+
+it('preserves saved data after a failed read and restores it on explicit retry', async () => {
+  const saved: ImageDraft = { version: 1, key: '["restore-read","a"]', scope: 'restore-read', parts: [{ type: 'text', text: 'Saved content' }], images: {}, nextLabel: 1 };
+  vi.mocked(readImageDraft).mockRejectedValueOnce(new Error('temporarily unavailable')).mockResolvedValue(saved);
+  await render(<Harness scope="restore-read" active={false} />);
+  expect(draft.storageError).toContain('Saved draft could not be restored');
+  expect(writeImageDraft).not.toHaveBeenCalled();
+  await act(async () => draft.retryStorage());
+  expect(draft.parts).toEqual(saved.parts);
+  expect(draft.storageError).toBeUndefined();
+});
+
+it('keeps edits made after a failed read when recovery succeeds', async () => {
+  vi.mocked(readImageDraft).mockRejectedValueOnce(new Error('temporarily unavailable')).mockResolvedValue({ version: 1, key: 'saved', scope: 'retry-edit', parts: [{ type: 'text', text: 'Old content' }], images: {}, nextLabel: 1 });
+  await render(<Harness scope="retry-edit" active={false} />);
+  await act(async () => draft.setText('New content'));
+  await act(async () => draft.retryStorage());
+  expect(draft.parts).toEqual([{ type: 'text', text: 'New content' }]);
+  expect(draft.storageError).toBeUndefined();
+});
+
+
+it('uploads images recovered by a later successful read', async () => {
+  const blob = new Blob(['x'], { type: 'image/png' });
+  vi.mocked(readImageDraft).mockRejectedValueOnce(new Error('interrupted')).mockResolvedValue({ version: 1, key: 'saved', scope: 'later-restore', parts: [{ type: 'image', imageId: 'restored', label: 'image #1' }], images: { restored: { imageId: 'restored', blob, uploadId: 'u', status: 'ready', progress: 1, attachment } }, nextLabel: 2 });
+  const upload = vi.fn<UploadImage>(async () => attachment);
+  await render(<Harness scope="later-restore" upload={upload} />);
+  expect(upload).not.toHaveBeenCalled();
+  await act(async () => draft.retryStorage());
+  expect(upload).toHaveBeenCalledTimes(1);
+  expect(draft.ready).toBe(true);
+  expect(draft.storageError).toBeUndefined();
 });

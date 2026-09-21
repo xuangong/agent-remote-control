@@ -127,7 +127,7 @@ it('rejects obsolete clients for new invitations and forwards explicit stop outc
   expect((await f.request(`remote/hosts/${host.hostId}/rotate`, { credential: 'browser-supplied' })).status).toBe(400);
 }, 10000);
 
-it('preserves invitation expiry and consumes it before offering a device credential after interrupted enrollment', async () => {
+it('keeps a claimed invitation consumed after interrupted enrollment and recovers with a new invitation', async () => {
   const first = await fixture(undefined, state => {
     // The durable write completes, but the process cannot publish it or offer a credential.
     if (state.hosts.length) throw Error('Registration interrupted after persistence');
@@ -141,11 +141,6 @@ it('preserves invitation expiry and consumes it before offering a device credent
   expect(saved.keys[0]![1]).toMatchObject({ installationId: 'interrupted', requiresRotation: true, expires: originalExpiry });
   await first.close();
   const restored = await fixture(saved);
-  const reconnect = new WebSocket(restored.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${invitation}` } });
-  await once(reconnect, 'open'); const offered = once(reconnect, 'message');
-  reconnect.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: 'interrupted', name: 'Interrupted Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-  const offer = JSON.parse((await offered)[0].toString());
-  expect(offer.type).toBe('credential_issued');
   const denied = await new Promise<number>((resolve, reject) => {
     const replay = new WebSocket(restored.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${invitation}` } });
     replay.on('error', () => undefined);
@@ -153,9 +148,11 @@ it('preserves invitation expiry and consumes it before offering a device credent
     replay.once('unexpected-response', (_, response) => { response.resume(); replay.terminate(); resolve(response.statusCode ?? 0); });
   });
   expect(denied).toBe(401);
-  // A durably saved offer remains usable even if the Host disconnects before acknowledging it.
-  reconnect.terminate();
-  expect((await restored.connect(offer.credential, 'interrupted')).hostId).toBe(saved.hosts[0]!.id);
+  expect(saved.keys[0]![1].claimedAt).toBeTypeOf('number');
+  expect(await (await restored.request('remote/pairings')).json()).toMatchObject({ pairings: [{ status: 'used', hostId: saved.hosts[0]!.id }] });
+  const replacement = await restored.pair();
+  const recovered = await restored.connect(replacement, 'interrupted');
+  expect(recovered.hostId).toBe(saved.hosts[0]!.id);
 }, 10000);
 
 it('keeps enrollment offline until credential acknowledgment while an existing Host stays online during rotation', async () => {

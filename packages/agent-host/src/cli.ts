@@ -19,6 +19,9 @@ import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection,
 import { createSystemdAutostart, systemdUnavailable } from './systemd.js';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@agent-remote-controller/agent-remote-relay';
 import { configureGatewayProviders } from './gateway-setup.js';
+import { runShare } from './share-command.js';
+import { createInterface } from 'node:readline';
+import { renderSessionQr } from './share-qr.js';
 
 interface DaemonState { pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' }
 const args = process.argv.slice(2);
@@ -46,11 +49,12 @@ async function main(): Promise<void> {
   else if (command === 'stop') await stop();
   else if (command === 'autostart') await autostart(args[1] ?? 'status');
   else if (command === 'pair') await pair();
+  else if (command === 'share') await share();
   else throw new Error(`Unknown command: ${command}. Run agent-remote-controller --help.`);
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with launchd or systemd\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup and crash recovery\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux, stop stops the managed job without disabling future login startup.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
+  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  share       Choose a provider and enter a session ID to generate a QR code\n  share list-sessions  Browse recent sessions and generate a QR code\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with launchd or systemd\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup and crash recovery\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux, stop stops the managed job without disabling future login startup.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
@@ -172,9 +176,20 @@ async function enrollHost(configuration: HostConnection, installationId: string,
 
 async function handleManagement(input: string, token: string, host: AgentHost, configuration: HostConnection, diagnosticSecrets: Set<string>, connection: import('node:net').Socket): Promise<void> {
   try {
-    const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string };
+    const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string; hostId?: string; providerId?: string; nativeSessionId?: string; cursor?: string; serverUrl?: string };
     if (request.token !== token) throw new Error('Unauthorized local management request.');
     if (request.action === 'status') connection.end(JSON.stringify({ running: true, uplink: host.state }));
+    else if (request.action === 'share-context') connection.end(JSON.stringify({ ...await host.shareContext(), serverUrl: configuration.serverUrl }));
+    else if (request.action === 'share-catalog') {
+      if (request.serverUrl !== configuration.serverUrl) throw new Error('The Host connection changed. Run share again.');
+      if (typeof request.hostId !== 'string' || typeof request.providerId !== 'string'
+        || (request.nativeSessionId !== undefined && typeof request.nativeSessionId !== 'string')
+        || (request.cursor !== undefined && typeof request.cursor !== 'string')) throw new Error('Invalid share catalog request.');
+      const result = await host.shareCatalog({ hostId: request.hostId, providerId: request.providerId,
+        nativeSessionId: request.nativeSessionId, cursor: request.cursor });
+      if (request.serverUrl !== configuration.serverUrl) throw new Error('The Host connection changed. Run share again.');
+      connection.end(JSON.stringify(result));
+    }
     else if (request.action === 'pair') {
       let response: Record<string, unknown> = {};
       let restartRequired = false;
@@ -254,6 +269,20 @@ async function start(enableAutostart = false): Promise<void> {
   });
 }
 
+async function share(): Promise<void> {
+  if (args.length > 2 || (args[1] !== undefined && args[1] !== 'list-sessions')) throw new Error('Usage: agent-remote-controller share [list-sessions]');
+  const state = await requiredState();
+  const lines = createInterface({ input: process.stdin, output: process.stdout, terminal: !!process.stdin.isTTY && !!process.stdout.isTTY });
+  const answers = lines[Symbol.asyncIterator]();
+  lines.on('SIGINT', () => lines.close());
+  try {
+    await runShare(args.slice(1), payload => request(state, payload), {
+      write: text => { process.stdout.write(text); },
+      ask: async prompt => { process.stdout.write(prompt); const answer = await answers.next(); return answer.done ? 'q' : answer.value; },
+      qr: renderSessionQr,
+    });
+  } finally { lines.close(); }
+}
 async function status(): Promise<void> {
   const state = await readState();
   if (!state || !processAlive(state.pid)) { process.stdout.write('Agent Host daemon is not running.\n'); process.exitCode = 3; return; }
@@ -333,14 +362,19 @@ async function waitForDaemonExit(state: DaemonState): Promise<void> {
 async function request(state: DaemonState, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const connection = createConnection(state.socket); let output = '';
-    connection.setTimeout(payload.action === 'pair' ? 30_000 : 5000, () => connection.destroy(new Error(payload.action === 'pair'
+    connection.setTimeout(payload.action === 'pair' || payload.action === 'share-catalog' ? 30_000 : 5000, () => connection.destroy(new Error(payload.action === 'pair'
       ? 'Pairing result is unknown: the invitation may already be consumed and saved. Check agent-remote-controller status and private saved connection settings before retrying. Restart with saved settings to finish pending Gateway setup; do not blindly reuse the invitation.'
       : 'Local management request timed out.')));
     connection.on('connect', () => connection.end(JSON.stringify({ ...payload, token: state.token })));
     connection.setEncoding('utf8'); connection.on('data', (chunk) => { output += chunk; });
     connection.on('error', reject); connection.on('close', () => {
-      try { const response = JSON.parse(output) as Record<string, unknown>; if (response.error) reject(new Error(String(response.error))); else resolve(response); }
-      catch { reject(new Error('Agent Host daemon returned an invalid management response.')); }
+      let response: Record<string, unknown>;
+      try { response = JSON.parse(output) as Record<string, unknown>; }
+      catch { reject(new Error('Agent Host daemon returned an invalid management response.')); return; }
+      if (!response || typeof response !== 'object' || Array.isArray(response)) { reject(new Error('Agent Host daemon returned an invalid management response.')); return; }
+      if (response.error) reject(new Error(response.error === 'Unknown local management action.' && String(payload.action).startsWith('share-')
+        ? 'The running Controller does not support share yet. Update it and restart the Controller, then try again.' : String(response.error)));
+      else resolve(response);
     });
   });
 }

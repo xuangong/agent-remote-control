@@ -76,6 +76,28 @@ function fixture(providerId: string, createSession: (nativeSessionId: string) =>
 }
 
 describe('Agent Host runtime', () => {
+  it('shares only registered catalog identities and follows a replacement Host without opening sessions', async () => {
+    const first = await uplinkBroker('first'), second = await uplinkBroker('second');
+    const registration = fixture('codex');
+    registration.directory.list = async () => [summary('codex', 'native')];
+    const host = createAgentHost({ registrations: [registration], installationId: 'installation', name: 'Host',
+      uplink: { url: first.url, remoteKey: 'private-key' } });
+    try {
+      await host.ready;
+      expect(await host.shareContext()).toEqual({ hostId: 'first', providers: [{ providerId: 'codex', displayName: 'CODEX' }] });
+      const found = await host.shareCatalog({ hostId: 'first', providerId: 'codex', nativeSessionId: 'native' });
+      expect(found.status).toBe(200); expect(JSON.parse(found.body).nativeSessionId).toBe('native');
+      expect((await host.shareCatalog({ hostId: 'first', providerId: 'codex', nativeSessionId: 'missing' })).status).toBe(404);
+      expect((await host.shareCatalog({ hostId: 'first', providerId: 'claude' })).status).toBe(400);
+      await host.replaceUplink({ url: second.url, remoteKey: 'other-key' });
+      expect((await host.shareContext()).hostId).toBe('second');
+      await expect(host.shareCatalog({ hostId: 'first', providerId: 'codex' })).rejects.toThrow(/changed/);
+      expect(registration.sessions.size).toBe(0);
+      await host.close();
+      await expect(host.shareContext()).rejects.toThrow(/registered/);
+    } finally { await host.close(); await first.close(); await second.close(); }
+  });
+
   it('preserves uplink diagnostics for replaced connections and explicit Host closure', async () => {
     const first = await uplinkBroker('first'), second = await uplinkBroker('second');
     const diagnostics: AgentHostUplinkDiagnostic[] = [];

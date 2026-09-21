@@ -239,3 +239,30 @@ it('waits for a slow live pairing enrollment instead of timing out after the key
   expect(f.registrations.at(-1)?.providers).toEqual([expect.objectContaining({ providerId: 'codex' })]);
   expect(JSON.parse(await readFile(join(f.root, 'connection.json'), 'utf8')).remoteKey).toBe(f.deviceKey);
 }, 15000);
+
+it('exposes sharing identity only through the authenticated local socket without native session attachment', async () => {
+  const f = await fixture('host-only'); f.start({}, false, '_serve');
+  let state: { token: string; socket: string };
+  await vi.waitFor(async () => {
+    state = JSON.parse(await readFile(join(f.root, 'daemon.json'), 'utf8'));
+    expect(f.registrations).toHaveLength(2);
+  }, { timeout: 5000 });
+  async function local(payload: Record<string, unknown>) {
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const socket = createConnection(state.socket); let output = '';
+      socket.setTimeout(3000, () => socket.destroy(new Error('Test management timeout')));
+      socket.on('error', reject); socket.on('connect', () => socket.end(JSON.stringify(payload)));
+      socket.on('data', chunk => { output += chunk; });
+      socket.on('close', () => { try { resolve(JSON.parse(output)); } catch (error) { reject(error); } });
+    });
+  }
+  expect(await local({ action: 'share-context', token: 'wrong' })).toEqual({ error: 'Unauthorized local management request.' });
+  const context = await local({ action: 'share-context', token: state!.token });
+  expect(context).toMatchObject({ hostId: 'host-cli', serverUrl: f.serverUrl, providers: [{ providerId: 'codex' }] });
+  expect(Object.keys(context).sort()).toEqual(['hostId', 'providers', 'serverUrl']);
+  expect(await local({ action: 'share-catalog', token: state!.token, hostId: 'host-cli', providerId: 'codex', serverUrl: 'https://wrong.example' }))
+    .toEqual({ error: 'The Host connection changed. Run share again.' });
+  expect(await local({ action: 'share-catalog', token: state!.token, hostId: 'host-cli', providerId: 'disabled', serverUrl: f.serverUrl }))
+    .toMatchObject({ status: 400 });
+  expect(f.registrations).toHaveLength(2);
+}, 10000);

@@ -44,6 +44,37 @@ Set the connection environment below first. The first run installs the SDK
 dependencies into npm's cache. Replace `foreground` with `start`, `status`,
 `pair`, or `stop` for daemon management.
 
+## Share a session with another device
+
+With the Controller daemon running and registered on this Host:
+
+```sh
+agent-remote-controller share
+agent-remote-controller share list-sessions
+```
+
+`share` asks you to select one of this Host's enabled providers, then paste a
+native session ID. For Codex, run `/status` in the native CLI and copy the
+**Session** value. A missing ID can be corrected without restarting the command.
+
+`share list-sessions` shows recent sessions across enabled providers, ordered by
+activity. Each entry includes the provider, title, native ID, directory, and
+update time. Choose a number, or enter `n` for the next 20 older entries. Both
+commands accept `q`, Ctrl+C, or end of input to cancel.
+
+Before displaying a link and terminal QR code, the Controller checks the selected
+identity against its current native catalog. Sharing does not resume a session,
+load conversation history, create a session, or establish another uplink. A session
+outside the provider's discoverable catalog cannot be shared through this command.
+On the phone, open the same site and use **Scan to open**. The code contains only
+the site, Host, provider, and native session ID; access uses the receiving device's
+own sign-in. Keep the full white border visible and widen the terminal if the QR
+code wraps.
+
+The CLI uses the authenticated local management socket of the running daemon and
+its registered Host identity. If that daemon predates this command, update it and
+restart the Controller. There is no need to restart the native Codex daemon.
+
 ## Connect to a Relay
 
 The first pairing requires an explicit Relay URL in `AGENT_HOST_SERVER` and

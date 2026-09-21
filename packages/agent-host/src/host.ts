@@ -63,6 +63,8 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
 export interface AgentHostUplinkDiagnostic extends RemoteHostUplinkDiagnostic { uplinkGeneration: number }
 export interface AgentHost {
   readonly ready: Promise<{ hostId: string }>;
+  shareContext(): Promise<{ hostId: string; providers: Array<{ providerId: string; displayName: string }> }>;
+  shareCatalog(query: { hostId: string; providerId: string; nativeSessionId?: string; cursor?: string }): Promise<AgentRemoteHttpResult>;
   readonly state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed';
   replaceUplink(uplink: AgentHostOptions['uplink']): Promise<{ hostId: string }>;
   close(): Promise<void>;
@@ -101,10 +103,30 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   };
   connection = connect(options.uplink);
   const ready = connection.client.ready;
+  async function shareContext() {
+    if (closed || state !== 'registered') throw new Error('The Host is not registered. Wait for reconnection, then run share again.');
+    const current = connection;
+    const { hostId } = await current.client.ready;
+    if (current !== connection || closed || state !== 'registered') throw new Error('The Host connection changed. Run share again.');
+    return { hostId, providers: options.registrations.map(({ adapter }) => ({
+      providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName })) };
+  }
   let closePromise: Promise<void> | undefined;
   return {
     ready,
     get state() { return state; },
+    shareContext,
+    async shareCatalog(query) {
+      const current = connection;
+      if ((await shareContext()).hostId !== query.hostId) throw new Error('The Host connection changed. Run share again.');
+      const params = new URLSearchParams({ providerId: query.providerId });
+      if (query.nativeSessionId !== undefined) params.set('nativeSessionId', query.nativeSessionId);
+      else { params.set('limit', '20'); if (query.cursor) params.set('cursor', query.cursor); }
+      const result = await runtime.control({ requestId: randomUUID(), method: 'GET',
+        path: `/remote/catalog${query.nativeSessionId !== undefined ? '/session' : ''}?${params}` });
+      if (current !== connection || closed || state !== 'registered') throw new Error('The Host connection changed. Run share again.');
+      return result;
+    },
     async replaceUplink(config) {
       if (closed) throw new Error('Agent Host is closed.');
       const prior = connection;

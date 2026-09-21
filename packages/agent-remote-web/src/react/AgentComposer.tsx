@@ -392,9 +392,7 @@ export function AgentComposer({ compact = false, state, sessionControls, session
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
         onInterrupt={() => void run('cancel')} /> : null}
       <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={`${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage !== true || (!onSendMessage && !onSendMessageContent))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
-    </div>
-    <div className="agent-composer-send-status">
-      {waiting.pending ? <div data-testid="pending-send" data-state={waiting.pending.phase}>
+      {waiting.pending ? <div className="agent-composer-send-status" data-testid="pending-send" data-state={waiting.pending.phase}>
         <span role="status" title={waiting.pending.reason}>{waiting.pending.phase === 'waiting' ? <>Waiting to send · <span aria-live="off">{waiting.pending.seconds}s</span></> : waiting.pending.reason ?? 'Not sent'}</span>
         {waiting.pending.phase === 'warning' ? <button type="button" aria-label="Retry pending send" onClick={waiting.retry}>Retry</button> : null}
         <button type="button" aria-label="Cancel pending send" onClick={waiting.cancel}>Cancel</button>

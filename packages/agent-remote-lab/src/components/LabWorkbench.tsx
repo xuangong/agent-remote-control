@@ -15,6 +15,7 @@ import { LiveControlPanel } from './LiveControlPanel.js';
 import { PlanningControl } from './PlanningControl.js';
 import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
+import { useRecoveryNotice } from '../hooks/useRecoveryNotice.js';
 import type { TraceEntryRequest } from '../trace-model.js';
 
 export interface LabWorkbenchActions {
@@ -72,9 +73,16 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
       : runtimeConnection?.state === 'unavailable'
         ? 'Native runtime is unavailable. Changes are unavailable.'
         : undefined;
-  useFeedbackToast('Session runtime', visible ? agentFailure ?? connectionFailure?.message ?? runtimeNotice
-    ?? (sessionStatus === 'disconnected' ? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
-    agentFailure || connectionFailure || runtimeConnection?.state === 'unavailable' ? 'error' : 'info');
+  const runtimeError = agentFailure ?? connectionFailure?.message
+    ?? (runtimeConnection?.state === 'unavailable' ? runtimeNotice : undefined);
+  const recoveryNoticeDue = useRecoveryNotice(
+    draftSessionKey ?? attachingAgentId ?? state?.agent?.id ?? '', sessionStatus,
+    runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring',
+    visible && !runtimeError,
+  );
+  useFeedbackToast('Session runtime', visible ? runtimeError
+    ?? (recoveryNoticeDue ? runtimeNotice ?? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
+    runtimeError ? 'error' : 'info');
   const activity = sessionActivity(state);
   const activityLabel = agentFailure ? 'Agent failed'
     : connectionFailure ? 'Connection failed'

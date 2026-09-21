@@ -271,6 +271,23 @@ describe('App', () => {
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
   });
 
+  it.each(['disconnected', 'connecting', 'catching_up'] as const)('accepts a pending message while the page is %s', async sessionStatus => {
+    const sendMessage = vi.fn(async () => {});
+    const container = await render(<App initialState={replicaState} initialSessionStatus={sessionStatus} actions={{ sendMessage }} />);
+    const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Wait for my connection');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const send = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+    expect(send.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
+    await act(async () => send.click());
+    expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('10s');
+    expect(input.value).toBe('Wait for my connection');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('presents a failed Agent instead of shadowing it with connection readiness', async () => {
     const agent = replicaState.agent;
     if (!agent) throw new Error('The App fixture requires an Agent Snapshot.');

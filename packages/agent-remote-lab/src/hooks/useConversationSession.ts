@@ -26,16 +26,23 @@ export function useConversationSession(session: OpenedSession, transport: Remote
     return () => { unsubscribe(); unsubscribeStatus(); connection.stop(); stopRecovery(); if (client.current === connection) client.current = undefined; };
   }, [session.agentId, transport, recoveryScope, cachedReplica]);
   const active = client.current;
+  const messageActions: LabWorkbenchActions = {
+    deleteMessage: id => active?.deleteMessage(id),
+    ...(active && !pending ? {
+      sendMessage: async (text, options) => { await active.sendMessage(text, options); },
+      sendMessageContent: async (content, options) => { await active.sendMessageContent(content, options); },
+    } satisfies LabWorkbenchActions : {}),
+  };
   const actions: LabWorkbenchActions = active && status === 'ready' && !pending ? {
-    sendMessageContent: async (content, options) => { await active.sendMessageContent(content, options); },
+    ...messageActions,
     uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
-    retryMessage: async id => { await active.retryMessage(id); }, deleteMessage: id => active.deleteMessage(id),
-    loadOlder: () => active.loadOlder(), sendMessage: async (text, options) => { await active.sendMessage(text, options); }, cancel: async () => { await active.cancel(); },
+    retryMessage: async id => { await active.retryMessage(id); },
+    loadOlder: () => active.loadOlder(), cancel: async () => { await active.cancel(); },
     setPlanning: async value => { await active.setPlanning(value); }, setSessionSetting: async (id, value) => { await active.setSessionSetting(id, value); },
     listCommands: () => active.listCommands(), executeCommand: (id, args) => active.executeCommand(id, args),
     respondToInteraction: async (id, response) => { await active.respondToInteraction(id, response); }, requestResource: async binding => (await active.requestResource(binding.resourceId)).payload.state,
     resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
-  } : { deleteMessage: id => active?.deleteMessage(id) };
+  } : messageActions;
   const sendQueuedInput = active && status === 'ready' && !pending
     ? (text: string, operationId: string) => active.sendMessage(text, { operationId }) : undefined;
   return { state, status, questions, setQuestions, actions, sendQueuedInput };

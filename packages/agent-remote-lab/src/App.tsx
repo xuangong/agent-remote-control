@@ -1134,7 +1134,7 @@ function AppContent({
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={compactLayout ? contextOpen : desktopContextVisible}>
           <HostVscodeTunnel />
         </VscodeTunnelScope> : null}
-      {directory && userScoped && sessionPanel !== 'favorites' ? <ControllerUpdates service={hostClient} hosts={remoteHosts} /> : null}
+      {directory && userScoped ? <div hidden={sessionPanel !== 'settings'}><ControllerUpdates service={hostClient} hosts={remoteHosts} /></div> : null}
       {!compactLayout ? <>
       {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={compactLayout ? contextOpen : desktopContextVisible} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
       </> : null}

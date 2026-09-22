@@ -29,6 +29,7 @@ export default defineConfig({
   projects: [
     { name: 'chromium-desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'chromium-mobile', use: { ...devices['Pixel 7'] } },
+    { name: 'webkit-mobile-sidebar', testMatch: 'mobile-sidebar.spec.ts', use: { ...devices['iPhone 13'], browserName: 'webkit' } },
   ],
   webServer: [
     {

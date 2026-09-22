@@ -5,14 +5,21 @@ import { event, fixture, send } from './fixture.js';
 function socketEvent(socket: WebSocket, type: 'message' | 'close', timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
     const listener = (value: any) => {
+      const message = type === 'message' ? JSON.parse(String(value.data)) : undefined;
+      if (message?.type === 'rpc_request' && message.path === '/remote/controller-update') {
+        // This legacy fixture does not support diagnostic delivery.
+        send(socket, { type: 'rpc_response', requestId: message.requestId, status: 404, body: '' });
+        return;
+      }
       clearTimeout(timer);
-      resolve(type === 'message' ? JSON.parse(String(value.data)) : value);
+      socket.removeEventListener(type, listener);
+      resolve(type === 'message' ? message : value);
     };
     const timer = setTimeout(() => {
       socket.removeEventListener(type, listener);
       reject(new Error(`Socket ${type} deadline exceeded`));
     }, timeoutMs);
-    socket.addEventListener(type, listener, { once: true });
+    socket.addEventListener(type, listener);
   });
 }
 

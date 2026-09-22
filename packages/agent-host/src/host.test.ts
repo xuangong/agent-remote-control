@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { createRelayDiagnosticSink } from './relay-diagnostics.js';
 import { createCodexSessionDirectory } from './directory.js';
 import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory, type AgentHostUplinkDiagnostic } from './host.js';
 import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
@@ -1342,4 +1343,80 @@ it('activates an owner update over the real uplink while an approval is pending'
     expect(JSON.parse(rejected.body).code).toBe('controller_updating');
     expect(registration.createCount()).toBe(1);
   } finally { lookup.mockRestore(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
+});
+
+it('acknowledges relay diagnostic RPC only after the sink completes and isolates malformed batches', async () => {
+  const broker = await uplinkBroker('host-1');
+  const records: unknown[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entry = { id: 'event-1', timestamp: '2026-09-20T01:02:03.000Z', source: 'relay', hostId: 'host-1', relayInstanceId: 'relay-1', event: 'host_disconnected' };
+  const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'installation', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'key' }, async onRelayDiagnostics(entries) { await gate; records.push(...entries); } });
+  try {
+    await host.ready;
+    let acknowledged = false;
+    const pending = broker.rpc('POST', '/remote/diagnostics/relay', undefined, { entries: [entry] }).then(response => { acknowledged = true; return response; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(acknowledged).toBe(false);
+    release(); expect((await pending).status).toBe(204); expect(records).toEqual([entry]);
+    expect((await broker.rpc('POST', '/remote/diagnostics/relay', undefined, { entries: [{ ...entry, token: 'secret' }] })).status).toBe(400);
+    expect(records).toEqual([entry]);
+    expect((await broker.rpc('GET', '/remote/catalog?providerId=codex')).status).toBe(200);
+  } finally { release(); await host.close(); await broker.close(); }
+});
+
+it.each([false, true])('returns a retryable relay diagnostic failure only when an installed sink fails (%s)', async installed => {
+  const broker = await uplinkBroker('host-1');
+  const root = await mkdtemp(join(tmpdir(), 'host-relay-log-'));
+  const path = join(root, 'missing-directory', 'relay-diagnostics.log');
+  const sink = createRelayDiagnosticSink({ path });
+  const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'installation', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'key' }, ...(installed ? { onRelayDiagnostics: sink.append } : {}) });
+  try {
+    await host.ready;
+    const response = await broker.rpc('POST', '/remote/diagnostics/relay', undefined, { entries: [{ id: 'event-1', timestamp: '2026-09-20T01:02:03.000Z', source: 'relay', hostId: 'host-1', relayInstanceId: 'relay-1', event: 'host_disconnected' }] });
+    expect(response.status).toBe(installed ? 503 : 404);
+    expect(response.body).not.toContain(root);
+    expect((await broker.rpc('GET', '/remote/catalog?providerId=codex')).status).toBe(200);
+  } finally { await host.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.each([false, true])('advertises diagnostic delivery only when a local sink exists (%s)', async installed => {
+  const broker = await uplinkBroker('host-1');
+  const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'installation', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'key' }, ...(installed ? { onRelayDiagnostics: async () => {} } : {}) });
+  try {
+    await host.ready;
+    const response = await broker.rpc('GET', '/remote/controller-update');
+    expect(response.status).toBe(installed ? 200 : 404);
+    if (installed) expect(JSON.parse(response.body)).toEqual({ diagnosticDelivery: 1 });
+  } finally { await host.close(); await broker.close(); }
+});
+
+it.each([false, true])('preserves diagnostic capability independently of unreadable update status (%s)', async installed => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'host-diagnostic-update-status-'));
+  await mkdir(join(stateDir, 'controller-updates'));
+  await writeFile(join(stateDir, 'controller-updates/status.json'), '{invalid-json');
+  const broker = await uplinkBroker('host-1');
+  const records: unknown[] = [];
+  const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true };
+  const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'installation', name: 'Host',
+    controller: { identity, stateDir, restart() {} }, uplink: { url: broker.url, remoteKey: 'key' },
+    ...(installed ? { onRelayDiagnostics: async (entries: unknown[]) => { records.push(...entries); } } : {}) });
+  try {
+    await host.ready;
+    const response = await broker.rpc('GET', '/remote/controller-update');
+    expect(response.status).toBe(409);
+    expect(JSON.parse(response.body).error).toEqual(expect.any(String));
+    expect(JSON.parse(response.body).diagnosticDelivery).toBe(installed ? 1 : undefined);
+    if (installed) {
+      const entry = { id: 'event-1', timestamp: '2026-09-20T01:02:03.000Z', source: 'relay', hostId: 'host-1', relayInstanceId: 'relay-1', event: 'host_disconnected' };
+      expect((await broker.rpc('POST', '/remote/diagnostics/relay', undefined, { entries: [entry] })).status).toBe(204);
+      expect(records).toEqual([entry]);
+    }
+    const update = await broker.rpc('POST', '/remote/controller-update', undefined, { version: '0.2.0', operationId: 'requested-update' });
+    expect(update.status).toBe(409);
+    expect(JSON.parse(update.body).diagnosticDelivery).toBeUndefined();
+  } finally { await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
 });

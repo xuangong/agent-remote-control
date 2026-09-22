@@ -1,3 +1,4 @@
+import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
 import { createControllerUpdater } from './controller-update.js';
 import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { createIdleSessions } from './idle-sessions.js';
@@ -82,6 +83,7 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
   installationId: string;
   name: string;
   environment?: HostEnvironment;
+  onRelayDiagnostics?: (entries: RelayDiagnostic[]) => void | Promise<void>;
   onDiagnostic?: (diagnostic: AgentHostUplinkDiagnostic) => void | Promise<void>;
   uplink: { url: string; remoteKey: string; onCredential?: (credential: string) => Promise<void> };
 }
@@ -123,10 +125,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         credentialPersistence = pending;
         return pending;
       } : undefined,
-      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: async request => request.path === '/remote/controller-update' && updater ? (async () => {
-        try { const body = request.method === 'POST' ? JSON.parse(request.body ?? '{}') : undefined;
-          return { status: request.method === 'POST' ? 202 : 200, body: JSON.stringify(request.method === 'POST' ? await updater.request(body.version, body.operationId) : await updater.status()) };
-        } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.' }) }; }
+      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: async request => request.method === 'POST' && request.path === RELAY_DIAGNOSTIC_PATH ? receiveRelayDiagnostics(request.body, options.onRelayDiagnostics) : request.path === '/remote/controller-update' ? (async () => {
+        try {
+          if (request.method === 'GET') {
+            if (!updater && !options.onRelayDiagnostics) return { status: 404, body: '' };
+            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 1 } : {}) }) };
+          }
+          if (!updater) return { status: 404, body: '' };
+          const body = JSON.parse(request.body ?? '{}');
+          return { status: 202, body: JSON.stringify(await updater.request(body.version, body.operationId)) };
+        } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.',
+          ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 1 } : {}) }) }; }
       })() : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
         : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
       operationExecutor: scope => runtime.executeOperation(scope),
@@ -574,4 +583,13 @@ async function bounded(operation: Promise<unknown>, timeoutMs: number): Promise<
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { await Promise.race([operation, new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); timer.unref?.(); })]); }
   finally { clearTimeout(timer); }
+}
+
+async function receiveRelayDiagnostics(body: string | undefined, sink: AgentHostOptions['onRelayDiagnostics']): Promise<AgentRemoteHttpResult> {
+  if (!sink) return { status: 404, body: '' };
+  let entries: RelayDiagnostic[] | undefined;
+  try { entries = parseRelayDiagnosticBatch(JSON.parse(body ?? 'null')); } catch { /* Invalid JSON is rejected below. */ }
+  if (!entries) return { status: 400, body: '{"error":"Invalid relay diagnostic batch."}' };
+  try { await sink(entries); return { status: 204, body: '' }; }
+  catch { return { status: 503, body: '{"error":"Relay diagnostics could not be appended."}' }; }
 }

@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHostBroker, type HostBrokerOptions } from './broker.js';
 import type { BrokerScheduler, RelaySocket } from './transport.js';
+import { createDiagnosticJournal } from './diagnostic-journal.js';
 
 const closers: Array<() => void> = [];
 afterEach(() => { for (const close of closers.splice(0).reverse()) close(); });
+afterEach(() => vi.useRealTimers());
 
 class Clock implements BrokerScheduler {
   time = 10_000;
@@ -249,3 +251,75 @@ it('closes virtual browser streams and clears their opening deadline when the Ho
   b.clock.advance(30_000);
   expect(browser.closes).toHaveLength(1);
 }, 10_000);
+
+it('retains exact server heartbeat cause and startup/connection identity for later Host delivery', async()=>{
+ const {createDiagnosticJournal}=await import('./diagnostic-journal.js');
+ let saved:import('./relay-diagnostics.js').RelayDiagnostic[]=[];
+ const journal=createDiagnosticJournal({storage:{save:async events=>{saved=structuredClone(events);}}});
+ const b=await fixture({diagnostics:journal});const socket=await b.connect();
+ b.clock.advance(40);await journal.flush();
+ expect(saved).toEqual(expect.arrayContaining([
+   expect.objectContaining({event:'host_registered',hostId:socket.sent[0]!.hostId}),
+   expect.objectContaining({event:'host_disconnected',reason:'heartbeat_timeout',closeCode:1012}),
+ ]));
+ expect(saved.filter(e=>e.event==='host_disconnected')).toHaveLength(1);
+ socket.finishClose();await journal.flush();expect(saved.filter(e=>e.event==='host_disconnected')).toHaveLength(1);
+ expect(saved[0]?.connectionId).toBe(saved[1]?.connectionId);await journal.close();
+},10000);
+
+it('defers diagnostic capability probing while the Host has buffered business traffic', async () => {
+  vi.useFakeTimers(); const journal = createDiagnosticJournal(); const b = await fixture({ diagnostics: journal });
+  try {
+    const socket = await b.connect(); socket.bufferedAmount = 1;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(socket.sent.filter(message => message.type === 'rpc_request')).toEqual([]);
+    b.clock.advance(30); expect(socket.sent.at(-1)?.type).toBe('heartbeat'); expect(socket.closes).toEqual([]);
+    socket.bufferedAmount = 0; await vi.advanceTimersByTimeAsync(30000);
+    expect(socket.sent.at(-1)).toMatchObject({ type: 'rpc_request', path: '/remote/controller-update' });
+  } finally { await journal.close(); }
+});
+
+it('rechecks buffered traffic after capability probing before sending the diagnostic batch', async () => {
+  vi.useFakeTimers(); const journal = createDiagnosticJournal(); const b = await fixture({ diagnostics: journal });
+  try {
+    const socket = await b.connect(); await vi.advanceTimersByTimeAsync(1000);
+    const probe = socket.sent.at(-1)!; expect(probe.path).toBe('/remote/controller-update');
+    socket.bufferedAmount = 1;
+    await socket.receive({ uplinkVersion: 2, type: 'rpc_response', requestId: probe.requestId, status: 200, body: '{"diagnosticDelivery":1}' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent.filter(message => message.type === 'rpc_request')).toHaveLength(1);
+    socket.bufferedAmount = 0; await vi.advanceTimersByTimeAsync(30000);
+    expect(socket.sent.at(-1)).toMatchObject({ type: 'rpc_request', path: '/remote/diagnostics/relay' });
+  } finally { await journal.close(); }
+});
+
+it.each(['before', 'after'] as const)('defers diagnostics when business requests accumulate %s the capability probe', async timing => {
+  vi.useFakeTimers(); const journal = createDiagnosticJournal(); const b = await fixture({ diagnostics: journal });
+  try {
+    const socket = await b.connect(); const hostId = socket.sent[0]!.hostId;
+    if (timing === 'after') await vi.advanceTimersByTimeAsync(1000);
+    const probe = socket.sent.find(message => message.path === '/remote/controller-update');
+    const requests = Array.from({ length: 17 }, () => b.broker.handleRequest(new Request(`https://relay.example/v1/remote/hosts/${hostId}/catalog?providerId=codex`)));
+    await vi.waitFor(() => expect(socket.sent.filter(message => message.path?.startsWith('/remote/catalog'))).toHaveLength(17));
+    if (probe) await socket.receive({ uplinkVersion: 2, type: 'rpc_response', requestId: probe.requestId, status: 200, body: '{"diagnosticDelivery":1}' });
+    await vi.advanceTimersByTimeAsync(timing === 'before' ? 1000 : 0);
+    expect(socket.sent.filter(message => message.path === '/remote/controller-update')).toHaveLength(timing === 'before' ? 0 : 1);
+    expect(socket.sent.some(message => message.path === '/remote/diagnostics/relay')).toBe(false);
+    for (const request of socket.sent.filter(message => message.path?.startsWith('/remote/catalog'))) {
+      await socket.receive({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId, status: 200, body: '{"sessions":[]}' });
+    }
+    await Promise.all(requests);
+  } finally { await journal.close(); }
+});
+
+it('permits diagnostics on adapters that cannot report their buffered byte count', async () => {
+  vi.useFakeTimers(); const journal = createDiagnosticJournal(); const b = await fixture({ diagnostics: journal });
+  try {
+    const socket = await b.connect(); Object.defineProperty(socket, 'bufferedAmount', { value: undefined });
+    await vi.advanceTimersByTimeAsync(1000);
+    const probe = socket.sent.at(-1)!; expect(probe.path).toBe('/remote/controller-update');
+    await socket.receive({ uplinkVersion: 2, type: 'rpc_response', requestId: probe.requestId, status: 200, body: '{"diagnosticDelivery":1}' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent.at(-1)).toMatchObject({ type: 'rpc_request', path: '/remote/diagnostics/relay' });
+  } finally { await journal.close(); }
+});

@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
 import { BROKER_MAX_FRAME_BYTES, createHostedRelay, isPreviewDomain, migrateLegacyNodeState, validateGatewayOrigin, type GatewayAuthOptions } from '@orchardworks/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
+import { openGatewayDiagnostics } from './gateway-diagnostics.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
 import { previewSocket } from './preview-socket.js';
 
@@ -76,6 +77,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, JSON.stringify([auth.origin, auth.issuer]));
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
         runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs,
+          ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
       } catch (error) { storage?.close(); server.close(); throw error; }
       return { port: address.port, url: auth.origin };

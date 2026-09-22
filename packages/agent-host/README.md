@@ -279,9 +279,9 @@ requests and active work may be interrupted by a restart.
 
 ## Connection diagnostics
 
-The background Controller appends connection diagnostics to `agent-host.log` in its state directory. The active log and its three numbered archives retain at most 5 MiB each after successful cleanup. Cleanup runs at daemon startup, before an owned diagnostic when the active file is already over its threshold, and once per second for output written directly through inherited stdout or stderr descriptors. Rotation preserves the active inode so append descriptors installed by manual startup, launchd, or systemd keep writing to the active log. One owned diagnostic can take the active file up to 64 KiB over its threshold until the next owned write or polling pass. An inherited burst has no finite instantaneous overshoot bound; the next pass archives only its latest 5 MiB and discards the earlier excess. Inherited bytes appended after the retained tail is captured and before the active inode is truncated can also be lost even when archive creation succeeds. If an archive cannot be retained, the Controller still truncates the active file when possible and retries cleanup later without logging the cleanup failure recursively.
+The Controller appends connection diagnostics to `agent-host.log` in its state directory. The active log and its three numbered archives retain at most 5 MiB each after successful cleanup. Cleanup runs at daemon startup, before an owned diagnostic when the active file is already over its threshold, and once per second for output written directly through inherited stdout or stderr descriptors. Rotation preserves the active inode so append descriptors installed by manual startup, launchd, or systemd keep writing to the active log. One owned diagnostic can take the active file up to 64 KiB over its threshold until the next owned write or polling pass. An inherited burst has no finite instantaneous overshoot bound; the next pass archives only its latest 5 MiB and discards the earlier excess. Inherited bytes appended after the retained tail is captured and before the active inode is truncated can also be lost even when archive creation succeeds. If an archive cannot be retained, the Controller still truncates the active file when possible and retries cleanup later without logging the cleanup failure recursively.
 
-Each owned diagnostic is redacted before being limited to 64 KiB and remains one line. Connection JSON includes a UTC timestamp, process ID, uplink generation, and connection ID. These fields correlate retries, pairing replacements, and process restarts. In foreground mode, the same diagnostics go to standard error without daemon archive management.
+Each owned diagnostic is redacted before being limited to 64 KiB and remains one line. Connection JSON includes a UTC timestamp, process ID, uplink generation, and connection ID. These fields correlate retries, pairing replacements, and process restarts. Owned records include `source: "controller"` and their original event timestamp. Foreground/container mode also saves these records to the same managed local file while writing them to standard error.
 
 Events cover connection attempts, successful registration, the first observed disconnect cause, scheduled reconnect delays, terminal retry cancellation, and deliberate closure. Reasons distinguish missing Relay heartbeats, registration deadlines, socket failures, HTTP handshake rejection, invalid protocol messages, and local credential-persistence failures. Numeric WebSocket close codes, HTTP statuses, safe network error codes, and heartbeat timing are included when available. A `peerReason` field classifies a small set of known Relay reports, including a missing heartbeat acknowledgment, heartbeat delivery failure, connection replacement, and broker closure; it is a remote report, not a locally confirmed cause. Normal heartbeat traffic is not logged.
 
@@ -290,6 +290,55 @@ tail -f "${AGENT_HOST_STATE_DIR:-$HOME/.agent-remote-control/agent-host}/agent-h
 ```
 
 `heartbeat_timeout` means the Controller did not receive a heartbeat within the configured silence budget; it does not establish whether the cause was sleep, the network, or the Relay. A later socket close does not overwrite that initial observation. Pairing credentials, management tokens, protocol payloads, raw remote close text, and raw network-error messages are excluded from connection diagnostics. Diagnostics begin with the updated Controller; they cannot reconstruct causes missing from older logs.
+
+### Server evidence on the Host
+
+The Relay delivers its Host-specific connection evidence into a separate private
+`relay-diagnostics.log` in the same Controller state directory. Both logs use JSONL;
+the Server log retains `source: "relay"` and the original Server occurrence timestamp,
+not the delivery time. Its active file and three numbered archives are bounded to
+5 MiB each. No combined timeline or clock correction is applied.
+
+Use the following commands from a diagnostic agent session on the affected Host:
+
+```sh
+agent-remote-controller diagnostics --paths
+agent-remote-controller diagnostics --limit 100
+agent-remote-controller diagnostics --source server --since 2026-09-24T00:00:00Z --limit 200
+```
+
+Output groups Controller and Server records separately. `--limit` applies per source
+(default 100, maximum 1000); reads include numbered archives. Select the same
+`AGENT_HOST_STATE_DIR` used by the running Controller when it is customized. Reading
+logs requires no network connection or credentials and does not open native sessions.
+Missing files return empty arrays. Older unstructured Controller lines cannot be
+included in a time-filtered query.
+
+Server events cover Host registration/disconnection, heartbeat failures, RPC
+failures/timeouts, and browser stream opening/readiness/closure. Event IDs identify
+possible repeat deliveries; `connectionId`, `requestId`, `streamId` and
+`relayInstanceId` correlate observations without storing conversation bodies, raw
+errors, workspace paths, session titles, or authentication data. Server and
+Controller connection IDs are independently assigned; they are not a shared ID.
+
+During disconnection, Relay buffers at most 256 events per Host and 4096 globally
+for 24 hours, independently of authorization/session persistence. It delivers batches
+of up to 32 through the authenticated Host connection, waits for local append before
+acknowledging, and retries failed delivery after 30 seconds. Successful batches are
+spaced by one second and delivery yields when business requests are busy. Logging
+failures must not fail normal session traffic. Storage failure, retention limits,
+rotation, abrupt process loss, or power loss can lose evidence; this is bounded
+best-effort diagnosis, not an audit archive. Append is not a power-loss durability
+guarantee, and a lost acknowledgement may produce duplicate IDs.
+
+Both Relay and Controller need this feature for Server delivery. Relay discovers
+support through the existing Controller status route before sending the new internal
+RPC. Older Controllers keep operating without receiving an unknown message.
+A new Relay instance records `relay_started` for retained Hosts when their broker is
+restored; this is an observation of restoration, not a precise process restart time
+or a recorded crash cause. Browser events reflect what the Server observes, not
+browser sleep state. Persistent Host outages and a browser telemetry UI are outside
+this feature's scope.
 
 ## Local execution policy
 

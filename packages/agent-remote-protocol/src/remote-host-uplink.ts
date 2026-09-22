@@ -37,7 +37,7 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|controller-update(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|diagnostics/relay(?=$)|controller-update(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([

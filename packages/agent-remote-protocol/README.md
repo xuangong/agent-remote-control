@@ -103,3 +103,18 @@ remain unavailable. Normal Ready gating for commands remains independent.
 On-demand native history can prepend rows before the initially loaded Timeline. Timeline page cursors, projected row positions, sequence ranges, and resource-binding replacement positions therefore accept signed safe integers. Initially loaded and live rows keep their original positions. Historical rows use `0, -1, -2, ...` in reverse insertion order. Live event and activity cursors remain nonnegative; backfill never advances or rewinds the live cursor. Timeline `window.minSeq` can be negative, while `maxSeq` and `nextSeq` retain the live high-water mark.
 
 This extends the unreleased protocol snapshot. Deploy matching Controller and web codecs together; an older client that only accepts nonnegative historical positions cannot decode backfilled pages. Compatibility metadata identifies the matching implementation.
+
+## Optional Host diagnostic delivery
+
+The Host uplink RPC allowlist includes the exact `POST /remote/diagnostics/relay`
+path with a required body and no session target, query, or trailing path. Its
+`{entries}` body is validated by the shared hosted diagnostic contract (1–32
+allowlisted records), and 204 acknowledges a local append. Relay must first probe
+`GET /remote/controller-update` and require `diagnosticDelivery: 1`; old strict
+uplink decoders must never receive this new path. A 404 or successful response
+without the capability disables delivery until reconnect. Transient failures
+retry after 30 seconds. A failed updater-status response may still advertise the
+independent diagnostic capability while preserving its original error status. Public session protocol 1.5.0 and uplink version 2 are
+unchanged; no register/registered fields are added. Codec fixtures live in
+`src/relay-diagnostics.test.ts`; real transport coverage also verifies legacy
+capability discovery and reconnect delivery.

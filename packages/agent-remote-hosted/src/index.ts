@@ -13,3 +13,4 @@ export * from './scheduler.js';
 
 export * from './preview-domain.js';
 export * from './controller-releases.js';
+export * from './relay-diagnostics.js';

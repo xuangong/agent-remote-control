@@ -2,7 +2,7 @@
 import { controllerIdentity, requestLauncherRestart } from './controller-update.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { appendFileSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createConnection, createServer } from 'node:net';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -12,7 +12,9 @@ import { createAgentHost, type AgentHost, type AgentHostUplinkDiagnostic } from 
 import { detectHostEnvironment } from './environment.js';
 import { createHostRegistrations } from './registrations.js';
 import { createHostExecutionPolicy } from './execution-policy.js';
-import { boundedDiagnosticLine, createDiagnosticLog, type DiagnosticLog } from './diagnostic-log.js';
+import { createRelayDiagnosticSink } from './relay-diagnostics.js';
+import { runDiagnosticsCommand } from './diagnostics-command.js';
+import { boundedDiagnosticLine, createDiagnosticLog, DEFAULT_DIAGNOSTIC_LINE_MAX_BYTES, type DiagnosticLog } from './diagnostic-log.js';
 import { resolveHostConnection, resolveHostEnvironment, saveIssuedCredential, saveRegisteredConnection, type HostConnection } from './connection-config.js';
 import { runCodexCommand } from './codex-command.js';
 import { createLoginStartup, systemdUnavailable } from './platform/services/index.js';
@@ -46,6 +48,7 @@ async function main(): Promise<void> {
   if (command === '--version') { const identity = await controllerIdentity(import.meta.url); if (!identity) throw new Error('Controller build identity is unavailable.'); process.stdout.write(`${identity.version} ${identity.revision}\n`); }
   else if (command === 'help' || command === '--help' || command === '-h') help();
   else if (command === 'codex') process.exitCode = await runCodexCommand(args.slice(1), stateDir, process.env);
+  else if (command === 'diagnostics') await runDiagnosticsCommand(args.slice(1), stateDir, text => { process.stdout.write(text); });
   else if (command === 'environment') process.stdout.write(`${JSON.stringify(await detectHostEnvironment(), null, 2)}\n`);
   else if (command === 'foreground') await serve(false);
   else if (command === '_serve') await serve(true);
@@ -67,12 +70,36 @@ async function main(): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  update --check [--version X.Y.Z]  Check a running Controller for compatible updates\n  update --version X.Y.Z --yes [--clean]  Safely update the running Controller\n  share       Choose a provider and enter a session ID to generate a QR code\n  share list-sessions  Browse recent sessions and generate a QR code\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with the platform login manager\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup (crash recovery on macOS/Linux)\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked except for trusted shared Codex.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nCodex defaults to shared and attaches to an existing local daemon; set AGENT_HOST_CODEX_CONNECTION=private for isolated sessions.\nShared Codex uses daemon permissions by default (AGENT_HOST_CODEX_TRUST_SHARED=1); start it with codex daemon start.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Unix Codex daemon soft file limit on start/restart (default 8192; unsupported on Windows).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux/Windows, stop stops the managed job without disabling future login startup.\nWindows uses the current user Startup folder; shared Codex uses a managed authenticated local WebSocket.\nWindows managed VS Code tunnels require code-tunnel.exe and Windows PowerShell.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
+  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  diagnostics [--paths] [--source controller|server|all] [--since ISO] [--limit 1..1000]\n              Read separate local Controller and Server diagnostic logs\n  update --check [--version X.Y.Z]  Check a running Controller for compatible updates\n  update --version X.Y.Z --yes [--clean]  Safely update the running Controller\n  share       Choose a provider and enter a session ID to generate a QR code\n  share list-sessions  Browse recent sessions and generate a QR code\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with the platform login manager\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup (crash recovery on macOS/Linux)\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked except for trusted shared Codex.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nCodex defaults to shared and attaches to an existing local daemon; set AGENT_HOST_CODEX_CONNECTION=private for isolated sessions.\nShared Codex uses daemon permissions by default (AGENT_HOST_CODEX_TRUST_SHARED=1); start it with codex daemon start.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Unix Codex daemon soft file limit on start/restart (default 8192; unsupported on Windows).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux/Windows, stop stops the managed job without disabling future login startup.\nWindows uses the current user Startup folder; shared Codex uses a managed authenticated local WebSocket.\nWindows managed VS Code tunnels require code-tunnel.exe and Windows PowerShell.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
+}
+
+export function createControllerDiagnosticLog(daemon: boolean, path = daemonLogFile): DiagnosticLog {
+  const log = createDiagnosticLog({ path, ...(daemon ? {} : { sink: (line: string) => {
+    appendFileSync(path, line, { mode: 0o600 });
+    process.stderr.write(line);
+  } }) });
+  return { ...log, write(line, secrets) {
+    let record: Record<string, unknown> = { message: line.trimEnd() };
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) record = parsed as Record<string, unknown>;
+    } catch { /* Native diagnostic text receives the same source and timestamp envelope. */ }
+    const timestamp = record.timestamp ?? record.time;
+    const metadata = { source: 'controller',
+      timestamp: typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? timestamp : new Date().toISOString() };
+    let output = JSON.stringify({ ...record, ...metadata });
+    if (Buffer.byteLength(output) + 1 > DEFAULT_DIAGNOSTIC_LINE_MAX_BYTES) {
+      // Reserve room for JSON escaping so the source and timestamp remain parseable.
+      output = JSON.stringify({ ...metadata, message: boundedDiagnosticLine(line, secrets ?? [],
+        Math.floor(DEFAULT_DIAGNOSTIC_LINE_MAX_BYTES / 8)).trimEnd(), truncated: true });
+    }
+    log.write(output, secrets);
+  } };
 }
 
 async function serve(daemon: boolean): Promise<void> {
   await privateDirectory();
-  const diagnosticLog = daemon ? createDiagnosticLog({ path: daemonLogFile }) : undefined;
+  const diagnosticLog = createControllerDiagnosticLog(daemon);
   const diagnosticSecrets = new Set<string>();
   try {
     await serveConfigured(daemon, diagnosticLog, diagnosticSecrets);
@@ -121,6 +148,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
     onSessionLifecycleDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
     onRequestDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
     onDiagnostic: diagnostic => { writeDiagnostic(uplinkDiagnosticLine(diagnostic), diagnosticSecrets); },
+    onRelayDiagnostics: createRelayDiagnosticSink({ path: join(stateDir, 'relay-diagnostics.log') }).append,
     executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey, onCredential: credential => {
       diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);
     } }, shutdownTimeoutMs: shutdownTimeout() });

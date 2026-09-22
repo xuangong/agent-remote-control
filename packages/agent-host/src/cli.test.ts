@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import { acquireStartupLock, authenticateSavedDaemon, daemonDiagnosticLine, removeOwnedDaemonState, uplinkDiagnosticLine, withDaemonLifecycleLock, within } from './cli.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { acquireStartupLock, authenticateSavedDaemon, createControllerDiagnosticLog, daemonDiagnosticLine, removeOwnedDaemonState, uplinkDiagnosticLine, withDaemonLifecycleLock, within } from './cli.js';
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -115,4 +115,38 @@ describe('Agent Host daemon lifecycle', () => {
       await writer.close();
     }
   });
+});
+
+it('persists foreground diagnostics privately without losing redaction', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'foreground-diagnostics-')); temporary.push(root);
+  const path = join(root, 'agent-host.log');
+  const log = createControllerDiagnosticLog(false, path);
+  try {
+    log.write('foreground event credential-secret', ['credential-secret']);
+    expect(JSON.parse((await readFile(path, 'utf8')).trim())).toEqual({ source: 'controller', timestamp: expect.any(String), message: 'foreground event [redacted]' });
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+  } finally { log.dispose(); }
+});
+
+it('preserves the occurrence timestamp of structured Controller records', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'controller-diagnostics-')); temporary.push(root);
+  const path = join(root, 'agent-host.log');
+  const log = createControllerDiagnosticLog(false, path);
+  try {
+    log.write(JSON.stringify({ event: 'uplink_registered', timestamp: '2026-09-20T00:00:00.000Z' }));
+    expect(JSON.parse((await readFile(path, 'utf8')).trim())).toEqual({ source: 'controller', timestamp: '2026-09-20T00:00:00.000Z', event: 'uplink_registered' });
+  } finally { log.dispose(); }
+});
+
+it('keeps oversized Controller messages as timestamped JSON records', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'controller-large-diagnostics-')); temporary.push(root);
+  const path = join(root, 'agent-host.log');
+  const log = createControllerDiagnosticLog(false, path);
+  const output = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    log.write('x'.repeat(70_000));
+    const contents = await readFile(path, 'utf8');
+    expect(Buffer.byteLength(contents)).toBeLessThanOrEqual(64 * 1024);
+    expect(JSON.parse(contents)).toMatchObject({ source: 'controller', timestamp: expect.any(String) });
+  } finally { log.dispose(); output.mockRestore(); }
 });

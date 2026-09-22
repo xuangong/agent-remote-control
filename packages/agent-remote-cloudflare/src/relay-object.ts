@@ -1,5 +1,6 @@
 import { createHostedRelay, validateGatewayOrigin, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
 import { SqliteRelayStore } from './storage.js';
+import { SqliteDiagnosticStore } from './diagnostic-storage.js';
 import { WorkerRelaySocket } from './socket.js';
 import { WorkerPreviewSocket } from './preview-socket.js';
 
@@ -41,7 +42,7 @@ export class RelayObject {
         await this.context.storage.setAlarm(Date.now() + 60_000);
       },
     };
-    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
+    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth), scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
   }
   async fetch(request: Request): Promise<Response> {
     await this.ready;

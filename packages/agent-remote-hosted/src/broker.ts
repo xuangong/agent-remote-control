@@ -1,3 +1,5 @@
+import type { DiagnosticJournal } from './diagnostic-journal.js';
+import { RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from './relay-diagnostics.js';
 import { controllerReleases } from './controller-releases.js';
 import { decodeClientMessage, PROTOCOL_VERSION, releaseCoversHost, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
@@ -13,13 +15,14 @@ type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true };
 type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
+  connectionId?: string; stopDiagnostics?(): void;
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
   controller?: ControllerIdentity;
   tunnelToken?: string;
   ready?: boolean; credentialRotation?: boolean; gatewayKeyRequested?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
-  pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown; method: 'GET' | 'POST'; path: string }>;
+  pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown; method: 'GET' | 'POST'; path: string; diagnostic: boolean; startedAt: number }>;
   streams: Map<string, { socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
 };
 type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
@@ -37,6 +40,7 @@ export interface RemoteHostBrokerState {
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
 export interface HostBrokerOptions {
+  diagnostics?: DiagnosticJournal;
   ownerSubject?: string;
   userStreamCount?(subject: string): number;
   controllerReleases?: Pick<typeof controllerReleases, 'latest'>;
@@ -78,6 +82,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   const completedCreations = new Map<string, { fingerprint: string; agentId: string }>();
   for (const [hash, key] of options.initialState?.keys ?? []) if (key.expires > now()) keys.set(hash, { ...key });
   for (const item of options.initialState?.hosts ?? []) hosts.set(item.id, { ...item, generation: 0, pending: new Map(), streams: new Map() });
+  for (const host of hosts.values()) options.diagnostics?.record(host.id, { event: 'relay_started' });
   for (const item of options.initialState?.bindings ?? []) {
     const binding = { ...item, generation: -1 };
     bindings.set(binding.agentId, binding);
@@ -111,7 +116,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   function failClosed() {
     unavailable = true;
     for (const cleanup of [...uplinkCleanups.values()]) cleanup();
-    for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket);
+    for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket, 'relay_state_unavailable', 1011);
     for (const client of clients) client.close(1011, 'Relay state is unavailable');
   }
   function commit<T>(stage: (draft: RemoteHostBrokerState) => { value: T; publish(): void }): Promise<T> {
@@ -190,27 +195,33 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (host.socket.bufferedAmount !== undefined && host.socket.bufferedAmount > BROKER_MAX_FRAME_BYTES) throw new BrokerError(503, 'host_backpressure', 'The Remote Host connection is busy.', true);
     host.socket.send(JSON.stringify(message));
   }
-  function rpc(host: Host, method: 'GET' | 'POST', path: string, sessionId?: string, body?: string): Promise<RpcResponse> {
+  function diagnostic(host: Host, details: Omit<RelayDiagnostic, 'id' | 'timestamp' | 'source' | 'hostId' | 'relayInstanceId'>) {
+    options.diagnostics?.record(host.id, { ...details, connectionId: host.connectionId });
+  }
+  function rpc(host: Host, method: 'GET' | 'POST', path: string, sessionId?: string, body?: string, diagnosticRequest = false): Promise<RpcResponse> {
     if (host.pending.size >= 128) return Promise.reject(new BrokerError(429, 'host_busy', 'Too many pending Remote Host requests.', true));
-    const requestId = randomUUID();
+    const requestId = randomUUID(), startedAt = now();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         host.pending.delete(requestId);
+        if (!diagnosticRequest) diagnostic(host, {event:'rpc_timeout', requestId, operation: diagnosticOperation(path), durationMs: Math.max(0, now()-startedAt)});
         try { send(host, { uplinkVersion: 2, type: 'rpc_cancel', requestId }); } catch { /* An offline host has no request to cancel. */ }
         const attach = path === '/remote/attach' || path === '/remote/child/attach';
         reject(new BrokerError(504, attach ? 'session_attach_timeout' : method === 'GET' ? 'host_read_timeout' : 'host_timeout', attach
           ? 'The Host did not confirm opening the session before the Relay deadline. It may still be opening; wait briefly and reopen the same session.'
           : method === 'GET' ? 'The Host did not return the requested data before the Relay deadline. Try reading it again.'
           : 'The Host did not confirm the operation before the Relay deadline. Its outcome is unknown; check the session before retrying.', false, requestId));
-      }, options.rpcTimeoutMs ?? 30_000);
-      host.pending.set(requestId, { resolve, reject, timer, method, path });
+      }, diagnosticRequest ? 5000 : options.rpcTimeoutMs ?? 30_000);
+      host.pending.set(requestId, { resolve, reject, timer, method, path, diagnostic: diagnosticRequest, startedAt });
       try { send(host, { uplinkVersion: 2, type: 'rpc_request', requestId, method, path, ...(sessionId ? { sessionId } : {}), ...(body === undefined ? {} : { body }) }); }
-      catch (error) { clearTimeout(timer); host.pending.delete(requestId); reject(error); }
+      catch (error) { clearTimeout(timer); host.pending.delete(requestId); if (!diagnosticRequest) diagnostic(host, {event:'rpc_failed',requestId,operation:diagnosticOperation(path),reason:error instanceof BrokerError && error.code==='host_backpressure'?'host_backpressure':'write_failed'}); reject(error); }
     });
   }
-  function disconnected(host: Host, socket: RelaySocket) {
+  function disconnected(host: Host, socket: RelaySocket, reason: RelayDiagnostic['reason'] = 'socket_closed', closeCode?: number, heartbeatAgeMs?: number) {
     uplinkCleanups.get(socket)?.();
     if (host.socket !== socket) return;
+    host.stopDiagnostics?.(); host.stopDiagnostics=undefined;
+    diagnostic(host, {event:'host_disconnected',reason,closeCode,heartbeatAgeMs,pendingRequests:[...host.pending.values()].filter(p=>!p.diagnostic).length,streams:host.streams.size});
     previews.disconnect(host.id); host.tunnelToken = undefined;
     host.socket = undefined; host.ready = false;
     for (const [requestId, pending] of host.pending) {
@@ -232,6 +243,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     let retired = false, heartbeatStarted = false;
     let timer: unknown, heartbeatTimer: unknown, heartbeatDeadline: unknown;
     let pendingNonce: string | undefined;
+    let lastHeartbeatAck = now();
     let cancelExpiry = () => {};
     function cleanup() {
       retired = true;
@@ -240,7 +252,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     function closeConnection(code: number, reason: string) {
       if (retired) return;
-      cleanup(); if (host) disconnected(host, socket);
+      cleanup(); if (host) disconnected(host, socket, diagnosticCloseReason(reason), code, Math.max(0,now()-lastHeartbeatAck));
       socket.close(code, reason);
     }
     uplinkCleanups.set(socket, cleanup);
@@ -266,7 +278,27 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
-        heartbeatStarted = true; heartbeatTimer = setTimeout(sendHeartbeat, heartbeat.intervalMs);
+        heartbeatStarted = true; lastHeartbeatAck = now(); heartbeatTimer = setTimeout(sendHeartbeat, heartbeat.intervalMs);
+        diagnostic(host, {event:'host_registered'});
+        const connectedHost = host;
+        let supported: boolean | undefined;
+        const canDeliverDiagnostics = () => !retired && connectedHost.socket === socket && connectedHost.pending.size <= 16
+          && (socket.bufferedAmount === undefined || socket.bufferedAmount === 0);
+        host.stopDiagnostics = options.diagnostics?.connect(host.id, async entries => {
+          if (!canDeliverDiagnostics()) return {status:503};
+          if (supported === undefined) {
+            const result = await rpc(connectedHost, 'GET', '/remote/controller-update', undefined, undefined, true);
+            // Diagnostics can remain available when the independent updater status fails.
+            try { if (JSON.parse(result.body).diagnosticDelivery === 1) supported = true; } catch { /* No capability advertised. */ }
+            if (supported !== true) {
+              if (result.status === 404 || result.status === 200) supported = false;
+              else return result;
+            }
+          }
+          if (!supported) return {status:404};
+          if (!canDeliverDiagnostics()) return {status:503};
+          return rpc(connectedHost, 'POST', RELAY_DIAGNOSTIC_PATH, undefined, JSON.stringify({entries}), true);
+        });
       }
     }
     let registration: Promise<void> | undefined;
@@ -316,8 +348,8 @@ export function createHostBroker(options: HostBrokerOptions) {
             for (const hash of keys.keys()) if (!draft.keys.some(([saved]) => saved === hash)) keys.delete(hash);
             host = existing ?? { ...next, generation: 0, pending: new Map(), streams: new Map() };
             hosts.set(host.id, host);
-            if (host.socket) { const previous = host.socket; disconnected(host, previous); previous.close(1012, 'Host connection replaced'); }
-            Object.assign(host, next); host.generation += 1; clearTimeout(timer);
+            if (host.socket) { const previous = host.socket; disconnected(host, previous, 'connection_replaced', 1012); previous.close(1012, 'Host connection replaced'); }
+            Object.assign(host, next); host.connectionId=randomUUID(); host.generation += 1; clearTimeout(timer);
             if (!retired && socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
               host.issueCredential = message.credentialRotation ? () => issueCredential(false) : undefined;
@@ -345,13 +377,13 @@ export function createHostBroker(options: HostBrokerOptions) {
         });
         registered();
       } else if (message.type === 'heartbeat_ack') {
-        if (pendingNonce === message.nonce) { clearTimeout(heartbeatDeadline); pendingNonce = undefined; }
+        if (pendingNonce === message.nonce) { clearTimeout(heartbeatDeadline); pendingNonce = undefined; lastHeartbeatAck=now(); }
       } else if (message.type === 'rpc_response') {
         const pending = host.pending.get(message.requestId);
-        if (pending) { clearTimeout(pending.timer); host.pending.delete(message.requestId); pending.resolve(message); }
+        if (pending) { clearTimeout(pending.timer); host.pending.delete(message.requestId); if (!pending.diagnostic && message.status>=400) diagnostic(host, {event:'rpc_failed',requestId:message.requestId,operation:diagnosticOperation(pending.path),status:message.status,durationMs:Math.max(0,now()-pending.startedAt)}); pending.resolve(message); }
       } else if (message.type === 'stream_opened') {
         const stream = host.streams.get(message.streamId);
-        if (stream && stream.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) { clearTimeout(stream.timer); stream.ready = true; for (const buffered of stream.buffered) send(host, { uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: buffered }); stream.buffered = []; }
+        if (stream && stream.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) { clearTimeout(stream.timer); if(!stream.ready)diagnostic(host,{event:'stream_ready',streamId:message.streamId}); stream.ready = true; for (const buffered of stream.buffered) send(host, { uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: buffered }); stream.buffered = []; }
       } else if (message.type === 'stream_message') {
         const stream = host.streams.get(message.streamId);
         if (stream?.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) {
@@ -359,7 +391,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           else stream.socket.send(message.message);
         }
       } else if (message.type === 'stream_close') {
-        const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); stream?.socket.close(message.code, message.reason);
+        const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); if(stream)diagnostic(host,{event:'stream_closed',streamId:message.streamId,closeCode:message.code}); stream?.socket.close(message.code, message.reason);
       } else if (message.type === 'preview_snapshot') {
         await previews.update(host.id, message.snapshot);
       } else closeConnection(1008, 'Unexpected uplink message');
@@ -789,7 +821,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           for (const [key, value] of completedCreations) if (!bindings.has(value.agentId)) { completedCreations.delete(key); creations.delete(key); }
           hosts.delete(host.id);
           previews.forget(host.id);
-          if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(1008, 'Device revoked'); }
+          if (host.socket) { const socket = host.socket; disconnected(host, socket, 'access_revoked', 1008); socket.close(1008, 'Device revoked'); }
         } };
       });
       return json(200, { ok: true });
@@ -868,7 +900,8 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (client.readyState !== RELAY_SOCKET_OPEN) return;
       const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [] };
       host.streams.set(streamId, stream);
-      const opening = setTimeout(() => client.close(1013, 'Remote stream opening timed out'), options.rpcTimeoutMs ?? 30_000);
+      diagnostic(host,{event:'stream_opening',streamId,agentId:binding.agentId});
+      const opening = setTimeout(() => { diagnostic(host,{event:'stream_open_timeout',streamId}); client.close(1013, 'Remote stream opening timed out'); }, options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
       client.onError(() => undefined);
       let messageWindow = now(); let messageCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0;
@@ -907,6 +940,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       client.onClose(() => {
         clearTimeout(opening);
         if (!host.streams.delete(streamId)) return;
+        diagnostic(host,{event:'stream_closed',streamId});
         try { send(host, { uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }); } catch { /* The host may already be offline. */ }
       });
       try { send(host, { uplinkVersion: 2, type: 'stream_open', streamId, sessionId: binding.agentId }); }
@@ -986,7 +1020,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     enforceExpiry() { for (const check of expiryChecks) check(); },
     disconnect(code = 1008) {
-      for (const host of hosts.values()) if (host.socket) { const socket = host.socket; disconnected(host, socket); socket.close(code, code === 1008 ? 'Access revoked' : 'Authority temporarily unavailable'); }
+      for (const host of hosts.values()) if (host.socket) { const socket = host.socket; disconnected(host, socket, code===1008?'access_revoked':'authority_unavailable', code); socket.close(code, code === 1008 ? 'Access revoked' : 'Authority temporarily unavailable'); }
     },
     handlesRequest,
     handlesUpgrade,
@@ -1009,7 +1043,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       unavailable = true;
       previews.close();
       for (const cleanup of [...uplinkCleanups.values()]) cleanup();
-      for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket);
+      for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket, 'relay_closed', 1001);
       for (const client of clients) client.close(1001, 'Broker closed');
       clients.clear();
       keys.clear(); hosts.clear(); bindings.clear(); nativeBindings.clear(); attached.clear(); creations.clear();
@@ -1067,3 +1101,24 @@ function rawJson(result: RpcResponse) {
   return new Response(body, { status: result.status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 function rejectUpgrade(status: number) { return new Response(null, { status }); }
+
+function diagnosticOperation(path: string): RelayDiagnostic['operation'] {
+  const pathname=path.split('?')[0]!;
+  if(pathname.startsWith('/remote/catalog'))return 'catalog';
+  if(pathname.endsWith('/attach'))return 'attach';
+  if(pathname==='/remote/create')return 'create';
+  if(pathname==='/remote/controller-update')return 'controller_update';
+  if(pathname.startsWith('/remote/previews'))return 'preview';
+  if(pathname.startsWith('/v1/sessions/'))return 'session_read';
+  return 'other';
+}
+function diagnosticCloseReason(reason:string): RelayDiagnostic['reason'] {
+  switch(reason) {
+    case 'Host heartbeat timed out': return 'heartbeat_timeout';
+    case 'Host heartbeat delivery failed': return 'heartbeat_delivery_failed';
+    case 'Host transport failed': return 'transport_error';
+    case 'Credential expired': return 'credential_expired';
+    case 'Device credential revoked': return 'access_revoked';
+    default: return 'protocol_error';
+  }
+}

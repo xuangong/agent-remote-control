@@ -1,3 +1,5 @@
+import { createDiagnosticJournal } from './diagnostic-journal.js';
+import type { RelayDiagnosticStore } from './relay-diagnostics.js';
 import { createFavorites } from './favorites.js';
 import { createSessionMigrations } from './session-migrations.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
@@ -33,6 +35,7 @@ export interface HostedRelayOptions extends GatewayAuthOptions {
   previewOrigin?: string;
   previewDomain?: string;
   storage?: RelayStateStore;
+  diagnosticStorage?: RelayDiagnosticStore;
   scheduler?: RelayScheduler;
   maxTenants?: number;
   clientAddress?(request: Request): string;
@@ -44,6 +47,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const auth = { origin: validateGatewayOrigin(options.origin), issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
   if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
   const tenants = new Map<string, Tenant>();
+  const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
   const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string> }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
@@ -159,7 +163,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (!entry) {
       if (tenants.size >= (options.maxTenants ?? 64)) return undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
-        ownerSubject: grant.subject, durable, initialState,
+        ownerSubject: grant.subject, durable, initialState, diagnostics,
         userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
         onStateChange: async broker => { await state.mutate(draft => {
           const previous = draft.tenants.find(value => value.namespace === grant.namespace);
@@ -715,7 +719,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       previewAccess.close(); subdomainAccess?.close(); sessions.close(); await scheduling.catch(() => undefined); await scheduler.cancel();
       for (const owned of tenants.values()) owned.broker.close();
       await Promise.all([...tenants.values()].map(owned => owned.broker.settled()));
-      await state.close(); tenants.clear();
+      await diagnostics.close(); await state.close(); tenants.clear();
     },
   };
 }

@@ -102,3 +102,20 @@ it('shows the Host and origin mapping and pins a name independently of tunnel av
   await act(async () => button.click());
   expect(pinName).toHaveBeenCalledWith('preview-one', false);
 });
+
+
+it('keeps an inactive pinned mapping visible and allows unpin without opening a tunnel', async () => {
+  const unpinName = vi.fn(async () => {});
+  const controller = value({ registrations: [], routing: 'subdomain', unpinName,
+    pinnedNames: [{ target: 'http://127.0.0.1:5173', nameId: 'saved-name', tunnelOrigin: 'https://rose-seal.arc.test' }],
+  });
+  const container = await render(<HostPreviewList hideEmpty hostName="Offline PC" controller={controller} />);
+  expect(container.textContent).toContain('Offline PC');
+  expect(container.textContent).toContain('http://127.0.0.1:5173');
+  expect(container.textContent).toContain('https://rose-seal.arc.test');
+  expect(container.textContent).toContain('Name reserved');
+  expect(container.querySelector('.lab-preview-open')).toBeNull();
+  expect(container.querySelector('.lab-preview-unregister')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-pin')!.click());
+  expect(unpinName).toHaveBeenCalledWith('saved-name');
+});

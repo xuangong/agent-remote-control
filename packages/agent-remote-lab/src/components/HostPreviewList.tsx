@@ -17,7 +17,8 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, ho
   useFeedbackToast('Preview', failure ?? controller?.error);
   if (!controller) return null;
   const registrations = controller.registrations.filter(item => item.status === 'active');
-  if (hideEmpty && registrations.length === 0) return null;
+  const pinnedNames = controller.pinnedNames ?? [];
+  if (hideEmpty && registrations.length === 0 && pinnedNames.length === 0) return null;
 
   async function unregister(id: string): Promise<void> {
     setBusy(id); setFailure(undefined);
@@ -44,10 +45,17 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, ho
     finally { setPinning(undefined); }
   }
 
+  async function unpinName(nameId: string): Promise<void> {
+    setPinning(nameId); setFailure(undefined);
+    try { await controller!.unpinName!(nameId); }
+    catch (error) { setFailure(error instanceof Error ? error.message : 'The tunnel name could not be released. Retry.'); }
+    finally { setPinning(undefined); }
+  }
+
   return <section className="lab-host-previews" aria-label={hostName ? `Previews on ${hostName}` : 'Host previews'}>
     <div className="lab-directory-heading"><h2>{hostName ?? 'Previews'}</h2><button type="button" disabled={controller.loading} onClick={() => void controller.refresh()}>Refresh</button></div>
     {controller.error ? <p className="lab-control-note" role="alert">{controller.error} Check that preview tunneling is enabled and the Controller is connected.</p> : null}
-    {!controller.loading && registrations.length === 0 ? <p className="lab-control-note">No active previews for this Host.</p> : null}
+    {!controller.loading && registrations.length === 0 && pinnedNames.length === 0 ? <p className="lab-control-note">No active previews or reserved tunnel names for this Host.</p> : null}
     <ul>
       {registrations.map(registration => <li key={registration.id}>
         {hostName ? <small className="lab-preview-host">{hostName}</small> : null}
@@ -67,13 +75,24 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, ho
           {registration.status === 'active' ? <button className="lab-preview-open" type="button" disabled={busy === registration.id || registration.pendingUnregister || registration.availability !== 'online'}
             onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(registration.id, registration.target); }}>Open preview</button> : null}
           {controller.canManage && controller.routing === 'subdomain' && controller.pinName ? <button type="button" className="lab-preview-pin"
-            aria-pressed={registration.tunnelNamePinned ?? false} disabled={pinning === registration.id || busy === registration.id || registration.pendingUnregister}
+            aria-pressed={registration.tunnelNamePinned ?? false} disabled={pinning === registration.id || busy === registration.id || (registration.pendingUnregister && !registration.tunnelNamePinned)}
             title={registration.tunnelNamePinned ? 'Release the reserved name for future registrations. This active tunnel keeps its URL.' : 'Keep this domain for this Host and local origin after the tunnel is released.'}
             onClick={() => void pinName(registration.id, !registration.tunnelNamePinned)}>{pinning === registration.id ? 'Saving…' : registration.tunnelNamePinned ? 'Unpin tunnel name' : 'Pin tunnel name'}</button> : null}
           {controller.canManage ? <button className="lab-preview-unregister" type="button"
             disabled={busy === registration.id || registration.status !== 'active' || registration.pendingUnregister}
             onClick={() => void unregister(registration.id)}>{busy === registration.id ? 'Unregistering…' : 'Unregister'}</button> : null}
         </div>
+      </li>)}
+      {pinnedNames.map(pin => <li key={`pin:${pin.nameId}`}>
+        {hostName ? <small className="lab-preview-host">{hostName}</small> : null}
+        <div><code>{pin.target}</code><span>Name reserved</span></div>
+        {pin.tunnelOrigin ? <div className="lab-preview-mapping"><span aria-hidden="true">→</span><code>{pin.tunnelOrigin}</code></div> : null}
+        <small>No active tunnel. The next registration will reuse this name.</small>
+        {controller.canManage && controller.unpinName ? <div className="lab-preview-actions">
+          <button type="button" className="lab-preview-pin" aria-pressed="true" disabled={pinning === pin.nameId}
+            title="Release the reserved name for future registrations."
+            onClick={() => void unpinName(pin.nameId)}>{pinning === pin.nameId ? 'Saving…' : 'Unpin tunnel name'}</button>
+        </div> : null}
       </li>)}
     </ul>
     {!controller.canManage ? <p className="lab-control-note">Only the Host owner can unregister previews.</p> : null}

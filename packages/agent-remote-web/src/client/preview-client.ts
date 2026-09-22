@@ -6,6 +6,13 @@ export type PreviewLifecycle = ProtocolPreviewRegistration['status'];
 export type PreviewSource = ProtocolPreviewRegistration['sources'][number];
 export type PreviewAvailability = 'online' | 'controller_offline';
 
+/** A reserved name with no active registration; it does not grant tunnel access. */
+export interface PinnedPreviewName {
+  readonly nameId: string;
+  readonly target: string;
+  readonly tunnelOrigin?: string;
+}
+
 export type PreviewRegistration = Readonly<Omit<ProtocolPreviewRegistration, 'sources'>> & {
   readonly sources: readonly PreviewSource[];
   readonly availability: PreviewAvailability;
@@ -15,6 +22,7 @@ export type PreviewRegistration = Readonly<Omit<ProtocolPreviewRegistration, 'so
 };
 export type PreviewSnapshot = Readonly<Omit<PreviewRegistrationSnapshot, 'registrations'>> & {
   readonly registrations: readonly PreviewRegistration[];
+  readonly pinnedNames?: readonly PinnedPreviewName[];
   readonly routing?: 'subdomain' | 'path';
 };
 export interface PreviewRegistrationRequest {
@@ -45,6 +53,12 @@ export class HttpPreviewClient {
   async pinName(hostId: string, id: string, pinned: boolean): Promise<void> {
     await this.request(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/${encodeURIComponent(id)}/pin`, {
       method: 'POST', body: JSON.stringify({ pinned }), headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20_000),
+    });
+  }
+
+  async unpinName(hostId: string, nameId: string): Promise<void> {
+    await this.request(`v1/remote/hosts/${encodeURIComponent(hostId)}/previews/pins/${encodeURIComponent(nameId)}/unpin`, {
+      method: 'POST', body: '{}', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20_000),
     });
   }
 

@@ -408,6 +408,14 @@ export function createHostedRelay(options: HostedRelayOptions) {
       }
     }
     const destination = routeTenant(path, grant.subject) ?? owned;
+    const unpinPreview = /^\/v1\/remote\/hosts\/([^/]+)\/previews\/pins\/([A-Za-z0-9_-]+)\/unpin$/.exec(path);
+    if (unpinPreview && request.method === 'POST') {
+      const [, hostId, nameId] = unpinPreview;
+      if (!destination.broker.ownsHost(hostId!, grant.subject)) return json(403, { error: 'Only the Host owner can unpin tunnel names.' });
+      await readJson(request);
+      await destination.broker.previews.unpinName(hostId!, nameId!);
+      return json(200, { pinned: false });
+    }
     const pinPreview = /^\/v1\/remote\/hosts\/([^/]+)\/previews\/([A-Za-z0-9_-]+)\/pin$/.exec(path);
     if (pinPreview && request.method === 'POST') {
       const [, hostId, previewId] = pinPreview;
@@ -478,9 +486,12 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return execute();
     }) : await execute();
     if (result?.ok && request.method === 'GET' && /^\/v1\/remote\/hosts\/[^/]+\/previews$/.test(path)) {
-      const snapshot = await result.json() as { registrations: Array<{ id: string }> };
+      const snapshot = await result.json() as { registrations: Array<{ id: string }>; pinnedNames?: Array<{ nameId: string; target: string }> };
       const hostId = /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)![1]!;
       return json(200, { ...snapshot, routing: subdomainAccess ? 'subdomain' : 'path',
+        pinnedNames: (snapshot.pinnedNames ?? []).map(value => ({ ...value,
+          ...(subdomainAccess ? { tunnelOrigin: previewDomainOrigin(value.nameId, options.previewDomain!, auth.origin) } : {}),
+        })),
         registrations: snapshot.registrations.map(value => ({ ...value,
           ...(subdomainAccess ? { tunnelOrigin: domainOrigin(destination.broker, hostId, value.id) } : {}),
         })),

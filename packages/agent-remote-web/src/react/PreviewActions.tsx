@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { CopyTunnelUrl } from './CopyTunnelUrl.js';
 
-import type { PreviewPathMode, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
+import type { PinnedPreviewName, PreviewPathMode, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 
 export interface PreviewController {
   readonly registrations: readonly PreviewRegistration[];
+  readonly pinnedNames?: readonly PinnedPreviewName[];
   readonly canManage: boolean;
   readonly routing?: 'subdomain' | 'path';
   register(agentId: string, request: PreviewRegistrationRequest): Promise<PreviewRegistration>;
   unregister(id: string, hostId?: string): Promise<void>;
   open(id: string, originalLoopbackUrl: string, sessionId?: string, remote?: { hostId: string; registration: PreviewRegistration }): Promise<string>;
   pinName?(id: string, pinned: boolean): Promise<void>;
+  unpinName?(nameId: string): Promise<void>;
   getTunnelUrl?(id: string, originalLoopbackUrl: string): Promise<string>;
 }
 

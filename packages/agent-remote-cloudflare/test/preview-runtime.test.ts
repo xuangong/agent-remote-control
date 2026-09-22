@@ -235,6 +235,35 @@ it('keeps a pinned name after history pruning and durable restart with a new Con
   ]), { timeout: 5000 });
 }, 20_000);
 
+it('persists owner unpin of an inactive name while the Controller stays disconnected', async () => {
+  const setup = await previewFixture('http://127.0.0.1:4173', 60_000, 'preview.example.test');
+  const path = setup.alice.basePath + `v1/remote/hosts/${setup.host.hostId}/previews`;
+  const snapshot = async () => await (await setup.f.json(path, setup.alice.cookie)).json() as any;
+  const original = (await snapshot()).registrations[0];
+  expect((await setup.f.json(`${path}/${original.id}/pin`, setup.alice.cookie, { pinned: true })).status).toBe(200);
+  send(setup.host.socket, { type: 'preview_snapshot', snapshot: {
+    epoch: 'workers-controller', revision: setup.registration.revision + 1, registrations: [],
+  } });
+  await vi.waitFor(async () => expect((await snapshot()).registrations).toEqual([]), { timeout: 5000 });
+  await setup.f.restart();
+  expect((await snapshot()).pinnedNames).toEqual([{ nameId: original.id, target: original.target, tunnelOrigin: original.tunnelOrigin }]);
+  expect((await setup.f.json(`${path}/pins/${original.id}/unpin`, setup.alice.cookie, {})).status).toBe(200);
+  expect((await snapshot()).pinnedNames).toEqual([]);
+  await setup.f.restart();
+  expect((await snapshot()).pinnedNames).toEqual([]);
+  const reconnected = await setup.f.host(setup.host.key);
+  send(reconnected.socket, { type: 'preview_snapshot', snapshot: {
+    epoch: 'restarted-controller', revision: 1, registrations: [{ ...setup.registration, id: 'fresh-preview', revision: 1 }],
+  } });
+  await vi.waitFor(async () => {
+    const next = (await snapshot()).registrations[0];
+    expect(next?.id).toBe('fresh-preview');
+    expect(next?.tunnelNamePinned).toBe(false);
+    expect(next?.tunnelOrigin).toBeTruthy();
+    expect(next?.tunnelOrigin).not.toBe(original.tunnelOrigin);
+  }, { timeout: 5000 });
+}, 20_000);
+
 it('returns only active previews from mixed Controller history, including after durable recovery', async () => {
   const setup = await previewFixture();
   const active = setup.registration;

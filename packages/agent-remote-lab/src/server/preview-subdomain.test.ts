@@ -76,3 +76,24 @@ it('pins a domain without extending its lease and reuses it with a fresh registr
     expect(entry?.tunnelOrigin).toBeTruthy(); expect(entry.tunnelOrigin).not.toBe(origin);
   });
 }, 20000);
+
+
+it('lists inactive reserved names and unpins them with owner authorization and no active registration', async () => {
+  const f = await previewFixture({ previewDomain: 'arc.test' });
+  const base = `v1/remote/hosts/${f.hostId}/previews`;
+  const initial = await (await f.alice.request(base)).json();
+  expect((await f.alice.request(`${base}/${f.registration.id}/pin`, { pinned: true })).status).toBe(200);
+  expect((await f.alice.request(`${base}/${f.registration.id}/unregister`, {})).status).toBe(200);
+  await vi.waitFor(async () => {
+    const snapshot = await (await f.alice.request(base)).json();
+    expect(snapshot.registrations).toEqual([]);
+    expect(snapshot.pinnedNames).toEqual([{ nameId: f.registration.id, target: f.target, tunnelOrigin: initial.registrations[0].tunnelOrigin }]);
+  });
+  const unpin = `${base}/pins/${f.registration.id}/unpin`;
+  expect((await f.bob.request(unpin, {})).status).toBe(403);
+  expect((await (await f.alice.request(base)).json()).pinnedNames).toHaveLength(1);
+  expect((await f.alice.request(unpin, {})).status).toBe(200);
+  expect((await f.alice.request(unpin, {})).status).toBe(200);
+  expect((await (await f.alice.request(base)).json()).pinnedNames).toEqual([]);
+  expect((await f.fetch(initial.registrations[0].tunnelOrigin + '/bytes')).status).toBe(401);
+}, 20000);

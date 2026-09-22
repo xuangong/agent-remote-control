@@ -1,7 +1,7 @@
 import { watchPagePolling } from '../client/page-polling.js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import type { HttpPreviewClient, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
+import type { HttpPreviewClient, PinnedPreviewName, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 import type { PreviewController } from './PreviewActions.js';
 import { previewRegistrationKey, usePreviewRenewal } from './usePreviewRenewal.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
@@ -34,7 +34,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
     scopeRef.current = { client, hostId, version: scopeRef.current.version + 1, request: 0 };
   }
   const scope = scopeRef.current;
-  const [state, setState] = useState<{ version: number; routing?: 'subdomain' | 'path'; registrations: readonly PreviewRegistration[]; loading: boolean; error?: string }>(
+  const [state, setState] = useState<{ version: number; routing?: 'subdomain' | 'path'; registrations: readonly PreviewRegistration[]; pinnedNames?: readonly PinnedPreviewName[]; loading: boolean; error?: string }>(
     { version: scope.version, registrations: [], loading: true },
   );
   const currentState = state.version === scope.version ? state : { version: scope.version, registrations: [], loading: true };
@@ -75,14 +75,16 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
       const snapshot = await client.snapshot(hostId, controller.signal);
       if (!controller.signal.aborted && scopeRef.current === scope && scope.request === request) {
         setState(previous => previous.version === scope.version && !previous.loading && !previous.error
+          && JSON.stringify(previous.pinnedNames) === JSON.stringify(snapshot.pinnedNames)
           && previous.routing === snapshot.routing && JSON.stringify(previous.registrations) === JSON.stringify(snapshot.registrations) ? previous
-          : { version: scope.version, registrations: snapshot.registrations, routing: snapshot.routing, loading: false });
+          : { version: scope.version, registrations: snapshot.registrations, pinnedNames: snapshot.pinnedNames, routing: snapshot.routing, loading: false });
       }
     } catch (cause) {
       if ((!controller.signal.aborted || timedOut) && scopeRef.current === scope && scope.request === request) {
         setState(current => ({
           version: scope.version,
           registrations: current.version === scope.version ? current.registrations : [],
+          pinnedNames: current.version === scope.version ? current.pinnedNames : undefined,
           routing: current.version === scope.version ? current.routing : undefined,
           loading: false,
           error: message(cause, 'Preview state is unavailable. Retry after checking the Host connection.'),
@@ -111,7 +113,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
   const renewalIssues = usePreviewRenewal(client, hostId, canManage, currentBrowsers, currentState.registrations, refresh);
 
   const value = useMemo<PreviewContextValue>(() => ({
-    registrations: currentState.registrations, routing: currentState.routing, canManage, loading: currentState.loading, error: currentState.error, refresh,
+    registrations: currentState.registrations, pinnedNames: currentState.pinnedNames, routing: currentState.routing, canManage, loading: currentState.loading, error: currentState.error, refresh,
     register: async (agentId: string, request: PreviewRegistrationRequest) => {
       const registration = await client.register(agentId, request);
       // Registration can finish before the Controller's data tunnel connects.
@@ -126,6 +128,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
       }
       throw new Error('The preview is registered, but its tunnel is still connecting. Open it again shortly.');
     },
+    unpinName: async nameId => { await client.unpinName(hostId, nameId); await refresh(); },
     pinName: async (id, pinned) => { await client.pinName(hostId, id, pinned); await refresh(); },
     unregister: async (id: string, remoteHostId?: string) => {
       await client.unregister(remoteHostId ?? hostId, id);

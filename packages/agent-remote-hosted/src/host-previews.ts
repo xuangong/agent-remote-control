@@ -46,16 +46,25 @@ export function createHostPreviews(options: Options) {
   return {
     snapshot: () => structuredClone(records),
     nameId: (hostId: string, id: string) => previewNameId(record(hostId), id),
+    async unpinName(hostId: string, nameId: string) {
+      await mutate(draft => {
+        const current = draft.find(value => value.hostId === hostId);
+        if (!current?.pins?.some(pin => pin.nameId === nameId)) return false;
+        current.pins = current.pins.filter(pin => pin.nameId !== nameId);
+      });
+    },
     async pinName(hostId: string, id: string, pinned: boolean) {
       await mutate(draft => {
         const current = draft.find(value => value.hostId === hostId);
         const registration = current?.snapshot.registrations.find(value => value.id === id);
-        if (!current || !registration || registration.status !== 'active' || registration.expiresAt <= Date.now() || current.pendingRemovals.includes(id))
+        if (!current || !registration)
           throw new PreviewNameError(409, 'This preview is no longer active. Refresh the list.');
         const target = previewTargetKey(registration.target);
         const pins = current.pins ?? [];
-        if (!pinned) { current.pins = pins.filter(value => value.target !== target); return; }
         const nameId = previewNameId(current, id);
+        if (!pinned) { current.pins = pins.filter(value => value.target !== target || value.nameId !== nameId); return; }
+        if (registration.status !== 'active' || registration.expiresAt <= Date.now() || current.pendingRemovals.includes(id))
+          throw new PreviewNameError(409, 'This preview is no longer active. Refresh the list.');
         const existing = pins.find(value => value.target === target);
         if (existing && existing.nameId !== nameId) throw new PreviewNameError(409, 'This local origin already has a pinned tunnel name. Unpin it before choosing another.');
         if (existing) return false;
@@ -65,11 +74,16 @@ export function createHostPreviews(options: Options) {
     },
     list(hostId: string) {
       const current = record(hostId);
-      return { ...(current?.snapshot ?? { epoch: '', revision: 0, registrations: [] }), registrations: (current?.snapshot.registrations ?? []).map(value => ({ ...value,
+      const registrations = (current?.snapshot.registrations ?? []).map(value => ({ ...value,
+        status: value.status === 'active' && value.expiresAt <= Date.now() ? 'expired' as const : value.status,
         tunnelNamePinned: current?.pins?.some(pin => pin.target === previewTargetKey(value.target) && pin.nameId === previewNameId(current, value.id)) ?? false,
         availability: reconciled.has(hostId) && peers.has(hostId) ? 'online' as const : 'controller_offline' as const,
         ...(current?.pendingRemovals.includes(value.id) ? { pendingUnregister: true } : {}),
-      })) };
+      }));
+      const activeNames = new Set(registrations.filter(value => value.status === 'active').map(value => previewNameId(current, value.id)));
+      return { ...(current?.snapshot ?? { epoch: '', revision: 0 }), registrations,
+        pinnedNames: (current?.pins ?? []).filter(pin => !activeNames.has(pin.nameId)).map(pin => ({ ...pin })),
+      };
     },
     lookup,
     activity: activity.record,

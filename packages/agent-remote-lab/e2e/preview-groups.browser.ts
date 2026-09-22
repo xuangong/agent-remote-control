@@ -11,19 +11,20 @@ it.each(['chromium', 'webkit'] as const)('keeps Host groups and pinned mapping a
   const source = `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {HostPreviewGroups} from './components/HostPreviewGroups.tsx';
-    const pinned = new Set();
+    const pinned = new Set(); let inactive = false;
     const client = {
-      async snapshot(host) {return {routing:'subdomain', registrations:[{
+      async snapshot(host) {return {routing:'subdomain', pinnedNames: inactive && pinned.has(host) ? [{nameId:'preview-'+host,target:'http://localhost:5173',tunnelOrigin:'https://rose-seal-233f1df48bea.agents.example.test'}] : [], registrations:inactive ? [] : [{
         id:'preview-'+host,target:'http://localhost:5173/a/long/application/path',
         tunnelOrigin:'https://rose-seal-233f1df48bea.agents.example.test',
         tunnelNamePinned:pinned.has(host),status:'active',availability:'online',pathMode:'strip',
         expiresAt:Date.now()+3600000,sources:[{sessionId:'source',itemId:'message'}]
       }]};},
-      async pinName(host,id,value){if(value)pinned.add(host);else pinned.delete(host);}
+      async pinName(host,id,value){if(value)pinned.add(host);else pinned.delete(host);},
+      async unpinName(host,id){pinned.delete(host);}
     };
-    createRoot(document.getElementById('root')).render(<HostPreviewGroups client={client}
+    createRoot(document.getElementById('root')).render(<><section className='lab-host-pairing'>You own this Host</section><section className='lab-host-vscode'><h2>VS Code</h2></section><HostPreviewGroups client={client}
       hosts={[{id:'work',name:'Work Mac',online:true},{id:'home',name:'Home Mac',online:true}]}
-      polling onOpen={()=>{}} onOpenSource={(session,item,host)=>document.body.dataset.sourceHost=host}/>);
+      polling onOpen={()=>{}} onOpenSource={(session,item,host)=>document.body.dataset.sourceHost=host}/><button id='release' onClick={()=>{inactive=true;document.dispatchEvent(new Event('visibilitychange'));}}>Release previews</button></>);
   `;
   const script = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) },
     bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
@@ -61,6 +62,19 @@ it.each(['chromium', 'webkit'] as const)('keeps Host groups and pinned mapping a
       await groups.nth(1).getByRole('button', { name: 'Open source 1', exact: true }).click();
       expect(await page.locator('body').getAttribute('data-source-host')).toBe('home');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.locator('#release').click();
+      await page.getByText('Name reserved', {exact:true}).waitFor();
+      expect(await groups.count()).toBe(1);
+      expect(await groups.first().innerText()).toContain('Home Mac');
+      expect(await groups.locator('.lab-preview-open').count()).toBe(0);
+      await page.screenshot({ path: fileURLToPath(new URL(`../test-results/pinned-previews/reserved-${engine.name()}-${width}.png`, import.meta.url)), fullPage: true });
+      await groups.getByRole('button', {name:'Unpin tunnel name',exact:true}).click();
+      await page.locator('.lab-preview-groups').waitFor({state:'hidden'});
+      expect(await page.locator('.lab-host-previews').count()).toBe(0);
+      const borders = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.lab-host-pairing')!).borderBottomWidth)
+        + parseFloat(getComputedStyle(document.querySelector('.lab-host-vscode')!).borderTopWidth));
+      expect(borders).toBe(1);
+
       await page.screenshot({ path: fileURLToPath(new URL(`../test-results/pinned-previews/${engine.name()}-${width}.png`, import.meta.url)), fullPage: true });
     }
     expect(errors).toEqual([]);

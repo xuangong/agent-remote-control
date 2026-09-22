@@ -124,3 +124,48 @@ test('keeps pin persistence atomic and never assigns a reserved name to two acti
     await expect(previews.pinName('host', 'second', true)).rejects.toThrow('already has a pinned');
   } finally { previews.close(); }
 });
+
+
+test('lists and releases a saved name while its Host is offline and registration history is gone', async () => {
+  let fail = false;
+  const options = { async save(_state: unknown, publish: () => void) { if (fail) throw new Error('Storage unavailable'); publish(); }, async remove() {} };
+  let previews = createHostPreviews(options);
+  try {
+    await previews.update('host', snapshot(1));
+    await previews.pinName('host', 'preview-id', true);
+    expect(previews.list('host').pinnedNames).toEqual([]);
+    await previews.update('host', { epoch: 'controller', revision: 2, registrations: [] });
+    const saved = previews.snapshot(); previews.close();
+    previews = createHostPreviews({ ...options, initial: saved });
+    const pin = { target: snapshot(1).registrations[0]!.target, nameId: 'preview-id' };
+    expect(previews.list('host').pinnedNames).toEqual([pin]);
+    fail = true;
+    await expect(previews.unpinName('host', 'preview-id')).rejects.toThrow('Storage unavailable');
+    expect(previews.list('host').pinnedNames).toEqual([pin]);
+    fail = false;
+    await previews.unpinName('other-host', 'preview-id');
+    await previews.unpinName('host', 'different-name');
+    expect(previews.list('host').pinnedNames).toEqual([pin]);
+    await previews.unpinName('host', 'preview-id');
+    await previews.unpinName('host', 'preview-id');
+    expect(previews.list('host').pinnedNames).toEqual([]);
+    const next = snapshot(3); next.registrations[0]!.id = 'fresh';
+    await previews.update('host', next);
+    expect(previews.nameId('host', 'fresh')).toBe('fresh');
+  } finally { previews.close(); }
+});
+
+
+test('exposes an expired reservation without waiting for the offline Controller to publish expiry', async () => {
+  const previews = createHostPreviews({ async save(_state, publish) { publish(); }, async remove() {} });
+  try {
+    await previews.update('host', snapshot(1));
+    await previews.pinName('host', 'preview-id', true);
+    const expired = snapshot(2); expired.registrations[0]!.expiresAt = Date.now() - 1;
+    await previews.update('host', expired); previews.disconnect('host');
+    expect(previews.list('host').registrations[0]?.status).toBe('expired');
+    expect(previews.list('host').pinnedNames).toHaveLength(1);
+    await previews.pinName('host', 'preview-id', false);
+    expect(previews.list('host').pinnedNames).toEqual([]);
+  } finally { previews.close(); }
+});

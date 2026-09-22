@@ -8,6 +8,11 @@ export function hostEnvironmentLabels(host: RemoteHost): string[] {
     ...value.browsers.filter(item => item.status === 'found').map(item => item.name),
     ...(value.vscode.status === 'found' ? ['VS Code'] : [])];
 }
+export function hostDisplayLabel(host: RemoteHost): string {
+  return [host.name, host.online ? 'Online' : 'Offline', ...(host.access === 'shared' ? ['Shared'] : []),
+    ...(host.environment ? hostEnvironmentLabels(host) : ['Environment unknown'])].join(' · ');
+}
+
 export function matchesHostEnvironment(host: RemoteHost, query: string): boolean {
   const value = host.environment;
   const terms = [host.name, host.online ? 'online' : 'offline', ...hostEnvironmentLabels(host),

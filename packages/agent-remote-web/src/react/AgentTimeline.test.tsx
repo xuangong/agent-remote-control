@@ -11,6 +11,7 @@ import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import type { PreviewController } from './PreviewActions.js';
+import { TimelineDisplay } from './TimelineDisplay.js';
 
 function entry(
   seq: number,
@@ -60,7 +61,7 @@ describe('AgentTimeline', () => {
     expect(message.textContent!.indexOf('[image #1]')).toBeLessThan(message.textContent!.indexOf('const answer'));
   });
 
-  it('adds explicit preview actions for message and tool text while preserving transcript rendering', async () => {
+  it.each(['preview', 'simple', 'content'] as const)('limits tunnel actions to content-only eligible entries in %s mode', async mode => {
     const register = vi.fn(async () => ({
       id: 'preview-one', target: 'http://localhost:5173', status: 'active' as const,
       createdAt: 1_789_516_800_000, expiresAt: 1_789_520_400_000, revision: 1,
@@ -71,16 +72,30 @@ describe('AgentTimeline', () => {
       entry(1, { type: 'assistant_message', messageId: 'answer', text: 'Run http://localhost:5173/docs.' }),
       entry(2, { type: 'tool_call', callId: 'shell', name: 'shell', status: 'completed', error: null,
         detail: { type: 'shell', command: 'curl 127.0.0.1:4173/health' }, result: { content: [{ type: 'text', text: 'ready at http://localhost:4173' }] } }),
+      entry(3, { type: 'tool_call', callId: 'mcp', name: 'chrome-devtools.list_pages', status: 'completed', error: null,
+        detail: { type: 'other', description: 'MCP tool chrome-devtools.list_pages' }, result: { content: [{ type: 'text', text: 'http://127.0.0.1:5181/session' }] } }),
+      entry(4, { type: 'reasoning', text: 'Inspect http://localhost:5173/private' }),
+      entry(5, { type: 'error', message: 'Failed at http://localhost:5173/error' }),
+      entry(6, { type: 'user_message', text: 'Try http://127.0.0.1:5173/user' }),
+      entry(7, { type: 'todo', items: [{ text: 'Review http://localhost:5173/todo', completed: false }] }),
+      entry(8, { type: 'tool_call', callId: 'plan', name: 'functions.update_plan', status: 'completed', error: null,
+        detail: { type: 'other', description: 'Review http://localhost:5173/plan' } }),
+      entry(9, { type: 'interaction', request: { kind: 'plan_approval', requestId: 'approve', plan: 'Review http://localhost:5173/approval', allowedActions: ['approve'] },
+        response: { kind: 'plan_approval', action: 'approve' } }),
     ]);
-    const container = await render(<AgentTimeline state={{ ...content, agent: {
+    const container = await render(<TimelineDisplay.Provider value={mode}><AgentTimeline state={{ ...content, agent: {
       id: 'agent-one', providerId: 'provider-neutral', createdAt: '2026-09-16T00:00:00Z', updatedAt: '2026-09-16T00:00:00Z',
       status: 'idle', activeTurn: null, pendingInteractions: [],
       capabilities: { history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
         interactions: { question: true, toolApproval: true, planApproval: true } },
       runtimeInfo: { providerId: 'provider-neutral', sessionId: 'native-one', status: 'idle' },
-    } }} previewController={previews} />);
+    } }} previewController={previews} /></TimelineDisplay.Provider>);
 
-    expect(container.querySelectorAll('.agent-preview-target')).toHaveLength(3);
+    expect(Array.from(container.querySelectorAll('.agent-preview-target code'), node => node.textContent)).toEqual([
+      'http://localhost:5173/docs', 'http://127.0.0.1:5173/user', 'http://localhost:5173/todo',
+      'http://localhost:5173/plan', 'http://localhost:5173/approval',
+    ]);
+    expect(container.querySelectorAll('.agent-tool')).toHaveLength(mode === 'content' ? 1 : 3);
     expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('Run http://localhost:5173/docs.');
     expect(register).not.toHaveBeenCalled();
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-target button')?.click());

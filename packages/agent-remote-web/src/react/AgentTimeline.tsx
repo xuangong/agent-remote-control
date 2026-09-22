@@ -130,8 +130,8 @@ export function AgentTimeline({
               resources={state.resources} resourceBindings={entry.resources}
               resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch])}
               onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
+            {previews && state.agent?.id && isContentOnlyItem(entry.item) ? <PreviewActions agentId={state.agent.id} itemId={key} text={previewText(entry.item)} controller={previews} /> : null}
             {!contentOnly ? <>
-              {previews && state.agent?.id ? <PreviewActions agentId={state.agent.id} itemId={key} text={previewText(entry.item)} controller={previews} /> : null}
               {registry?.render(entry.item)}
               <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
               <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />

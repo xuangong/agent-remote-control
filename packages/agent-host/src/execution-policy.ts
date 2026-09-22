@@ -94,6 +94,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   return {
     providerId: directory.providerId,
     supportsSourceReferences: directory.supportsSourceReferences,
+    reconcileIdleSession: directory.reconcileIdleSession?.bind(directory),
     canReleaseSession: directory.canReleaseSession?.bind(directory),
     sessionReleased: directory.sessionReleased?.bind(directory),
     async list() {

@@ -15,6 +15,7 @@ import { createSessionWire } from '../../agent-remote-relay/dist/session-wire.js
 import { decodeServerMessage } from '../../agent-remote-protocol/dist/index.js';
 
 interface NativeThread {
+  source?: string;
   id: string;
   status: { type: string; activeFlags?: string[] };
   canAcceptDirectInput: boolean;
@@ -846,4 +847,155 @@ it('retains an idle parent when a known child cannot yet be discovered', async (
     server.requestHook = undefined; announce();
     await expect.poll(() => provider.canReleaseSession('root')).toBe(true);
   } finally { blocked.resolve(undefined); }
+});
+
+
+it('rechecks native idle state without loading history or replaying a mutation', async () => {
+  const { server, provider } = await harness();
+  const start = server.requests.length;
+  server.thread.status = { type: 'active', activeFlags: ['waitingOnApproval'] };
+  expect(await provider.reconcileIdleSession('root')).toBe(false);
+  server.thread.status = { type: 'idle' };
+  expect(await provider.reconcileIdleSession('root')).toBe(true);
+  expect(server.requests.slice(start).map(r => [r.method, r.params.includeTurns])).toEqual([
+    ['thread/read', false], ['thread/read', false],
+  ]);
+});
+
+it('retries failed child discovery with a bounded page before allowing idle detach', async () => {
+  const { server, provider, session } = await harness();
+  server.children.set('retry-child', { id: 'retry-child', parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: false, turns: [] });
+  server.requestHook = ({ method, params }) => method === 'thread/read' && params.threadId === 'retry-child'
+    ? { kind: 'error', code: -32603, message: 'Temporarily unavailable' } : undefined;
+  server.notify('item/completed', { threadId: 'root', turnId: 'turn', item: {
+    id: 'spawn-retry', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['retry-child'], status: 'completed',
+  } });
+  await expect.poll(() => server.requests.some(r => r.params.threadId === 'retry-child')).toBe(true);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  expect(provider.canReleaseSession('root')).toBe(false);
+  server.requestHook = ({ method }) => method === 'thread/turns/list' ? { kind: 'result', value: { data: [], nextCursor: null } } : undefined;
+  const start = server.requests.length;
+  expect(await provider.reconcileIdleSession('root')).toBe(true);
+  expect(provider.canReleaseSession('root')).toBe(true);
+  expect((await session.runtimeInfo()).childSessions?.map(c => c.nativeSessionId)).toContain('retry-child');
+  expect(server.requests.slice(start).some(r => r.params.includeTurns === true || r.method === 'thread/resume')).toBe(false);
+  expect(server.requests.slice(start).filter(r => r.method === 'thread/turns/list').map(r => r.params.limit)).toEqual([10]);
+});
+
+it('rejects stale native idle replies when activity intervenes', async () => {
+  const { server, provider, iterator } = await harness();
+  const blocked = deferred<RpcOverride | undefined>();
+  server.requestHook = ({ method }) => method === 'thread/read' ? blocked.promise : undefined;
+  const checking = provider.reconcileIdleSession('root');
+  await expect.poll(() => server.requests.filter(r => r.method === 'thread/read').length).toBeGreaterThan(0);
+  server.notify('turn/started', { threadId: 'root', turn: { id: 'new-turn', status: 'inProgress', items: [] } });
+  await nextEvent(iterator, 'turn_started');
+  blocked.resolve({ kind: 'result', value: { thread: { ...server.thread, status: { type: 'idle' } } } });
+  expect(await checking).toBe(false);
+  expect(provider.canReleaseSession('root')).toBe(false);
+});
+
+
+it('discards an idle check across native socket recovery', async () => {
+  const { server, provider, session, iterator } = await harness();
+  const blocked = deferred<RpcOverride | undefined>();
+  let entered = false;
+  server.requestHook = ({ method }) => {
+    if (method !== 'thread/read') return undefined;
+    entered = true; return blocked.promise;
+  };
+  const check = provider.reconcileIdleSession('root');
+  await expect.poll(() => entered).toBe(true);
+  server.requestHook = undefined;
+  server.disconnectClients();
+  expect(await check).toBe(false);
+  blocked.resolve(undefined);
+  await nextItem(iterator, 'timeline_replacement');
+  await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+  expect(await provider.reconcileIdleSession('root')).toBe(true);
+});
+
+it.each([
+  { kind: 'error', code: -32603, message: 'Temporarily unavailable' },
+  { kind: 'result', value: { thread: { id: 'other', status: { type: 'idle' } } } },
+  { kind: 'result', value: { thread: { id: 'root', status: { type: 'notLoaded' } } } },
+  { kind: 'result', value: { thread: { id: 'root', status: { type: 'idle', activeFlags: ['waitingOnApproval'] } } } },
+] satisfies RpcOverride[])('retains uncertain protection on unreadable or unsafe native metadata: %j', async reply => {
+  const { server, provider } = await harness();
+  server.requestHook = ({ method }) => method === 'thread/read' ? reply : undefined;
+  expect(await provider.reconcileIdleSession('root')).toBe(false);
+});
+
+it('does not load full child history when background pagination is unavailable', async () => {
+  const { server, provider } = await harness();
+  server.children.set('legacy-child', { id: 'legacy-child', parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: false, turns: [] });
+  server.requestHook = ({ method, params }) => method === 'thread/read' && params.threadId === 'legacy-child'
+    ? { kind: 'error', code: -32603, message: 'Temporarily unavailable' } : undefined;
+  server.notify('item/completed', { threadId: 'root', turnId: 'turn', item: {
+    id: 'legacy-spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['legacy-child'], status: 'completed',
+  } });
+  await expect.poll(() => server.requests.some(r => r.params.threadId === 'legacy-child')).toBe(true);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  server.requestHook = undefined;
+  const start = server.requests.length;
+  expect(await provider.reconcileIdleSession('root')).toBe(false);
+  expect(provider.canReleaseSession('root')).toBe(false);
+  expect(server.requests.slice(start).some(r => r.params.includeTurns === true)).toBe(false);
+});
+
+
+it.each(['normal', 'ancestor', 'malformed', 'parentage'] as const)('defers nested activity references safely: %s', async scenario => {
+  const { server, provider } = await harness();
+  server.children.set('child', { id: 'child', parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: false,
+    turns: [{ id: 'child-turn', status: 'completed', items: [
+      { id: 'activity', type: 'subAgentActivity', kind: 'interacted', agentThreadId: 'grandchild' },
+      { id: 'foreign-activity', type: 'subAgentActivity', kind: 'completed', agentThreadId: 'foreign' },
+      ...(scenario === 'ancestor' ? [{ id: 'ancestor-activity', type: 'subAgentActivity', kind: 'interacted', agentThreadId: 'root' }] : []),
+    ] }] });
+  server.children.set('grandchild', { id: 'grandchild', parentThreadId: 'child', status: { type: 'active', activeFlags: [] }, canAcceptDirectInput: false, turns: [] });
+  server.children.set('foreign', { id: 'foreign', source: 'cli', status: { type: 'idle' }, canAcceptDirectInput: true, turns: [] });
+  server.requestHook = ({ method, params }) => method === 'thread/read' && params.threadId === 'child'
+    ? { kind: 'error', code: -32603, message: 'Temporarily unavailable' } : undefined;
+  server.notify('item/completed', { threadId: 'root', turnId: 'turn', item: {
+    id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'], status: 'completed',
+  } });
+  await expect.poll(() => server.requests.some(r => r.params.threadId === 'child')).toBe(true);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  server.requestHook = ({ method, params }) => method === 'thread/turns/list'
+    ? { kind: 'result', value: { data: [...(server.children.get(String(params.threadId))?.turns ?? [])].reverse(), nextCursor: null } } : undefined;
+  const start = server.requests.length;
+  expect(await provider.reconcileIdleSession('root')).toBe(false);
+  expect(provider.canReleaseSession('root')).toBe(false);
+  expect(server.requests.slice(start).some(r => r.params.threadId === 'grandchild' || r.params.threadId === 'foreign')).toBe(false);
+  const normalHook = server.requestHook;
+  if (scenario === 'malformed') {
+    server.requestHook = context => context.method === 'thread/read' && context.params.threadId === 'grandchild'
+      ? { kind: 'result', value: { thread: { id: 'grandchild' } } } : normalHook?.(context);
+    expect(await provider.reconcileIdleSession('root')).toBe(false);
+    server.requestHook = normalHook;
+    // The failed candidate rotates behind the foreign reference.
+    expect(await provider.reconcileIdleSession('root')).toBe(false);
+  }
+  if (scenario === 'parentage') {
+    const blocked = deferred<RpcOverride | undefined>();
+    let entered = false;
+    server.requestHook = context => {
+      if (context.method !== 'thread/read' || context.params.threadId !== 'grandchild') return normalHook?.(context);
+      entered = true; return blocked.promise;
+    };
+    const checking = provider.reconcileIdleSession('root');
+    await expect.poll(() => entered).toBe(true);
+    server.notify('thread/started', { thread: server.children.get('grandchild') });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    blocked.resolve({ kind: 'result', value: { thread: { id: 'grandchild', source: 'cli', status: { type: 'idle' } } } });
+    expect(await checking).toBe(false);
+    server.requestHook = normalHook;
+    expect(await provider.reconcileIdleSession('root')).toBe(false);
+  }
+  expect(await provider.reconcileIdleSession('root')).toBe(false);
+  server.children.get('grandchild')!.status = { type: 'idle' };
+  server.notify('turn/completed', { threadId: 'grandchild', turn: { id: 'grandchild-turn', status: 'completed', items: [] } });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  expect(await provider.reconcileIdleSession('root')).toBe(true);
+  expect(provider.canReleaseSession('root')).toBe(true);
 });

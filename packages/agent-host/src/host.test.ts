@@ -972,7 +972,7 @@ function idleFixture() {
     if (old && !old.disposed) return old;
     const session = new Session('codex', id); registration.sessions.set(id, session); return session;
   };
-  const host = createAgentHostRuntime({ registrations: [registration], idleGraceMs: 1000 });
+  const host = createAgentHostRuntime({ registrations: [registration], idleGraceMs: 1000, idleReconcileMs: 2000 });
   const attach = (id: string, parent?: string) => host.control({ method: 'POST', path: parent ? '/remote/child/attach' : '/remote/attach', sessionId: id,
     body: JSON.stringify({ providerId: 'codex', nativeSessionId: id, ...(parent ? { parentNativeSessionId: parent } : {}) }) });
   return { host, registration, attach };
@@ -1139,4 +1139,78 @@ it('keeps native subscriptions across a real broken uplink until renewed browser
     broker.closeStream('after-sleep');
     await expect.poll(() => native.disposed).toBe(true);
   } finally { await host.close(); await broker.close(); }
+});
+
+it('reconciles uncertain idle operations without confirming or replaying their result', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  let safe = false;
+  f.registration.directory.reconcileIdleSession = async () => safe;
+  try {
+    await f.attach('native');
+    const lease = (await f.host.acquireSession('native'))!;
+    const operation = { operationId: operationId('reconciled'), kind: 'send_message' as const, parameters: { text: 'once' } };
+    let dispatches = 0;
+    const work = { dispatch: async () => { dispatches++; throw new Error('Lost result'); } };
+    await expect(f.host.executeOperation('test')(lease.agent, operation, work)).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+    lease.release();
+    const original = f.registration.sessions.get('native')!;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(original.disposed).toBe(false);
+    safe = true;
+    await vi.advanceTimersByTimeAsync(900);
+    expect(original.disposed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(original.disposed).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(original.disposed).toBe(true);
+    const restored = (await f.host.acquireSession('native'))!;
+    await expect(f.host.executeOperation('test')(restored.agent, operation, work)).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+    expect(dispatches).toBe(1);
+    restored.release();
+  } finally { await f.host.close(); vi.useRealTimers(); }
+});
+
+it.each(['demand', 'reconnect', 'operation'] as const)('discards reconciliation after intervening %s', async change => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  let finish: ((safe: boolean) => void) | undefined;
+  f.registration.directory.reconcileIdleSession = () => new Promise(resolve => { finish = resolve; });
+  try {
+    await f.attach('native');
+    const fail = async (id: string) => {
+      const lease = (await f.host.acquireSession('native'))!;
+      try { await expect(f.host.executeOperation('test')(lease.agent,
+        { operationId: operationId(id), kind: 'send_message', parameters: {} },
+        { dispatch: async () => { throw new Error('Lost result'); } })).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+      } finally { lease.release(); }
+    };
+    await fail('old');
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(finish).toBeTypeOf('function');
+    if (change === 'reconnect') { f.host.setRelayConnected(false); f.host.setRelayConnected(true); }
+    else if (change === 'operation') await fail('new');
+    else { const lease = (await f.host.acquireSession('native'))!; lease.release(); }
+    finish!(true);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(f.registration.sessions.get('native')!.disposed).toBe(false);
+  } finally { finish?.(false); await f.host.close(); vi.useRealTimers(); }
+});
+
+
+it('keeps partial child reconciliation pinned until the complete native check succeeds', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+  const f = idleFixture();
+  let discovered = false;
+  let verified = false;
+  f.registration.directory.canReleaseSession = () => discovered;
+  f.registration.directory.reconcileIdleSession = async () => { discovered = true; return verified; };
+  try {
+    await f.attach('native');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(f.registration.sessions.get('native')!.disposed).toBe(false);
+    verified = true;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(f.registration.sessions.get('native')!.disposed).toBe(true);
+  } finally { await f.host.close(); vi.useRealTimers(); }
 });

@@ -79,6 +79,11 @@ export class CodexSessionRuntime {
   inspectHistory(parentId: string, history: unknown): void { this.client.inspectHistory(parentId, history); }
   terminate(error: Error): void { this.client.terminate(error); }
 
+  async reconcileIdle(): Promise<boolean> {
+    if (![...this.uniqueSessions()].every(session => session.hasIdleState())) return false;
+    return await this.client.reconcileIdle() && this.canReleaseIdle();
+  }
+
   canReleaseIdle(): boolean {
     return !this.client.hasUnresolvedChildren() && [...this.uniqueSessions()].every(session => session.hasIdleState())
       && [...this.children.values()].every(child => child.session || child.descriptor.status === 'closed');

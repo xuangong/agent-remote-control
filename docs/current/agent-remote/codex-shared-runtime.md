@@ -185,8 +185,19 @@ Short browser disconnects and mobile sleep do not immediately dispose a session.
 Returning demand resets the grace interval. Cleanup pauses while the Controller's
 Relay uplink is disconnected; registration starts a fresh full grace interval.
 Running turns, pending interactions, native recovery, and unconfirmed mutations
-prevent release. An unknown mutation outcome conservatively pins that binding for
-the remaining Controller lifetime, even after its deduplication record expires.
+prevent release. Otherwise-idle bindings protected by unknown outcomes or failed
+child discovery are checked after one minute without demand. Checks share the
+existing native connection and run one at a time per Controller. Failed or unsafe
+checks back off to at most one every fifteen minutes. Native recovery or a Relay
+outage pauses effective reconciliation; demand, new operations, and connection
+changes invalidate outstanding results.
+
+Reconciliation reads native family metadata, retrying at most one unresolved child
+with the latest ten-turn page and a ten-second request budget. It never falls back
+to full child history, creates a new native connection, resumes or sends a message.
+A successful idle check removes only the release protection, then starts the full
+five-minute grace again. Unknown message results and operation-cache retry rules
+remain unchanged. Unreadable or busy state is never force-released.
 Native child projections are detached before their owning parent connection; this
 can extend the parent's grace period.
 
@@ -194,7 +205,7 @@ Reopening restores the same native session and stable remote identity, including
 history created by other native clients while the Controller was detached. The
 normal timeline reset/catch-up protocol handles the new projection. No send is
 replayed as part of restoration. Lifecycle diagnostics record
-`session_idle_released` and `session_idle_restored` without conversation content.
+`session_idle_released`, `session_idle_restored`, and `session_idle_reconciled` without conversation content.
 
 This cleanup closes only the Controller-owned connection. It does not cancel work,
 archive history, stop the daemon, or close another CLI/client's subscription. Codex

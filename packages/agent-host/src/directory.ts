@@ -6,7 +6,7 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
@@ -54,6 +54,7 @@ export function createCodexSessionDirectory(
   }
   return {
     providerId: 'codex',
+    reconcileIdleSession: id => provider.reconcileIdleSession?.(id) ?? Promise.resolve(false),
     canReleaseSession: id => provider.canReleaseSession?.(id) === true,
     sessionReleased(id) { opened.delete(id); },
     supportsSourceReferences: !!references && !!provider.readSessionHistory,

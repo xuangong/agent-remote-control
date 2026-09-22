@@ -19,6 +19,7 @@ export interface AgentHostDirectory {
   readonly supportsSourceReferences?: boolean;
   /** Must guarantee disposal only detaches this client's idle runtime connection. */
   canReleaseSession?(nativeSessionId: string): boolean;
+  reconcileIdleSession?(nativeSessionId: string): Promise<boolean>;
   sessionReleased?(nativeSessionId: string): Promise<void> | void;
   sessionWorkspace?(nativeSessionId: string): Promise<string | undefined>;
   setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
@@ -35,7 +36,8 @@ export interface AgentHostRuntimeOptions {
   registrations: readonly AgentHostProviderRegistration[];
   onRequestDiagnostic?: (diagnostic: AgentHostRequestDiagnostic) => void;
   idleGraceMs?: number;
-  onSessionLifecycleDiagnostic?: (diagnostic: { event: 'session_idle_released' | 'session_idle_restored'; agentId: string; providerId: string }) => void;
+  idleReconcileMs?: number;
+  onSessionLifecycleDiagnostic?: (diagnostic: { event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled'; agentId: string; providerId: string }) => void;
   shutdownTimeoutMs?: number;
   cancelTimeoutMs?: number;
   executionPolicy?: HostExecutionPolicy;
@@ -188,7 +190,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const projections = new Map<string, Projection>();
   const projectionAgents = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
-  const idle = createIdleSessions({ graceMs: options.idleGraceMs });
+  const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
   const uncertainAgents = new Set<string>();
   const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
@@ -232,7 +234,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       } finally { release(); }
     };
   }
-  function lifecycle(event: 'session_idle_released' | 'session_idle_restored', binding: Binding) {
+  function lifecycle(event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled', binding: Binding) {
     try { options.onSessionLifecycleDiagnostic?.({ event, agentId: binding.agentId, providerId: binding.providerId }); }
     catch { /* Diagnostics cannot change session lifetime. */ }
   }
@@ -251,6 +253,24 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       await relay.closeAgent(binding.agentId);
       await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
       lifecycle('session_idle_released', binding);
+    }, async isCurrent => {
+      const source = registration(binding.providerId).directory;
+      const agent = liveAgent(binding.agentId);
+      if (!source.reconcileIdleSession || !agent?.canReleaseIdle()) return false;
+      for (const child of bindingsByAgent.values()) {
+        if (child.providerId === binding.providerId && child.parentNativeSessionId === binding.nativeSessionId
+          && (liveAgent(child.agentId) || idle.hasDemand(child.agentId))) return false;
+      }
+      // Discovery can resolve a child before the complete family check finishes.
+      // Keep that partial progress protected if the check fails or becomes stale.
+      uncertainAgents.add(binding.agentId);
+      if (!await source.reconcileIdleSession(binding.nativeSessionId) || !isCurrent()
+        || liveAgent(binding.agentId) !== agent || !agent.canReleaseIdle()
+        || !source.canReleaseSession?.(binding.nativeSessionId)) return false;
+      // Native quiescence permits detachment, but does not settle or replay an unknown operation.
+      uncertainAgents.delete(binding.agentId);
+      lifecycle('session_idle_reconciled', binding);
+      return true;
     });
   }
   async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {

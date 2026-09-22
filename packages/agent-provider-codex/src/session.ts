@@ -155,6 +155,10 @@ export class CodexAppServerSession implements AgentSession {
       && this.runtime.connectionInfo()?.state === 'connected' && this.runtime.canReleaseIdle();
   }
 
+  async reconcileIdle(nativeSessionId: string): Promise<boolean> {
+    return this.ownsRuntime && this.runtime.hasThread(nativeSessionId) && this.runtime.reconcileIdle();
+  }
+
   hasIdleState(): boolean {
     return this.ready && !this.transportFailure && !this.disposed
       && (this.runtimeStatus === 'idle' || !this.ownsRuntime && this.runtimeStatus === 'closed')

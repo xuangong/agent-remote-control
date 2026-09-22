@@ -24,6 +24,7 @@ export class CodexDaemonClient {
   private readonly router: CodexThreadRouter;
   private readonly restorationScheduler: CodexRestorationScheduler;
   private generation = 0;
+  private activityRevision = 0;
   private closed = false;
   private recoveryTask: Promise<void> | undefined;
   private recoveryAbort: AbortController | undefined;
@@ -44,6 +45,30 @@ export class CodexDaemonClient {
   async initialize(): Promise<void> { await initializeCodexTransport(this.transport, this.options.initialization); }
   registerRoot(id: string): void { this.router.registerRoot(id); }
   hasUnresolvedChildren(): boolean { return this.router.hasUnresolvedChildren(); }
+  /** Read-only verification: never settles a mutation or restores a thread. */
+  async reconcileIdle(): Promise<boolean> {
+    if (this.closed || this.connection?.state !== 'connected' || this.pendingDispatches.size) return false;
+    const generation = this.generation;
+    const revision = this.activityRevision;
+    const current = () => !this.closed && this.connection?.state === 'connected'
+      && generation === this.generation && revision === this.activityRevision && !this.pendingDispatches.size;
+    const deadline = performance.now() + 10_000;
+    try {
+      await this.router.retryUnresolvedChild(deadline);
+      if (!current() || this.router.hasUnresolvedChildren()) return false;
+      for (const id of this.router.threads) {
+        if (!current() || performance.now() >= deadline) return false;
+        const result = await this.request('thread/read', { threadId: id, includeTurns: false }, Math.max(1, Math.floor(deadline - performance.now())));
+        if (!current() || !isRecord(result) || !isRecord(result.thread) || result.thread.id !== id
+          || !isRecord(result.thread.status)) return false;
+        const status = result.thread.status;
+        if (status.type !== 'idle' && !(id !== this.router.rootId && status.type === 'notLoaded')) return false;
+        if (Array.isArray(status.activeFlags) && status.activeFlags.length) return false;
+      }
+      return current() && !this.router.hasUnresolvedChildren();
+    } catch { return false; }
+  }
+
   hasThread(id: string): boolean { return this.router.hasThread(id); }
   hasChild(parentId: string, id: string): boolean { return this.router.hasChild(parentId, id); }
   waitForChild(parentId: string, id: string): Promise<void> { return this.router.waitForChild(parentId, id); }
@@ -78,6 +103,7 @@ export class CodexDaemonClient {
         const threadId = isRecord(params) ? readString(params.threadId) : undefined;
         if (!threadId) throw new Error('Codex request belongs to an unavailable thread');
         const key = `${generation}:${threadId}:${id}`;
+        this.activityRevision++;
         const dispatch = new AbortController();
         this.pendingDispatches.set(key, dispatch);
         try {
@@ -99,6 +125,7 @@ export class CodexDaemonClient {
 
   private routeNotification(method: string, params: unknown): void {
     if (this.closed) return;
+    this.activityRevision++;
     const id = notificationThreadId(params);
     if (id && method === 'serverRequest/resolved' && isRecord(params)) {
       this.pendingDispatches.get(`${this.generation}:${id}:${params.requestId}`)?.abort(new CodexServerRequestCanceled('Codex request already resolved'));

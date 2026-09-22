@@ -10,6 +10,7 @@ export class CodexThreadRouter {
   rootId: string | undefined;
   private readonly children = new Map<string, string>();
   private readonly unresolvedChildren = new Set<string>();
+  private readonly tentativeChildren = new Set<string>();
   private readonly discoveries = new Map<string, Promise<boolean>>();
   private readonly buffered = new Map<string, Array<CodexRawNotification & { sequence: number }>>();
   private readonly origins = new Map<string, CodexThreadOrigin>();
@@ -27,6 +28,15 @@ export class CodexThreadRouter {
 
   /** Failed child discovery remains unsafe until authoritative child state arrives. */
   hasUnresolvedChildren(): boolean { return this.discoveries.size > 0 || this.unresolvedChildren.size > 0; }
+
+  async retryUnresolvedChild(deadline: number): Promise<void> {
+    if (this.closed || this.discoveries.size) return;
+    const id = this.unresolvedChildren.values().next().value;
+    if (!id) return;
+    // Rotate failures so one unavailable child cannot starve the rest of the family.
+    this.unresolvedChildren.delete(id); this.unresolvedChildren.add(id);
+    await this.discover(id, [], deadline);
+  }
 
   async waitForChild(parentId: string, id: string): Promise<void> {
     if (this.closed) throw new Error('Codex runtime is closed');
@@ -49,7 +59,10 @@ export class CodexThreadRouter {
     const thread = isRecord(params) && isRecord(params.thread) ? params.thread : undefined;
     const id = notificationThreadId(params);
     const parent = thread && parentThreadId(thread);
-    if (id && parent && this.threads.has(parent) && !this.children.has(id)) this.unresolvedChildren.add(id);
+    if (id && parent && this.threads.has(parent) && !this.children.has(id)) {
+      this.unresolvedChildren.add(id);
+      this.tentativeChildren.delete(id);
+    }
     if (!id) { this.callbacks.onNotification?.(method, params); return; }
     if (isRecord(params) && (method === 'item/started' || method === 'item/completed')) this.inspectItem(id, readString(params.turnId), params.item);
     if (this.threads.has(id)) { this.callbacks.onNotification?.(method, params); return; }
@@ -65,39 +78,45 @@ export class CodexThreadRouter {
     void this.discover(id).catch(() => undefined);
   }
 
-  inspectHistory(parentId: string, history: unknown): void {
+  inspectHistory(parentId: string, history: unknown, deferDiscovery = false): void {
     if (!isRecord(history) || !isRecord(history.thread) || !Array.isArray(history.thread.turns)) return;
     for (const turn of history.thread.turns) {
       if (!isRecord(turn) || !Array.isArray(turn.items)) continue;
-      for (const item of turn.items) this.inspectItem(parentId, readString(turn.id), item);
+      for (const item of turn.items) this.inspectItem(parentId, readString(turn.id), item, deferDiscovery);
     }
   }
 
-  inspectItem(parentId: string, turnId: string | undefined, item: unknown): void {
+  inspectItem(parentId: string, turnId: string | undefined, item: unknown, deferDiscovery = false): void {
     if (!isRecord(item)) return;
     if (item.type === 'subAgentActivity') {
       const id = readString(item.agentThreadId);
       if (!id || id === parentId) return;
       if (item.kind === 'started') this.recordOrigin(id, { parentThreadId: parentId, turnId, callId: readString(item.id) });
-      void this.discover(id).catch(() => undefined);
+      if (deferDiscovery && !this.threads.has(id) && !this.children.has(id) && !this.unresolvedChildren.has(id)) {
+        // Recent pages may contain only interactions; the original spawn can be on an older page.
+        this.tentativeChildren.add(id);
+        this.unresolvedChildren.add(id);
+      }
+      if (!deferDiscovery) void this.discover(id).catch(() => undefined);
       return;
     }
     if (item.type !== 'collabAgentToolCall' || !Array.isArray(item.receiverThreadIds)) return;
     for (const id of item.receiverThreadIds) {
       if (typeof id !== 'string') continue;
       if (item.tool === 'spawnAgent') this.recordOrigin(id, { parentThreadId: parentId, turnId, callId: readString(item.id), description: readString(item.prompt) });
-      if (item.tool === 'spawnAgent' || this.children.has(id)) void this.discover(id).catch(() => undefined);
+      if (!deferDiscovery && (item.tool === 'spawnAgent' || this.children.has(id))) void this.discover(id).catch(() => undefined);
     }
   }
 
   private recordOrigin(id: string, origin: CodexThreadOrigin): void {
     if (this.origins.has(id)) return;
     this.origins.set(id, origin);
+    this.tentativeChildren.delete(id);
     if (!this.children.has(id)) this.unresolvedChildren.add(id);
     if (this.children.get(id) === origin.parentThreadId) this.callbacks.onChildOrigin?.(id, origin);
   }
 
-  discover(id: string, ancestry: string[] = []): Promise<boolean> {
+  discover(id: string, ancestry: string[] = [], deadline?: number): Promise<boolean> {
     if (this.closed || ancestry.includes(id) || ancestry.length > 32) return Promise.resolve(false);
     if (this.threads.has(id)) return Promise.resolve(true);
     const pending = this.discoveries.get(id);
@@ -105,7 +124,7 @@ export class CodexThreadRouter {
     if (!this.discoveryOrder.has(id)) this.discoveryOrder.set(id, this.discoveryOrder.size);
     const generation = this.generation;
     let operation: Promise<boolean>;
-    operation = this.readChild(id, ancestry, generation).finally(() => {
+    operation = this.readChild(id, ancestry, generation, deadline).finally(() => {
       if (this.discoveries.get(id) === operation) {
         this.discoveries.delete(id);
         this.buffered.delete(id);
@@ -115,13 +134,34 @@ export class CodexThreadRouter {
     return operation;
   }
 
-  private async readChild(id: string, ancestry: string[], generation: number): Promise<boolean> {
-    const transport = this.transport();
+  private async readChild(id: string, ancestry: string[], generation: number, deadline?: number): Promise<boolean> {
+    const nativeTransport = this.transport();
+    const transport = { request: (method: string, params?: unknown) => {
+      if (deadline === undefined) return nativeTransport.request(method, params);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0 || method === 'thread/read' && isRecord(params) && params.includeTurns === true) {
+        throw new Error('Idle child reconciliation requires bounded paginated history.');
+      }
+      return nativeTransport.request(method, params, Math.max(1, Math.floor(remaining)));
+    } };
+
     const metadata = await transport.request('thread/read', { threadId: id, includeTurns: false });
     if (generation !== this.generation || this.closed || !isRecord(metadata) || !isRecord(metadata.thread) || metadata.thread.id !== id) return false;
     const parentId = parentThreadId(metadata.thread);
-    if (!parentId || parentId === id) return false;
-    if (!this.threads.has(parentId) && !await this.discover(parentId, [...ancestry, id])) return false;
+    if (!parentId) {
+      const status = metadata.thread.status;
+      const source = metadata.thread.source;
+      // Missing ancestry fields are not evidence of a foreign thread. Require an explicit native root source.
+      if (!isRecord(status) || !['idle', 'active', 'notLoaded'].includes(String(status.type))
+        || typeof source !== 'string' || !['cli', 'vscode', 'exec', 'appServer'].includes(source)) return false;
+      // A complete metadata ancestry ending outside our loaded family proves a foreign reference.
+      for (const unrelated of [id, ...ancestry]) {
+        if (this.tentativeChildren.delete(unrelated)) this.unresolvedChildren.delete(unrelated);
+      }
+      return false;
+    }
+    if (parentId === id) return false;
+    if (!this.threads.has(parentId) && !await this.discover(parentId, [...ancestry, id], deadline)) return false;
     if (generation !== this.generation || this.closed) return false;
     this.unresolvedChildren.add(id);
     const previous = this.children.get(id);
@@ -139,6 +179,7 @@ export class CodexThreadRouter {
         requiresRefresh: this.overflowed.delete(id), discoveryOrder: this.discoveryOrder.get(id)!,
         origin: origin?.parentThreadId === parentId ? origin : undefined });
       this.unresolvedChildren.delete(id);
+      this.tentativeChildren.delete(id);
     };
     if (!loaded && thread.ephemeral === true && (!Array.isArray(thread.turns) || !thread.turns.length)) {
       handoff('unavailable');
@@ -167,7 +208,7 @@ export class CodexThreadRouter {
     }
     if (generation !== this.generation) return false;
     this.threads.add(id);
-    this.inspectHistory(id, history);
+    this.inspectHistory(id, history, deadline !== undefined);
     return true;
   }
 }

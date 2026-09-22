@@ -247,11 +247,11 @@ it.runIf(executable)('dispatches persisted dynamic source tools through a real d
 }, 30_000);
 
 
-it.runIf(executable)('releases and resumes the Controller subscription while an independent native client keeps working', async () => {
+it.runIf(executable)('reconciles an unknown send and resumes after release while an independent native client keeps working', async () => {
   const f = await fixture();
   const provider = f.provider();
   const directory = createCodexSessionDirectory(provider, []);
-  const host = createAgentHostRuntime({ registrations: [{ adapter: provider, directory }], idleGraceMs: 100 });
+  const host = createAgentHostRuntime({ registrations: [{ adapter: provider, directory }], idleGraceMs: 100, idleReconcileMs: 100 });
   try {
     const desktop = await f.provider().createSession({ sessionId: 'desktop', cwd: f.home }); f.sessions.push(desktop);
     const stream = desktop.observe()[Symbol.asyncIterator]();
@@ -265,6 +265,16 @@ it.runIf(executable)('releases and resumes the Controller subscription while an 
     expect(lease).toBeDefined();
     const original = await directory.open(id);
     await expect.poll(() => provider.canReleaseSession(id)).toBe(true);
+    const operation = { operationId: '01234567-1234-4234-8234-123456789abc', kind: 'send_message' as const,
+      parameters: { text: 'Native message with lost acknowledgement' } };
+    let dispatches = 0;
+    const work = { dispatch: async () => {
+      dispatches++;
+      await lease!.agent.sendMessage('Native message with lost acknowledgement');
+      throw new Error('Simulated lost acknowledgement after native dispatch');
+    } };
+    await expect(host.executeOperation('native-test')(lease!.agent, operation, work)).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+    await until(stream, event => event.type === 'turn_completed');
     lease!.release();
     await expect.poll(async () => (await original.runtimeInfo()).status).toBe('closed');
     expect(f.daemon.exitCode).toBeNull();
@@ -272,6 +282,8 @@ it.runIf(executable)('releases and resumes the Controller subscription while an 
     await until(stream, event => event.type === 'turn_completed');
     const restored = await host.acquireSession('mobile');
     expect(restored!.agent.snapshot().payload.runtimeInfo.sessionId).toBe(id);
+    await expect(host.executeOperation('native-test')(restored!.agent, operation, work)).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+    expect(dispatches).toBe(1);
     const history = host.relay.requireAgent('mobile').fetchTimeline({ requestId: 'tail', agentId: 'mobile', direction: 'tail', limit: 100 });
     expect(JSON.stringify(history)).toContain('History before mobile sleep');
     expect(JSON.stringify(history)).toContain('Desktop continues while mobile is detached');

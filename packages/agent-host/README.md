@@ -317,8 +317,11 @@ also be unable to read its stored format; configure a compatible
 Host checks real paths, including symbolic links, before creating or importing
 sessions and before native input or settings mutations. Catalogs omit sessions
 outside those roots and sessions whose workspace cannot be established. Native
-permission settings are read-only to remote controllers; model controls remain
-available. These rules apply to the CLI. Embedders can provide the same trusted
+permission settings are read-only to remote controllers except for trusted shared
+Codex sessions. Those sessions accept permission changes from the web and publish
+native permission updates from other clients on Windows, macOS, and Linux.
+Native requirements and idle-session checks still apply; workspace admission
+remains enforced. Model controls remain available. These rules apply to the CLI. Embedders can provide the same trusted
 `executionPolicy` through `createAgentHostRuntime` or `createAgentHost`, and
 should also configure Codex/Claude providers with `restrictedNative: true` to
 enforce their native permission and sandbox boundaries.
@@ -326,7 +329,7 @@ enforce their native permission and sandbox boundaries.
 A workspace admission check is not filesystem isolation. The providers have
 different execution guarantees:
 
-- Codex starts and resumes threads with native `workspace-write` and approval
+- Private or explicitly restricted Codex starts and resumes threads with native `workspace-write` and approval
   policy `never`. Native sandbox escalation and additional permission grants are
   disabled. The adapter hides and rejects the permissions command and locks
   permission mutations even when a command interaction invokes them internally. Codex may still read

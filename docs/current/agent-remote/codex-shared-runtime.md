@@ -95,6 +95,10 @@ connections retain their native argument semantics.
   rejection unless full control is enabled. It does not change Claude or Copilot restrictions.
   A connected client cannot independently sandbox work already running in a
   shared thread. The existing Host workspace/grant checks remain in effect.
+- Trusted shared Codex sessions allow web permission changes on Windows, macOS,
+  and Linux. The Host does not add a local permission lock. Native requirements
+  and idle-session checks still apply. Confirmed native permission changes from
+  another client update the web controls through the shared daemon notifications.
 - Closing a Remote session closes its connection, not the daemon or another
   subscriber. Native daemon lifetime and idle thread unloading remain native
   policies. The Provider reconnects automatically after a socket failure while

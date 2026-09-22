@@ -714,6 +714,8 @@ textarea {
 .lab-host-pairing { display: grid; grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; gap: 9px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--obs-border); }
 .lab-host-pairing > *, .lab-pairing-details > * { min-width: 0; }
 .lab-host-pairing select, .lab-host-pairing textarea { min-width: 0; max-width: 100%; }
+.lab-host-selector-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 3px; }
+.lab-host-pairing .lab-host-selector-scroll select { width: max-content; min-width: 100%; max-width: none; white-space: nowrap; }
 .lab-host-pairing > label { font-size: .85rem; color: var(--obs-text-secondary); }
 .lab-pair-host { width: 100%; }
 .lab-pairing-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }

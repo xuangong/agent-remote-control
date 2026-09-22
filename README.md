@@ -32,6 +32,8 @@ The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages 
 ## Install Agent Host as a standalone command
 
 Use [install.sh](install.sh) on macOS, Linux, or from a shell inside a Docker container.
+On Windows, use [install.ps1](install.ps1): `irm https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.ps1 | iex`.
+Both installers offer upgrade, clean reinstall, or cancellation for an existing installation.
 It installs a verified GitHub release and guides pairing; existing installations offer
 Update, Clean install, or Cancel. See the [installation guide](docs/controller-install.md)
 for requirements, streamed installation and persistent container state.

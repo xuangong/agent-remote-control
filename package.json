@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Independent agent session control and protocol workbench.",
   "scripts": {
+    "test:installer:windows": "node scripts/run-tests.mjs installer-windows",
     "start": "node scripts/start.mjs",
     "dev": "node scripts/dev.mjs",
     "debug:dsh": "node scripts/dsh-debug.mjs",

@@ -4,6 +4,61 @@ Run `install.sh` on macOS, Linux (x64/ARM64), or **inside an existing Docker
 container**. First installation guides pairing. Existing installations offer
 **Update**, **Clean install**, or **Cancel** (the default).
 
+On Windows, use `install.ps1` with the same installation and update choices.
+
+## Windows PowerShell
+
+Windows PowerShell 5.1 and PowerShell 7 are supported. Install Node.js 22 or newer
+with npm first; `curl.exe` and `tar.exe` must also be available. No administrator
+terminal or execution-policy change is required for the pipeline entry:
+
+```powershell
+irm https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.ps1 | iex
+```
+
+For options, invoke the downloaded script as a script block:
+
+```powershell
+$installer = irm https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.ps1
+& ([scriptblock]::Create($installer)) -InstallCodex
+# Existing installation: approve an upgrade, or explicitly reinstall the runtime.
+& ([scriptblock]::Create($installer)) -Yes
+& ([scriptblock]::Create($installer)) -Clean -Yes
+```
+
+Releases built with this installer also include `install.ps1` as a download asset,
+at `https://github.com/xuangong/agent-remote-control/releases/latest/download/install.ps1`.
+Earlier releases without this asset require the repository URL above.
+
+First installation asks for the Relay, Host name and a hidden one-time pairing key.
+Existing installations show **Update / Clean install / Cancel**, defaulting to
+**Cancel**. `-NonInteractive` never prompts; use `-Yes` to approve an update or
+`-Clean -Yes` to approve a reinstall. Both delegate to the existing Controller's
+update command and preserve its identity, settings and history. A stopped Controller
+must be started first. A legacy Controller without the update command requires a
+one-time launcher upgrade; the installer will not silently replace it.
+
+Default locations are `%LOCALAPPDATA%\agent-remote-controller` for packages,
+its `bin` subdirectory for commands, and `%USERPROFILE%\.agent-remote-control\agent-host`
+for state. `-Prefix`, `-BinDir`, and `-StateDir` accept absolute paths. The generated
+command respects `AGENT_HOST_STATE_DIR` at runtime. Existing wrappers keep their
+state directory unless explicitly overridden. The script prints the directory to
+add to your user PATH; it does not edit PATH permanently. Use the generated
+`agent-remote-controller.cmd` directly when local PowerShell script execution is disabled.
+
+For automation, use `-KeyFile C:\private\pairing-key` with `-NonInteractive`, or
+download the script before using `-KeyStdin`. Never put a pairing key in command
+arguments. `-NoStart` installs without a pairing key or service startup. `-Foreground`
+keeps the Controller in the current terminal. `-Version X.Y.Z` selects a release.
+Selected providers must be installed; `-InstallCodex` optionally installs the same
+pinned Codex version as the POSIX installer in a private directory.
+
+The Windows installer verifies the release manifest, platform, Node version,
+SHA-256 and package identity before activation. npm lifecycle scripts are disabled.
+Temporary directory locks are retried during installation. Pairing credentials are
+never written into command wrappers, and the calling shell's Host environment is
+restored on exit.
+
 ## Requirements
 
 - A POSIX shell (`sh`), curl, tar, SHA-256 tools, Node.js 22 or newer and npm in the
@@ -153,6 +208,12 @@ successful enrollment. `--no-start` installs the command without requesting a ke
 starting services. `--version X.Y.Z` selects a specific published release.
 
 ## Validation
+
+`pnpm test:installer:windows` runs the Windows PowerShell installer against real
+local npm archives and generated commands, with isolated download and service
+fixtures. It covers upgrade/reinstall consent, default cancellation, protected state,
+checksum and identity failures, pipe execution, and paths with spaces and Unicode.
+It does not pair or restart the user's Host.
 
 `pnpm test:setup` covers fresh installation using real local npm archives, disabled
 lifecycle scripts, invalid releases, hidden terminal input, explicit update/clean

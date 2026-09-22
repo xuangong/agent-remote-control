@@ -4,6 +4,7 @@ import { packageManager } from './lib/package-manager.mjs';
 const mode = process.argv[2] ?? 'unit';
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
+  'installer-windows': ['exec', 'node', '--test', '--test-timeout=180000', 'scripts/controller/install-windows.test.mjs'],
   'preview-browser': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vitest', 'run', '--config=vitest.preview.config.ts', '--testTimeout=30000', '--hookTimeout=15000'],
   'codex-shared': ['--filter', '@orchardworks/agent-provider-codex', 'exec', 'vitest', 'run', 'src/shared-runtime.local.test.ts', '--testTimeout=30000', '--hookTimeout=15000', '--maxWorkers=1'],
   'host-package': ['exec', 'node', '--test', '--test-timeout=180000', 'scripts/agent-host-cli.test.mjs', 'scripts/agent-host-package.test.mjs'],

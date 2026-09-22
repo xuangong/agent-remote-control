@@ -89,6 +89,7 @@ jobs:
             dist/agent-remote-controller/*.tgz
             dist/agent-remote-controller/controller-release.json
             dist/agent-remote-controller/install.sh
+            dist/agent-remote-controller/install.ps1
           if-no-files-found: error
           retention-days: 7
 
@@ -113,5 +114,5 @@ jobs:
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
             --title "Controller ${RELEASE_TAG#controller-v}" \
             --notes 'Independent Controller updates with owner confirmation, verified packages and startup rollback. See docs/controller-updates.md for compatibility and bootstrap instructions.' \
-            package/*.tgz package/controller-release.json package/install.sh
+            package/*.tgz package/controller-release.json package/install.sh package/install.ps1
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

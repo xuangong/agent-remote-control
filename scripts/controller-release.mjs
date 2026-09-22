@@ -16,3 +16,4 @@ await writeFile(new URL('dist/agent-remote-controller/controller-release.json', 
 console.log(`Created controller-v${version} manifest for ${revision}`);
 
 await copyFile(new URL('install.sh', root), new URL('dist/agent-remote-controller/install.sh', root));
+await copyFile(new URL('install.ps1', root), new URL('dist/agent-remote-controller/install.ps1', root));

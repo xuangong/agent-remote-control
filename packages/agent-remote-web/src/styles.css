@@ -489,6 +489,53 @@
 .agent-form-receipt dd, .agent-approval-context dd { margin: 3px 0 0; overflow-wrap: anywhere; }
 .agent-answer-hidden { color: var(--agent-muted); font-style: italic; }
 
+.agent-tool-approval { gap: 16px; border-left-width: 1px; }
+.agent-tool-approval .agent-approval-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.agent-approval-heading h3 { font-size: 16px; line-height: 1.4; }
+.agent-approval-tool-name { min-width: 0; color: var(--agent-muted); font-size: 12px; overflow-wrap: anywhere; }
+.agent-approval-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.agent-approval-details p { margin: 0; }
+.agent-approval-reason { max-width: 75ch; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-approval-label { color: var(--agent-muted); font-size: 12px; }
+.agent-approval-command { display: grid; min-width: 0; gap: 5px; }
+.agent-approval-command pre { max-height: 12rem; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--agent-rule); border-radius: 6px; background: var(--agent-surface-muted); color: var(--agent-ink); font: 12px/1.6 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.agent-approval-command code { font: inherit; }
+.agent-approval-details .agent-approval-context { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 12px; }
+.agent-approval-context > div { min-width: 0; max-width: 100%; }
+.agent-approval-directory { flex-basis: 100%; }
+.agent-approval-directory code { font-size: 11px; }
+.agent-approval-actions { align-items: center; gap: 8px; }
+.agent-approval-actions:empty { display: none; }
+.agent-tool-approval .agent-interaction-actions button { min-height: 36px; padding: 7px 12px; border-radius: 6px; font-size: 13px; font-weight: 550; white-space: nowrap; }
+.agent-approval-actions button[data-scope="once"] { border-color: var(--agent-signal); color: var(--agent-action-text); background: var(--agent-surface-selected); }
+.agent-approval-rules { min-width: 0; padding-top: 4px; border-top: 1px solid var(--agent-rule); }
+.agent-approval-rules summary { width: fit-content; max-width: 100%; box-sizing: border-box; padding-block: 8px; color: var(--agent-muted); font-size: 12px; cursor: pointer; }
+.agent-approval-rule-count { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.agent-approval-rules ul { display: grid; gap: 12px; margin: 4px 0 0; padding: 0; list-style: none; }
+.agent-approval-rules li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 16px; }
+.agent-approval-rules li + li { padding-top: 12px; border-top: 1px solid var(--agent-rule); }
+.agent-approval-rules p, .agent-approval-applied-rule p { margin: 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-approval-submitting { color: var(--agent-muted); font-size: 12px; }
+.agent-tool-approval-completed { min-width: 0; gap: 0; border-left: 0; }
+.agent-approval-receipt-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 36px; padding: 4px 0; border: 0; border-radius: 4px; color: var(--agent-muted); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.agent-approval-receipt-toggle > .agent-timeline-title { flex-shrink: 0; font-weight: 600; }
+.agent-approval-receipt-toggle > .agent-approval-tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-approval-result { flex-shrink: 0; margin-left: auto; color: var(--agent-ink); font-size: 12px; }
+.agent-approval-receipt-details:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 8px 0 12px; }
+.agent-approval-receipt-details > p { margin: 0; overflow-wrap: anywhere; }
+.agent-approval-applied-rule { display: grid; gap: 4px; }
+.agent-approval-rules summary:focus-visible,
+.agent-approval-command pre:focus-visible,
+.agent-approval-receipt-toggle:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .agent-tool-approval .agent-interaction-actions button,
+  .agent-approval-receipt-toggle { min-height: 44px; }
+  .agent-approval-rules summary { padding-block: 12px; }
+}
+@media (max-width: 480px) {
+  .agent-approval-rules li { grid-template-columns: minmax(0, 1fr); }
+}
+
 .agent-session-controls { margin-bottom: 8px; min-width: 0; }
 .agent-session-toolbar { display: flex; gap: 6px; flex-wrap: wrap; }
 .agent-session-toolbar button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

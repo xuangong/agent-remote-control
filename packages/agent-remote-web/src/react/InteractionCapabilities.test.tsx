@@ -59,6 +59,8 @@ it('renders a policy choice without inventing other approval scopes', async () =
   const request = { kind: 'tool_approval', requestId: 'tool', toolCallId: 'call', toolName: 'command', summary: 'Connect to docs', detail: { type: 'other', description: 'Network request' }, allowedDecisions: ['allow', 'cancel'], allowScopes: ['policy'], policies: [{ policyId: 'allow-host', description: 'Allow docs.example.com for future requests' }] } as AgentInteractionRequest;
   const container = await render(<InteractionPanel request={request} onResponse={respond} />);
   expect(container.querySelector('[data-scope="session"]')).toBeNull();
+  expect(container.querySelector('[data-scope="once"]')).toBeNull();
+  await act(async () => container.querySelector('summary')!.click());
   await act(async () => container.querySelector<HTMLButtonElement>('[data-policy-id="allow-host"]')!.click());
   expect(respond).toHaveBeenCalledWith('tool', { kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: 'allow-host' });
 });

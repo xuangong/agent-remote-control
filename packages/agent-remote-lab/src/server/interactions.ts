@@ -101,7 +101,8 @@ if (entry === import.meta.url) {
   });
   const sockets = new Set<Duplex>();
   server.http.server.on('upgrade', (request, socket) => {
-    if (!request.url?.startsWith('/v1/sessions/')) return;
+    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    if (!path.startsWith('/v1/sessions/') && path !== '/v1/session-channel') return;
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });

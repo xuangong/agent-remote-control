@@ -416,7 +416,14 @@ async function stop(): Promise<void> {
     const running = state && processAlive(state.pid);
     const supervisor = loginStartup();
     if (supervisor?.kind === 'windows' || supervisor?.kind === 'launchd' || (supervisor?.kind === 'systemd' && (state?.supervisor === 'systemd' || await supervisor.available()))) await supervisor.stop();
-    if (state && await authenticateSavedDaemon(state)) await request(state, { action: 'stop' });
+    if (state && await authenticateSavedDaemon(state)) {
+      try { await request(state, { action: 'stop' }); }
+      catch (error) {
+        // A supervisor can finish shutdown between authentication and the stop RPC.
+        // Only treat the request failure as success after observing process exit.
+        try { await waitForDaemonExit(state); } catch { throw error; }
+      }
+    }
     if (running) await waitForDaemonExit(state);
     process.stdout.write('Agent Host daemon is stopped. Login startup preference is unchanged.\n');
   });

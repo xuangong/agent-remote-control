@@ -6,6 +6,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [
-    { "pattern": "install.xianliao.de5.net", "custom_domain": true }
+    { "pattern": "install.xianliao.de5.net", "custom_domain": true },
+    { "pattern": "wininstall.xianliao.de5.net", "custom_domain": true }
   ]
 }

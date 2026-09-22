@@ -46,22 +46,23 @@ it('creates a fresh operation when discovery advances to another release', async
   expect(requests[1]!.operationId).not.toBe(requests[0]!.operationId);
 });
 
-it('discovers Windows updates and submits the confirmed version only for a managed installation', async () => {
-  const windows: RemoteHost = { ...host, id: 'windows', name: 'Windows PC', controller: { ...host.controller!, platform: 'win32', arch: 'x64' } };
-  const legacy: RemoteHost = { ...windows, id: 'legacy', name: 'Legacy Windows', controller: undefined };
-  const latest = { ...release, platforms: ['darwin-arm64', 'win32-x64'] };
+it.each(['win32-x64', 'linux-x64', 'linux-arm64'])('discovers %s updates and confirms only managed installations', async platform => {
+  const [os, arch] = platform.split('-');
+  const managed: RemoteHost = { ...host, id: platform, name: platform, controller: { ...host.controller!, platform: os!, arch: arch! } };
+  const legacy: RemoteHost = { ...managed, id: 'legacy', name: 'Legacy Host', controller: undefined };
+  const latest = { ...release, platforms: ['darwin-arm64', platform] };
   let status: ControllerUpdateStatus = { phase: 'idle', updatedAt: 0 };
-  expect(controllerUpdateCoverage(latest, [windows, legacy]).eligible).toEqual([windows]);
-  const service: HostPairingService = { hosts: async () => ({ hosts: [windows, legacy] }), pair: async () => { throw new Error('unused'); },
+  expect(controllerUpdateCoverage(latest, [managed, legacy]).eligible).toEqual([managed]);
+  const service: HostPairingService = { hosts: async () => ({ hosts: [managed, legacy] }), pair: async () => { throw new Error('unused'); },
     controllerRelease: async () => ({ release: latest }),
     controllerUpdate: vi.fn(async (_id, input) => input ? status = { ...input, phase: 'waiting', updatedAt: 1 } : status) };
-  const container = await render(<ControllerUpdates service={service} hosts={[windows, legacy]} />);
+  const container = await render(<ControllerUpdates service={service} hosts={[managed, legacy]} />);
   expect(container.textContent).toContain('0.2.0 available');
   await act(async () => container.querySelector('button')!.click());
   expect(container.textContent).toContain('Install the release launcher once');
   await act(async () => button(container, 'Update Host').click());
   expect(vi.mocked(service.controllerUpdate!).mock.calls.filter(([, input]) => input)).toEqual([]);
   await act(async () => button(container, 'Confirm update').click());
-  expect(service.controllerUpdate).toHaveBeenCalledWith('windows', { version: '0.2.0', operationId: expect.any(String) });
+  expect(service.controllerUpdate).toHaveBeenCalledWith(platform, { version: '0.2.0', operationId: expect.any(String) });
   expect(container.textContent).toContain('Waiting for a safe restart');
 });

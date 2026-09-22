@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, cp, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,9 @@ const exec = promisify(execFile);
 it('runs the Linux CLI without systemd, reconnects, and persists the manual startup preference', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-linux-cli-'));
   const state = join(directory, 'state');
+  const launcher = join(directory, 'launcher.mjs');
+  await cp(fileURLToPath(new URL('../../../scripts/controller-launcher.mjs', import.meta.url)), launcher);
+  await symlink(fileURLToPath(new URL('../dist/cli.js', import.meta.url)), join(directory, 'cli.js'));
   const bin = join(directory, 'bin'); await mkdir(bin);
   // Exercise Linux CLI branches on macOS too; this does not emulate the Linux kernel or service manager.
   const platform = join(directory, 'platform.mjs');
@@ -23,7 +26,7 @@ it('runs the Linux CLI without systemd, reconnects, and persists the manual star
   const env = { HOME: directory, PATH: `${bin}:${process.env.PATH}`, NODE_OPTIONS: `--import=${platform}`,
     AGENT_HOST_STATE_DIR: state, AGENT_HOST_PROVIDERS: 'codex', AGENT_HOST_CODEX: codex, AGENT_HOST_WORKSPACE: directory };
   const run = (args: string[], extra: Record<string, string> = {}) => exec(process.execPath,
-    [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), ...args], { cwd: directory, env: { ...env, ...extra }, timeout: 15000 });
+    [launcher, ...args], { cwd: directory, env: { ...env, ...extra }, timeout: 15000 });
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening');
   let registrations = 0;
@@ -42,6 +45,9 @@ it('runs the Linux CLI without systemd, reconnects, and persists the manual star
     const connection = { AGENT_HOST_SERVER: `http://127.0.0.1:${address.port}`, AGENT_HOST_REMOTE_KEY: 'linux-cli-test-key' };
     const started = await run(['start'], connection);
     expect(started.stderr).toContain('manual background daemon');
+    const daemon = JSON.parse(await readFile(join(state, 'daemon.json'), 'utf8'));
+    expect(daemon.launcherPid).toEqual(expect.any(Number));
+    expect(daemon.launcherPid).not.toBe(daemon.pid);
     await expect.poll(async () => (await run(['status'])).stdout).toContain('uplink: registered; supervisor: manual');
     expect((await run(['autostart', 'status'])).stdout).toContain('systemd user manager unavailable');
     await expect(run(['autostart', 'enable'])).rejects.toThrow(/systemd user manager is unavailable/);

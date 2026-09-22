@@ -55,3 +55,62 @@ Run `pnpm test:controller-updates` after building workspace dependencies. It cov
 real child replacement and rollback, graceful Controller shutdown over IPC with a
 real local WebSocket Relay, restart admission, Windows website discovery and owner-only
 update requests through the Worker HTTP/WebSocket boundary.
+
+## Linux and containers
+
+Linux x64 and ARM64 use the same release discovery, owner confirmation, verified
+installation, safe restart admission and registration-based rollback. Releases must
+list `linux-x64` or `linux-arm64` for the Host. Node 22 or newer and npm are required;
+the updater supports official Node installations and distribution npm layouts such as
+Debian/Ubuntu's `/usr/share/nodejs/npm`. It runs npm with the current Node executable
+and disables lifecycle scripts. No root privileges are required for remote updates:
+packages are staged inside the Host's writable state directory.
+
+For a legacy Linux installation, finish private tasks and pending approvals, then
+use the same user and `AGENT_HOST_STATE_DIR` to bootstrap the published launcher:
+
+```sh
+agent-remote-controller stop
+# Replace X.Y.Z with the selected published release version.
+controller_version=X.Y.Z
+npm install --global --ignore-scripts "https://github.com/xuangong/agent-remote-control/releases/download/controller-v${controller_version}/orchardworks-agent-remote-controller-${controller_version}.tgz"
+agent-remote-controller start
+agent-remote-controller status
+```
+
+Use a Node installation whose global prefix is writable by this user. Retain the
+state directory and pairing credentials. Starting the packaged command rewrites an
+enabled systemd user service to use the stable launcher. A disabled autostart
+preference remains disabled. Without a systemd user manager, `start` can run the
+launcher as a manual background process; it still supports remote updates, but has
+no service-manager crash recovery. Development builds require a clean published
+release before the website can offer remote updates.
+
+In Docker, keep `foreground` as the command. The container entrypoint rejects
+`start`, `_serve` and `autostart`, which would introduce a competing daemon or service
+manager. The process chain is container init → entrypoint → stable launcher →
+Controller. An update replaces only the Controller child; the container restart
+policy handles exit of the outer process. SIGTERM is forwarded through the chain for
+graceful shutdown. Keep a stop grace period of at least 30 seconds, as in the supplied
+Compose file.
+
+Persist `/data` (including `/data/host/controller-updates`) as a writable volume owned
+by the container user. The launcher restores the selected version after container
+restart or recreation with that volume. Do not remove the volume, run npm globally
+inside a running container, or restart the container merely to apply a website update.
+A read-only image filesystem is compatible if the state volume, npm cache and temporary
+directory remain writable. GitHub and npm registry access are required. To bootstrap
+a legacy image, rebuild it with a published launcher package and recreate the container
+with the existing volumes. Website updates change the Controller package; Node,
+native agents and the base image remain managed through image deployment.
+
+Once bootstrapped, Linux Hosts appear under **Controller updates → Update Host →
+Confirm update**, including eligible Hosts in batch updates. Publishing a new GitHub
+release remains separate from requesting installation on a Host.
+
+`pnpm test:controller-updates` covers Linux website eligibility, real npm installation
+without lifecycle scripts, manual launcher startup, container-entrypoint child
+replacement and rollback, and persisted selection after restarting the entrypoint.
+`pnpm test:setup` covers rejection of container background commands. The container
+process tests run on Linux without requiring a Docker daemon; they do not validate
+Docker volume mounts or an actual systemd user manager.

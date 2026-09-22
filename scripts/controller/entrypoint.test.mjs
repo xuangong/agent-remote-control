@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -20,3 +23,11 @@ test('uses a secret file initially and saved device credentials on restart', { t
     await assert.rejects(containerEnvironment({ ...input, AGENT_HOST_SERVER: 'https://different.example' }), /another Relay/);
   } finally { await rm(root, { force: true, recursive: true }); }
 });
+
+for (const command of ['start', '_serve', 'autostart']) {
+  test(`rejects ${command} under the container supervisor`, { timeout: 5000 }, async () => {
+    await assert.rejects(promisify(execFile)(process.execPath,
+      [fileURLToPath(new URL('./entrypoint.mjs', import.meta.url)), command], { timeout: 3000 }),
+    error => error.code === 1 && error.stderr.includes('Containers must use foreground'));
+  });
+}

@@ -1,16 +1,22 @@
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createControllerUpdater, installControllerRelease } from './controller-update.js';
+import { controllerNpm, createControllerUpdater, installControllerRelease } from './controller-update.js';
 const roots: string[] = [];
 afterEach(async () => { vi.useRealTimers(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function directory() { const root = await mkdtemp(join(tmpdir(), 'controller-update-')); roots.push(root); return root; }
 const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true };
 const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'b'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', sha256: 'c'.repeat(64), nodeMajor: 22, platforms: ['darwin-arm64'] };
-it('stages once, waits for safe restart and preserves operation identity across retries', async () => {
+it.each(['darwin-arm64', 'win32-x64', 'linux-x64', 'linux-arm64'])('stages %s once and waits for safe restart across retries', async platform => {
+  const [os, arch] = platform.split('-');
+  const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: os!, arch: arch!, nodeMajor: 22, remoteUpdate: true };
+  const supportedRelease = { ...release, platforms: [platform] };
   const stateDir = await directory(); let safe = false; let installations = 0; const restarted: string[] = [];
-  const updater = createControllerUpdater({ stateDir, identity, release: async () => release,
+  const updater = createControllerUpdater({ stateDir, identity, release: async () => supportedRelease,
     install: async () => { installations++; }, beginRestart: () => safe, restart: version => { restarted.push(version); } });
   try {
     await updater.request('0.2.0', 'operation-one');
@@ -81,3 +87,41 @@ it('accepts a later version after the launcher settles a candidate observed whil
     await expect.poll(async () => (await updater.status()).phase).toBe('waiting');
   } finally { await updater.close(); }
 });
+
+it.each(['bin/node_modules/npm', 'lib/node_modules/npm', 'share/nodejs/npm', 'share/npm'])(
+  'finds npm in the %s installation layout without relying on PATH', async layout => {
+    const root = await directory();
+    const npm = join(root, layout, 'bin/npm-cli.js');
+    await mkdir(join(root, layout, 'bin'), { recursive: true });
+    await writeFile(npm, '');
+    expect(await controllerNpm(join(root, 'bin/node'))).toBe(npm);
+  });
+it('fails explicitly when the Node installation has no npm', async () => {
+  await expect(controllerNpm(join(await directory(), 'bin/node'))).rejects.toThrow('Install npm');
+});
+
+it('installs a verified package without lifecycle scripts and preserves the active version', async () => {
+  const root = await directory();
+  const source = join(root, 'source');
+  await mkdir(join(source, 'dist'), { recursive: true });
+  await writeFile(join(source, 'package.json'), JSON.stringify({
+    name: '@orchardworks/agent-remote-controller', version: release.version,
+    scripts: { preinstall: 'node -e "process.exit(99)"', postinstall: 'node -e "process.exit(99)"' },
+  }));
+  await writeFile(join(source, 'build-info.json'), JSON.stringify({ version: release.version, revision: release.revision, dirty: false }));
+  await writeFile(join(source, 'dist/cli.js'), "console.log('0.2.0');");
+  const npm = await controllerNpm();
+  await promisify(execFile)(process.execPath, [npm, 'pack', '--offline', '--ignore-scripts', '--pack-destination', root],
+    { cwd: source, timeout: 10000 });
+  const bytes = await readFile(join(root, release.asset));
+  const verified = { ...release, sha256: createHash('sha256').update(bytes).digest('hex') };
+  await mkdir(join(root, 'controller-updates'));
+  await writeFile(join(root, 'controller-updates/current.json'), '{"version":"0.1.0"}');
+  const fetcher = vi.fn(async () => new Response(bytes));
+  await installControllerRelease(root, verified, fetcher as typeof fetch);
+  const installed = join(root, 'controller-updates/packages', release.version, 'node_modules/@orchardworks/agent-remote-controller');
+  expect(JSON.parse(await readFile(join(installed, 'build-info.json'), 'utf8'))).toMatchObject({ revision: release.revision, dirty: false });
+  expect(await readFile(join(root, 'controller-updates/current.json'), 'utf8')).toBe('{"version":"0.1.0"}');
+  await installControllerRelease(root, verified, fetcher as typeof fetch);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+}, 15000);

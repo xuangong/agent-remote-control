@@ -16,6 +16,20 @@ export async function controllerIdentity(moduleUrl: string): Promise<ControllerI
       nodeMajor: Number(process.versions.node.split('.')[0]), remoteUpdate: !info.dirty && process.env.AGENT_HOST_MANAGED_UPDATES === '1' && !!process.send };
   } catch { return undefined; }
 }
+/** Resolve npm from the Node installation, including distribution-managed Linux layouts. */
+export async function controllerNpm(nodePath = process.execPath): Promise<string> {
+  const bin = dirname(nodePath);
+  const candidates = [join(bin, 'node_modules/npm/bin/npm-cli.js'),
+    resolve(bin, '../lib/node_modules/npm/bin/npm-cli.js'),
+    resolve(bin, '../share/nodejs/npm/bin/npm-cli.js'),
+    resolve(bin, '../share/npm/bin/npm-cli.js')];
+  for (const path of candidates) {
+    try { await access(path); return path; } catch (error) {
+      if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    }
+  }
+  throw new Error('npm is unavailable in this Node installation. Install npm before updating this Controller.');
+}
 export async function installControllerRelease(stateDir: string, release: ControllerRelease, fetcher: typeof fetch = fetch): Promise<void> {
   const root = join(stateDir, 'controller-updates/packages'); await mkdir(root, { recursive: true, mode: 0o700 });
   const target = join(root, release.version);
@@ -37,10 +51,7 @@ export async function installControllerRelease(stateDir: string, release: Contro
     const bytes = Buffer.concat(chunks);
     if (createHash('sha256').update(bytes).digest('hex') !== release.sha256) throw new Error('Controller package checksum verification failed.');
     const archive = join(stage, release.asset); await writeFile(archive, bytes, { mode: 0o600 });
-    const npmPaths = [join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), resolve(dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js')];
-    let npm: string | undefined;
-    for (const path of npmPaths) { try { await access(path); npm = path; break; } catch {} }
-    if (!npm) throw new Error('npm is unavailable beside Node. Install npm before updating this Controller.');
+    const npm = await controllerNpm();
     try { await exec(process.execPath, [npm, 'install', '--prefix', stage, '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', archive],
       { timeout: 240000, maxBuffer: 1024 * 1024, windowsHide: true }); }
     catch { throw new Error('Controller package installation failed. Check Host network and npm access, then retry.'); }

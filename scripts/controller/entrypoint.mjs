@@ -27,8 +27,11 @@ export async function containerEnvironment(input) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    const env = await containerEnvironment(process.env);
     const args = process.argv.slice(2);
+    if (['start', '_serve', 'autostart'].includes(args[0])) {
+      throw new Error('Containers must use foreground. The container supervisor owns startup; the release launcher owns Controller updates.');
+    }
+    const env = await containerEnvironment(process.env);
     const child = spawn('agent-remote-controller', args.length ? args : ['foreground'], { env, stdio: 'inherit' });
     process.on('SIGTERM', () => child.kill('SIGTERM'));
     process.on('SIGINT', () => child.kill('SIGINT'));

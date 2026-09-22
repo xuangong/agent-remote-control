@@ -120,8 +120,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       return directory.create({ ...input, cwd });
     },
     async open(nativeSessionId) {
-      const summary = (await directory.list()).find(entry => entry.nativeSessionId === nativeSessionId);
-      await allowedWorkspace(policy, summary?.workspace);
+      await checkSource(nativeSessionId);
       return protect(await directory.open(nativeSessionId));
     },
     ...(directory.openChild ? { async openChild(parent: string, child: string) { return protect(await directory.openChild!(parent, child)); } } : {}),

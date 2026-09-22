@@ -46,6 +46,33 @@ it('locks permission controls in runtime and events while allowing model changes
   await session.setSessionSetting!('model', 'large'); expect(f.calls).toEqual(['open', 'model']);
   f.info.cwd = f.outside; await expect(session.sendMessage('hello')).rejects.toThrow(/workspace/i);
 });
+it('opens an allowed session by authoritative workspace metadata even when absent from discovery', async () => {
+  const f = await fixture();
+  const directory = protectHostDirectory({ ...f.source,
+    list() { throw new Error('Opening a known session must not scan the catalog.'); },
+    async sessionWorkspace(id) { expect(id).toBe('older-session'); return f.allowed; },
+  }, f.policy!);
+  const session = await directory.open('older-session');
+  expect((await session.runtimeInfo()).cwd).toBe(f.allowed);
+  expect(f.calls).toEqual(['open']);
+});
+
+it('rejects missing or disallowed authoritative workspaces even when discovery says allowed', async () => {
+  const f = await fixture();
+  for (const cwd of [undefined, f.outside, join(f.allowed, 'escape')]) {
+    const directory = protectHostDirectory({ ...f.source, async sessionWorkspace() { return cwd; } }, f.policy!);
+    await expect(directory.open('session')).rejects.toThrow(/workspace/i);
+  }
+  expect(f.calls).toEqual([]);
+});
+
+it('rechecks the resumed workspace after an allowed metadata lookup', async () => {
+  const f = await fixture();
+  const directory = protectHostDirectory({ ...f.source, async sessionWorkspace() { return f.allowed; } }, f.policy!);
+  f.info.cwd = f.outside;
+  await expect(directory.open('session')).rejects.toThrow(/workspace/i);
+  expect(f.calls).toEqual(['open', 'dispose']);
+});
 it('requires explicit local full-control opt-out and masks management secrets across inherited environment merges', async () => {
   expect(await createHostExecutionPolicy({ AGENT_HOST_TRUSTED_FULL_CONTROL: '1' })).toBeUndefined();
   const env = sanitizeNativeEnvironment({ AGENT_HOST_REMOTE_KEY: 'remote', AGENT_HOST_MANAGEMENT_TOKEN: 'management', AGENT_REMOTE_GATEWAY_CLIENT_SECRET: 'gateway',

@@ -275,3 +275,51 @@ test('recognizes a Home Screen launch without offering redundant fullscreen cont
   await expect(settings.getByRole('button', { name: 'Enter full screen' })).toHaveCount(0);
   await expect(settings.getByText('Open without the address bar')).toHaveCount(0);
 });
+
+
+test('removes the home-indicator inset above the keyboard and restores it after dismissal', async ({ page, context }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { bottom: 34 } });
+  await page.addInitScript(() => {
+    const viewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  });
+  await openSession(page);
+  const pane = page.locator('.lab-primary-conversation');
+  const shell = page.locator('.lab-shell');
+  const dock = pane.locator('.lab-composer-dock');
+  const input = pane.getByTestId('prompt-input');
+  const gap = () => dock.locator('.agent-composer').evaluate(composer => {
+    const bounds = composer.getBoundingClientRect();
+    return visualViewport!.offsetTop + visualViewport!.height - bounds.bottom;
+  });
+  await input.fill('Keep my draft');
+  await expect(dock).toHaveCSS('padding-bottom', '40px');
+  for (const bounds of [{ height: 400, offsetTop: 20 }, { height: 340, offsetTop: 80 }]) {
+    await page.evaluate(bounds => {
+      Object.assign(window.visualViewport!, bounds);
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    }, bounds);
+    await expect(shell).toHaveAttribute('data-viewport-occluded', 'true');
+    await expect.poll(gap).toBeLessThanOrEqual(8);
+    await expect.poll(gap).toBeGreaterThanOrEqual(4);
+  }
+  await page.screenshot({ path: testInfo.outputPath('keyboard-composer-spacing.png') });
+  await pane.getByRole('button', { name: 'Hide message input', exact: true }).click();
+  const show = pane.getByRole('button', { name: 'Show message input', exact: true });
+  await expect.poll(async () => {
+    const bounds = (await show.boundingBox())!;
+    return 420 - bounds.y - bounds.height;
+  }).toBeLessThanOrEqual(1);
+  await show.click();
+  await expect(input).toHaveValue('Keep my draft');
+  await page.evaluate(() => {
+    Object.assign(window.visualViewport!, { height: 844, offsetTop: 0 });
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
+  await expect(dock).toHaveCSS('padding-bottom', '40px');
+  await expect(input).toHaveValue('Keep my draft');
+  await cdp.detach();
+});

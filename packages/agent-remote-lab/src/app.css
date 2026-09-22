@@ -428,7 +428,7 @@ textarea {
 .lab-composer-dock {
   position: relative;
   z-index: 5;
-  padding: 6px clamp(12px, 2vw, 24px) calc(6px + env(safe-area-inset-bottom));
+  padding: 6px clamp(12px, 2vw, 24px) calc(6px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom)));
   border-top: 1px solid var(--obs-border);
   background: var(--obs-surface);
 }
@@ -443,7 +443,7 @@ textarea {
   border: 1px solid var(--obs-control-border); border-bottom: 0; border-radius: 6px 6px 0 0;
   background: var(--obs-surface); color: var(--obs-text-secondary);
 }
-.lab-shell .lab-composer-dock[data-collapsed] .lab-composer-toggle { bottom: max(0px, env(safe-area-inset-bottom)); }
+.lab-shell .lab-composer-dock[data-collapsed] .lab-composer-toggle { bottom: max(0px, var(--lab-composer-bottom-inset, env(safe-area-inset-bottom))); }
 .lab-composer-toggle svg { width: 12px; height: 12px; }
 .lab-shell .lab-composer-dock .lab-composer-toggle:is(:hover, :focus-visible) { color: var(--obs-action); background: var(--obs-surface-selected); }
 .lab-composer-toggle:active:not(:disabled) { transform: none; }
@@ -638,7 +638,7 @@ textarea {
 
 
   .lab-composer-dock {
-    padding: 9px max(10px, env(safe-area-inset-right)) calc(9px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    padding: 9px max(10px, env(safe-area-inset-right)) calc(9px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom))) max(10px, env(safe-area-inset-left));
   }
 
   .lab-composer-dock .agent-composer textarea { min-height: 44px; font-size: 16px; }
@@ -812,7 +812,7 @@ textarea {
 .lab-chat-sessions { position: relative; padding: 0; border: 0; flex-shrink: 0; }
 .lab-chat-sessions-heading { width: auto; padding: 0 6px; gap: 5px; }
 .lab-chat-sessions > .lab-session-tree { position: absolute; z-index: 15; top: calc(100% + 4px); right: 0; width: min(360px, calc(100vw - 24px)); max-height: min(360px, 55dvh); margin: 0; padding: 6px; border: 1px solid var(--obs-border-strong); border-radius: var(--obs-radius-sm); background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); }
-.lab-composer-dock { border-top: 0; padding-block: 4px calc(6px + env(safe-area-inset-bottom)); }
+.lab-composer-dock { border-top: 0; padding-block: 4px calc(6px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom))); }
 .lab-composer-dock .agent-composer { position: relative; width: 100%; max-width: 900px; margin-inline: auto; display: flex; flex-direction: column; gap: 0; padding: 4px 6px; border: 1px solid var(--obs-control-border); border-radius: 12px; background: var(--obs-surface); }
 .lab-composer-dock .agent-composer textarea { display: block; min-height: 38px; padding: 6px 6px; border: 0; background: transparent; border-radius: 6px; }
 .lab-composer-dock .agent-composer textarea:focus-visible { outline: none; }
@@ -945,6 +945,7 @@ textarea {
 @media (max-width: 1180px) {
   body { overflow: hidden; }
   .lab-shell { position: fixed; inset-inline: 0; top: var(--lab-viewport-top, 0px); height: var(--lab-viewport-height, 100dvh); }
+  .lab-shell[data-viewport-occluded="true"] { --lab-composer-bottom-inset: 0px; }
   .lab-view-options { position: absolute; }
   .lab-context-rail, .lab-inspector-rail { top: var(--lab-viewport-top, 0px); bottom: auto; height: var(--lab-viewport-height, 100dvh); }
   .lab-composer-dock .agent-composer textarea { max-height: min(200px, calc(var(--lab-viewport-height, 100dvh) * .25)); }

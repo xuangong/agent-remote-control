@@ -44,10 +44,12 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, in
       }
     }}
     style={{ '--agent-time-offset': `${reveal.offset}px`, '--agent-time-top': `${reveal.top}px` } as CSSProperties}>
+    {inspect || editButton ? <span className="agent-entry-actions">
+    {editButton ? <span className="agent-entry-edit-desktop">{editButton}</span> : null}
     {inspect ? <button className="agent-inspect-entry" type="button" aria-label={`Inspect event #${sequence} in Trace`} title="Inspect in Trace" onClick={inspect}>
       <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 4h5m-5 6h5m-5 6h5M5 4v12m6-6h6m-3-3 3 3-3 3" /></svg>
     </button> : null}
-    {editButton ? <span className="agent-entry-edit-desktop">{editButton}</span> : null}
+    </span> : null}
     {localTime ? <div className="agent-entry-time"><time dateTime={timestamp} aria-label={`${localTime.date} ${localTime.time} (local time)`}>
       <span>{localTime.date}</span><span>{localTime.time}</span>
     </time>{editButton}</div> : null}

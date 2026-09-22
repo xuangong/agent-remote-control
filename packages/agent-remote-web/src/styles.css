@@ -675,12 +675,13 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-preview-divider:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: -2px; }
   .agent-preview-resize-shield { display: block; position: absolute; inset: 0; z-index: 3; cursor: col-resize; user-select: none; }
 }
-.agent-timeline-entry:has(> .agent-inspect-entry) { position: relative; }
-.agent-inspect-entry { position: absolute; top: 2px; right: 2px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--agent-rule); border-radius: 5px; background: var(--agent-panel-raised); color: var(--agent-muted); cursor: pointer; opacity: 0; }
-.agent-timeline-entry:hover > .agent-inspect-entry, .agent-timeline-entry:focus-within > .agent-inspect-entry { opacity: 1; }
+.agent-timeline-entry:has(> .agent-entry-actions) { position: relative; }
+.agent-entry-actions { position: absolute; top: 2px; right: 2px; z-index: 2; display: flex; align-items: center; gap: 6px; opacity: 0; }
+.agent-inspect-entry { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 1px solid var(--agent-rule); border-radius: 5px; background: var(--agent-panel-raised); color: var(--agent-muted); cursor: pointer; }
+.agent-timeline-entry:hover > .agent-entry-actions, .agent-timeline-entry:focus-within > .agent-entry-actions { opacity: 1; }
 .agent-timeline-entry[data-inspected] { outline: 2px solid var(--agent-signal); outline-offset: 3px; border-radius: 4px; }
 .agent-inspect-entry:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 2px; }
-@media (hover: none) { .agent-inspect-entry { opacity: .7; } }
+@media (hover: none) { .agent-entry-actions { opacity: .7; } }
 
 .agent-entry-content { min-width: 0; }
 .agent-timeline-title { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
@@ -808,8 +809,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-draft-storage-status > span { flex: 1; min-width: 0; }
 .agent-composer .agent-draft-storage-status button { flex: none; min-height: 32px; padding: 0 6px; background: transparent; color: inherit; font-size: 12px; }
 
-.agent-entry-edit-desktop { position: absolute; right: 6px; top: 5px; z-index: 1; opacity: 0; }
-.agent-timeline-entry:hover > .agent-entry-edit-desktop, .agent-timeline-entry:focus-within > .agent-entry-edit-desktop { opacity: 1; }
+.agent-entry-edit-desktop { display: inline-flex; }
 .agent-edit-prompt { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--agent-muted); cursor: pointer; pointer-events: auto; }
 .agent-edit-prompt:hover, .agent-edit-prompt:focus-visible { background: var(--agent-bg); color: var(--agent-text); }
 .agent-edit-prompt:disabled { opacity: .5; cursor: wait; }

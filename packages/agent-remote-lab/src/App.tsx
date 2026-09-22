@@ -786,7 +786,13 @@ function AppContent({
   const [promptEditPending, setPromptEditPending] = useState(false);
   const promptEditReservation = useMemo<{ current: PromptEditReservation | undefined }>(() => ({ current: readPromptEditReservation(baseUrl) }), [baseUrl]);
   const promptMigrations = useSessionMigrations({ baseUrl, enabled: userScoped, transport, current: activeOpened, loaded: openWindows,
-    blocked: migration => promptEditBusy.current || transitionRef.current || activeView !== 'workbench' || supportingRailOpen || (promptEditReservation.current?.operationId === migration.id && !promptEditReservation.current.restored),
+    blocked: () => promptEditBusy.current || transitionRef.current || activeView !== 'workbench' || supportingRailOpen,
+    needsPromptRestore: migration => !promptEditBusy.current && promptEditReservation.current?.operationId === migration.id && !promptEditReservation.current.restored,
+    stay: migration => {
+      if (promptEditReservation.current?.operationId !== migration.id) return;
+      finishPromptEditReservation(baseUrl, migration.id);
+      promptEditReservation.current = undefined;
+    },
     apply: migration => tracking.replace(migration),
     refreshReferences: () => { void favorites.refresh(); },
     follow: async (session, source) => {

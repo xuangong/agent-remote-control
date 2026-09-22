@@ -11,6 +11,8 @@ export function useSessionMigrations(options: {
   refreshReferences?(): void;
   follow(session: OpenedSession, source: OpenedSession): Promise<boolean>;
   blocked(migration: SessionMigration): boolean;
+  needsPromptRestore?(migration: SessionMigration): boolean;
+  stay?(migration: SessionMigration): void;
 }) {
   const latest = useRef(options); latest.current = options;
   const [records, setRecords] = useState<SessionMigration[]>([]);
@@ -20,6 +22,7 @@ export function useSessionMigrations(options: {
   const refreshRef = useRef<() => Promise<void>>();
   const [previous, setPrevious] = useState<OpenedSession>();
   const [failure, setFailure] = useState<string>();
+  const [following, setFollowing] = useState(false);
   const scope = options.baseUrl;
   const applied = useRef(new Set<string>());
   const loaded = options.loaded ?? (options.current ? [options.current] : []);
@@ -72,7 +75,7 @@ export function useSessionMigrations(options: {
     return () => { abort.abort(); refreshRef.current = undefined; clearTimeout(referencesTimer); remove?.(); resume(); };
   }, [scope, options.transport, options.enabled]);
   useEffect(() => {
-    setRemaining(5); setFailure(undefined);
+    setRemaining(5); setFailure(undefined); setFollowing(false);
     if (!pending) return;
     let remainingMs = 5000; let previousTick = Date.now(); let submitting = false; let canceled = false;
     const source: OpenedSession = { ...pending.from, title: loaded.find(session => sessionKey(session) === sessionKey(pending.from))?.title ?? 'Original conversation' };
@@ -81,25 +84,30 @@ export function useSessionMigrations(options: {
     window.addEventListener('pageshow', resetClock);
     const timer = setInterval(() => {
       const now = Date.now(); const elapsed = now - previousTick; previousTick = now;
-      if (document.visibilityState === 'hidden' || latest.current.blocked(pending) || submitting || canceled) return;
+      if (document.visibilityState === 'hidden' || latest.current.blocked(pending) || latest.current.needsPromptRestore?.(pending) || submitting || canceled) return;
       remainingMs -= Math.min(elapsed, 1000); setRemaining(Math.max(0, Math.ceil(remainingMs / 1000)));
       if (remainingMs > 0) return;
-      submitting = true;
+      submitting = true; setFollowing(true);
       void latest.current.follow({ ...pending.to, title: source.title }, source).then(opened => {
         if (latest.current.baseUrl !== scope) return;
         if (opened) { acknowledge(pending.id); setPrevious(source); clearInterval(timer); }
         else { setFailure('The new branch could not be opened. Retry when connected.'); clearInterval(timer); }
-      }).catch(() => { if (!canceled) setFailure('The new branch could not be opened. Retry when connected.'); clearInterval(timer); });
+      }).catch(() => { if (!canceled) setFailure('The new branch could not be opened. Retry when connected.'); clearInterval(timer); })
+        .finally(() => { if (!canceled) setFollowing(false); });
     }, 250);
     return () => { canceled = true; clearInterval(timer); document.removeEventListener('visibilitychange', resetClock); window.removeEventListener('pageshow', resetClock); };
   }, [pending?.id, scope]);
   const original = pending ? { ...pending.from, title: 'Original conversation' } : previous;
   const originalUrl = original ? new URL(sessionUrl(original)) : undefined;
   originalUrl?.searchParams.set('keepOriginal', '1');
+  const needsPromptRestore = pending && options.needsPromptRestore?.(pending);
   const notice = original ? <div className="lab-prompt-edit-notice" role="status">
-    <span>{failure ?? (pending && options.blocked(pending) ? 'Automatic switching paused. Finish or retry the prompt edit.' : pending ? `Prompt edited. Switching to the new branch in ${remaining}s…` : 'Opened the edited branch.')}</span>
+    <span>{failure ?? (needsPromptRestore ? 'Prompt edit interrupted. Retry editing the original message, or stay here.' : following ? 'Opening the edited branch…' : pending && options.blocked(pending) ? 'Automatic switching paused.' : pending ? `Prompt edited. Switching to the new branch in ${remaining}s…` : 'Opened the edited branch.')}</span>
     <a href={originalUrl!.href} target="_blank" rel="noreferrer">Original session</a>
-    {failure && pending ? <button type="button" onClick={() => { setFailure(undefined); void latest.current.follow({ ...pending.to, title: options.current?.title ?? 'Conversation' }, original).then(opened => { if (opened) { acknowledge(pending.id); setPrevious(original); } else setFailure('The new branch could not be opened. Retry when connected.'); }).catch(() => setFailure('The new branch could not be opened. Retry when connected.')); }}>Retry</button> : null}
+    {failure && pending ? <button type="button" disabled={following} onClick={() => { setFailure(undefined); setFollowing(true); void latest.current.follow({ ...pending.to, title: options.current?.title ?? 'Conversation' }, original).then(opened => { if (latest.current.baseUrl !== scope) return; if (opened) { acknowledge(pending.id); setPrevious(original); } else setFailure('The new branch could not be opened. Retry when connected.'); }).catch(() => { if (latest.current.baseUrl === scope) setFailure('The new branch could not be opened. Retry when connected.'); }).finally(() => { if (latest.current.baseUrl === scope) setFollowing(false); }); }}>Retry</button> : null}
+    {pending ? <button type="button" disabled={following || options.blocked(pending)} onClick={() => {
+      latest.current.stay?.(pending); acknowledge(pending.id); setPrevious(undefined); setFailure(undefined);
+    }}>Stay here</button> : null}
     {!pending ? <button type="button" aria-label="Dismiss branch notice" onClick={() => setPrevious(undefined)}>×</button> : null}
   </div> : null;
   return { notice, pending, requestFollow(id: string) { setRequested(id); void refreshRef.current?.(); } };

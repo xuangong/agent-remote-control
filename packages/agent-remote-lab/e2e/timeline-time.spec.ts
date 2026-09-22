@@ -17,6 +17,15 @@ test('edits a user prompt from the swipe timestamp on mobile and inline action o
   else await user.hover();
   const button = user.getByRole('button', { name: 'Edit from this message' }).filter({ visible: true });
   await expect(button).toBeVisible();
+  if (!isMobile) {
+    const inspect = user.getByRole('button', { name: 'Inspect event #1 in Trace' });
+    const editBox = (await button.boundingBox())!;
+    const inspectBox = (await inspect.boundingBox())!;
+    expect(editBox.x + editBox.width).toBeLessThanOrEqual(inspectBox.x - 4);
+    await inspect.click();
+    await expect(page.getByTestId('inspections')).toHaveText('1');
+    await expect(page.getByTestId('edits')).toHaveText('0');
+  }
   expect(Math.abs((await user.boundingBox())!.height - height)).toBeLessThan(0.1);
   await page.screenshot({ path: testInfo.outputPath('prompt-edit-action.png') });
   if (isMobile) await button.tap(); else await button.click();

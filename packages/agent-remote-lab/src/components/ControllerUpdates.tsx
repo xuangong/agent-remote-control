@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { compareControllerVersions, releaseCoversHost, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { watchPagePolling } from '@orchardworks/agent-remote-web';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
-import { useFeedbackToast } from './Toast.js';
 
 export function controllerUpdateCoverage(release: ControllerRelease | null, hosts: readonly RemoteHost[]) {
   const owned = hosts.filter(host => host.access !== 'shared');
@@ -27,7 +26,6 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
   const { owned, covered, outdated, eligible } = controllerUpdateCoverage(release, hosts);
   const actionable = eligible.filter(host => !['downloading', 'waiting', 'restarting'].includes(statuses[host.id]?.phase ?? 'idle'));
   const available = eligible.length > 0;
-  useFeedbackToast('Controller update', available ? `Controller ${release!.version} is available. Open Sessions → Controller updates.` : undefined, 'info');
   useEffect(() => {
     let retired = false, loading = false;
     setRelease(null); setStatuses({}); setError(undefined); requests.current.clear(); setBusy(false); setConfirm(null);
@@ -86,7 +84,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
       <ul>{owned.map(host => {
         const status = statuses[host.id]; const needs = outdated.includes(host);
         const completed = status?.version === host.controller?.version && host.controller?.revision === release?.revision && host.online;
-        return <li key={host.id}><strong>{host.name}</strong><span>{host.controller?.version ?? 'Version not reported'} · {host.online ? 'Online' : 'Offline'}</span>
+        return <li key={host.id}><div className="lab-controller-host-name" role="region" aria-label="Host name" tabIndex={0}><strong>{host.name}</strong></div><span>{host.controller?.version ?? 'Version not reported'} · {host.online ? 'Online' : 'Offline'}</span>
           {status && status.phase !== 'idle' ? <small role="status">{completed ? 'Updated' : labels[status.phase]}{!completed && status.message ? ` ${status.message}` : ''}</small> : null}
           {!host.controller?.remoteUpdate ? <small>Install the release launcher once on this Host to enable remote updates.</small> : null}
           {needs && eligible.includes(host) ? <button type="button" disabled={busy || (!!status && ['downloading', 'waiting', 'restarting'].includes(status.phase))} onClick={() => setConfirm([host.id])}>{status?.phase === 'failed' ? 'Retry update' : 'Update Host'}</button> : null}

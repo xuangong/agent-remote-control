@@ -714,8 +714,7 @@ textarea {
 .lab-host-pairing { display: grid; grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; gap: 9px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--obs-border); }
 .lab-host-pairing > *, .lab-pairing-details > * { min-width: 0; }
 .lab-host-pairing select, .lab-host-pairing textarea { min-width: 0; max-width: 100%; }
-.lab-host-selector-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 3px; }
-.lab-host-pairing .lab-host-selector-scroll select { width: max-content; min-width: 100%; max-width: none; white-space: nowrap; }
+.lab-host-pairing select { width: 100%; text-overflow: ellipsis; }
 .lab-host-pairing > label { font-size: .85rem; color: var(--obs-text-secondary); }
 .lab-pair-host { width: 100%; }
 .lab-pairing-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -1343,8 +1342,9 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 .lab-controller-updates { padding: 8px 0; font-size: 13px; }
 .lab-controller-updates > button { width: 100%; text-align: left; }
-.lab-controller-updates ul { display: grid; gap: 8px; padding: 0; list-style: none; }
-.lab-controller-updates li { display: grid; gap: 3px; padding: 8px; background: var(--agent-panel); border-radius: 8px; overflow-wrap: anywhere; }
+.lab-controller-updates ul { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 0; list-style: none; }
+.lab-controller-updates li { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 3px; padding: 8px; background: var(--agent-panel); border-radius: 8px; overflow-wrap: anywhere; }
+.lab-controller-host-name { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; white-space: nowrap; }
 .lab-controller-updates li span, .lab-controller-updates small { color: var(--agent-muted); }
 .lab-controller-updates [role="group"] { padding: 8px; border: 1px solid var(--agent-border); border-radius: 8px; }
 .lab-controller-updates a { display: block; margin: 8px 0; }

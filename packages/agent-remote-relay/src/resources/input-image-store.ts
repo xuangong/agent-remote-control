@@ -1,6 +1,7 @@
 import { crc32 } from 'node:zlib';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, open, writeFile, chmod } from 'node:fs/promises';
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { join } from 'node:path';
 import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, type AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 import type { ImageMediaType, ImageUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
@@ -177,15 +178,7 @@ export class InputImageStore {
   }
   private async touch(item: Manifest): Promise<void> { item.touchedAt = this.now(); await this.persist(item); }
   private async persist(item: Manifest): Promise<void> {
-    const temporary = this.path(item.key, 'json.tmp');
-    const file = await open(temporary, 'w', 0o600);
-    try { await file.writeFile(JSON.stringify(item)); await file.sync(); } finally { await file.close(); }
-    await rename(temporary, this.path(item.key, 'json'));
-    // Windows cannot fsync a directory; the manifest file is already flushed.
-    if (process.platform !== 'win32') {
-      const directory = await open(this.options.directory, 'r');
-      try { await directory.sync(); } finally { await directory.close(); }
-    }
+    await atomicWriteFile(this.path(item.key, 'json'), JSON.stringify(item));
   }
   private async expire(): Promise<void> {
     for (const item of this.manifests.values()) {

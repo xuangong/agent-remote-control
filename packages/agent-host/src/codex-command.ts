@@ -4,7 +4,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { resolveHostEnvironment } from './connection-config.js';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { loadGatewayCodexEnvironment } from './gateway-codex.js';
-import { nativeInvocation, resolveNativeExecutable } from './native-executable.js';
+import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
 import { windowsCodexSharedEndpoint } from '@orchardworks/agent-provider-codex';
 import { manageWindowsCodexDaemon } from './windows-codex-command.js';
 

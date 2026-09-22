@@ -28,7 +28,8 @@
     "@orchardworks/agent-remote-relay": "workspace:*",
     "@orchardworks/agent-remote-tunnel": "workspace:*",
     "qrcode": "1.5.4",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "@orchardworks/agent-platform": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

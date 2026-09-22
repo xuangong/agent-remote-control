@@ -7,7 +7,7 @@ import type { RemoteHostControlRequest } from '@orchardworks/agent-remote-relay'
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { vscodeTunnelSupervisorSource } from './vscode-tunnel-supervisor.js';
 import { parseTunnelOutput, tunnelOutputLines } from './vscode-tunnel-output.js';
-import { resolveVscodeExecutable } from './vscode-executable.js';
+import { resolveVscodeExecutable } from './platform/executables/index.js';
 
 export interface VscodeTunnelOptions {
   stateDirectory: string;

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it } from 'vitest';
-import { nativeInvocation, resolveNativeExecutable } from './native-executable.js';
+import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
 import { createCodexHostRegistration } from './codex.js';
 import { spawnCodexAppServer } from '../../agent-provider-codex/src/native.js';
 import { CodexAppServerTransport } from '../../codex-daemon-client/src/app-server-transport.js';

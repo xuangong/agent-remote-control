@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { atomicWriteFile } from '@orchardworks/agent-platform';
+import { chmod, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { PairingPurpose } from '@orchardworks/agent-remote-protocol';
 
@@ -75,18 +75,9 @@ function serializedWrite(stateDir: string, write: () => Promise<void>): Promise<
 async function writeConnection(stateDir: string, connection: HostConnection): Promise<void> {
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   await chmod(stateDir, 0o700);
-  const temporary = join(stateDir, `.connection-${randomUUID()}.tmp`);
-  try {
-    const file = await open(temporary, 'wx', 0o600);
-    try {
-      await file.writeFile(JSON.stringify({ serverUrl: connection.serverUrl, remoteKey: connection.remoteKey, ...(connection.pairingPurpose ? { pairingPurpose: connection.pairingPurpose } : {}), environment: retainedHostEnvironment(connection.environment) }));
-      await file.sync();
-    } finally { await file.close(); }
-    await rename(temporary, join(stateDir, 'connection.json'));
-    // Windows does not expose directory fsync through Node; the file is synced before rename.
-    if (process.platform !== 'win32') {
-      const directory = await open(stateDir, 'r');
-      try { await directory.sync(); } finally { await directory.close(); }
-    }
-  } finally { await rm(temporary, { force: true }); }
+  await atomicWriteFile(join(stateDir, 'connection.json'), JSON.stringify({
+    serverUrl: connection.serverUrl, remoteKey: connection.remoteKey,
+    ...(connection.pairingPurpose ? { pairingPurpose: connection.pairingPurpose } : {}),
+    environment: retainedHostEnvironment(connection.environment),
+  }));
 }

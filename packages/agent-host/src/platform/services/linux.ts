@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readlink, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { atomicPrivate, autostartEnabled } from './autostart-state.js';
+import { atomicPrivate, autostartEnabled } from '../../autostart-state.js';
 
 interface CommandResult { code: number; stdout: string; stderr: string }
 interface SystemdOptions {

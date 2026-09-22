@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createLaunchdAutostart } from './launchd.js';
+import { createLaunchdAutostart } from './platform/services/macos.js';
 import { prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
 import { saveIssuedCredential, saveRegisteredConnection } from './connection-config.js';
 

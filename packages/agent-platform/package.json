@@ -1,0 +1,13 @@
+{
+  "name": "@orchardworks/agent-platform",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Node filesystem capabilities for native agent hosts and relays.",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=22" },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run --testTimeout=10000 --hookTimeout=15000" },
+  "devDependencies": { "@types/node": "24.13.3", "typescript": "5.9.3", "vitest": "4.1.10" }
+}

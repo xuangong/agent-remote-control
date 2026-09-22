@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, open, readFile, rm } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import { join, resolve } from 'node:path';
-import { atomicPrivate, autostartEnabled } from './autostart-state.js';
+import { atomicPrivate, autostartEnabled } from '../../autostart-state.js';
 
 interface WindowsAutostartOptions {
   stateDir: string; home: string; nodePath: string; cliPath: string; cwd: string; path: string;

@@ -1,4 +1,4 @@
-import { windowsJobSource } from './windows-job.js';
+import { windowsJobSource } from './platform/processes/windows-job.js';
 
 /** A separate process observes pipe EOF even when the Controller cannot run cleanup. */
 export const vscodeTunnelSupervisorSource = String.raw`

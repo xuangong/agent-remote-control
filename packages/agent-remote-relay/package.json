@@ -29,7 +29,8 @@
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "ws": "^8.21.0",
-    "image-size": "2.0.2"
+    "image-size": "2.0.2",
+    "@orchardworks/agent-platform": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

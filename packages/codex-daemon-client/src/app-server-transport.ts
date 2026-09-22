@@ -1,4 +1,5 @@
-import { execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { disposeOwnedProcess } from './platform/processes/index.js';
+import { type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
@@ -199,31 +200,7 @@ export class CodexAppServerTransport {
       return;
     }
     if (!this.child) return;
-    if (process.platform === 'win32' && this.child.pid && this.child.exitCode === null && this.child.signalCode === null) {
-      // npm entry points can own a native child; killing only the wrapper leaves that server running.
-      const child = this.child;
-      await new Promise<void>((resolve, reject) => {
-        execFile('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 3000 }, error => {
-          if (error && child.exitCode === null && child.signalCode === null) reject(error);
-          else resolve();
-        });
-      });
-      return;
-    }
-    this.child.stdin.end();
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
-
-    const exited = once(this.child, 'exit').then(() => undefined);
-    this.child.kill('SIGTERM');
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, this.gracefulShutdownMs);
-    });
-    await Promise.race([exited, timeout]);
-    if (timer) clearTimeout(timer);
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      this.child.kill('SIGKILL');
-    }
+    await disposeOwnedProcess(this.child, this.gracefulShutdownMs);
   }
 
   private handleTermination(error: Error): void {

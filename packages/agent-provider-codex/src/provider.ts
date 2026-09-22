@@ -21,7 +21,7 @@ import { CodexAppServerSession } from './session.js';
 import { initializeCodexTransport } from './initialize.js';
 import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
 import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
-import { windowsCodexSharedEndpoint } from './windows-daemon.js';
+import { windowsCodexSharedEndpoint } from './platform/windows/daemon.js';
 
 export interface CodexAppServerProviderOptions {
   executable?: string;

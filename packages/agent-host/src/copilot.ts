@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { resolveNativeExecutable } from './native-executable.js';
+import { resolveNativeExecutable } from './platform/executables/index.js';
 import { CopilotAgentProvider, resolveCopilotExecutable } from '@orchardworks/agent-provider-copilot';
 import { createCopilotSessionDirectory } from './copilot-directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';

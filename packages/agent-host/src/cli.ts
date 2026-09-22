@@ -15,12 +15,10 @@ import { createHostExecutionPolicy } from './execution-policy.js';
 import { boundedDiagnosticLine, createDiagnosticLog, type DiagnosticLog } from './diagnostic-log.js';
 import { resolveHostConnection, resolveHostEnvironment, saveIssuedCredential, saveRegisteredConnection, type HostConnection } from './connection-config.js';
 import { runCodexCommand } from './codex-command.js';
-import { createLaunchdAutostart } from './launchd.js';
+import { createLoginStartup, systemdUnavailable } from './platform/services/index.js';
 import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
-import { createSystemdAutostart, systemdUnavailable } from './systemd.js';
-import { createWindowsAutostart } from './windows-autostart.js';
 import { serveWindowsCodexDaemon } from '@orchardworks/agent-provider-codex';
-import { spawnWindowsJob } from './windows-job.js';
+import { spawnWindowsJob } from './platform/processes/windows-job.js';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { configureGatewayProviders } from './gateway-setup.js';
 import { runControllerUpdate } from './update-command.js';
@@ -387,12 +385,7 @@ function loginStartup(configuration?: HostConnection) {
   const options = { stateDir, home: homedir(), nodePath: realpathSync(process.execPath), cliPath: process.env.AGENT_HOST_LAUNCHER ?? fileURLToPath(import.meta.url),
     cwd: configuration?.environment.AGENT_HOST_WORKSPACE ?? configuration?.environment.AGENT_REMOTE_WORKSPACE ?? process.cwd(),
     path: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' };
-  if (process.platform === 'linux') return { kind: 'systemd' as const,
-    ...createSystemdAutostart({ ...options, configHome: process.env.XDG_CONFIG_HOME }) };
-  if (process.platform === 'darwin') return { kind: 'launchd' as const,
-    ...createLaunchdAutostart({ ...options, uid: process.getuid!() }) };
-  if (process.platform === 'win32') return { kind: 'windows' as const, ...createWindowsAutostart(options) };
-  return undefined;
+  return createLoginStartup(options);
 }
 async function autostart(action: string): Promise<void> {
   const supervisor = loginStartup();

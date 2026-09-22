@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createConnection, createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { CodexAppServerTransport } from './app-server-transport.js';
+import { CodexAppServerTransport } from '../../app-server-transport.js';
 
 export interface WindowsCodexDaemonState { pid: number; nativePid: number; token: string; pipe: string; url: string; version: string }
 export const windowsCodexDaemonDirectory = (home: string) => join(resolve(home), 'agent-remote-daemon');

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { atomicPrivate, autostartEnabled } from './autostart-state.js';
+import { atomicPrivate, autostartEnabled } from '../../autostart-state.js';
 
 interface LaunchctlResult { code: number; stdout: string; stderr: string }
 interface LaunchdOptions {

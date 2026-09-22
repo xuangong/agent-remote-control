@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, lstat, readFile, rm, stat, symlink } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createSystemdAutostart } from './systemd.js';
+import { createSystemdAutostart } from './platform/services/linux.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });

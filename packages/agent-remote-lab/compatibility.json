@@ -17,6 +17,10 @@
         "packages/agent-host/package.json",
         "packages/agent-host/src",
         "packages/agent-host/tsconfig.json",
+        "packages/agent-platform/README.md",
+        "packages/agent-platform/package.json",
+        "packages/agent-platform/src",
+        "packages/agent-platform/tsconfig.json",
         "packages/agent-provider-claude/README.md",
         "packages/agent-provider-claude/package.json",
         "packages/agent-provider-claude/src",
@@ -104,7 +108,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:61a4590c0c7be304b144ec35a7a30a656b3e26fb5ed49a8607c453aacc23f191"
+      "digest": "sha256:335ffef9c567781e03ad29c64bdf2fd486bd29da38d9adc1fa0e65bbb1f81e41"
     }
   },
   "providers": [

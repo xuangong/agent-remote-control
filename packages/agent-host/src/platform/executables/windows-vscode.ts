@@ -1,8 +1,7 @@
 import { existsSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 
-export function resolveVscodeExecutable(command: string, environment: NodeJS.ProcessEnv = process.env): string {
-  if (process.platform !== 'win32') return command;
+export function resolveWindowsVscodeExecutable(command: string, environment: NodeJS.ProcessEnv = process.env): string {
   const path = environment[Object.keys(environment).sort().find(key => key.toUpperCase() === 'PATH') ?? 'PATH'] ?? '';
   const explicit = isAbsolute(command) || /[/\\]/.test(command);
   for (const directory of explicit ? [''] : path.split(delimiter).filter(Boolean)) {

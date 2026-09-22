@@ -1,5 +1,6 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { resolveHostConnection, retainedHostEnvironment, type HostConnection } from './connection-config.js';
 
@@ -17,19 +18,7 @@ export async function autostartEnabled(stateDir: string): Promise<boolean> {
 export async function atomicPrivate(path: string, contents: string): Promise<void> {
   const directory = resolve(path, '..');
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const temporary = join(directory, `.autostart-${randomUUID()}.tmp`);
-  try {
-    await writeFile(temporary, contents, { mode: 0o600, flag: 'wx' });
-    for (let attempt = 0; ; attempt++) {
-      try { await rename(temporary, path); break; }
-      catch (error) {
-        if (process.platform !== 'win32' || attempt >= 7 || !['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-        // Windows readers and scanners can briefly hold the destination open.
-        await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
-      }
-    }
-  }
-  finally { await rm(temporary, { force: true }); }
+  await atomicWriteFile(path, contents);
 }
 
 interface PendingConnection { id: string; previous?: string; connection: HostConnection }

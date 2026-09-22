@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
-import { createWindowsAutostart } from './windows-autostart.js';
+import { createWindowsAutostart } from './platform/services/windows.js';
 
 it.runIf(process.platform === 'win32')('runs the installed login launcher with literal paths and saved environment, then removes it on disable', async () => {
   const home = await mkdtemp(join(tmpdir(), "arc login & %literal% ' "));

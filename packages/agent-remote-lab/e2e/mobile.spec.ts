@@ -277,14 +277,15 @@ test('recognizes a Home Screen launch without offering redundant fullscreen cont
 });
 
 
-test('removes the home-indicator inset above the keyboard and restores it after dismissal', async ({ page, context }, testInfo) => {
+for (const resizesWindow of [false, true]) test(`removes the home-indicator inset above the keyboard and restores it after dismissal (${resizesWindow ? 'resized window' : 'visual viewport only'})`, async ({ page, context }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const cdp = await context.newCDPSession(page);
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { bottom: 34 } });
-  await page.addInitScript(() => {
+  await page.addInitScript(resizesWindow => {
+    if (resizesWindow) Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
     const viewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0, scale: 1 });
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
-  });
+  }, resizesWindow);
   await openSession(page);
   const pane = page.locator('.lab-primary-conversation');
   const shell = page.locator('.lab-shell');
@@ -296,11 +297,17 @@ test('removes the home-indicator inset above the keyboard and restores it after 
   });
   await input.fill('Keep my draft');
   await expect(dock).toHaveCSS('padding-bottom', '40px');
+  await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
   for (const bounds of [{ height: 400, offsetTop: 20 }, { height: 340, offsetTop: 80 }]) {
-    await page.evaluate(bounds => {
+    await page.evaluate(({ bounds, resizesWindow }) => {
       Object.assign(window.visualViewport!, bounds);
+      if (resizesWindow) {
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: bounds.height });
+        Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: bounds.height });
+        window.dispatchEvent(new Event('resize'));
+      }
       window.visualViewport!.dispatchEvent(new Event('resize'));
-    }, bounds);
+    }, { bounds, resizesWindow });
     await expect(shell).toHaveAttribute('data-viewport-occluded', 'true');
     await expect.poll(gap).toBeLessThanOrEqual(8);
     await expect.poll(gap).toBeGreaterThanOrEqual(4);
@@ -315,11 +322,30 @@ test('removes the home-indicator inset above the keyboard and restores it after 
   await show.click();
   await expect(input).toHaveValue('Keep my draft');
   await page.evaluate(() => {
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: 844 });
     Object.assign(window.visualViewport!, { height: 844, offsetTop: 0 });
     window.visualViewport!.dispatchEvent(new Event('resize'));
   });
   await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
   await expect(dock).toHaveCSS('padding-bottom', '40px');
   await expect(input).toHaveValue('Keep my draft');
+  await input.focus();
+  await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
+  await expect(dock).toHaveCSS('padding-bottom', '40px');
+  // A rotation must not reuse the taller portrait reference as a keyboard.
+  for (const size of [{ width: 844, height: 390 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(size);
+    await page.evaluate(({ height }) => {
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+      Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: height });
+      Object.assign(window.visualViewport!, { height, offsetTop: 0 });
+      window.dispatchEvent(new Event('orientationchange'));
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    }, size);
+    await expect(shell).toHaveCSS('--lab-viewport-height', `${size.height}px`);
+    await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
+    await expect(dock).toHaveCSS('padding-bottom', '40px');
+  }
   await cdp.detach();
 });

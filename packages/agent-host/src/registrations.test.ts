@@ -48,9 +48,9 @@ function registration(): AgentHostProviderRegistration {
     async open() { throw new Error('unused'); }, async close() {} } };
 }
 
-it('selects native restrictions by default, supports the explicit local opt-out, and strips connection credentials', async () => {
+it('keeps private native restrictions, supports the explicit local opt-out, and strips connection credentials', async () => {
   const seen: any[] = []; const factory = async (options: unknown) => { seen.push(options); return registration(); };
-  for (const trusted of [undefined, 'true', '1']) await createHostRegistrations({ AGENT_HOST_TRUSTED_FULL_CONTROL: trusted,
+  for (const trusted of [undefined, 'true', '1']) await createHostRegistrations({ AGENT_HOST_CODEX_CONNECTION: 'private', AGENT_HOST_TRUSTED_FULL_CONTROL: trusted,
     AGENT_HOST_REMOTE_KEY: 'connection-secret', AGENT_HOST_MANAGEMENT_TOKEN: 'management-secret', OPENAI_API_KEY: 'native-auth' },
     undefined, { codex: factory, claude: factory, copilot: factory });
   expect(seen.map(options => options.restrictedNative)).toEqual([true, true, false]);
@@ -74,11 +74,20 @@ it('rejects an invalid Codex connection mode before starting providers', async (
     { codex: factory, claude: factory, copilot: factory })).rejects.toThrow('Codex connection mode');
 });
 
-it('trusts shared Codex permissions only for Codex, retaining restrictions for the other providers', async () => {
+it('defaults to shared Codex permissions, retaining restrictions for the other providers', async () => {
   const seen: any[] = []; const factory = async (options: unknown) => { seen.push(options); return registration(); };
-  await createHostRegistrations({ AGENT_HOST_PROVIDERS: 'codex,claude,copilot', AGENT_HOST_CODEX_CONNECTION: 'shared', AGENT_HOST_CODEX_TRUST_SHARED: '1' },
+  await createHostRegistrations({ AGENT_HOST_PROVIDERS: 'codex,claude,copilot' },
     undefined, { codex: factory, claude: factory, copilot: factory });
   expect(seen.map(options => options.restrictedNative)).toEqual([false, true, true]);
+  expect(seen[0].connectionMode).toBe('shared');
+});
+
+it('preserves an explicit shared permission opt-out', async () => {
+  let seen: unknown;
+  const factory = async (options: unknown) => { seen = options; return registration(); };
+  await createHostRegistrations({ AGENT_HOST_CODEX_TRUST_SHARED: '0' }, undefined,
+    { codex: factory, claude: factory, copilot: factory });
+  expect(seen).toMatchObject({ connectionMode: 'shared', restrictedNative: true });
 });
 
 it('passes managed Gateway credentials only to the matching native provider', async () => {

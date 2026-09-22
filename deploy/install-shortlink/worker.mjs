@@ -1,6 +1,6 @@
 const installers = new Map([
-  ['install.xianliao.de5.net', 'https://github.com/xuangong/agent-remote-control/releases/latest/download/install.sh'],
-  ['wininstall.xianliao.de5.net', 'https://github.com/xuangong/agent-remote-control/releases/latest/download/install.ps1'],
+  ['install.xianliao.de5.net', 'https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.sh'],
+  ['wininstall.xianliao.de5.net', 'https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.ps1'],
 ]);
 
 export default {

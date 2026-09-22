@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { act } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState } from '../replica/reducer.js';
 import { render, rerender } from '../test/setup.js';
@@ -53,6 +54,8 @@ describe('content-only timeline', () => {
     expect(container.querySelector('.agent-question-completed')?.textContent).toContain('Mobile');
     expect(container.querySelector('.agent-question-completed')?.textContent).toContain('Which platform?');
     expect(container.querySelector('.agent-plan-completed')?.textContent).toContain('Include desktop too.');
+    expect(container.querySelector('.agent-tool-approval-completed')?.textContent).toContain('Denied');
+    await act(async () => container.querySelector<HTMLButtonElement>('.agent-approval-receipt-toggle')!.click());
     expect(container.querySelector('.agent-tool-approval-completed')?.textContent).toContain('Wait for review.');
     const task = container.querySelector('.agent-todo');
     const tool = content[1] as Extract<AgentTimelineItem, { type: 'tool_call' }>;

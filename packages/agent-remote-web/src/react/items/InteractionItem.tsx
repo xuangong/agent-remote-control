@@ -4,7 +4,7 @@ import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { InteractionReceipt } from './InteractionReceipt.js';
 import { MarkdownContent } from '../MarkdownContent.js';
 import { CompletedQuestionItem } from './CompletedQuestionItem.js';
-import { ToolDetail } from './ToolCallItem.js';
+import { CompletedToolApprovalItem } from './CompletedToolApprovalItem.js';
 
 export interface InteractionItemProps {
   readonly item: Extract<AgentTimelineItem, { type: 'interaction' }>;
@@ -22,11 +22,7 @@ export function InteractionItem({ item: { request, response } }: InteractionItem
     </article>;
   }
   if (request.kind === 'tool_approval' && response.kind === 'tool_approval') {
-    return <article className="agent-item agent-interaction-completed agent-tool-approval-completed">
-      <header><TimelineTitle className="agent-item-kicker">TOOL APPROVAL</TimelineTitle><span className="agent-state-label">{response.decision === 'allow' ? `Allowed · ${response.scope}` : response.decision === 'cancel' ? 'Canceled' : 'Denied'}</span></header>
-      <h3>{request.toolName}</h3><p>{request.summary}</p><ToolDetail detail={request.detail} />
-      {response.decision === 'deny' && response.message ? <p>{response.message}</p> : null}
-    </article>;
+    return <CompletedToolApprovalItem request={request} response={response} />;
   }
   return <InteractionReceipt request={request} response={response} />;
 }

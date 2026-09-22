@@ -11,7 +11,12 @@ test('reviews typed interactions and recovers redacted history through the real 
   const incoming: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('websocket', (socket) => {
-    socket.on('framesent', ({ payload }) => { try { sent.push(JSON.parse(String(payload))); } catch {} });
+    socket.on('framesent', ({ payload }) => {
+      try {
+        const envelope = JSON.parse(String(payload));
+        sent.push(envelope.type === 'message' ? envelope.message : envelope);
+      } catch {}
+    });
     socket.on('framereceived', ({ payload }) => incoming.push(String(payload)));
   });
   const screenshotDirectory = resolve('.tmp/interaction-capabilities', testInfo.project.name);
@@ -88,12 +93,15 @@ test('reviews typed interactions and recovers redacted history through the real 
   await external.getByRole('button', { name: 'I have completed this', exact: true }).click();
 
   const policy = page.locator('.agent-tool-approval');
-  await expect(policy.getByRole('heading', { name: 'Read project configuration' })).toBeVisible();
+  await expect(policy.getByRole('heading', { name: 'Approval required' })).toBeVisible();
+  await expect(policy).toContainText('Read project configuration');
   await expect(policy).toContainText('/workspace/project/**');
   await expect(policy.getByRole('button', { name: 'Allow once', exact: true })).toHaveCount(0);
   await expect(policy.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
   await page.screenshot({ path: resolve(screenshotDirectory, 'policy.png'), fullPage: true });
-  await policy.getByRole('button', { name: 'Allow project reads', exact: true }).click();
+  await policy.locator('summary').click();
+  await expect(policy.getByText('Allow project reads', { exact: true })).toBeVisible();
+  await policy.getByRole('button', { name: 'Apply rule', exact: true }).click();
   await expect(page.getByText('The fixture verified all four exact interaction responses.', { exact: true })).toBeVisible();
   expect(sent.filter((message) => message.type === 'interaction_response').map((message) => message.payload?.response)).toEqual([
     { kind: 'form', action: 'submit', values: { email: 'developer@example.test', token: '  browser-secret  ', retries: 2, telemetry: false, region: 'eu', features: ['search', 'reports'] } },

@@ -267,7 +267,8 @@ textarea {
 @media (min-width: 1181px) {
   .lab-context-rail { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .lab-context-rail > .lab-rail-heading, .lab-sidebar-tabs { flex-shrink: 0; }
-  .lab-sidebar-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px; scrollbar-gutter: stable; }
+  /* Keep absolutely positioned accessibility text inside the sidebar scrollport. */
+  .lab-sidebar-content { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px; scrollbar-gutter: stable; }
   .lab-sidebar-content .lab-host-pairing { gap: 7px; margin: 0 0 16px; padding-bottom: 14px; }
   .lab-sidebar-content .lab-host-pairing .lab-directory-heading { margin-bottom: 0; }
   .lab-sidebar-content .lab-directory-heading h2 { font-size: 12px; color: var(--obs-text-secondary); font-weight: 600; }

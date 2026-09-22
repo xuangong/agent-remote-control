@@ -112,7 +112,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
     else { const saved = opened.find((entry) => sessionKey(entry) === sessionKey(item)); if (saved) onSelect(saved); }
   };
   return <>
-    {searchable ? <label className="lab-session-search">Search loaded sessions<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Title, workspace, or ID" /></label> : null}
+    {searchable ? <label className="lab-session-search"><span>Search loaded sessions</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Title, workspace, or ID" /></label> : null}
     <section className="lab-session-directory" aria-label="Discover sessions">
       <div className="lab-directory-heading"><h2>Discover sessions</h2><div className="lab-directory-actions">{quickOpen}<button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div></div>
       <p className="agent-visually-hidden">Roots by activity · Subagents by creation</p>

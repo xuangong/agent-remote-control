@@ -47,7 +47,7 @@ test('keeps discovery, creation and management easy to reach while retaining for
   await expect(discover.locator('.lab-session-row').first()).toBeVisible();
   await expect(rail.getByTestId('session-create')).toBeHidden();
   await expect(rail.getByRole('button', { name: 'Pair Agent Host' })).toBeHidden();
-  const search = rail.getByRole('searchbox');
+  const search = rail.getByRole('searchbox', { name: 'Search loaded sessions' });
   await search.fill('no-matching-session-xyz');
   await expect(discover).toContainText('No matching loaded sessions.');
   await search.fill('');
@@ -59,16 +59,14 @@ test('keeps discovery, creation and management easy to reach while retaining for
   await rail.getByRole('button', { name: desktop ? 'Sidebar settings' : 'Settings', exact: true }).click();
   await expect(rail.getByRole('button', { name: 'Pair Agent Host' })).toBeVisible();
   await expect(rail.getByTestId('session-create')).toBeHidden();
-  if (desktop) await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
-  else await rail.getByRole('button', { name: 'All sessions', exact: true }).click();
+  await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
   await showNewSession(page);
   await expect(rail.getByLabel('Working directory', { exact: true })).toHaveValue('/tmp/sidebar-draft');
   await rail.getByRole('button', { name: 'Browse…' }).click();
   await expect(page.getByRole('dialog', { name: 'Choose a workspace folder' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(rail.getByTestId('session-create')).toBeVisible();
-  if (desktop) await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
-  else await rail.getByRole('button', { name: 'All sessions', exact: true }).click();
+  await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   expect(overflow).toBe(false);
   await page.screenshot({ path: info.outputPath('sidebar.png') });

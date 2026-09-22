@@ -31,7 +31,8 @@ export interface HostPairingService {
   stop?(hostId: string): Promise<{ results: HostStopResult[] }>;
 }
 
-export function HostPairing({ service, selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession, managementVisible = true }: {
+export function HostPairing({ service, selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession, managementVisible = true, compact = false }: {
+  compact?: boolean;
   managementVisible?: boolean;
   service: HostPairingService; selectedHostId: string; selectionLocked?: boolean; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
 }) {
@@ -55,19 +56,14 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     finally { setRevoking(false); }
   }
 
-  return <section className="lab-host-pairing" aria-label="Remote Hosts">
-    <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
+  const hostFilter = <>
     <label htmlFor="host-environment-filter">Find an execution environment</label>
     <input id="host-environment-filter" type="search" value={filter} disabled={selectionLocked}
       placeholder="Filter Hosts: Linux, zsh, Chrome…" autoComplete="off" spellCheck={false}
       onChange={event => setFilter(event.target.value)} />
     {filter.trim() ? <small role="status">{matchingHosts.length ? `${matchingHosts.length} matching Hosts` : 'No matching Hosts'}</small> : null}
-    <label htmlFor="remote-host">Connected Host</label>
-    <select id="remote-host" value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
-      {hosts.length > 0 && !selectedHost ? <option value={selectedHostId}>Select a Host</option> : null}
-      {selectedHost && !matchingHosts.includes(selectedHost) ? <option value={selectedHost.id} disabled>{selectedHost.name} · Current selection (filtered out)</option> : null}
-      {hosts.length ? matchingHosts.map((host) => <option key={host.id} value={host.id}>{hostDisplayLabel(host)}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
-    </select>
+  </>;
+  const environment = <>
     {selectedHost ? <div className="lab-host-environment" aria-label="Host environment">
       {selectedHost.environment ? <>
         <div className="lab-host-environment-tags">{hostEnvironmentLabels(selectedHost).map((label, index) => <span key={`${index}:${label}`}>{label}</span>)}</div>
@@ -84,6 +80,18 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
       </> : <small>Environment unknown · This Host has not reported detection results.</small>}
     </div> : null}
     {selectedHost?.access ? <p className="lab-control-note">{selectedHost.access === 'shared' ? 'Shared with you' : 'You own this Host'}</p> : null}
+  </>;
+
+  return <section className={`lab-host-pairing${compact ? ' lab-host-pairing-compact' : ''}`} aria-label="Remote Hosts">
+    <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
+    {!compact ? hostFilter : null}
+    <label className={compact ? 'agent-visually-hidden' : undefined} htmlFor="remote-host">Connected Host</label>
+    <select id="remote-host" title={selectedHost ? hostDisplayLabel(selectedHost) : undefined} value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
+      {hosts.length > 0 && !selectedHost ? <option value={selectedHostId}>Select a Host</option> : null}
+      {selectedHost && !matchingHosts.includes(selectedHost) ? <option value={selectedHost.id} disabled>{selectedHost.name} · Current selection (filtered out)</option> : null}
+      {hosts.length ? matchingHosts.map((host) => <option key={host.id} value={host.id}>{hostDisplayLabel(host)}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
+    </select>
+    {compact ? <details className="lab-host-disclosure"><summary>Filter &amp; Host details{filter.trim() ? <span>Filtered</span> : null}</summary><div>{hostFilter}{environment}</div></details> : environment}
     {quota ? <p className="lab-control-note" role="status">Session creation allowance used: {quota.used} / {quota.limit}. This total does not reset when sessions finish.{quotaExhausted ? ' Creation limit reached. Existing sessions remain available.' : ''}</p> : null}
     <div hidden={!managementVisible}>
     {selectedHost?.managed && selectedHost.access !== 'shared' && service.revoke ? <button type="button" onClick={() => setRevokeTarget(selectedHost)}>Revoke Host</button> : null}

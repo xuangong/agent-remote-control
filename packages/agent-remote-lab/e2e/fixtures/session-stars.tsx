@@ -12,7 +12,8 @@ import '@orchardworks/agent-remote-web/styles.css';
 const baseUrl = location.origin + '/u/alice/';
 const directory = new SessionDirectoryClient(baseUrl, undefined, 'host');
 const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'recorded-session', title: 'Research notes', state: 'idle' as const, createdAt: '2026-09-19', updatedAt: '2026-09-19' };
-directory.list = async () => ({ items: [session], hasMore: false, revision: '1' });
+const sidebarFixture = new URLSearchParams(location.search).has('sidebar');
+directory.list = async () => ({ items: sidebarFixture ? Array.from({ length: 24 }, (_, index) => ({ ...session, nativeSessionId: `session-${index}`, title: `${['Review connection stability', 'Improve mobile session navigation', 'Investigate preview tunnel requests'][index % 3]} ${index + 1}` })) : [session], hasMore: false, revision: '1' });
 directory.workspaces = async () => ({ workspaces: [] });
 directory.attach = async () => ({ agentId: 'agent-1', nativeSessionId: session.nativeSessionId });
 const observers = new Map<RemoteTransportListener, string>();
@@ -74,7 +75,7 @@ window.addEventListener('fixture-content', event => {
   } });
 });
 localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...session, agentId: 'agent-1' }]));
-const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Work Mac', online: true, providers: [{ providerId: 'recorded', displayName: 'Recorded' }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
+const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: sidebarFixture ? 'zhangxians-Mac-mini.local · CLI' : 'Work Mac', online: true, ...(sidebarFixture ? { access: 'owner' as const, environment: { detectedAt: Date.now(), os: { platform: 'darwin', name: 'macOS', arch: 'arm64', release: '25.0' }, shell: { name: 'zsh', source: 'account' as const }, shells: [], browsers: [{ id: 'chrome', name: 'Chrome', status: 'found' as const }], vscode: { status: 'found' as const }, wsl: false, container: false } } : {}), providers: [{ providerId: 'recorded', displayName: 'Recorded' }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
 const requestedStatus = new URLSearchParams(location.search).get('status');
 const status = requestedStatus === 'waiting' || requestedStatus === 'idle' ? requestedStatus : 'running';
 const app = (accountAction: ReactNode) => <App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}

@@ -22,6 +22,7 @@ export interface SupportingRailProps {
 const focusableSelector = [
   'button:not([disabled])',
   'a[href]',
+  'summary',
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
@@ -97,6 +98,9 @@ function focusableElements(container: HTMLElement | null): HTMLElement[] {
   if (!container) return [];
   return Array.from(container.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => {
     if (element.hidden || element.closest('[hidden]')) return false;
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement && !parent.open && element !== parent.querySelector(':scope > summary')) return false;
+    }
     if (element.matches(':disabled') || element.tabIndex < 0) return false;
     const style = window.getComputedStyle(element);
     return style.display !== 'none' && style.visibility !== 'hidden';

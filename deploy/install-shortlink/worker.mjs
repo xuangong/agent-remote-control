@@ -1,0 +1,19 @@
+const installerUrl = 'https://github.com/xuangong/agent-remote-control/releases/latest/download/install.sh';
+
+export default {
+  fetch(request) {
+    const url = new URL(request.url);
+    const headers = {
+      'Cache-Control': 'no-store',
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+    };
+    if (url.hostname !== 'install.xianliao.de5.net' || url.pathname !== '/') {
+      return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return new Response('Method not allowed\n', { status: 405, headers: { ...headers, Allow: 'GET, HEAD' } });
+    }
+    return new Response(null, { status: 302, headers: { ...headers, Location: installerUrl } });
+  },
+};

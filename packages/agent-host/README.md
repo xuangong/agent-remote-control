@@ -245,7 +245,7 @@ directory. Windows Script Host and Windows PowerShell must be available. Windows
 login startup does not provide automatic crash restart or pre-login boot startup.
 
 Shared Codex and managed VS Code tunnels are supported on Windows as described
-below. The Host still defaults to private Codex mode until shared mode is explicitly selected.
+below. The Host defaults to shared Codex mode; start the shared daemon before opening sessions.
 Native sandbox availability remains provider-specific. Claude's restricted command
 sandbox still fails closed on unsupported platforms; Windows support does not
 automatically enable trusted full control or weaken local execution policy.
@@ -317,8 +317,11 @@ also be unable to read its stored format; configure a compatible
 Host checks real paths, including symbolic links, before creating or importing
 sessions and before native input or settings mutations. Catalogs omit sessions
 outside those roots and sessions whose workspace cannot be established. Native
-permission settings are read-only to remote controllers; model controls remain
-available. These rules apply to the CLI. Embedders can provide the same trusted
+permission settings are read-only to remote controllers except for trusted shared
+Codex sessions. Those sessions accept permission changes from the web and publish
+native permission updates from other clients on Windows, macOS, and Linux.
+Native requirements and idle-session checks still apply; workspace admission
+remains enforced. Model controls remain available. These rules apply to the CLI. Embedders can provide the same trusted
 `executionPolicy` through `createAgentHostRuntime` or `createAgentHost`, and
 should also configure Codex/Claude providers with `restrictedNative: true` to
 enforce their native permission and sandbox boundaries.
@@ -326,7 +329,7 @@ enforce their native permission and sandbox boundaries.
 A workspace admission check is not filesystem isolation. The providers have
 different execution guarantees:
 
-- Codex starts and resumes threads with native `workspace-write` and approval
+- Private or explicitly restricted Codex starts and resumes threads with native `workspace-write` and approval
   policy `never`. Native sandbox escalation and additional permission grants are
   disabled. The adapter hides and rejects the permissions command and locks
   permission mutations even when a command interaction invokes them internally. Codex may still read
@@ -397,8 +400,6 @@ verified with Codex **0.153.4**. Use a version that supports `--ws-auth` and
 ```powershell
 $env:CODEX_HOME = "$env:USERPROFILE\.codex"
 agent-remote-controller codex daemon start
-$env:AGENT_HOST_CODEX_CONNECTION = 'shared'
-$env:AGENT_HOST_CODEX_TRUST_SHARED = '1'
 agent-remote-controller start
 agent-remote-controller codex resume <session-id>
 ```
@@ -423,15 +424,16 @@ an untrusted remote server cannot be substituted through the saved daemon addres
 ### macOS and Linux shared daemon
 
 To use the same native session from a desktop CLI and the Remote Controller,
-start `codex app-server daemon start` and connect the CLI with
-`codex --remote unix://`. Configure this Host with
-`AGENT_HOST_CODEX_CONNECTION=shared` and `AGENT_HOST_CODEX_TRUST_SHARED=1` before
-starting it. `AGENT_HOST_CODEX_SOCKET` optionally selects an absolute local socket
+start `agent-remote-controller codex daemon start` and connect the CLI with
+`agent-remote-controller codex`. The Host and CLI default to shared mode. `AGENT_HOST_CODEX_SOCKET` optionally selects an absolute local socket
 path; otherwise the native socket under the configured Codex home is used.
 
 Shared mode accepts the daemon's native permissions for Codex only. It never
 starts a replacement writer or stops the daemon when a Remote connection closes.
-The default remains `private`. Existing private CLI or desktop sessions must be
+Shared mode defaults to accepting daemon permissions (`AGENT_HOST_CODEX_TRUST_SHARED=1`).
+An explicit `0` retains the permission rejection unless full control is enabled.
+Set `AGENT_HOST_CODEX_CONNECTION=private` for isolated sessions with native restrictions.
+Explicit saved private settings and managed Gateway private sessions remain private. Existing private CLI or desktop sessions must be
 released once before they can be opened in the shared daemon. An already-running
 Host must be restarted to apply provider configuration changes.
 

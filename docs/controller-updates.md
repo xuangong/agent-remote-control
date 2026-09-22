@@ -4,6 +4,12 @@ GitHub Releases under `xuangong/agent-remote-control` are the release authority.
 
 If the GitHub REST release catalog returns 403 or 429, discovery falls back to GitHub's public latest stable release redirect. The redirect must identify a stable Controller tag in the same repository, and its manifest and package must be available. This fallback only verifies the current latest release; it never substitutes another version for a requested update. Other upstream errors and invalid release metadata remain failures. No GitHub credentials are required.
 
+The **Refresh** button beside **Latest version** checks immediately through
+`GET /v1/remote/controller-release?refresh=1`, bypassing the Relay's five-minute
+release cache and one-minute error cache. Concurrent checks share one discovery
+request. Automatic checks retain caching. While checking, the button is disabled;
+a failed check keeps the previous version visible and allows a manual retry.
+
 Hosts register their running Controller identity and update capability. Owners can confirm updates for their own Hosts; shared access never grants upgrade rights. Each Host updates independently when its platform, Node version and Relay protocol are compatible. Batch updates target eligible online Hosts; unsupported or offline Hosts never block the others. Frontend, Relay, Controller and native runtime do not need matching product versions. Legacy installations display a bootstrap instruction. Offline Hosts are reported as unavailable rather than silently queued indefinitely.
 
 A packaged stable launcher supervises the Controller process. Updates install into a new private directory, preserving the previous package, credentials, native configuration and installation ID. The launcher switches its child and commits the active package only after the new Controller registers. Failed startup rolls back; connection loss during upgrade is not itself proof of success. Docker requires the state directory to remain writable and persistent.

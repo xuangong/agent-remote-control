@@ -15,17 +15,16 @@ including `codex-code-mode-host`, instead of copying only the main executable.
 On macOS and Linux, start the native daemon and connect the desktop terminal to it:
 
 ```sh
-codex app-server daemon start
-codex --remote unix://
+agent-remote-controller codex daemon start
+agent-remote-controller codex
 # To reopen a saved session in that same daemon:
-codex --remote unix:// resume <native-session-id>
+agent-remote-controller codex resume <native-session-id>
 ```
 
 Configure the Agent Host locally before starting it:
 
 ```sh
-export AGENT_HOST_CODEX_CONNECTION=shared
-export AGENT_HOST_CODEX_TRUST_SHARED=1
+# Shared mode and daemon permissions are the defaults.
 # Optional when using a nondefault socket:
 # export AGENT_HOST_CODEX_SOCKET=/absolute/path/to/codex.sock
 agent-remote-controller start
@@ -50,8 +49,6 @@ implement the Unix daemon lifecycle there. This integration was tested with nati
 Codex 0.153.4. From PowerShell, with the same Codex home for both clients:
 
 ```powershell
-$env:AGENT_HOST_CODEX_CONNECTION = 'shared'
-$env:AGENT_HOST_CODEX_TRUST_SHARED = '1'
 agent-remote-controller codex daemon start
 agent-remote-controller start
 agent-remote-controller codex
@@ -62,6 +59,8 @@ Controller discovers and verifies the endpoint through an authenticated named
 pipe; the terminal proxy passes the token through the environment. State is stored
 in `<CODEX_HOME>/agent-remote-daemon`. Keep that directory private to your account.
 Unix socket and file-descriptor-limit overrides must be unset on Windows.
+On macOS/Linux, the Controller daemon start/restart command defaults to a soft
+file descriptor limit of `8192`, configurable through `AGENT_HOST_CODEX_NOFILE`.
 
 Use `agent-remote-controller codex daemon status|restart|stop` to manage this
 independent runtime. Stopping the Controller or closing a client leaves it running.
@@ -83,17 +82,23 @@ connections retain their native argument semantics.
 
 ## Ownership and permission boundaries
 
-- `private` remains the default connection mode and creates an isolated
-  app-server process for each provider session. `shared` never silently falls
+- `shared` is the default Controller connection mode. Explicit
+  `AGENT_HOST_CODEX_CONNECTION=private` settings and managed Gateway sessions
+  retain isolated app-server processes. `shared` never silently falls
   back to a private runtime if the daemon is missing or disconnected.
 - Shared mode uses native WebSocket JSON-RPC over the local Unix socket or an
   authenticated Windows loopback connection. The
   native `app-server proxy` command forwards bytes; it does not translate the
   WebSocket handshake into newline-delimited JSON.
-- `AGENT_HOST_CODEX_TRUST_SHARED=1` explicitly accepts the shared daemon's native
-  permissions for Codex only. It does not change Claude or Copilot restrictions.
+- `AGENT_HOST_CODEX_TRUST_SHARED` defaults to `1`, accepting the shared daemon's
+  native permissions for Codex only. An explicit `0` retains the permission
+  rejection unless full control is enabled. It does not change Claude or Copilot restrictions.
   A connected client cannot independently sandbox work already running in a
   shared thread. The existing Host workspace/grant checks remain in effect.
+- Trusted shared Codex sessions allow web permission changes on Windows, macOS,
+  and Linux. The Host does not add a local permission lock. Native requirements
+  and idle-session checks still apply. Confirmed native permission changes from
+  another client update the web controls through the shared daemon notifications.
 - Closing a Remote session closes its connection, not the daemon or another
   subscriber. Native daemon lifetime and idle thread unloading remain native
   policies. The Provider reconnects automatically after a socket failure while

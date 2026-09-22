@@ -4,6 +4,22 @@ import type { AddressInfo } from 'node:net';
 import { expect, it } from 'vitest';
 import { RemoteHostClient, SessionDirectoryClient } from './directory-client.js';
 
+it('requests fresh Controller discovery only for a manual refresh', async () => {
+  const paths: string[] = [];
+  const server = createServer((request, response) => {
+    paths.push(request.url!);
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ release: null }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new RemoteHostClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/tenant/`);
+    await client.controllerRelease();
+    await client.controllerRelease({ refresh: true });
+    expect(paths).toEqual(['/u/tenant/v1/remote/controller-release', '/u/tenant/v1/remote/controller-release?refresh=1']);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
 it('revokes the selected Host over the user-scoped HTTP endpoint', async () => {
   const requests: Array<{ method?: string; path?: string; body: string; contentType?: string }> = [];
   const server = createServer(async (request, response) => {

@@ -20,6 +20,8 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const refreshRelease = useRef<() => void>(() => {});
   const [statuses, setStatuses] = useState<Record<string, ControllerUpdateStatus>>({});
   const current = useRef({ service, hosts }); current.current = { service, hosts };
   const mutationEpoch = useRef(0);
@@ -30,13 +32,15 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
   useEffect(() => {
     let retired = false, loading = false;
     setRelease(null); setStatuses({}); setError(undefined); requests.current.clear(); setBusy(false); setConfirm(null);
-    const stop = watchPagePolling(async () => {
+    const discover = async (refresh = false) => {
       if (retired || loading || !service.controllerRelease) return;
-      loading = true;
-      try { const result = await service.controllerRelease(); if (!retired && current.current.service === service) { setRelease(result.release); setError(undefined); } }
+      loading = true; setChecking(true);
+      try { const result = await service.controllerRelease({ refresh }); if (!retired && current.current.service === service) { setRelease(result.release); setError(undefined); } }
       catch (cause) { if (!retired) setError(cause instanceof Error ? cause.message : 'Could not check Controller updates.'); }
-      finally { loading = false; }
-    }, 300000);
+      finally { loading = false; if (!retired) setChecking(false); }
+    };
+    refreshRelease.current = () => { void discover(true); };
+    const stop = watchPagePolling(() => discover(), 300000);
     return () => { retired = true; stop(); };
   }, [service]);
   const pending = Object.values(statuses).some(status => ['downloading', 'waiting', 'restarting'].includes(status.phase));
@@ -80,7 +84,9 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
     <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>Controller updates{available ? ` · ${release!.version} available` : ''}</button>
     {expanded ? <div>
       {error ? <p role="alert">{error}</p> : null}
-      {release ? <p>Latest version: <strong>{release.version}</strong></p> : <p>No published Controller release is available yet.</p>}
+      <p className="lab-controller-release">{release ? <span>Latest version: <strong>{release.version}</strong></span> : <span>{checking ? 'Checking latest version…' : 'No published Controller release is available yet.'}</span>}
+        <button type="button" disabled={checking} onClick={() => refreshRelease.current()}>{checking ? 'Refreshing…' : 'Refresh'}</button>
+      </p>
       {release && !covered ? <p>Some Hosts are not compatible with this release. Compatible Hosts can still update independently.</p> : null}
       <ul>{owned.map(host => {
         const status = statuses[host.id]; const needs = outdated.includes(host);

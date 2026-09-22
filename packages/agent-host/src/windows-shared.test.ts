@@ -7,6 +7,9 @@ import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
 import { CodexAppServerProvider, readWindowsCodexDaemon, requestWindowsCodexDaemon, windowsCodexSharedEndpoint } from '@orchardworks/agent-provider-codex';
 import { CodexAppServerTransport } from '../../codex-daemon-client/src/app-server-transport.js';
+import { createCodexHostRegistration } from './codex.js';
+import { createAgentHostRuntime } from './host.js';
+import { createHostExecutionPolicy } from './execution-policy.js';
 
 const exec = promisify(execFile);
 const wsPath = createRequire(import.meta.url).resolve('ws');
@@ -30,7 +33,11 @@ server.on('connection', socket=>socket.on('message', raw=>{
   const message=JSON.parse(String(raw)); if(message.id===undefined)return;
   let result={};
   if(message.method==='initialize') result={userAgent:'fake-codex/0.153.4'};
-  if(message.method==='thread/start') result={thread:thread={id:'shared-test-thread',cwd:${JSON.stringify(home)},turns:[]}};
+  if(message.method==='thread/start') result={thread:thread={id:'shared-test-thread',cwd:${JSON.stringify(home)},turns:[]},approvalPolicy:'on-request',sandbox:{type:'readOnly'}};
+  if(message.method==='configRequirements/read') result={requirements:null};
+  if(message.method==='thread/settings/update') {
+    for(const client of server.clients) client.send(JSON.stringify({method:'thread/settings/updated',params:{threadId:message.params.threadId,threadSettings:message.params}}));
+  }
   if(message.method==='thread/read') result={thread};
   if(message.method==='thread/list') result={data:[],nextCursor:null};
   socket.send(JSON.stringify({id:message.id,result}));
@@ -63,6 +70,23 @@ server.on('connection', socket=>socket.on('message', raw=>{
     const provider = new CodexAppServerProvider({ connectionMode: 'shared', env: { CODEX_HOME: home }, requestTimeoutMs: 5000 });
     await provider.listSessions();
     expect((await requestWindowsCodexDaemon(state, 'status')).pid).toBe(state.pid);
+    const registration = await createCodexHostRegistration({ executable: native ?? fake, env, connectionMode: 'shared', restrictedNative: false });
+    const host = createAgentHostRuntime({ registrations: [registration], executionPolicy: await createHostExecutionPolicy({ AGENT_HOST_WORKSPACE: home }) });
+    try {
+      const id = await registration.directory.create({ cwd: home });
+      const attached = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'permission-web', body: JSON.stringify({ providerId: 'codex', nativeSessionId: id }) });
+      expect(attached.status).toBe(200);
+      const lease = await host.acquireSession('permission-web');
+      expect(lease).toBeDefined();
+      const settings = () => lease!.agent.snapshot().payload.runtimeInfo.settings;
+      expect(settings()?.find(setting => setting.id === 'sandbox')).toMatchObject({ mutable: true });
+      await second.request('thread/settings/update', { threadId: id, approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } });
+      await expect.poll(() => settings()?.find(setting => setting.id === 'sandbox')?.value).toBe('dangerFullAccess');
+      expect(settings()?.find(setting => setting.id === 'approval')?.value).toBe('never');
+      await lease!.agent.setSessionSetting('sandbox', 'readOnly');
+      expect(settings()?.find(setting => setting.id === 'sandbox')).toMatchObject({ value: 'readOnly', mutable: true });
+      lease!.release();
+    } finally { await host.close(); }
     if (!native) {
       await run(['resume', 'shared-test-thread']);
       const proxy = JSON.parse(await readFile(capture, 'utf8'));

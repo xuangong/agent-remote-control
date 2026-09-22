@@ -10,7 +10,7 @@ const paths: string[] = [];
 afterEach(async () => { await Promise.all(paths.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'host-policy-')); paths.push(root);
-  await mkdir(join(root, 'allowed')); await mkdir(join(root, 'outside')); await symlink(join(root, 'outside'), join(root, 'allowed', 'escape'));
+  await mkdir(join(root, 'allowed')); await mkdir(join(root, 'outside')); await symlink(join(root, 'outside'), join(root, 'allowed', 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
   const allowed = await realpath(join(root, 'allowed')); const outside = await realpath(join(root, 'outside'));
   const calls: string[] = [];
   const info: AgentRuntimeInfo = { providerId: 'recorded', sessionId: 'session', cwd: allowed, status: 'idle', settings: [
@@ -53,6 +53,19 @@ it('requires explicit local full-control opt-out and masks management secrets ac
   expect(env.AGENT_HOST_REMOTE_KEY).toBeUndefined(); expect(env.AGENT_HOST_MANAGEMENT_TOKEN).toBeUndefined();
   expect(env.AGENT_REMOTE_GATEWAY_CLIENT_SECRET).toBeUndefined(); expect(env.OPENAI_API_KEY).toBe('provider'); expect(env.GH_TOKEN).toBe('github');
   expect({ AGENT_HOST_REMOTE_KEY: 'inherited', ...env }.AGENT_HOST_REMOTE_KEY).toBeUndefined();
+});
+
+it('allows native permission control while retaining workspace admission and live values', async () => {
+  const f = await fixture();
+  const directory = protectHostDirectory(f.source, { ...f.policy!, lockPermissions: false });
+  const session = await directory.open('session');
+  expect((await session.runtimeInfo()).settings![0]!.mutable).toBe(true);
+  await session.setSessionSetting!('native-policy', 'full');
+  f.info.settings![0]!.value = 'full';
+  const item = (await session.observe()[Symbol.asyncIterator]().next()).value;
+  expect(item.event.runtimeInfo.settings[0]).toMatchObject({ value: 'full', mutable: true });
+  f.info.cwd = f.outside;
+  await expect(session.setSessionSetting!('native-policy', 'ask')).rejects.toThrow(/workspace/i);
 });
 
 

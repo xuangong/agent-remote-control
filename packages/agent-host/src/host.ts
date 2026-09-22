@@ -37,7 +37,13 @@ export interface AgentHostDirectory {
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close(): Promise<void> | void;
 }
-export interface AgentHostProviderRegistration { adapter: AgentProviderAdapter; directory: AgentHostDirectory; preservesWorkOnDisconnect?: boolean }
+export interface AgentHostProviderRegistration {
+  adapter: AgentProviderAdapter;
+  directory: AgentHostDirectory;
+  preservesWorkOnDisconnect?: boolean;
+  /** Trust native permission controls without disabling Host workspace admission. */
+  nativePermissionControl?: boolean;
+}
 export interface AgentHostRuntimeOptions {
   registrations: readonly AgentHostProviderRegistration[];
   onRequestDiagnostic?: (diagnostic: AgentHostRequestDiagnostic) => void;
@@ -183,7 +189,9 @@ interface Binding { agentId: string; providerId: string; nativeSessionId: string
 interface Projection { agentId: string; parentNativeSessionId?: string; operation: Promise<Binding> }
 
 export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentHostRuntime {
-  if (options.executionPolicy) options = { ...options, registrations: options.registrations.map(registration => ({ ...registration, directory: protectHostDirectory(registration.directory, options.executionPolicy!) })) };
+  if (options.executionPolicy) options = { ...options, registrations: options.registrations.map(registration => ({ ...registration,
+    directory: protectHostDirectory(registration.directory, { ...options.executionPolicy!,
+      lockPermissions: registration.nativePermissionControl ? false : options.executionPolicy!.lockPermissions }) })) };
   if (!options.registrations.length) throw new Error('Agent Host requires at least one provider registration.');
   const registrations = new Map<string, AgentHostProviderRegistration>();
   const prepared = new Map<string, AgentSession>();

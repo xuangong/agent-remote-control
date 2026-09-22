@@ -18,7 +18,7 @@ export interface PairingRecord { id: string; purpose: PairingPurpose; createdAt:
 export interface PairingHistory { pairings: PairingRecord[]; availablePurposes?: PairingPurpose[] }
 export interface HostStopResult { agentId: string; status: 'cancelled' | 'unsupported' | 'failed'; message?: string }
 export interface HostPairingService {
-  controllerRelease?(): Promise<{ release: ControllerRelease | null }>;
+  controllerRelease?(options?: { refresh?: boolean }): Promise<{ release: ControllerRelease | null }>;
   controllerUpdate?(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus>;
   invitation?: PairingInvitation;
   hosts(): Promise<{ hosts: RemoteHost[] }>;

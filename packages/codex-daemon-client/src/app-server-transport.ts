@@ -2,7 +2,7 @@ import { disposeOwnedProcess } from './platform/processes/index.js';
 import { type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import readline from 'node:readline';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { connect } from 'node:net';
 import { WebSocket } from 'ws';
 
@@ -144,10 +144,14 @@ export class CodexAppServerTransport {
     const id = this.nextId++;
     const started = Date.now();
     const phase = method === 'thread/resume' ? 'resume' : ['thread/read', 'thread/turns/list', 'thread/items/list'].includes(method) ? 'history' : method === 'thread/list' ? 'catalog' : method === 'initialize' ? 'initialize' : undefined;
-    const diagnostic = (outcome: 'started' | 'completed' | 'timeout' | 'unavailable' | 'rejected') => {
+    const sessionRef = isRecord(params) && typeof params.threadId === 'string'
+      ? createHash('sha256').update(params.threadId).digest('hex').slice(0, 16) : undefined;
+    const diagnostic = (outcome: 'started' | 'completed' | 'timeout' | 'unavailable' | 'rejected', error?: unknown) => {
       if (!phase) return;
       try { this.onDiagnostic(JSON.stringify({ event: 'codex_request', connectionId: this.diagnosticId, requestId: id,
-        phase, outcome, elapsedMs: Date.now() - started })); } catch { /* Diagnostics cannot change native request outcomes. */ }
+        phase, method, outcome, elapsedMs: Date.now() - started, ...(sessionRef ? { sessionRef } : {}),
+        ...(phase === 'history' ? { hasCursor: isRecord(params) && typeof params.cursor === 'string' } : {}),
+        ...(error ? requestFailureDiagnostic(error) : {}) })); } catch { /* Diagnostics cannot change native request outcomes. */ }
     };
     diagnostic('started');
     const result = new Promise((resolve, reject) => {
@@ -168,7 +172,7 @@ export class CodexAppServerTransport {
       }
     }
     return result.then(value => { diagnostic('completed'); return value; }, error => {
-      diagnostic(error instanceof CodexRequestTimeoutError ? 'timeout' : error instanceof CodexTransportUnavailableError ? 'unavailable' : 'rejected');
+      diagnostic(error instanceof CodexRequestTimeoutError ? 'timeout' : error instanceof CodexTransportUnavailableError ? 'unavailable' : 'rejected', error);
       throw error;
     });
   }
@@ -292,6 +296,22 @@ export class CodexAppServerTransport {
       this.socket.send(JSON.stringify(message), error => { if (error) this.handleTermination(error); });
     } else if (this.child?.stdin.writable) this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
+}
+
+/** Classify native errors without recording messages, error data, or request payloads. */
+function requestFailureDiagnostic(error: unknown): { reason: string; rpcCode?: number } {
+  if (error instanceof CodexRequestTimeoutError) return { reason: 'request_timeout' };
+  if (error instanceof CodexTransportUnavailableError) return { reason: 'transport_unavailable' };
+  if (!(error instanceof CodexAppServerRpcError)) return { reason: 'request_failed' };
+  const rpcCode = typeof error.code === 'number' && Number.isSafeInteger(error.code) ? error.code : undefined;
+  const text = error.message.toLowerCase();
+  const reason = /too many open files|os error 24|\bemfile\b/.test(text) ? 'file_limit'
+    : /thread.*not loaded/.test(text) ? 'thread_not_loaded'
+    : /thread.*not found|no thread found/.test(text) ? 'thread_not_found'
+    : /invalid.*cursor|cursor.*invalid|cursor.*expired/.test(text) ? 'invalid_cursor'
+    : rpcCode === -32602 ? 'invalid_params' : rpcCode === -32601 ? 'method_unavailable'
+    : rpcCode === -32603 ? 'internal_error' : 'native_error';
+  return { reason, ...(rpcCode !== undefined ? { rpcCode } : {}) };
 }
 
 function isJsonRpcRequest(message: JsonObject): boolean {

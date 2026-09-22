@@ -45,3 +45,36 @@ it('bounds the owner authority response before accepting a valid lease', async (
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
   }
 }, 10_000);
+
+it.each([[503, 'authority_http_error'], [403, 'access_revoked'], [200, 'authority_invalid_response']] as const)(
+  'reports safe authority failure metadata for HTTP %s', async (status, reason) => {
+    const server = createServer((request, response) => {
+      request.resume(); response.writeHead(status); response.end('private authority response');
+    });
+    server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    try {
+      const address = server.address(); if (!address || typeof address === 'string') throw Error('Missing listener');
+      const diagnostics: unknown[] = [];
+      await queryGatewayAuthority({ origin: 'https://relay.example', issuer: `http://127.0.0.1:${address.port}`, secret: 'authority-safe-metadata-secret-0123456789' },
+        'user-status', { subject: 'private-user' }, value => diagnostics.push(value));
+      expect(diagnostics).toEqual([{ reason, status, durationMs: expect.any(Number) }]);
+      expect(JSON.stringify(diagnostics)).not.toMatch(/private|secret/);
+    } finally {
+      server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  }, 10000);
+
+it('distinguishes an authority deadline from HTTP errors without changing denial behavior', async () => {
+  const server = createServer(request => request.resume());
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw Error('Missing listener');
+    const diagnostics: unknown[] = [];
+    const result = await queryGatewayAuthority({ origin: 'https://relay.example', issuer: `http://127.0.0.1:${address.port}`, secret: 'authority-timeout-secret-0123456789012345' },
+      'user-status', { subject: 'private-user' }, value => diagnostics.push(value));
+    expect(result).toEqual({ status: 'unavailable' });
+    expect(diagnostics).toEqual([{ reason: 'authority_timeout', durationMs: expect.any(Number) }]);
+  } finally {
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}, 10000);

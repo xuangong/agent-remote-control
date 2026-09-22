@@ -8,3 +8,12 @@ it('accepts bounded typed metadata and rejects arbitrary payloads or timestamps'
  expect(parseRelayDiagnosticBatch({entries:Array(33).fill(event)})).toBeUndefined();
  expect(parseRelayDiagnosticBatch({entries:[event],key:'secret'})).toBeUndefined();
 });
+
+it('negotiates authority diagnostics without blocking older Controller log delivery', async () => {
+ const { relayDiagnosticsForVersion } = await import('./relay-diagnostics.js');
+ const authority = { ...event, event: 'authority_refresh_completed', reason: 'authority_timeout', leaseRemainingMs: 20000, retryDelayMs: 10000, durationMs: 5000 };
+ expect(isRelayDiagnostic(authority)).toBe(true);
+ const batch = parseRelayDiagnosticBatch({ entries: [event, authority] })!;
+ expect(relayDiagnosticsForVersion(batch, 1)).toEqual([event]);
+ expect(relayDiagnosticsForVersion(batch, 2)).toEqual(batch);
+});

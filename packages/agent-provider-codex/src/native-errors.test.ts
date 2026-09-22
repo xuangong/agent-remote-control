@@ -80,3 +80,27 @@ it('does not mistake local Controller file exhaustion for a daemon RPC failure',
   const provider = new CodexAppServerProvider({ spawn: () => { throw Object.assign(new Error('EMFILE'), { code: 'EMFILE' }); } });
   await expect(provider.createSession({ sessionId: 'private' })).rejects.toMatchObject({ code: 'EMFILE' });
 });
+
+it('records rejected history metadata over a shared socket without exposing native text or session identity', async () => {
+  const root = await mkdtemp('/tmp/arc-history-diagnostic-');
+  const server = createServer(); const sockets = new WebSocketServer({ server });
+  sockets.on('connection', socket => socket.on('message', raw => {
+    const request = JSON.parse(raw.toString()); if (request.id === undefined) return;
+    socket.send(JSON.stringify(request.method === 'thread/turns/list'
+      ? { id: request.id, error: { code: -32602, message: 'thread private-thread is not loaded: /private/rollout', data: { token: 'private-token' } } }
+      : { id: request.id, result: request.method === 'thread/resume' ? { thread: { id: 'private-thread' }, model: 'model' } : {} }));
+  }));
+  const socketPath = join(root, 'native.sock'); server.listen(socketPath); await once(server, 'listening');
+  const diagnostics: string[] = [];
+  const provider = new CodexAppServerProvider({ connectionMode: 'shared', socketPath, requestTimeoutMs: 1000, onDiagnostic: line => diagnostics.push(line) });
+  try {
+    await expect(provider.resumeSession({ providerId: 'codex', sessionId: 'private-thread', opaque: '{}' })).rejects.toBeDefined();
+    expect(diagnostics.map(line => JSON.parse(line))).toContainEqual(expect.objectContaining({ event: 'codex_request', phase: 'history',
+      method: 'thread/turns/list', outcome: 'rejected', rpcCode: -32602, reason: 'thread_not_loaded', sessionRef: expect.stringMatching(/^[a-f0-9]{16}$/) }));
+    expect(diagnostics.join('')).not.toMatch(/private-thread|private-token|private\/rollout/);
+  } finally {
+    for (const socket of sockets.clients) socket.terminate();
+    await new Promise<void>(resolve => sockets.close(() => resolve()));
+    await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true });
+  }
+}, 10000);

@@ -14,7 +14,7 @@ import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
 import { createGatewayControlVerifier } from './control.js';
 import { SharingError } from './host-sharing.js';
 import { createGatewaySessions } from './sessions.js';
-import { queryGatewayAuthority } from './authority.js';
+import { queryGatewayAuthority, type AuthorityDiagnostic } from './authority.js';
 import { provisionGatewayHostKey, revokeGatewayHostKey, validateBootstrapBody } from './host-bootstrap.js';
 import { createRelayState, type RelayStateStore } from './state.js';
 import { createTimerRelayScheduler, type RelayScheduler } from './scheduler.js';
@@ -41,7 +41,7 @@ export interface HostedRelayOptions extends GatewayAuthOptions {
   clientAddress?(request: Request): string;
   keyLifetimeMs?: number;
 }
-type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityDenied: boolean;
+type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityRefreshAt: number; authorityDenied: boolean;
   checking?: Promise<'active' | 'denied' | 'unavailable'>; broker: ReturnType<typeof createHostBroker>; expiresAt: number };
 export function createHostedRelay(options: HostedRelayOptions) {
   const auth = { origin: validateGatewayOrigin(options.origin), issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
@@ -129,6 +129,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     due.push(renewalAt, ...state.read().loginChallenges.map(([, value]) => value.expiresAt), ...state.read().consumedProofs.map(([, expires]) => expires * 1000));
     for (const owned of tenants.values()) {
       if (!durable) due.push(owned.expiresAt);
+      if (owned.authorityRefreshAt > 0) due.push(owned.authorityRefreshAt);
       if (owned.authorityUntil > Date.now()) due.push(owned.authorityUntil);
     }
     for (const session of state.read().sessions) {
@@ -144,10 +145,22 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (!force && owned.authorityUntil > Date.now()) return 'active';
     if (owned.checking) return owned.checking;
     owned.checking = (async () => {
-      const result = await queryGatewayAuthority(auth, 'user-status', { subject: owned.subject });
+      const hostIds = owned.broker.visibleHosts(owned.subject).map(host => host.id);
+      for (const id of hostIds) diagnostics.record(id, { event: 'authority_refresh_started', leaseRemainingMs: Math.max(0, owned.authorityUntil - Date.now()) });
+      let detail: AuthorityDiagnostic | undefined;
+      const result = await queryGatewayAuthority(auth, 'user-status', { subject: owned.subject }, value => { detail = value; });
       if (closing || failed) return 'unavailable' as const;
       if (result.status === 'active' && result.subject === owned.subject) { owned.authorityUntil = result.validUntil; owned.authorityDenied = false; }
       else if (result.status === 'denied' || result.status === 'active') { owned.authorityUntil = 0; owned.authorityDenied = true; }
+      // Renewal must finish before expiry. A transient outage retries within the
+      // existing lease; it never grants additional time without authority approval.
+      const remaining = owned.authorityUntil - Date.now();
+      owned.authorityRefreshAt = Date.now() + (remaining > 0
+        ? Math.max(result.status === 'active' ? 1 : 250, Math.floor(Math.min(result.status === 'active' ? 60_000 : 10_000, remaining / 2)))
+        : 10_000);
+      for (const id of hostIds) diagnostics.record(id, { event: 'authority_refresh_completed', ...detail,
+        ...(owned.authorityDenied ? { reason: 'access_revoked' as const } : {}),
+        leaseRemainingMs: Math.max(0, remaining), retryDelayMs: Math.max(0, owned.authorityRefreshAt - Date.now()) });
       if (owned.authorityUntil <= Date.now()) {
         owned.authorityUntil = 0;
         owned.broker.disconnect(owned.authorityDenied ? 1008 : 1013);
@@ -172,7 +185,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         }); await scheduling; },
         onPairing(_key, expiresAt) { const owned = tenants.get(grant.namespace); if (owned) owned.expiresAt = Math.max(owned.expiresAt, expiresAt); },
       });
-      entry = { subject: grant.subject, namespace: grant.namespace, authorityUntil: 0, authorityDenied: false, broker, expiresAt: grant.expiresAt };
+      entry = { subject: grant.subject, namespace: grant.namespace, authorityUntil: 0, authorityRefreshAt: 0, authorityDenied: false, broker, expiresAt: grant.expiresAt };
       tenants.set(grant.namespace, entry);
     }
     entry.expiresAt = Math.max(entry.expiresAt, grant.expiresAt);
@@ -324,7 +337,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (!pending) return json(401, { error: 'Start sign-in from this browser before opening the gateway.' });
       const exchange = await sessions.exchange(grant, request);
       if (exchange.status !== 'active') return json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Gateway access could not be renewed.' });
-      if (grant.continuation) { owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false; }
+      if (grant.continuation) {
+        owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false;
+        owned.authorityRefreshAt = Date.now() + Math.max(1, Math.floor(Math.min(60_000, (owned.authorityUntil - Date.now()) / 2)));
+      }
       await security.record(grant.subject, 'signed_in', 'allowed');
       const response = json(200, { ...browserState(exchange.grant), ...(pending.returnPath ? { returnPath: pending.returnPath } : {}), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
       response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
@@ -690,7 +706,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
         draft.consumedProofs = draft.consumedProofs.filter(([, expires]) => expires * 1000 > now);
         if (!durable) draft.tenants = draft.tenants.filter(value => tenants.has(value.namespace));
       });
-      await Promise.all([sessions.refreshAll(), ...[...tenants.values()].map(owned => activeOwner(owned, true))]);
+      const renewOwners = async (force = false) => {
+        const due = [...tenants.values()].filter(owned => force || owned.authorityRefreshAt <= Date.now());
+        for (let index = 0; index < due.length; index += 4) {
+          await Promise.all(due.slice(index, index + 4).map(owned => activeOwner(owned, true)));
+        }
+      };
+      // Host authorization must not queue behind every saved browser login.
+      // Recheck due owners between browser batches even during a long refresh.
+      await renewOwners(true);
+      await sessions.refreshAll(renewOwners);
       await previewAccess.enforce();
     })();
     refreshing = operation;

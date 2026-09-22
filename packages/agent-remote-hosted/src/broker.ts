@@ -1,5 +1,5 @@
 import type { DiagnosticJournal } from './diagnostic-journal.js';
-import { RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from './relay-diagnostics.js';
+import { relayDiagnosticsForVersion, RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from './relay-diagnostics.js';
 import { controllerReleases } from './controller-releases.js';
 import { decodeClientMessage, PROTOCOL_VERSION, releaseCoversHost, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
@@ -281,23 +281,25 @@ export function createHostBroker(options: HostBrokerOptions) {
         heartbeatStarted = true; lastHeartbeatAck = now(); heartbeatTimer = setTimeout(sendHeartbeat, heartbeat.intervalMs);
         diagnostic(host, {event:'host_registered'});
         const connectedHost = host;
-        let supported: boolean | undefined;
+        let diagnosticVersion: number | undefined;
         const canDeliverDiagnostics = () => !retired && connectedHost.socket === socket && connectedHost.pending.size <= 16
           && (socket.bufferedAmount === undefined || socket.bufferedAmount === 0);
         host.stopDiagnostics = options.diagnostics?.connect(host.id, async entries => {
           if (!canDeliverDiagnostics()) return {status:503};
-          if (supported === undefined) {
+          if (diagnosticVersion === undefined) {
             const result = await rpc(connectedHost, 'GET', '/remote/controller-update', undefined, undefined, true);
             // Diagnostics can remain available when the independent updater status fails.
-            try { if (JSON.parse(result.body).diagnosticDelivery === 1) supported = true; } catch { /* No capability advertised. */ }
-            if (supported !== true) {
-              if (result.status === 404 || result.status === 200) supported = false;
+            try { const version = JSON.parse(result.body).diagnosticDelivery; if (Number.isSafeInteger(version) && version >= 1) diagnosticVersion = version; } catch { /* No capability advertised. */ }
+            if (diagnosticVersion === undefined) {
+              if (result.status === 404 || result.status === 200) diagnosticVersion = 0;
               else return result;
             }
           }
-          if (!supported) return {status:404};
+          if (!diagnosticVersion) return {status:404};
           if (!canDeliverDiagnostics()) return {status:503};
-          return rpc(connectedHost, 'POST', RELAY_DIAGNOSTIC_PATH, undefined, JSON.stringify({entries}), true);
+          const compatible = relayDiagnosticsForVersion(entries, diagnosticVersion);
+          if (!compatible.length) return { status: 204 };
+          return rpc(connectedHost, 'POST', RELAY_DIAGNOSTIC_PATH, undefined, JSON.stringify({ entries: compatible }), true);
         });
       }
     }

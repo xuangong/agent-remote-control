@@ -62,3 +62,27 @@ describe('CodexAppServerTransport', () => {
     vi.useRealTimers();
   });
 });
+
+describe('native request diagnostics', () => {
+  it.each([
+    ['thread/turns/list', -32602, 'thread private-session is not loaded: /private/workspace', 'thread_not_loaded'],
+    ['thread/read', -32602, 'thread not found: private-session', 'thread_not_found'],
+    ['thread/items/list', -32602, 'Invalid cursor: secret-cursor', 'invalid_cursor'],
+    ['thread/read', -32603, 'Too many open files (os error 24): /private/rollout', 'file_limit'],
+    ['thread/read', -32602, 'sensitive arbitrary native message', 'invalid_params'],
+    ['thread/read', -32603, 'sensitive arbitrary native message', 'internal_error'],
+    ['thread/read', 'secret-code', 'sensitive arbitrary native message', 'native_error'],
+  ])('records safe rejection details for %s (%s, %s)', async (method, code, message, reason) => {
+    const child = createFakeChildProcess(); const diagnostics: string[] = [];
+    const transport = new CodexAppServerTransport(child, { onDiagnostic: line => diagnostics.push(line) });
+    try {
+      const request = transport.request(method, { threadId: 'private-session', cursor: 'secret-cursor' });
+      child.stdout.write(JSON.stringify({ id: 1, error: { code, message, data: { token: 'secret-token' } } }) + '\n');
+      await expect(request).rejects.toMatchObject({ code, message });
+      const rejected = diagnostics.map(line => JSON.parse(line)).find(value => value.outcome === 'rejected');
+      expect(rejected).toMatchObject({ event: 'codex_request', phase: 'history', method, reason,
+        ...(typeof code === 'number' ? { rpcCode: code } : {}), requestId: 1, sessionRef: expect.stringMatching(/^[a-f0-9]{16}$/), hasCursor: true });
+      expect(diagnostics.join('')).not.toMatch(/private-session|private\/|secret-|sensitive arbitrary/);
+    } finally { await transport.dispose(); }
+  });
+});

@@ -4,8 +4,8 @@ export const MAX_RELAY_DIAGNOSTICS = 4096;
 export const MAX_HOST_DIAGNOSTICS = 256;
 export const RELAY_DIAGNOSTIC_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_DIAGNOSTIC_BATCH = 32;
-const events = ['relay_started', 'host_registered', 'host_disconnected', 'rpc_timeout', 'rpc_failed', 'stream_opening', 'stream_ready', 'stream_closed', 'stream_open_timeout'] as const;
-const reasons = ['socket_closed', 'heartbeat_timeout', 'heartbeat_delivery_failed', 'transport_error', 'connection_replaced', 'authority_unavailable', 'access_revoked', 'relay_closed', 'relay_state_unavailable', 'credential_expired', 'protocol_error', 'stream_timeout', 'host_backpressure', 'write_failed', 'runtime_rejected'] as const;
+const events = ['relay_started', 'host_registered', 'host_disconnected', 'rpc_timeout', 'rpc_failed', 'stream_opening', 'stream_ready', 'stream_closed', 'stream_open_timeout', 'authority_refresh_started', 'authority_refresh_completed'] as const;
+const reasons = ['socket_closed', 'heartbeat_timeout', 'heartbeat_delivery_failed', 'transport_error', 'connection_replaced', 'authority_unavailable', 'access_revoked', 'relay_closed', 'relay_state_unavailable', 'credential_expired', 'protocol_error', 'stream_timeout', 'host_backpressure', 'write_failed', 'runtime_rejected', 'authority_active', 'authority_timeout', 'authority_http_error', 'authority_transport_error', 'authority_invalid_response'] as const;
 const operations = ['catalog', 'attach', 'create', 'session_read', 'session_control', 'controller_update', 'preview', 'other'] as const;
 export interface RelayDiagnostic {
   id: string;
@@ -26,6 +26,8 @@ export interface RelayDiagnostic {
   pendingRequests?: number;
   streams?: number;
   heartbeatAgeMs?: number;
+  leaseRemainingMs?: number;
+  retryDelayMs?: number;
 }
 export interface RelayDiagnosticStore {
   initial?: unknown;
@@ -34,7 +36,7 @@ export interface RelayDiagnosticStore {
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_:.-]{1,128}$/.test(value);
 const identifiers = ['connectionId', 'requestId', 'streamId', 'agentId'] as const;
-const counts = ['status', 'closeCode', 'durationMs', 'pendingRequests', 'streams', 'heartbeatAgeMs'] as const;
+const counts = ['status', 'closeCode', 'durationMs', 'pendingRequests', 'streams', 'heartbeatAgeMs', 'leaseRemainingMs', 'retryDelayMs'] as const;
 const fields = new Set(['id', 'timestamp', 'source', 'hostId', 'relayInstanceId', 'event', 'operation', 'reason', ...identifiers, ...counts]);
 export function isRelayDiagnostic(value: unknown): value is RelayDiagnostic {
   if (!record(value) || Object.keys(value).some(key => !fields.has(key)) || value.source !== 'relay' || !identifier(value.id) || !identifier(value.hostId) || !identifier(value.relayInstanceId)) return false;
@@ -58,4 +60,13 @@ export function pruneRelayDiagnostics(value: unknown, now = Date.now()): RelayDi
     ids.add(item.id); perHost.set(item.hostId, count + 1); result.push(item);
   }
   return result.reverse();
+}
+
+/** Older Controllers reject unknown diagnostic events and fields. */
+export function relayDiagnosticsForVersion(entries: RelayDiagnostic[], version: number): RelayDiagnostic[] {
+  if (version >= 2) return entries;
+  return entries.filter(entry => !entry.event.startsWith('authority_refresh_')).map(entry => {
+    const { leaseRemainingMs: _lease, retryDelayMs: _retry, ...legacy } = entry;
+    return legacy;
+  });
 }

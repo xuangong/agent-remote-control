@@ -90,7 +90,13 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
       const record = recordFor(request);
       if (record) await state.mutate(draft => { draft.sessions = draft.sessions.filter(value => value.hash !== record.hash); });
     },
-    async refreshAll() { await Promise.all([...state.read().sessions].map(value => renew(value))); },
+    async refreshAll(beforeBatch?: () => Promise<void>) {
+      const records = [...state.read().sessions];
+      for (let index = 0; index < records.length && !closed; index += 4) {
+        await beforeBatch?.();
+        await Promise.all(records.slice(index, index + 4).map(value => renew(value)));
+      }
+    },
     close() { closed = true; },
   };
 }

@@ -1390,7 +1390,7 @@ it.each([false, true])('advertises diagnostic delivery only when a local sink ex
     await host.ready;
     const response = await broker.rpc('GET', '/remote/controller-update');
     expect(response.status).toBe(installed ? 200 : 404);
-    if (installed) expect(JSON.parse(response.body)).toEqual({ diagnosticDelivery: 1 });
+    if (installed) expect(JSON.parse(response.body)).toEqual({ diagnosticDelivery: 2 });
   } finally { await host.close(); await broker.close(); }
 });
 
@@ -1409,7 +1409,7 @@ it.each([false, true])('preserves diagnostic capability independently of unreada
     const response = await broker.rpc('GET', '/remote/controller-update');
     expect(response.status).toBe(409);
     expect(JSON.parse(response.body).error).toEqual(expect.any(String));
-    expect(JSON.parse(response.body).diagnosticDelivery).toBe(installed ? 1 : undefined);
+    expect(JSON.parse(response.body).diagnosticDelivery).toBe(installed ? 2 : undefined);
     if (installed) {
       const entry = { id: 'event-1', timestamp: '2026-09-20T01:02:03.000Z', source: 'relay', hostId: 'host-1', relayInstanceId: 'relay-1', event: 'host_disconnected' };
       expect((await broker.rpc('POST', '/remote/diagnostics/relay', undefined, { entries: [entry] })).status).toBe(204);

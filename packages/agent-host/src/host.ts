@@ -129,13 +129,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         try {
           if (request.method === 'GET') {
             if (!updater && !options.onRelayDiagnostics) return { status: 404, body: '' };
-            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 1 } : {}) }) };
+            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 2 } : {}) }) };
           }
           if (!updater) return { status: 404, body: '' };
           const body = JSON.parse(request.body ?? '{}');
           return { status: 202, body: JSON.stringify(await updater.request(body.version, body.operationId)) };
         } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.',
-          ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 1 } : {}) }) }; }
+          ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 2 } : {}) }) }; }
       })() : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
         : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
       operationExecutor: scope => runtime.executeOperation(scope),

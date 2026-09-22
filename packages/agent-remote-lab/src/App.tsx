@@ -214,7 +214,7 @@ function AppContent({
   const traceTabRef = useRef<HTMLButtonElement>(null);
   const sessionsTriggerRef = useRef<HTMLButtonElement>(null);
   const [contextFromSessions, setContextFromSessions] = useState(true);
-  const [sessionPanel, setSessionPanel] = useState<'list' | 'new' | 'settings'>('list');
+  const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
   const [timelineDisplay, setTimelineDisplay] = useTimelineDisplayMode();
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
@@ -1110,7 +1110,8 @@ function AppContent({
       </div>
       {!compactLayout ? <nav className="lab-sidebar-tabs" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
-        <button type="button" aria-pressed={sessionPanel === 'new'} onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button>
+        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
+        <button type="button" className="lab-sidebar-new" aria-pressed={sessionPanel === 'new'} onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button>
         <button type="button" aria-label="Sidebar settings" title="Settings" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel('settings')}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none" /><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none" /></svg>
         </button>
@@ -1118,20 +1119,21 @@ function AppContent({
       <div className="lab-sidebar-content">
       {accountAction ? <div className="lab-sidebar-account">{accountAction}</div> : null}
       {compactLayout ? <div className="lab-session-panel-actions">
-        {sessionPanel !== 'list' ? <button type="button" onClick={() => setSessionPanel('list')}>All sessions</button> : <strong>Your sessions</strong>}
+        <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
+        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
         <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel((value) => value === 'settings' ? 'list' : 'settings')}>Settings</button>
       </div> : null}
       {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         <MobileDisplaySettings />
         <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
       </section> : null}
-      {userScoped && sessionPanel === 'list' ? <section className="lab-session-directory" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2><span>{favorites.stars.length}</span></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
-      {directory ? <HostPairing managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
+      {directory && sessionPanel !== 'favorites' ? <HostPairing managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {sessionPanel === 'list' || sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel />
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={compactLayout ? contextOpen : desktopContextVisible}>
           <HostVscodeTunnel />
         </VscodeTunnelScope> : null}
-      {directory && userScoped ? <ControllerUpdates service={hostClient} hosts={remoteHosts} /> : null}
+      {directory && userScoped && sessionPanel !== 'favorites' ? <ControllerUpdates service={hostClient} hosts={remoteHosts} /> : null}
       {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={compactLayout ? contextOpen : desktopContextVisible} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
       {providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}

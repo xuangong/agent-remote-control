@@ -1,3 +1,4 @@
+import { organizeFavorites, advanceFavorites } from './favorites.js';
 import type { SessionMigration } from '@orchardworks/agent-remote-protocol';
 import type { RelayState } from './state.js';
 import { starKey, StarError, type StarIdentity } from './session-stars.js';
@@ -31,12 +32,11 @@ export function createSessionMigrations(state: RelayState, access: (subject: str
         migrations.push({ ...item, subject });
         const old = draft.sessionStars?.find(star => star.subject === subject && starKey(star) === starKey(item.from));
         if (old) {
-          const existing = draft.sessionStars!.find(star => star.subject === subject && starKey(star) === starKey(item.to));
-          draft.sessionStars = draft.sessionStars!.filter(star => star !== old);
-          if (!existing) {
-            const { parentNativeSessionId: _, ...saved } = old;
-            draft.sessionStars.push({ ...saved, hostId: item.to.hostId, providerId: item.to.providerId, nativeSessionId: item.to.nativeSessionId });
-          }
+          const tree = organizeFavorites(draft, subject);
+          draft.sessionStars = draft.sessionStars!.filter(star => star !== old && (star.subject !== subject || starKey(star) !== starKey(item.to)));
+          const { parentNativeSessionId: _, ...saved } = old;
+          draft.sessionStars.push({ ...saved, hostId: item.to.hostId, providerId: item.to.providerId, nativeSessionId: item.to.nativeSessionId });
+          advanceFavorites(draft, tree);
         }
       });
     },

@@ -1,3 +1,4 @@
+import { validFavoritesState, type SavedFavoritesTree } from './favorites.js';
 import { decodeSessionChannelServerMessage, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import type { SavedSessionMigration } from './session-migrations.js';
 import { validPairingHistory } from './pairing-keys.js';
@@ -16,6 +17,7 @@ export interface HostedRelayState {
   version: 2;
   securityEvents?: SecurityEvent[];
   sessionStars?: SavedSessionStar[];
+  favoritesTrees?: SavedFavoritesTree[];
   sessionMigrations?: SavedSessionMigration[];
   config: { origin: string; issuer: string };
   sessions: SavedGatewaySession[];
@@ -86,6 +88,7 @@ export function validateRelayState(value: unknown, auth: GatewayAuthOptions): Ho
     const counts = new Map<string, number>();
     for (const item of value.sessionStars) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > MAX_USER_STARS) return invalid(); counts.set(item.subject, count); }
   }
+  if (!validFavoritesState(value as HostedRelayState)) return invalid();
   if (value.sessions.some((session: SavedGatewaySession) => session.grant.profile !== undefined && (!record(session.grant.profile) || !string(session.grant.profile.name) || (session.grant.profile.email !== undefined && !string(session.grant.profile.email, 320))))) return invalid();
   return structuredClone(value) as HostedRelayState;
 }

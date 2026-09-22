@@ -16,7 +16,7 @@ async function fixture(target: SessionStar, activityReady = true) {
   saveTrackedSessions(baseUrl, [target]);
   // Remembered runtime IDs are not evidence of a live binding.
   localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...target, agentId: 'stale-agent' }]));
-  vi.spyOn(SessionStarsClient.prototype, 'list').mockResolvedValue([]);
+  vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:[]});
   vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
   const attach = vi.spyOn(SessionDirectoryClient.prototype, target.parentNativeSessionId ? 'attachChild' : 'attach').mockResolvedValue({ agentId: 'live-agent' });

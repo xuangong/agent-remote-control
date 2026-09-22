@@ -1,3 +1,4 @@
+import { createFavorites } from './favorites.js';
 import { createSessionMigrations } from './session-migrations.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
@@ -54,11 +55,13 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let renewalAt = Date.now() + 60_000;
   const state = createRelayState(auth, options.storage, failClosed, published);
   const sessions = createGatewaySessions(auth, state, durable);
-  const stars = createSessionStars(state, (subject, item) => {
+  const starAccess = (subject: string, item: import('./session-stars.js').StarIdentity) => {
     const broker = [...tenants.values()].find(value => value.broker.canStarSession(item, subject))?.broker;
     const host = broker?.visibleHosts(subject).find(host => host.id === item.hostId);
     return host ? { online: host.online, hostName: host.name } : undefined;
-  });
+  };
+  const stars = createSessionStars(state, starAccess);
+  const favorites = createFavorites(state, starAccess);
   const migrations = createSessionMigrations(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
   function publishMigrations(socket: RelaySocket, channel: { subject: string; migrations?: Set<string> }) {
     if (!channel.migrations || socket.readyState !== 1) return;
@@ -395,6 +398,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (path === '/v1/remote/pairings' && request.method === 'POST' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
     }
     if (path === '/v1/session-migrations' && request.method === 'GET') return json(200, { migrations: migrations.list(grant.subject) });
+    if (path === '/v1/favorites') {
+      try {
+        if (request.method === 'GET') return json(200, favorites.list(grant.subject));
+        if (request.method === 'POST') return json(200, await favorites.execute(grant.subject, await readJson(request)));
+        return json(405, { error: 'Method is not allowed.' });
+      } catch (error) {
+        if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message });
+        throw error;
+      }
+    }
     if (path === '/v1/stars') {
       try {
         if (request.method === 'GET') return json(200, { stars: stars.list(grant.subject) });

@@ -38,7 +38,7 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
           if (path === '/_fixture/storage') return Response.json({ alarm: await this.fixtureContext.storage.getAlarm(),
             rows: this.fixtureContext.storage.sql.exec('SELECT kind, count(*) AS count FROM relay_records GROUP BY kind').toArray() });
           if (path === '/_fixture/alarm-set') { await this.fixtureContext.storage.setAlarm(Number(new URL(request.url).searchParams.get('at'))); return new Response('ok'); }
-          if (path === '/_fixture/fail-commit') { const condition = new URL(request.url).searchParams.get("kind") === "host" ? " WHEN NEW.kind = 'host'" : ""; this.fixtureContext.storage.sql.exec("CREATE TRIGGER fail_records BEFORE INSERT ON relay_records" + condition + " BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END"); return new Response('ok'); }
+          if (path === '/_fixture/fail-commit') { const kind = new URL(request.url).searchParams.get("kind"); const table = kind === "favorites" ? "relay_favorites_trees" : "relay_records"; const condition = kind === "host" ? " WHEN NEW.kind = 'host'" : ""; this.fixtureContext.storage.sql.exec("CREATE TRIGGER fail_records BEFORE INSERT ON " + table + condition + " BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END"); return new Response('ok'); }
           if (path === '/_fixture/restore-commit') { this.fixtureContext.storage.sql.exec('DROP TRIGGER IF EXISTS fail_records'); return new Response('ok'); }
           return super.fetch(request);
         }

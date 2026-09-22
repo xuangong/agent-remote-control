@@ -25,3 +25,18 @@ it('does not publish or leak a migration when access is missing or storage fails
   const other = createSessionMigrations(createRelayState(auth, undefined, () => {}, () => {}), () => false);
   await expect(other.save('alice', migration)).rejects.toThrow(/access/);
 });
+it('preserves the original bookmark identity and placement even if the fork target was already saved', async () => {
+  const { createFavorites } = await import('./favorites.js');
+  const state = createRelayState(auth, undefined, () => {}, () => {});
+  const favorites = createFavorites(state, () => ({ online: true, hostName: 'Host' }));
+  await favorites.execute('alice', { type: 'create-folder', id: 'folder', title: 'Folder', parentId: null, revision: 0 });
+  const { agentId: _, ...identity } = from; const { agentId: __, ...target } = to;
+  await favorites.execute('alice', { type: 'save-session', session: { ...identity, title: 'Original' }, folderId: 'folder', revision: 1 });
+  const original = favorites.list('alice').stars[0]!;
+  await favorites.execute('alice', { type: 'save-session', session: { ...target, title: 'Target' }, folderId: null, revision: 2 });
+  await createSessionMigrations(state, () => true).save('alice', migration);
+  expect(favorites.list('alice')).toMatchObject({ revision: 4, stars: [{ favoriteId: original.favoriteId, folderId: 'folder', order: original.order, nativeSessionId: 'new', title: 'Original' }] });
+  expect(favorites.list('alice').stars).toHaveLength(1);
+  await favorites.execute('alice', { type: 'save-session', session: { ...identity, title: 'Original again' }, folderId: null, revision: 4 });
+  expect(new Set(favorites.list('alice').stars.map(star => star.favoriteId)).size).toBe(2);
+});

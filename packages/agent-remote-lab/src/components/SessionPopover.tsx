@@ -9,12 +9,12 @@ export function SessionPopover({ label, trigger, triggerTitle, className = '', c
   useEffect(() => {
     if (!open) return;
     panel.current?.focus({ preventScroll: true });
-    const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
+    const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target) && !(event.target instanceof Element && event.target.closest('[data-favorites-dialog]'))) setOpen(false); };
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [open]);
   return <div className={`lab-session-popover ${className}`} ref={root}
-    onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
+    onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget) && !(event.relatedTarget instanceof Element && event.relatedTarget.closest('[data-favorites-dialog]'))) setOpen(false); }}
     onKeyDown={event => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close(); } }}>
     <button type="button" ref={button} className="lab-session-popover-trigger" title={triggerTitle} aria-label={label} aria-expanded={open} aria-controls={id}
       onClick={() => { if (!open) onOpen?.(); setOpen(value => !value); }}>{trigger}</button>

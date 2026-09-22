@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { HostPairingService, PairingHistory, PairingInvitation, PairingPurpose, PairingRecord } from './HostPairing.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
+import { ControllerInstallGuide } from './ControllerInstallGuide.js';
 
 const purposeLabels: Record<PairingPurpose, string> = { 'host-only': 'Host only', 'gateway-setup': 'Gateway token + CLI setup' };
 const statusLabels: Record<PairingRecord['status'], string> = { unused: 'Unused', used: 'Used', obsolete: 'Obsolete', revoked: 'Revoked' };
@@ -85,7 +86,10 @@ export function PairingKeys({ service }: { service: HostPairingService }) {
   }
 
   return <div className="lab-pairing-details">
+    <ControllerInstallGuide />
+    <details><summary>Already installed or using DSH?</summary>
     <p className="lab-control-note">Generate a pairing key, then run <code>agent-remote-controller start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>agent-remote-controller pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>
+    </details>
     <label htmlFor="pairing-purpose">Pairing purpose</label>
     <select id="pairing-purpose" value={purpose} disabled={busy || loading} onChange={event => setPurpose(event.target.value as PairingPurpose)} aria-describedby="pairing-purpose-help">
       <option value="host-only">Host only</option>

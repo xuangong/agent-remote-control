@@ -720,6 +720,12 @@ textarea {
 .lab-pairing-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .lab-pairing-details textarea { font-family: var(--obs-mono); font-size: .78rem; overflow-wrap: anywhere; }
 .lab-pairing-details label { font-size: .85rem; }
+.lab-controller-install-guide { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.lab-controller-install-guide h3, .lab-controller-install-guide h4 { margin: 0; font-size: .9rem; }
+.lab-controller-install-command { min-width: 0; }
+.lab-controller-install-command .lab-directory-heading { margin: 0 0 6px; }
+.lab-controller-install-command pre { margin: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: 10px; border: 1px solid var(--obs-border); border-radius: var(--obs-radius-sm); background: var(--obs-surface); font: .78rem/1.5 var(--obs-mono); white-space: pre; user-select: text; }
+.lab-controller-install-command code { font: inherit; }
 .lab-context-rail > .lab-session-directory, .lab-context-rail > .lab-directory-panel > .lab-session-directory { margin: 16px 16px 24px; }
 .lab-context-rail > .lab-host-pairing { margin: 16px 16px 24px; }
 .lab-context-rail > .lab-rail-heading { min-height: 56px; }

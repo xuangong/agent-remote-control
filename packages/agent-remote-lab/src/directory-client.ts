@@ -66,7 +66,7 @@ export class RemoteHostClient implements HostPairingService {
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
-  controllerRelease(): Promise<{ release: ControllerRelease | null }> { return this.request('controller-release', 'GET', undefined, 35000); }
+  controllerRelease(options: { refresh?: boolean } = {}): Promise<{ release: ControllerRelease | null }> { return this.request(`controller-release${options.refresh ? '?refresh=1' : ''}`, 'GET', undefined, 35000); }
   controllerUpdate(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus> {
     return this.request(`hosts/${encodeURIComponent(hostId)}/controller-update`, input ? 'POST' : 'GET', input, 20000);
   }

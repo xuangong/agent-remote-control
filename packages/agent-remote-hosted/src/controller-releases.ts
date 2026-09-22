@@ -55,9 +55,10 @@ export function createControllerReleases(fetcher: typeof fetch = fetch, now = Da
       catch (error) { if (canUseLatestRelease(error)) return latestPublished(version); throw error; }
       return read(entry);
     },
-    async latest(): Promise<ControllerRelease | null> {
-      if (cached && now() - cached.at < 300000) return cached.value;
-      if (failure && now() - failure.at < 60000) throw failure.error;
+    async latest(options: { refresh?: boolean } = {}): Promise<ControllerRelease | null> {
+      if (pending) return pending;
+      if (!options.refresh && cached && now() - cached.at < 300000) return cached.value;
+      if (!options.refresh && failure && now() - failure.at < 60000) throw failure.error;
       return pending ??= (async () => {
         let entries: any;
         try { entries = await json(fetcher, `${api}?per_page=30`); }

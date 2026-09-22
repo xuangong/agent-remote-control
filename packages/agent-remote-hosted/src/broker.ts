@@ -634,7 +634,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const subject = principal(context);
     if (url.pathname === '/v1/remote/controller-release' && request.method === 'GET') {
       requireOwner(subject);
-      return json(200, { release: await (options.controllerReleases ?? controllerReleases).latest() });
+      return json(200, { release: await (options.controllerReleases ?? controllerReleases).latest({ refresh: url.searchParams.get('refresh') === '1' }) });
     }
     const controllerUpdate = /^\/v1\/remote\/hosts\/([^/]+)\/controller-update$/.exec(url.pathname);
     if (controllerUpdate) {

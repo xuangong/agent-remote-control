@@ -22,6 +22,29 @@ it('rejects draft releases and manifest identity changes', async () => {
 });
 
 const repositoryReleases = 'https://github.com/xuangong/agent-remote-control/releases';
+it('refreshes cached releases immediately and coalesces concurrent refreshes', async () => {
+  let latest = manifest;
+  let calls = 0;
+  const releases = createControllerReleases((async (url: string) => {
+    calls++;
+    return Response.json(url.endsWith('controller-release.json') ? latest : [{ ...entry, tag_name: `controller-v${latest.version}`, assets: [{ name: 'controller-release.json' }, { name: latest.asset }] }]);
+  }) as typeof fetch);
+  expect(await releases.latest()).toEqual(manifest);
+  latest = { ...manifest, version: '0.3.0', asset: 'orchardworks-agent-remote-controller-0.3.0.tgz' };
+  expect(await releases.latest()).toEqual(manifest);
+  expect(await Promise.all([releases.latest({ refresh: true }), releases.latest({ refresh: true }), releases.latest()])).toEqual([latest, latest, latest]);
+  expect(calls).toBe(4);
+  expect(await releases.latest()).toEqual(latest);
+  expect(calls).toBe(4);
+});
+it('allows explicit retry during the failure cache window', async () => {
+  let failed = true;
+  const releases = createControllerReleases((async (url: string) => failed ? new Response(null, { status: 500 }) : Response.json(url.endsWith('controller-release.json') ? manifest : [entry])) as typeof fetch);
+  await expect(releases.latest()).rejects.toThrow('(500)');
+  failed = false;
+  await expect(releases.latest()).rejects.toThrow('(500)');
+  expect(await releases.latest({ refresh: true })).toEqual(manifest);
+});
 function limitedCatalog(options: { status?: number; location?: string; manifest?: unknown; assetStatus?: number } = {}) {
   const requests: { url: string; method: string; redirect?: RequestRedirect }[] = [];
   const fetcher = (async (input: string, init?: RequestInit) => {

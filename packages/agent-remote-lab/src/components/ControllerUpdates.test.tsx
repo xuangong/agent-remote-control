@@ -8,6 +8,27 @@ const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'a'.repe
 const host: RemoteHost = { id: 'mac', name: 'Mac', online: true, access: 'owner', controller: { version: '0.1.0', revision: 'c'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true } };
 const others: RemoteHost[] = [{ ...host, id: 'offline', online: false }, { ...host, id: 'shared', access: 'shared' }, { ...host, id: 'unsupported', controller: { ...host.controller!, platform: 'linux' } }];
 function button(container: HTMLElement, label: string) { const element = [...container.querySelectorAll('button')].find(b => b.textContent === label); expect(element).toBeDefined(); return element!; }
+it('refreshes on demand, prevents duplicate requests, and retains the last version on failure', async () => {
+  let finish!: (value: { release: typeof release }) => void;
+  const discover = vi.fn().mockResolvedValueOnce({ release }).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockRejectedValueOnce(new Error('Discovery unavailable')).mockResolvedValueOnce({ release });
+  const service: HostPairingService = { hosts: async () => ({ hosts: [host] }), pair: async () => { throw new Error('unused'); }, controllerRelease: discover };
+  const container = await render(<ControllerUpdates service={service} hosts={[host]} />);
+  await act(async () => container.querySelector('button')!.click());
+  await act(async () => button(container, 'Refresh').click());
+  expect(discover).toHaveBeenLastCalledWith({ refresh: true });
+  expect(button(container, 'Refreshing…').disabled).toBe(true);
+  await act(async () => button(container, 'Refreshing…').click());
+  expect(discover).toHaveBeenCalledTimes(2);
+  await act(async () => finish({ release: { ...release, version: '0.3.0' } }));
+  expect(container.textContent).toContain('Latest version: 0.3.0');
+  await act(async () => button(container, 'Refresh').click());
+  expect(container.textContent).toContain('Discovery unavailable');
+  expect(container.textContent).toContain('Latest version: 0.3.0');
+  expect(button(container, 'Refresh').disabled).toBe(false);
+  await act(async () => button(container, 'Refresh').click());
+  expect(container.textContent).not.toContain('Discovery unavailable');
+});
 it('allows a compatible Host independently of offline, shared and unsupported Hosts', () => {
   const coverage = controllerUpdateCoverage(release, [host, ...others]);
   expect(coverage.covered).toBe(false); expect(coverage.eligible.map(h => h.id)).toEqual(['mac']);

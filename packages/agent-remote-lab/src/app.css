@@ -1348,6 +1348,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 .lab-controller-updates { padding: 8px 0; font-size: 13px; }
 .lab-controller-updates > button { width: 100%; text-align: left; }
+.lab-controller-release { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .lab-controller-updates ul { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 0; list-style: none; }
 .lab-controller-updates li { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 3px; padding: 8px; background: var(--agent-panel); border-radius: 8px; overflow-wrap: anywhere; }
 .lab-controller-host-name { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; white-space: nowrap; }

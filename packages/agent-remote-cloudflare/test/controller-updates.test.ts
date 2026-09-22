@@ -23,6 +23,10 @@ it.each(['linux', 'win32'])('persists %s Host versions and restricts upgrade RPC
   expect(denied.status).toBeGreaterThanOrEqual(400); expect(rpc).toHaveLength(1);
   const hosts = await (await f.json(alice.basePath + 'v1/remote/hosts', alice.cookie)).json() as any;
   expect(hosts.hosts[0].controller).toEqual(identity);
+  const next = { ...release, version: '0.3.0', asset: 'orchardworks-agent-remote-controller-0.3.0.tgz' };
+  Object.assign(release, next);
+  expect(await (await f.json(alice.basePath + 'v1/remote/controller-release', alice.cookie)).json()).toMatchObject({ release: { version: '0.2.0' } });
+  expect(await (await f.json(alice.basePath + 'v1/remote/controller-release?refresh=1', alice.cookie)).json()).toEqual({ release: next });
   await f.restart();
   expect(await (await f.json(alice.basePath + 'v1/remote/hosts', alice.cookie)).json()).toMatchObject({ hosts: [{ controller: identity, online: false }] });
 }, 30000);

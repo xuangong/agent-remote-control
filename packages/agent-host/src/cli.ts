@@ -23,6 +23,7 @@ import { serveWindowsCodexDaemon } from '@orchardworks/agent-provider-codex';
 import { spawnWindowsJob } from './windows-job.js';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { configureGatewayProviders } from './gateway-setup.js';
+import { runControllerUpdate } from './update-command.js';
 import { runShare } from './share-command.js';
 import { selectTerminalChoice } from './terminal-select.js';
 import { createInterface } from 'node:readline';
@@ -56,6 +57,9 @@ async function main(): Promise<void> {
     await serveWindowsCodexDaemon(args[1], args[2], spawnWindowsJob);
   }
   else if (command === 'start') await start();
+  else if (command === 'update') await runControllerUpdate(args.slice(1), {
+    call: async payload => request(await requiredState(), payload), print: text => { process.stdout.write(text); },
+  });
   else if (command === 'status') await status();
   else if (command === 'stop') await stop();
   else if (command === 'autostart') await autostart(args[1] ?? 'status');
@@ -65,7 +69,7 @@ async function main(): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  share       Choose a provider and enter a session ID to generate a QR code\n  share list-sessions  Browse recent sessions and generate a QR code\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with the platform login manager\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup (crash recovery on macOS/Linux)\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux/Windows, stop stops the managed job without disabling future login startup.\nWindows uses the current user Startup folder; shared Codex uses a managed authenticated local WebSocket.\nWindows managed VS Code tunnels require code-tunnel.exe and Windows PowerShell.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
+  process.stdout.write(`Usage: agent-remote-controller <command> [options]\n\nCommands:\n  update --check [--version X.Y.Z]  Check a running Controller for compatible updates\n  update --version X.Y.Z --yes [--clean]  Safely update the running Controller\n  share       Choose a provider and enter a session ID to generate a QR code\n  share list-sessions  Browse recent sessions and generate a QR code\n  environment Print detected Host OS, shells, browsers and VS Code as JSON\n  codex [args...]  Run native Codex with the configured shared socket and LC_ALL=C\n  codex daemon start|restart|stop|status  Manage the matching shared Codex daemon\n  foreground  Run in the foreground\n  start       Start the daemon; Login startup defaults on with the platform login manager\n  status      Report process and uplink state\n  pair        Replace the uplink key/URL without restarting sessions\n  stop        Stop the daemon and release its resources; retain login startup\n  autostart enable   Enable login startup (crash recovery on macOS/Linux)\n  autostart disable  Disable login startup and stop the managed daemon\n  autostart status   Report login startup and supervisor state\n\nOptions are supplied through AGENT_HOST_SERVER, AGENT_HOST_REMOTE_KEY, AGENT_HOST_PROVIDERS,\nAGENT_HOST_CODEX, AGENT_HOST_CODEX_CONNECTION, AGENT_HOST_CODEX_SOCKET, AGENT_HOST_CODEX_TRUST_SHARED, AGENT_HOST_CLAUDE, AGENT_HOST_CLAUDE_HOME, AGENT_HOST_COPILOT, AGENT_HOST_COPILOT_HOME,\nAGENT_HOST_VSCODE (VS Code CLI executable), AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS (default 300000), AGENT_HOST_WORKSPACE, AGENT_HOST_ALLOWED_WORKSPACE_ROOTS (JSON paths), AGENT_HOST_NAME, and AGENT_HOST_STATE_DIR. AGENT_REMOTE_CODEX_EXECUTABLE,\nAGENT_REMOTE_CODEX_HOME, and AGENT_REMOTE_WORKSPACE remain supported. Keys are never accepted\non the command line. Providers default to codex; select a comma-separated list of codex, claude, copilot explicitly.\nAccepted connection settings are saved privately for later starts without environment settings.\nSet AGENT_HOST_SERVER to your Relay URL (for example https://agents.xianliao.de5.net).\nThe first pairing requires that URL and AGENT_HOST_REMOTE_KEY; no Relay is selected by default.\nThe workspace defaults to the launch directory; remote permission controls are locked.\nAGENT_HOST_TRUSTED_FULL_CONTROL=1 locally opts out of workspace and native sandbox defaults.\nAGENT_HOST_CODEX_CONNECTION=shared attaches to an existing local Codex daemon; private is the default.\nShared Codex requires AGENT_HOST_CODEX_TRUST_SHARED=1 and uses the daemon permissions.\nAGENT_HOST_CODEX_SOCKET optionally selects an absolute local socket path.\nAGENT_HOST_CODEX_NOFILE sets the Codex daemon soft file limit on start/restart (default 8192).\nA workspace check does not isolate the filesystem; Copilot has no enforced native sandbox.\nSet server and key together to replace a connection. A rejected key requires pairing again, then running pair.\nOn macOS/Linux/Windows, stop stops the managed job without disabling future login startup.\nWindows uses the current user Startup folder; shared Codex uses a managed authenticated local WebSocket.\nWindows managed VS Code tunnels require code-tunnel.exe and Windows PowerShell.\nLinux requires an accessible systemd user manager for autostart; otherwise start runs manually.\nFor Linux startup before login and after logout, ask the administrator to enable user lingering.\nContainers can run foreground under their own restart policy.\nAutostart disable persists; later start runs manually until autostart enable.\nAn already running manual daemon is left running when login startup is enabled.\n`);
 }
 
 async function serve(daemon: boolean): Promise<void> {
@@ -91,7 +95,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const configuration = launch?.connection ?? await resolveHostConnection(stateDir, process.env);
   const { serverUrl, environment } = configuration;
   const hostEnvironment = await detectHostEnvironment(undefined, environment);
-  if (daemon) {
+  {
     const existing = await readState();
     if (existing && existing.pid !== process.pid && processAlive(existing.pid))
       throw new Error(`A saved Agent Host process is still alive (pid ${existing.pid}); wait for it to exit before starting another daemon.`);
@@ -122,15 +126,12 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
     executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey, onCredential: credential => {
       diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);
     } }, shutdownTimeoutMs: shutdownTimeout() });
-  if (!daemon) {
-    process.stdout.write('Agent Host is running in the foreground.\n');
-    await saveRegisteredConnection(stateDir, configuration, host.ready);
-    process.send?.({ type: 'controller-ready', version: identity?.version });
-    process.stdout.write('Agent Host uplink is registered.\n');
-    await waitForSignal(host);
-    return;
-  }
-  void saveRegisteredConnection(stateDir, configuration, host.ready).then(() => clearAutostartConnection(stateDir, launch?.pendingId)).catch(error => {
+  if (!daemon) process.stdout.write('Agent Host is running in the foreground.\n');
+  const registered = saveRegisteredConnection(stateDir, configuration, host.ready).then(async () => {
+    if (daemon) await clearAutostartConnection(stateDir, launch?.pendingId);
+    else process.stdout.write('Agent Host uplink is registered.\n');
+  });
+  void registered.catch(error => {
     writeDiagnostic(error instanceof Error ? error.message : 'Could not save registered Host connection.', diagnosticSecrets);
   });
   const scope = createHash('sha256').update(stateDir).digest('hex').slice(0, 16);
@@ -177,7 +178,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   process.once('SIGTERM', stopDaemon);
   process.once('SIGINT', stopDaemon);
   watchLauncherShutdown(stopDaemon);
-  void host.ready.then(() => { process.send?.({ type: 'controller-ready', version: identity?.version }); }).catch(() => undefined);
+  void registered.then(() => { process.send?.({ type: 'controller-ready', version: identity?.version }); }).catch(() => undefined);
   await new Promise<void>(() => undefined);
 }
 
@@ -212,9 +213,15 @@ async function enrollHost(configuration: HostConnection, installationId: string,
 
 async function handleManagement(input: string, token: string, host: AgentHost, configuration: HostConnection, diagnosticSecrets: Set<string>, connection: import('node:net').Socket, stopDaemon: () => void): Promise<void> {
   try {
-    const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string; hostId?: string; providerId?: string; nativeSessionId?: string; cursor?: string; serverUrl?: string };
+    const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string; hostId?: string; providerId?: string; nativeSessionId?: string; cursor?: string; serverUrl?: string; version?: string; operationId?: string; clean?: boolean };
     if (request.token !== token) throw new Error('Unauthorized local management request.');
     if (request.action === 'status') connection.end(JSON.stringify({ running: true, uplink: host.state }));
+    else if (request.action === 'controller-info') connection.end(JSON.stringify({ ...await host.controllerInfo(), cleanInstall: process.env.AGENT_HOST_CLEAN_INSTALL === '1' }));
+    else if (request.action === 'controller-update') {
+      if (typeof request.version !== 'string' || typeof request.operationId !== 'string' || (request.clean !== undefined && typeof request.clean !== 'boolean')) throw new Error('Invalid Controller update request.');
+      if (request.clean && process.env.AGENT_HOST_CLEAN_INSTALL !== '1') throw new Error('This launcher does not support clean install. Install the latest bootstrap launcher first.');
+      connection.end(JSON.stringify(await host.updateController(request.version, request.operationId, request.clean)));
+    }
     else if (request.action === 'share-context') connection.end(JSON.stringify({ ...await host.shareContext(), serverUrl: configuration.serverUrl }));
     else if (request.action === 'share-catalog') {
       if (request.serverUrl !== configuration.serverUrl) throw new Error('The Host connection changed. Run share again.');
@@ -498,11 +505,6 @@ function watchLauncherShutdown(stop: () => void): void {
   if (process.env.AGENT_HOST_MANAGED_UPDATES !== '1' || !process.send) return;
   process.on('message', message => { if ((message as { type?: string } | null)?.type === 'controller-shutdown') stop(); });
   process.once('disconnect', stop);
-}
-async function waitForSignal(host: AgentHost): Promise<void> {
-  await new Promise<void>((resolve) => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); watchLauncherShutdown(resolve); });
-  await host.close();
-  if (process.env.AGENT_HOST_MANAGED_UPDATES === '1' && process.connected) process.disconnect();
 }
 function shutdownTimeout(): number { const value = Number(process.env.AGENT_HOST_SHUTDOWN_TIMEOUT_MS ?? 5000); return Number.isSafeInteger(value) && value > 0 ? value : 5000; }
 export async function within(operation: Promise<unknown>, timeoutMs: number): Promise<void> {

@@ -70,6 +70,14 @@ jobs:
       - name: Test Windows Controller
         if: runner.os == 'Windows'
         run: pnpm test:windows
+      - name: Test first-install script
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          python3 - <<'PYTEST'
+          import subprocess
+          subprocess.run(['node', '--test', '--test-timeout=60000', 'scripts/controller/install.test.mjs'], timeout=180, check=True)
+          PYTEST
       - run: pnpm test:agent-remote-controller-package
       - run: node scripts/controller-release.mjs
       - run: git diff --exit-code
@@ -80,6 +88,7 @@ jobs:
           path: |
             dist/agent-remote-controller/*.tgz
             dist/agent-remote-controller/controller-release.json
+            dist/agent-remote-controller/install.sh
           if-no-files-found: error
           retention-days: 7
 
@@ -104,5 +113,5 @@ jobs:
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
             --title "Controller ${RELEASE_TAG#controller-v}" \
             --notes 'Independent Controller updates with owner confirmation, verified packages and startup rollback. See docs/controller-updates.md for compatibility and bootstrap instructions.' \
-            package/*.tgz package/controller-release.json
+            package/*.tgz package/controller-release.json package/install.sh
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

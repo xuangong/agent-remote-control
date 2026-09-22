@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, copyFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { PROTOCOL_VERSION } from '../packages/agent-remote-protocol/dist/index.js';
@@ -14,3 +14,5 @@ const manifest = { protocolVersion: PROTOCOL_VERSION, version, revision, asset, 
   platforms: ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'] };
 await writeFile(new URL('dist/agent-remote-controller/controller-release.json', root), JSON.stringify(manifest, null, 2) + '\n');
 console.log(`Created controller-v${version} manifest for ${revision}`);
+
+await copyFile(new URL('install.sh', root), new URL('dist/agent-remote-controller/install.sh', root));

@@ -1,5 +1,5 @@
 import { createControllerUpdater } from './controller-update.js';
-import type { ControllerIdentity } from '@orchardworks/agent-remote-protocol';
+import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { createIdleSessions } from './idle-sessions.js';
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
@@ -70,7 +70,7 @@ export interface AgentHostRuntime {
   close(): Promise<void>;
 }
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
-  controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string): void | Promise<void> };
+  controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string, clean?: boolean): void | Promise<void> };
   vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
   installationId: string;
@@ -82,6 +82,8 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
 export interface AgentHostUplinkDiagnostic extends RemoteHostUplinkDiagnostic { uplinkGeneration: number }
 export interface AgentHost {
   readonly ready: Promise<{ hostId: string }>;
+  controllerInfo(): Promise<{ identity: ControllerIdentity | undefined; status: ControllerUpdateStatus | undefined }>;
+  updateController(version: string, operationId: string, clean?: boolean): Promise<ControllerUpdateStatus>;
   shareContext(): Promise<{ hostId: string; providers: Array<{ providerId: string; displayName: string }> }>;
   shareCatalog(query: { hostId: string; providerId: string; nativeSessionId?: string; cursor?: string }): Promise<AgentRemoteHttpResult>;
   readonly state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed';
@@ -142,6 +144,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     ready,
     get state() { return state; },
     shareContext,
+    async controllerInfo() { return { identity: options.controller?.identity, status: await updater?.status() }; },
+    async updateController(version, operationId, clean) {
+      if (!updater || closed) throw new Error('Controller updates are unavailable.');
+      return updater.request(version, operationId, clean);
+    },
     async shareCatalog(query) {
       const current = connection;
       if ((await shareContext()).hostId !== query.hostId) throw new Error('The Host connection changed. Run share again.');

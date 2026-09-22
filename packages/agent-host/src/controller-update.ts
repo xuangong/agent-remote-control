@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, mkdir, readFile, writeFile, rm, rename } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile, rm, rename, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareControllerVersions, releaseCoversHost, type ControllerIdentity, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
@@ -28,11 +28,17 @@ export async function controllerNpm(nodePath = process.execPath): Promise<string
       if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
     }
   }
+  if (nodePath === process.execPath) {
+    for (const directory of (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':').filter(Boolean)) {
+      try { const path = await realpath(join(directory, 'npm')); if (path.endsWith('/bin/npm-cli.js')) return path; } catch { /* Continue through PATH. */ }
+    }
+  }
   throw new Error('npm is unavailable in this Node installation. Install npm before updating this Controller.');
 }
-export async function installControllerRelease(stateDir: string, release: ControllerRelease, fetcher: typeof fetch = fetch): Promise<void> {
+export async function installControllerRelease(stateDir: string, release: ControllerRelease, fetcher: typeof fetch = fetch, clean = false): Promise<void> {
   const root = join(stateDir, 'controller-updates/packages'); await mkdir(root, { recursive: true, mode: 0o700 });
-  const target = join(root, release.version);
+  const target = join(root, release.version + (clean ? '.reinstall' : ''));
+  if (clean) await rm(target, { recursive: true, force: true });
   try {
     const info = JSON.parse(await readFile(join(target, 'node_modules/@orchardworks/agent-remote-controller/build-info.json'), 'utf8'));
     if (info.revision === release.revision && info.version === release.version && info.dirty === false) return;
@@ -64,9 +70,10 @@ export async function installControllerRelease(stateDir: string, release: Contro
 }
 export function createControllerUpdater(options: {
   stateDir: string; identity: ControllerIdentity; release?: (version: string) => Promise<ControllerRelease>;
-  install?: (release: ControllerRelease) => Promise<void>; beginRestart(): boolean; cancelRestart?(): void; restart(version: string): void | Promise<void>;
+  install?: (release: ControllerRelease, clean?: boolean) => Promise<void>; beginRestart(): boolean; cancelRestart?(): void; restart(version: string, clean?: boolean): void | Promise<void>;
 }) {
   const path = join(options.stateDir, 'controller-updates/status.json');
+  let cleanInstall = false;
   let status: ControllerUpdateStatus = { phase: 'idle', updatedAt: Date.now() };
   let initialized: Promise<void> | undefined, work: Promise<void> | undefined, timer: ReturnType<typeof setTimeout> | undefined, closed = false, accepting = false;
   async function init() { return initialized ??= (async () => {
@@ -84,7 +91,7 @@ export function createControllerUpdater(options: {
     if (closed) return;
     if (!options.beginRestart()) { timer = setTimeout(() => { void activate().catch(fail); }, 2000); timer.unref(); return; }
     try {
-      await save({ ...status, phase: 'restarting', message: undefined }); await options.restart(status.version!);
+      await save({ ...status, phase: 'restarting', message: undefined }); await options.restart(status.version!, ...(cleanInstall ? [true] as const : []));
     } catch (error) { options.cancelRestart?.(); throw error; }
   }
   async function fail(error: unknown) {
@@ -93,7 +100,7 @@ export function createControllerUpdater(options: {
   }
   return {
     async status() { await init(); if (status.phase === 'failed') return { ...status }; try { return JSON.parse(await readFile(path, 'utf8')) as ControllerUpdateStatus; } catch { return { ...status }; } },
-    async request(version: string, operationId: string) {
+    async request(version: string, operationId: string, clean = false) {
       await init(); await refreshLauncherResult();
       if (!options.identity.remoteUpdate) throw new Error('Install the release launcher locally before using remote updates.');
       if (!/^[A-Za-z0-9_-]{8,128}$/.test(operationId)) throw new Error('Invalid Controller update operation.');
@@ -102,13 +109,14 @@ export function createControllerUpdater(options: {
         throw new Error('Another Controller update is already pending.');
       }
       if (status.operationId === operationId && status.version === version && status.phase === 'succeeded') return { ...status };
-      if (compareControllerVersions(version, options.identity.version) <= 0) throw new Error('Only a newer Controller version can be installed.');
+      if (compareControllerVersions(version, options.identity.version) < (clean ? 0 : 1)) throw new Error('Only a newer Controller version can be installed.');
+      cleanInstall = clean;
       accepting = true;
       try { await save({ phase: 'downloading', version, operationId, updatedAt: Date.now() }); } finally { accepting = false; }
       work = (async () => {
         const release = await (options.release ?? controllerReleases.version)(version);
         if (!releaseCoversHost(release, options.identity)) throw new Error('This release does not support this Host platform or Node version.');
-        await (options.install ?? (r => installControllerRelease(options.stateDir, r)))(release);
+        await (options.install ?? ((r, reinstall) => installControllerRelease(options.stateDir, r, fetch, reinstall)))(release, ...(clean ? [true] as const : []));
         if (closed) return;
         await save({ ...status, phase: 'waiting', message: 'Waiting for a safe restart window.' });
         await activate();
@@ -120,7 +128,7 @@ export function createControllerUpdater(options: {
 }
 
 /** Let the supervisor acknowledge activation before keeping admission closed. */
-export async function requestLauncherRestart(version: string): Promise<void> {
+export async function requestLauncherRestart(version: string, clean = false): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 250));
   await new Promise<void>((resolve, reject) => {
     if (!process.send || !process.connected) return reject(new Error('Controller launcher is disconnected.'));
@@ -134,6 +142,6 @@ export async function requestLauncherRestart(version: string): Promise<void> {
     const disconnected = () => finish(new Error('Controller launcher disconnected before accepting the update.'));
     const timer = setTimeout(() => finish(new Error('Controller launcher did not acknowledge the update.')), 10000);
     process.on('message', message); process.once('disconnect', disconnected);
-    process.send({ type: 'controller-update', version }, error => { if (error) finish(error); });
+    process.send({ type: 'controller-update', version, ...(clean ? { clean: true } : {}) }, error => { if (error) finish(error); });
   });
 }

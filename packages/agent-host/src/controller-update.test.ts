@@ -124,4 +124,25 @@ it('installs a verified package without lifecycle scripts and preserves the acti
   expect(await readFile(join(root, 'controller-updates/current.json'), 'utf8')).toBe('{"version":"0.1.0"}');
   await installControllerRelease(root, verified, fetcher as typeof fetch);
   expect(fetcher).toHaveBeenCalledTimes(1);
+  await writeFile(join(installed,'old-marker'),'old runtime');
+  await installControllerRelease(root,verified,fetcher as typeof fetch,true);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(await readFile(join(installed,'old-marker'),'utf8')).toBe('old runtime');
+  const clean=join(root,'controller-updates/packages',release.version+'.reinstall','node_modules/@orchardworks/agent-remote-controller');
+  expect(JSON.parse(await readFile(join(clean,'build-info.json'),'utf8')).revision).toBe(release.revision);
+  await expect(readFile(join(clean,'old-marker'))).rejects.toMatchObject({code:'ENOENT'});
 }, 15000);
+it('clean install stages fresh files even for the current version and keeps safe restart gating', async () => {
+  const root = await directory(); let safe = false;
+  const install = vi.fn(async () => {}), restart = vi.fn();
+  const updater = createControllerUpdater({ stateDir:root, identity:{...identity,version:release.version},
+    release:async()=>release, install, beginRestart:()=>safe, restart });
+  try {
+    await updater.request(release.version,'clean-install-intent',true);
+    await expect.poll(async()=>(await updater.status()).phase).toBe('waiting');
+    expect(install).toHaveBeenCalledWith(release,true);expect(restart).not.toHaveBeenCalled();
+    safe=true;
+    await expect.poll(()=>restart.mock.calls.length,{timeout:4000}).toBe(1);
+    expect(restart).toHaveBeenCalledWith(release.version,true);
+  } finally {await updater.close();}
+});

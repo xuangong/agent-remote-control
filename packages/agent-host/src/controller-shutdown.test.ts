@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createConnection } from 'node:net';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -37,7 +38,17 @@ it.each([
   try {
     await expect.poll(() => ready, { timeout: 8000 }).toBe(true);
     const configuration = await readFile(join(root, 'connection.json'), 'utf8');
-    if (command === '_serve') await readFile(join(root, 'daemon.json'));
+    const daemon = JSON.parse(await readFile(join(root, 'daemon.json'), 'utf8'));
+    const call = (payload: Record<string, unknown>) => new Promise<Record<string, unknown>>((resolve, reject) => {
+      const socket = createConnection(daemon.socket); let data = '';
+      socket.setTimeout(3000, () => socket.destroy(new Error('Management timeout')));
+      socket.on('connect', () => { const text = JSON.stringify(payload); if (process.platform === 'win32') socket.write(text + '\n'); else socket.end(text); });
+      socket.on('data', chunk => { data += chunk; }); socket.on('error', reject);
+      socket.on('end', () => { try { resolve(JSON.parse(data)); } catch (error) { reject(error); } });
+    });
+    expect(await call({ action:'controller-info', token:'incorrect' })).toMatchObject({ error:'Unauthorized local management request.' });
+    expect(await call({ action:'controller-update', token:daemon.token, version:1 })).toMatchObject({ error:'Invalid Controller update request.' });
+    expect(await call({ action:'controller-info', token:daemon.token })).not.toHaveProperty('error');
     if (action === 'disconnect') child.disconnect();
     else child.send({ type: 'controller-shutdown' });
     await expect.poll(() => child.exitCode, { timeout: 5000 }).toBe(0);

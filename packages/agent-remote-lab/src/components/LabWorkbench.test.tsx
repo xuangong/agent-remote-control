@@ -6,8 +6,9 @@ import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { LabWorkbench } from './LabWorkbench.js';
 
-it('offers sign-in after a denied permission change while preserving the session and draft', async () => {
-  const setSessionSetting = vi.fn(async () => { throw Object.assign(new Error('Sign in again before changing session permissions.'), { code: 'reauthentication_required' }); });
+it('offers sign-in inside the permission panel while preserving the session and draft', async () => {
+  window.history.replaceState(null, '', '/?host=studio&provider=codex&session=native-1&debug=1');
+  const setSessionSetting = vi.fn<(id: string, value: string) => Promise<void>>().mockRejectedValueOnce(Object.assign(new Error('Sign in again before changing session permissions.'), { code: 'reauthentication_required' })).mockRejectedValueOnce(new Error('Provider unavailable.')).mockResolvedValue(undefined);
   const state = { ...replicaState, pendingInteractions: [], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null,
     capabilities: { ...replicaState.agent!.capabilities, sessionSettings: true },
     runtimeInfo: { ...replicaState.agent!.runtimeInfo, settings: [{ id: 'sandbox', category: 'permissions' as const, label: 'Sandbox', value: 'readOnly', mutable: true, scope: 'session' as const,
@@ -17,11 +18,27 @@ it('offers sign-in after a denied permission change while preserving the session
   const select = container.querySelector<HTMLSelectElement>('[data-testid="session-setting-sandbox"]')!;
   await act(async () => { select.value = 'dangerFullAccess'; select.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(setSessionSetting).toHaveBeenCalledExactlyOnceWith('sandbox', 'dangerFullAccess');
-  expect(container.querySelector('.lab-reauthentication a')?.getAttribute('href')).toMatch(/^\/auth\/login\?reauthenticate=1/);
-  expect(container.querySelector('.lab-reauthentication')?.textContent).toContain('will not run automatically');
+  const panel = container.querySelector('[aria-label="Permission settings"]')!;
+  const signIn = panel.querySelector<HTMLAnchorElement>('.lab-reauthentication a');
+  expect(signIn?.getAttribute('href')).toBe('/auth/login?reauthenticate=1&host=studio&provider=codex&session=native-1');
+  expect(signIn?.textContent).toBe('Sign in again');
+  expect(container.querySelectorAll('.lab-reauthentication')).toHaveLength(1);
+  expect(panel.textContent).toContain('Return to this session, then retry your change.');
+  expect(panel.textContent).not.toContain('Sign in again before changing session permissions.');
+  signIn!.addEventListener('click', event => event.preventDefault());
+  await act(async () => signIn!.click());
+  expect(sessionStorage.getItem('agent-remote-sign-in-return')).toBe('/?host=studio&provider=codex&session=native-1');
+  sessionStorage.removeItem('agent-remote-sign-in-return');
   expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
   expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.value).toBe('Keep my draft');
   expect(select.value).toBe('readOnly');
+  expect(setSessionSetting).toHaveBeenCalledTimes(1);
+  await act(async () => { select.value = 'dangerFullAccess'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(panel.querySelector('.lab-reauthentication')).toBeNull();
+  expect(panel.querySelector('[role="alert"]')?.textContent).toBe('Provider unavailable.');
+  await act(async () => { select.value = 'dangerFullAccess'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(panel.querySelector('[role="alert"]')).toBeNull();
+  expect(setSessionSetting).toHaveBeenCalledTimes(3);
 });
 
 describe('LabWorkbench', () => {

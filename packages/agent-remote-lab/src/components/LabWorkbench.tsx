@@ -146,6 +146,7 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
             onSendMessage={suppliedFeedbackActions.sendMessage}
             onCancel={actions.cancel}
             onSetSessionSetting={actions.setSessionSetting}
+            renderSessionSettingError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="permissions" /> : undefined}
             onListCommands={actions.listCommands}
             onExecuteCommand={actions.executeCommand}
             onRequestResource={actions.requestResource}
@@ -188,7 +189,7 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): { 
     loadOlder: report('Load conversation history', actions.loadOlder),
     editPrompt: report('Edit prompt', actions.editPrompt),
   }), [actions, sessionId]);
-  return { actions: reportedActions, reauthenticate: failure?.reauthenticate === true };
+  return { actions: reportedActions, reauthenticate: failure?.reauthenticate === true && failure.title !== 'Change session setting' };
 }
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,

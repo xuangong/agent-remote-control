@@ -1114,6 +1114,12 @@ textarea {
 .lab-host-security-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .lab-host-stop-results { padding-left: 20px; overflow-wrap: anywhere; }
 .lab-reauthentication { margin: 12px 0; }
+.lab-reauthentication[data-purpose="permissions"] { margin: 0 0 16px; }
+.lab-reauthentication[data-purpose="permissions"] strong { color: var(--obs-text); font-size: 13px; }
+.lab-reauthentication[data-purpose="permissions"] p { margin: 4px 0 10px; font-size: 12px; }
+.lab-reauthentication[data-purpose="permissions"] a { justify-content: center; padding: 0 14px; border: 1px solid var(--obs-action); border-radius: 6px; background: var(--obs-action); color: var(--obs-surface); text-decoration: none; }
+.lab-reauthentication[data-purpose="permissions"] a:hover { filter: brightness(.92); }
+.lab-reauthentication[data-purpose="permissions"] a:focus-visible { outline: 2px solid var(--obs-action); outline-offset: 3px; }
 .lab-reauthentication a { display: inline-flex; align-items: center; min-height: 44px; color: var(--obs-action); font-weight: 600; }
 @media (max-width: 720px) {
   .gateway-account-actions { display: none; }

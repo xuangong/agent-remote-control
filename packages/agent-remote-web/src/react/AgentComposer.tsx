@@ -18,6 +18,7 @@ export interface AgentComposerProps {
   compact?: boolean;
   state?: AgentReplicaState;
   sessionControls?: ReactNode;
+  renderSessionSettingError?(error: unknown): ReactNode;
   attachments?: ReactNode;
   consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[];
   onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>;
@@ -58,7 +59,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
-export function AgentComposer({ compact = false, state, sessionControls, sessionKey, disabled = false, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ compact = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
@@ -386,7 +387,7 @@ export function AgentComposer({ compact = false, state, sessionControls, session
       {state?.agent && !compact ? <AgentSessionSettings key={agentId} state={state} disabled={disabled} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
-        onSelect={onSetSessionSetting}>{sessionControls}</AgentSessionSettings> : null}
+        onSelect={onSetSessionSetting} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : null}
       {state?.agent ? <AgentActivityStatus visible={activityVisible} state={state} disabled={disabled}
         commandPending={pending === 'command'}
         interruptDisabled={Boolean(waiting.pending) || !canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}

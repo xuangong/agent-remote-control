@@ -718,7 +718,8 @@ function AppContent({
   const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId);
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);
-  const previewHost = activeHost ?? (selectedHost.id !== 'local' ? remoteHosts.find((host) => host.id === selectedHost.id) : undefined);
+  const selectedRemoteHost = selectedHost.id !== 'local' ? remoteHosts.find((host) => host.id === selectedHost.id) : undefined;
+  const previewHost = activeHost ?? selectedRemoteHost;
   const hostOffline = activeHost?.online === false;
   const connectionProviderName = providerName ?? state?.agent?.providerId ?? 'No active Agent';
   const connectionStatusLabel = hostOffline ? 'Host offline' : state?.agent?.status === 'failed' ? 'Agent failed' : sessionStatusLabel(status);
@@ -1120,7 +1121,10 @@ function AppContent({
       </section> : null}
       {userScoped && sessionPanel === 'list' ? <section className="lab-session-directory" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2><span>{favorites.stars.length}</span></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
       {directory ? <HostPairing managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
-      {sessionPanel === 'list' || sessionPanel === 'settings' ? <HostVscodeTunnel /> : null}
+      {sessionPanel === 'list' || sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel />
+        : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={compactLayout ? contextOpen : desktopContextVisible}>
+          <HostVscodeTunnel />
+        </VscodeTunnelScope> : null}
       {directory && userScoped ? <ControllerUpdates service={hostClient} hosts={remoteHosts} /> : null}
       {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={compactLayout ? contextOpen : desktopContextVisible} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>

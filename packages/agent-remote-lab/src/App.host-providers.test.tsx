@@ -8,8 +8,13 @@ afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', discovered = false) {
   let online = true;
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const tunnelRequests: string[] = [];
   vi.stubGlobal('fetch', async (input: URL | string, init?: RequestInit) => {
     const url = new URL(String(input));
+    if (url.pathname.includes('/vscode-tunnel')) {
+      tunnelRequests.push(url.pathname);
+      return Response.json({ status: 'stopped', processAlive: false, revision: 0 });
+    }
     if (url.pathname === '/v1/providers') return Response.json(localProviders === 'error'
       ? { error: 'Local providers unavailable' }
       : { protocolVersion: '1.5.0', type: 'provider_list', payload: { providers: localProviders === 'empty' ? [] : [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }] } }, { status: localProviders === 'error' ? 503 : 200 });
@@ -41,7 +46,7 @@ async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', disc
     expect(option, `Provider option for ${name}`).toBeDefined();
     await act(async () => { provider().value = option!.value; provider().dispatchEvent(new Event('change', { bubbles: true })); });
   };
-  return { container, provider, create, selectHost, requests, disconnect: () => { online = false; } };
+  return { container, provider, create, selectHost, requests, tunnelRequests, disconnect: () => { online = false; } };
 }
 
 it('routes Provider creation to each selected DSH Host and clears settings when switching back to local', async () => {
@@ -101,6 +106,32 @@ it('uses the remote Host descriptor when opening an existing session', async () 
   await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-session-row')].find((button) => button.textContent?.includes('Existing Codex'))!.click());
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Codex CLI · Desk Host');
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toContain('Online');
+});
+
+it('controls the selected Host tunnel while keeping another Host session open', async () => {
+  const f = await setup('ready', true);
+  await f.selectHost('Codex CLI · Desk Host');
+  await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-session-row')].find(button => button.textContent?.includes('Existing Codex'))!.click());
+  const panel = () => f.container.querySelector<HTMLElement>('[aria-label="Host VS Code tunnel"]')!;
+  expect(panel().textContent).toContain('Desk Host');
+  await act(async () => panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+
+  const connectedHost = f.container.querySelector<HTMLSelectElement>('#remote-host')!;
+  await act(async () => { connectedHost.value = 'studio'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(panel().textContent).toContain('Studio Host');
+  expect(panel().textContent).not.toContain('Desk Host');
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Codex CLI · Desk Host');
+  expect(panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false);
+  f.tunnelRequests.length = 0;
+  await act(async () => [...panel().querySelectorAll('button')].find(button => button.textContent === 'Refresh')!.click());
+  expect(f.tunnelRequests).toEqual(['/v1/remote/hosts/studio/vscode-tunnel']);
+  await act(async () => panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+  await act(async () => [...panel().querySelectorAll('button')].find(button => button.textContent === 'Start tunnel')!.click());
+  expect(f.tunnelRequests.at(-1)).toBe('/v1/remote/hosts/studio/vscode-tunnel/start');
+
+  await act(async () => { connectedHost.value = 'desk'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(panel().textContent).toContain('Desk Host');
+  expect(panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false);
 });
 
 it.each(['empty', 'error'] as const)('keeps remote Providers usable when the local catalog is %s', async (status) => {

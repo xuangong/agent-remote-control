@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { ControllerUpdates, controllerUpdateCoverage } from './ControllerUpdates.js';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64'] };
 const host: RemoteHost = { id: 'mac', name: 'Mac', online: true, access: 'owner', controller: { version: '0.1.0', revision: 'c'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true } };
 const others: RemoteHost[] = [{ ...host, id: 'offline', online: false }, { ...host, id: 'shared', access: 'shared' }, { ...host, id: 'unsupported', controller: { ...host.controller!, platform: 'linux' } }];
@@ -43,4 +44,24 @@ it('creates a fresh operation when discovery advances to another release', async
   await act(async () => button(container, 'Confirm update').click());
   expect(requests.map(r => r.version)).toEqual(['0.2.0', '0.3.0']);
   expect(requests[1]!.operationId).not.toBe(requests[0]!.operationId);
+});
+
+it('discovers Windows updates and submits the confirmed version only for a managed installation', async () => {
+  const windows: RemoteHost = { ...host, id: 'windows', name: 'Windows PC', controller: { ...host.controller!, platform: 'win32', arch: 'x64' } };
+  const legacy: RemoteHost = { ...windows, id: 'legacy', name: 'Legacy Windows', controller: undefined };
+  const latest = { ...release, platforms: ['darwin-arm64', 'win32-x64'] };
+  let status: ControllerUpdateStatus = { phase: 'idle', updatedAt: 0 };
+  expect(controllerUpdateCoverage(latest, [windows, legacy]).eligible).toEqual([windows]);
+  const service: HostPairingService = { hosts: async () => ({ hosts: [windows, legacy] }), pair: async () => { throw new Error('unused'); },
+    controllerRelease: async () => ({ release: latest }),
+    controllerUpdate: vi.fn(async (_id, input) => input ? status = { ...input, phase: 'waiting', updatedAt: 1 } : status) };
+  const container = await render(<ControllerUpdates service={service} hosts={[windows, legacy]} />);
+  expect(container.textContent).toContain('0.2.0 available');
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.textContent).toContain('Install the release launcher once');
+  await act(async () => button(container, 'Update Host').click());
+  expect(vi.mocked(service.controllerUpdate!).mock.calls.filter(([, input]) => input)).toEqual([]);
+  await act(async () => button(container, 'Confirm update').click());
+  expect(service.controllerUpdate).toHaveBeenCalledWith('windows', { version: '0.2.0', operationId: expect.any(String) });
+  expect(container.textContent).toContain('Waiting for a safe restart');
 });

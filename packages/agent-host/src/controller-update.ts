@@ -76,9 +76,12 @@ export function createControllerUpdater(options: {
       await save({ ...status, phase: 'restarting', message: undefined }); await options.restart(status.version!);
     } catch (error) { options.cancelRestart?.(); throw error; }
   }
-  async function fail(error: unknown) { await save({ ...status, phase: 'failed', message: error instanceof Error ? error.message.slice(0, 300) : 'Controller update failed.' }); }
+  async function fail(error: unknown) {
+    try { await save({ ...status, phase: 'failed', message: error instanceof Error ? error.message.slice(0, 300) : 'Controller update failed.' }); }
+    catch { status = { ...status, phase: 'failed', message: 'Controller update failed and its status could not be saved. Check the Controller state directory before retrying.', updatedAt: Date.now() }; }
+  }
   return {
-    async status() { await init(); try { return JSON.parse(await readFile(path, 'utf8')) as ControllerUpdateStatus; } catch { return { ...status }; } },
+    async status() { await init(); if (status.phase === 'failed') return { ...status }; try { return JSON.parse(await readFile(path, 'utf8')) as ControllerUpdateStatus; } catch { return { ...status }; } },
     async request(version: string, operationId: string) {
       await init(); await refreshLauncherResult();
       if (!options.identity.remoteUpdate) throw new Error('Install the release launcher locally before using remote updates.');
@@ -101,7 +104,7 @@ export function createControllerUpdater(options: {
       })().catch(fail).finally(() => { work = undefined; });
       return { ...status };
     },
-    close() { closed = true; clearTimeout(timer); },
+    async close() { closed = true; clearTimeout(timer); await work; },
   };
 }
 

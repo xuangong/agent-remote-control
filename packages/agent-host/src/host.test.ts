@@ -657,7 +657,7 @@ describe('Agent Host runtime', () => {
       session.dispose = async () => { await transport.dispose(); await dispose(); };
       await host.close();
       await exited;
-      expect(child.signalCode).toBe('SIGTERM');
+      expect(() => process.kill(child.pid!, 0)).toThrow();
       expect(session.disposed).toBe(true);
     } finally {
       await host.close(); await transport.dispose();

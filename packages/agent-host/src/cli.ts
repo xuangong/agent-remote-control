@@ -176,6 +176,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   }
   process.once('SIGTERM', stopDaemon);
   process.once('SIGINT', stopDaemon);
+  watchLauncherShutdown(stopDaemon);
   void host.ready.then(() => { process.send?.({ type: 'controller-ready', version: identity?.version }); }).catch(() => undefined);
   await new Promise<void>(() => undefined);
 }
@@ -493,7 +494,16 @@ async function installation(): Promise<string> { try { return (await readFile(in
 async function atomicJson(path: string, value: unknown): Promise<void> { const temporary = join(dirname(path), `.daemon-${process.pid}.tmp`); await writeFile(temporary, JSON.stringify(value), { mode: 0o600 }); await rename(temporary, path); }
 function requiredEnv(name: string): string { const value = process.env[name]?.trim(); if (!value) throw new Error(`${name} is required.`); return value; }
 function uplinkUrl(value: string): string { const url = new URL(value); if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) throw new Error('Agent Host server URL is invalid.'); url.protocol = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:'; url.pathname = '/ws/remote-host'; url.search = ''; url.hash = ''; return url.href; }
-async function waitForSignal(host: AgentHost): Promise<void> { await new Promise<void>((resolve) => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); }); await host.close(); }
+function watchLauncherShutdown(stop: () => void): void {
+  if (process.env.AGENT_HOST_MANAGED_UPDATES !== '1' || !process.send) return;
+  process.on('message', message => { if ((message as { type?: string } | null)?.type === 'controller-shutdown') stop(); });
+  process.once('disconnect', stop);
+}
+async function waitForSignal(host: AgentHost): Promise<void> {
+  await new Promise<void>((resolve) => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); watchLauncherShutdown(resolve); });
+  await host.close();
+  if (process.env.AGENT_HOST_MANAGED_UPDATES === '1' && process.connected) process.disconnect();
+}
 function shutdownTimeout(): number { const value = Number(process.env.AGENT_HOST_SHUTDOWN_TIMEOUT_MS ?? 5000); return Number.isSafeInteger(value) && value > 0 ? value : 5000; }
 export async function within(operation: Promise<unknown>, timeoutMs: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;

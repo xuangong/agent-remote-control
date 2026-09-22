@@ -14,14 +14,14 @@ it('stages once, waits for safe restart and preserves operation identity across 
     install: async () => { installations++; }, beginRestart: () => safe, restart: version => { restarted.push(version); } });
   try {
     await updater.request('0.2.0', 'operation-one');
-    await expect.poll(async () => (await updater.status()).phase).toBe('waiting');
+    await expect.poll(() => updater.status()).toMatchObject({ phase: 'waiting' });
     await updater.request('0.2.0', 'operation-one');
     await expect(updater.request('0.2.0', 'operation-two')).rejects.toThrow('already pending');
     expect(installations).toBe(1); expect(restarted).toEqual([]);
     safe = true;
     await expect.poll(() => restarted, { timeout: 4000 }).toEqual(['0.2.0']);
     expect(JSON.parse(await readFile(join(stateDir, 'controller-updates/status.json'), 'utf8'))).toMatchObject({ phase: 'restarting', operationId: 'operation-one' });
-  } finally { updater.close(); }
+  } finally { await updater.close(); }
 });
 it('reports a failed download without stopping the running Controller and allows explicit retry', async () => {
   const stateDir = await directory(); let attempts = 0; const restart = vi.fn();
@@ -34,7 +34,7 @@ it('reports a failed download without stopping the running Controller and allows
     await updater.request('0.2.0', 'operation-one');
     await expect.poll(() => attempts).toBe(2);
     await expect(updater.request('0.1.0', 'operation-old')).rejects.toThrow();
-  } finally { updater.close(); }
+  } finally { await updater.close(); }
 });
 it('rejects tampered packages before npm or any current installation is changed', async () => {
   const root = await directory(); await mkdir(join(root, 'controller-updates')); await writeFile(join(root, 'controller-updates/current.json'), '{"version":"0.1.0"}');
@@ -50,7 +50,21 @@ it('reopens admission when launcher activation fails', async () => {
     await updater.request('0.2.0', 'operation-one');
     await expect.poll(async () => (await updater.status()).phase).toBe('failed');
     expect(draining).toBe(false);
-  } finally { updater.close(); }
+  } finally { await updater.close(); }
+});
+it('keeps the Controller running when a failed update cannot persist its status', async () => {
+  const stateDir = await directory(); const restart = vi.fn();
+  const updater = createControllerUpdater({ stateDir, identity, release: async () => release,
+    install: async () => {
+      const path = join(stateDir, 'controller-updates/status.json');
+      await rm(path); await mkdir(path);
+      throw new Error('Installation failed');
+    }, beginRestart: () => true, restart });
+  try {
+    await updater.request('0.2.0', 'operation-one');
+    await expect.poll(() => updater.status(), { timeout: 3000 }).toMatchObject({ phase: 'failed', message: expect.stringContaining('could not be saved') });
+    expect(restart).not.toHaveBeenCalled();
+  } finally { await updater.close(); }
 });
 it('accepts a later version after the launcher settles a candidate observed while restarting', async () => {
   const stateDir = await directory(); const path = join(stateDir, 'controller-updates/status.json');
@@ -65,5 +79,5 @@ it('accepts a later version after the launcher settles a candidate observed whil
     expect((await updater.status()).phase).toBe('succeeded');
     expect((await updater.request('0.3.0', 'next-update')).version).toBe('0.3.0');
     await expect.poll(async () => (await updater.status()).phase).toBe('waiting');
-  } finally { updater.close(); }
+  } finally { await updater.close(); }
 });

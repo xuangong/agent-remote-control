@@ -11,3 +11,45 @@ Shared Codex tasks do not prevent an update: its independent daemon is not resta
 The first installation of this launcher is manual for legacy Controllers. Updating the package manager installation later should continue to use the same state directory. Releases do not automatically publish to npm; npm publication remains a separate explicit workflow.
 
 The stable launcher itself remains at its bootstrap version and supervises versioned Controller children. A future incompatible launcher contract requires an explicit local bootstrap. Package dependencies are installed with npm without lifecycle scripts; updates need registry access as well as GitHub access.
+
+## Windows
+
+Windows x64 uses the same release discovery, owner confirmation, checksum verification,
+safe restart admission and registration-based rollback as macOS. A release must list
+`win32-x64`; an installed VS Code or native agent does not establish Controller update
+support. The Host must report a clean release identity and run through the packaged
+`dist/launcher.js` entry point. Development builds and older installations that invoke
+`dist/cli.js` directly require a one-time local bootstrap.
+
+On Windows the launcher requests graceful shutdown over its private Node IPC channel.
+The Controller closes its Relay connection, releases its owned resources and removes
+its daemon state before the replacement starts. An unresponsive child is forcibly
+terminated after the shutdown deadline. An independent shared Codex daemon is not
+part of this replacement. Both foreground and login-started Controllers support the
+shutdown request; loss of the launcher IPC channel also requests cleanup.
+
+For a legacy Windows installation, first finish private native tasks and pending
+approvals. Use the same Windows account and `AGENT_HOST_STATE_DIR` as the existing
+Controller. Stop the Controller, install the standalone tarball from the selected
+`controller-vX.Y.Z` GitHub Release, then start it again:
+
+```powershell
+agent-remote-controller stop
+# Replace X.Y.Z with the selected published version, including Windows x64 support.
+$controllerVersion = 'X.Y.Z'
+npm install --global --ignore-scripts "https://github.com/xuangong/agent-remote-control/releases/download/controller-v$controllerVersion/orchardworks-agent-remote-controller-$controllerVersion.tgz"
+agent-remote-controller start
+agent-remote-controller status
+```
+
+Retain the state directory; do not re-pair or delete credentials. Starting the packaged
+command rewrites the enabled Windows login entry to use the stable launcher. An
+explicitly disabled login preference stays disabled. The website should then report
+the running version. Later compatible releases become available under **Controller
+updates → Update Host → Confirm update**. This does not publish a release from the
+browser or update the native Codex/VS Code installation.
+
+Run `pnpm test:controller-updates` after building workspace dependencies. It covers
+real child replacement and rollback, graceful Controller shutdown over IPC with a
+real local WebSocket Relay, restart admission, Windows website discovery and owner-only
+update requests through the Worker HTTP/WebSocket boundary.

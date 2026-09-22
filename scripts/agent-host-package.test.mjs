@@ -158,6 +158,13 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.match((await run(['status'])).stdout, /uplink: registered/);
   assert.deepEqual(registrations[0].providers, []);
   assert.deepEqual(registrations.at(-1).providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot']);
+  const buildInfo = JSON.parse(await readFile(join(packageRoot, 'build-info.json'), 'utf8'));
+  assert.deepEqual(registrations.at(-1).controller, {
+    version: manifest.version, revision: buildInfo.revision, platform: process.platform,
+    arch: process.arch, nodeMajor: Number(process.versions.node.split('.')[0]), remoteUpdate: !buildInfo.dirty,
+  });
+  assert.ok(Number.isInteger(management.launcherPid));
+  assert.notEqual(management.launcherPid, management.pid);
   assert.equal(registrations.at(-1).installationId, registrations[0].installationId);
   const saved = JSON.parse(await readFile(join(state, 'connection.json'), 'utf8'));
   assert.equal(saved.remoteKey, connection.AGENT_HOST_REMOTE_KEY);

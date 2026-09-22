@@ -165,9 +165,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         throw error;
       }
     },
-    close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed'; updater?.close();
+    close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed';
       connection.superseded = true;
-      await bounded(Promise.allSettled([connection.client.close(), previews?.close(), vscodeTunnel?.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
+      await bounded(Promise.allSettled([updater?.close(), connection.client.close(), previews?.close(), vscodeTunnel?.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
     })(); },
   };
 }

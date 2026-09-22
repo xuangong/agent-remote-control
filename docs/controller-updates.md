@@ -23,6 +23,11 @@ support. The Host must report a clean release identity and run through the packa
 `dist/launcher.js` entry point. Development builds and older installations that invoke
 `dist/cli.js` directly require a one-time local bootstrap.
 
+Publishing a verified package retries temporary `EPERM`, `EACCES`, and `EBUSY`
+directory locks for up to 8.5 seconds. A persistent lock fails the update while
+leaving the running version unchanged. Each installation attempt uses a fresh
+staging directory, so a directory left behind by failed cleanup is not reused.
+
 On Windows the launcher requests graceful shutdown over its private Node IPC channel.
 The Controller closes its Relay connection, releases its owned resources and removes
 its daemon state before the replacement starts. An unresponsive child is forcibly

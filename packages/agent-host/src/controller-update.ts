@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, mkdir, readFile, writeFile, rm, rename, realpath } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, writeFile, rm, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareControllerVersions, releaseCoversHost, type ControllerIdentity, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { controllerAssetUrl, controllerReleases } from '@orchardworks/agent-remote-hosted';
 import { atomicPrivate } from './autostart-state.js';
+import { publishControllerPackage } from './controller-package.js';
 const exec = promisify(execFile);
 export async function controllerIdentity(moduleUrl: string): Promise<ControllerIdentity | undefined> {
   try {
@@ -44,8 +45,7 @@ export async function installControllerRelease(stateDir: string, release: Contro
     if (info.revision === release.revision && info.version === release.version && info.dirty === false) return;
     throw new Error('An existing update directory does not match this release.');
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  const stage = join(root, `${release.version}.staging-${process.pid}`);
-  await mkdir(stage, { recursive: true, mode: 0o700 });
+  const stage = await mkdtemp(join(root, `${release.version}.staging-`));
   try {
     const response = await fetcher(controllerAssetUrl(release.version, release.asset), { signal: AbortSignal.timeout(120000) });
     if (!response.ok || !response.body) throw new Error('Controller download failed. The running version is unchanged.');
@@ -65,8 +65,12 @@ export async function installControllerRelease(stateDir: string, release: Contro
     const info = JSON.parse(await readFile(join(packageRoot, 'build-info.json'), 'utf8'));
     if (info.version !== release.version || info.revision !== release.revision || info.dirty !== false) throw new Error('Installed Controller identity does not match the release.');
     await exec(process.execPath, [join(packageRoot, 'dist/cli.js'), '--version'], { timeout: 15000, maxBuffer: 65536, windowsHide: true });
-    await rm(archive); await rename(stage, target);
-  } finally { await rm(stage, { recursive: true, force: true }); }
+    await rm(archive); await publishControllerPackage(stage, target);
+  } catch (error) {
+    // Preserve the installation error if a lingering Windows handle also prevents cleanup.
+    try { await rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* A retry uses a fresh staging directory. */ }
+    throw error;
+  }
 }
 export function createControllerUpdater(options: {
   stateDir: string; identity: ControllerIdentity; release?: (version: string) => Promise<ControllerRelease>;

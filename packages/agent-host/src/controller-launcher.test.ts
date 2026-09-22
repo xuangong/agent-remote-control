@@ -29,7 +29,7 @@ it.each([
   const launcher = join(root, container ? 'agent-remote-controller' : 'launcher.mjs');
   const updates = join(root, 'controller-updates');
   const active = join(updates, 'packages/0.2.0/node_modules/@orchardworks/agent-remote-controller/dist');
-  const target = clean ? active.replace('0.2.0/', '0.2.0.reinstall/') : active;
+  const target = clean ? join(updates, 'packages/0.2.0.reinstall/node_modules/@orchardworks/agent-remote-controller/dist') : active;
   await mkdir(target, { recursive: true });
   await writeFile(join(root, 'package.json'), '{"type":"module"}');
   await writeFile(join(updates, 'status.json'), JSON.stringify({ phase: 'waiting', version: '0.2.0', operationId: 'test-operation', updatedAt: Date.now() }));

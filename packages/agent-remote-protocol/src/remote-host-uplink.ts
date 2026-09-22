@@ -17,7 +17,7 @@ export type RemoteHostHeartbeat = Static<typeof RemoteHostHeartbeat>;
 const heartbeatNonce = Type.String({ minLength: 1, maxLength: 128 });
 const rpc = { uplinkVersion: version, requestId: identity };
 const stream = { uplinkVersion: version, streamId: identity };
-const provider = Type.Object({ providerId: identity, displayName: identity }, object);
+const provider = Type.Object({ providerId: identity, displayName: identity, promptEditing: Type.Optional(Type.Literal(true)) }, object);
 export const PreviewRegistrationSnapshot = Type.Object({
   epoch: identity, revision: Type.Integer({ minimum: 0 }),
   registrations: Type.Array(Type.Object({

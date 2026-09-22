@@ -70,9 +70,32 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     return value?.changed ? { ...previous, [key]: { ...value, changed: false, attention: undefined } } : previous;
   }), [setObservations]);
   const retry = (key: string) => { setObservations(values => { const next = { ...values }; delete next[key]; return next; }); setRetries(values => ({ ...values, [key]: (values[key] ?? 0) + 1 })); };
+  const migrations = useRef({ scope: baseUrl, values: new Map<string, import('@orchardworks/agent-remote-protocol').SessionMigration>() });
+  if (migrations.current.scope !== baseUrl) migrations.current = { scope: baseUrl, values: new Map() };
+  function replace(migration: import('@orchardworks/agent-remote-protocol').SessionMigration) {
+    migrations.current.values.set(sessionKey(migration.from), migration);
+    const replacements = new Map(migrations.current.values);
+    setSelection(value => {
+      if (value.scope !== baseUrl || !value.sessions.some(item => replacements.has(sessionKey(item)))) return value;
+      const next = new Map<string, SessionStar>();
+      for (const item of value.sessions) {
+        let updated = item;
+        const visited = new Set<string>();
+        for (let replacement = replacements.get(sessionKey(updated)); replacement && !visited.has(replacement.id); replacement = replacements.get(sessionKey(updated))) {
+          visited.add(replacement.id);
+          updated = { hostId: replacement.to.hostId, providerId: replacement.to.providerId, nativeSessionId: replacement.to.nativeSessionId,
+            title: item.title, starredAt: item.starredAt, ...(item.workspace ? { workspace: item.workspace } : {}) };
+        }
+        next.set(sessionKey(updated), updated);
+      }
+      const sessions = [...next.values()];
+      try { saveTrackedSessions(baseUrl, sessions); } catch { /* Keep the in-memory replacement when browser storage is unavailable. */ }
+      return { ...value, sessions };
+    });
+  }
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} />), [observedSessions, baseUrl, transport, update, retries]);
   useFeedbackToast('Session tracking', error);
-  return { sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
+  return { replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 

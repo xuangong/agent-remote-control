@@ -1,3 +1,4 @@
+import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import type { AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
 import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
@@ -379,6 +380,35 @@ export class CodexAppServerSession implements AgentSession {
     });
     session.setThreadFromResponse(response, 'thread/start');
     session.finishBootstrap([], new Map());
+    return session;
+  }
+
+  static async forkForPromptEdit(
+    transport: CodexAppServerTransport,
+    target: CodexPromptEditTarget,
+    codexHome?: string,
+    restrictedNative = false,
+    recoveryPlan?: CodexSharedRecoveryPlan,
+  ): Promise<CodexAppServerSession> {
+    const session = new CodexAppServerSession(transport, {}, codexHome, undefined, restrictedNative, recoveryPlan);
+    const initialization = await session.initialize();
+    const boundary = await preparePromptEdit(transport, target, initialization);
+    const response = await transport.request(boundary.beforeTurnId ? 'thread/fork' : 'thread/start', {
+      ...(boundary.beforeTurnId ? { threadId: target.nativeSessionId, beforeTurnId: boundary.beforeTurnId, excludeTurns: true } : {}),
+      ...(boundary.cwd ? { cwd: boundary.cwd } : {}),
+      config: { 'features.default_mode_request_user_input': true },
+      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
+    });
+    session.setThreadFromResponse(response, boundary.beforeTurnId ? 'thread/fork' : 'thread/start');
+    if (session.threadId === target.nativeSessionId) throw new Error('Codex did not create an independent prompt-edit branch.');
+    if (!boundary.beforeTurnId) { session.finishBootstrap([], new Map()); return session; }
+    const history = await readCodexHistoryPage(transport, session.threadId!, { metadata: response });
+    session.olderHistoryCursor = history.historyCursor;
+    session.runtime.inspectHistory(session.threadId!, history);
+    session.finishBootstrap(
+      projectCodexThreadHistory(history, session.threadId!, { images: session.images, cwd: session.config.cwd }),
+      collectCodexThreadHistoryItems(history, session.threadId!),
+    );
     return session;
   }
 
@@ -765,8 +795,8 @@ export class CodexAppServerSession implements AgentSession {
     }
   }
 
-  private async initialize(): Promise<void> {
-    await initializeCodexTransport(this.transport);
+  private async initialize(): Promise<unknown> {
+    const initialization = await initializeCodexTransport(this.transport);
     await this.settings.discover(this.transport);
     let modes: unknown;
     try {
@@ -781,6 +811,7 @@ export class CodexAppServerSession implements AgentSession {
     if (this.config.collaborationMode === 'plan' && !this.planningModes) {
       throw new Error('Codex planning control is unsupported by this app-server.');
     }
+    return initialization;
   }
 
   private setThreadFromResponse(response: unknown, method: string): void {

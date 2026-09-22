@@ -1,3 +1,4 @@
+import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import type { AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import { readSessionHistoryPage } from './reference-history.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -89,6 +90,32 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     try {
       const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative,
         this.sharedRecoveryPlan(cwd), extensions);
+      this.sessions.add(session);
+      session.onRuntimeClosed(() => this.sessions.delete(session));
+      return session;
+    } catch (error) {
+      await transport.dispose();
+      throw runtimeError(error, this.options.connectionMode === 'shared');
+    }
+  }
+
+  async validatePromptEdit(target: CodexPromptEditTarget): Promise<void> {
+    const transport = await this.createTransport();
+    try { await preparePromptEdit(transport, target, await initializeCodexTransport(transport)); }
+    catch (error) {
+      const mapped = runtimeError(error, this.options.connectionMode === 'shared');
+      if (mapped instanceof AgentRuntimeError) throw mapped;
+      if (error instanceof CodexAppServerRpcError) throw new Error('Codex could not verify this prompt. Check the Controller log and reload the source conversation.');
+      throw error;
+    }
+    finally { await transport.dispose(); }
+  }
+
+  async forkForPromptEdit(target: CodexPromptEditTarget): Promise<AgentSession> {
+    const transport = await this.createTransport();
+    try {
+      const session = await CodexAppServerSession.forkForPromptEdit(transport, target, this.options.env?.CODEX_HOME,
+        this.options.restrictedNative, this.sharedRecoveryPlan());
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;

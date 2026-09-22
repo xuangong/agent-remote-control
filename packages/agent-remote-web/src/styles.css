@@ -755,3 +755,16 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-draft-storage-status { display: flex; align-items: center; gap: 8px; }
 .agent-draft-storage-status > span { flex: 1; min-width: 0; }
 .agent-composer .agent-draft-storage-status button { flex: none; min-height: 32px; padding: 0 6px; background: transparent; color: inherit; font-size: 12px; }
+
+.agent-entry-edit-desktop { position: absolute; right: 6px; top: 5px; z-index: 1; opacity: 0; }
+.agent-timeline-entry:hover > .agent-entry-edit-desktop, .agent-timeline-entry:focus-within > .agent-entry-edit-desktop { opacity: 1; }
+.agent-edit-prompt { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--agent-muted); cursor: pointer; pointer-events: auto; }
+.agent-edit-prompt:hover, .agent-edit-prompt:focus-visible { background: var(--agent-bg); color: var(--agent-text); }
+.agent-edit-prompt:disabled { opacity: .5; cursor: wait; }
+.agent-entry-time time { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.agent-edit-prompt-error { color: var(--agent-muted); font-size: 12px; margin: 4px 8px; }
+@media (max-width: 1180px) {
+  .agent-entry-edit-desktop { display: none; }
+  .agent-timeline-entry[data-prompt-editable] > .agent-entry-time { width: 160px; flex-direction: row; justify-content: center; }
+  .agent-entry-time .agent-edit-prompt { flex: 0 0 44px; width: 44px; height: 44px; }
+}

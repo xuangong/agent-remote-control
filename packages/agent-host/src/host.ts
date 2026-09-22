@@ -17,6 +17,8 @@ export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
   readonly providerId: string;
   readonly supportsSourceReferences?: boolean;
+  readonly supportsPromptEditing?: boolean;
+  validatePromptEdit?(target: { nativeSessionId: string; turnId: string; messageId: string }): Promise<void>;
   /** Must guarantee disposal only detaches this client's idle runtime connection. */
   canReleaseSession?(nativeSessionId: string): boolean;
   reconcileIdleSession?(nativeSessionId: string): Promise<boolean>;
@@ -26,7 +28,7 @@ export interface AgentHostDirectory {
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
   workspaces(): Promise<readonly AgentHostWorkspace[]> | readonly AgentHostWorkspace[];
   models?(): Promise<unknown> | unknown;
-  create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string; sourceNativeSessionId?: string }): Promise<string>;
+  create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string; sourceNativeSessionId?: string; editNativeSessionId?: string; editTurnId?: string; editMessageId?: string }): Promise<string>;
   open(nativeSessionId: string): Promise<AgentSession>;
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close(): Promise<void> | void;
@@ -96,7 +98,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment,
-      providers: options.registrations.map(({ adapter }) => adapter.descriptor), url: config.url, remoteKey: config.remoteKey,
+      providers: options.registrations.map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) })), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
           if (generation !== current || closed) throw new Error('Host credential persistence was superseded.');
@@ -361,7 +363,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const proposedAgentId = request.sessionId;
     if (!proposedAgentId) throw new HostRequestError(400, 'invalid_request', 'A proposed Agent identity is required.');
     if (payload.sourceNativeSessionId !== undefined && (typeof payload.sourceNativeSessionId !== 'string' || !payload.sourceNativeSessionId || payload.sourceNativeSessionId.length > 256)) throw new HostRequestError(400, 'invalid_request', 'Source session identity is invalid.');
+    const editKeys = ['editNativeSessionId', 'editTurnId', 'editMessageId'] as const;
+    const editing = editKeys.some(key => payload[key] !== undefined);
+    if (editing && (editKeys.some(key => typeof payload[key] !== 'string' || !(payload[key] as string).trim() || (payload[key] as string).length > 256) || payload.sourceNativeSessionId !== undefined)) throw new HostRequestError(400, 'invalid_request', 'A complete native prompt identity is required.');
     const settings = {
+      ...(editing ? { editNativeSessionId: payload.editNativeSessionId as string, editTurnId: payload.editTurnId as string, editMessageId: payload.editMessageId as string } : {}),
       ...(typeof payload.sourceNativeSessionId === 'string' ? { sourceNativeSessionId: payload.sourceNativeSessionId } : {}),
       ...(typeof payload.cwd === 'string' ? { cwd: payload.cwd } : {}),
       ...(typeof payload.workspaceId === 'string' ? { workspaceId: payload.workspaceId } : {}),
@@ -378,12 +384,20 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }, {
       validate: async () => {
         const directory = registration(providerId).directory;
+        if (editing && !directory.supportsPromptEditing) throw new HostRequestError(400, 'unsupported_configuration', 'Prompt editing is unavailable on this Host/provider. Update the Controller.');
         if (settings.sourceNativeSessionId && !directory.supportsSourceReferences) throw new HostRequestError(400, 'unsupported_configuration', 'This Host/provider does not support source-session tools. Update the Host or use /fork.');
         if (options.executionPolicy) {
           const selected = payload.workspaceId === undefined ? undefined
             : (await directory.workspaces()).find(workspace => workspace.id === payload.workspaceId);
           if (payload.workspaceId !== undefined && !selected) throw new HostExecutionPolicyError('Unknown local Host workspace.');
           await allowedWorkspace(options.executionPolicy, typeof payload.cwd === 'string' ? payload.cwd : selected?.path ?? options.executionPolicy.defaultWorkspace);
+        }
+        if (editing) {
+          try { await directory.validatePromptEdit?.({ nativeSessionId: settings.editNativeSessionId!, turnId: settings.editTurnId!, messageId: settings.editMessageId! }); }
+          catch (error) {
+            if (error instanceof HostExecutionPolicyError || error instanceof AgentRuntimeError) throw error;
+            throw new HostRequestError(400, 'operation_rejected', error instanceof Error ? error.message : 'The selected prompt could not be verified.');
+          }
         }
         if (projectionAgents.has(proposedAgentId) || bindingsByAgent.has(proposedAgentId)) {
           throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already reserved.');

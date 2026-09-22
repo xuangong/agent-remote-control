@@ -20,6 +20,7 @@ import { useRecoveryNotice } from '../hooks/useRecoveryNotice.js';
 import type { TraceEntryRequest } from '../trace-model.js';
 
 export interface LabWorkbenchActions {
+  editPrompt?(entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry): Promise<void>;
   loadOlder?(): void | Promise<void>;
   retryMessage?(id: string): Promise<void>;
   deleteMessage?(id: string): void;
@@ -182,6 +183,7 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): La
     setPlanning: report('Change session mode', actions.setPlanning), setSessionSetting: report('Change session setting', actions.setSessionSetting),
     listCommands: report('Load commands', actions.listCommands), executeCommand: report('Run command', actions.executeCommand),
     loadOlder: report('Load conversation history', actions.loadOlder),
+    editPrompt: report('Edit prompt', actions.editPrompt),
   }), [actions, sessionId]);
 }
 
@@ -213,6 +215,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ state, sessionStatus
             {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
             <AgentTimeline
               state={state}
+              onEditPrompt={runtimeMutationDisabled ? undefined : actions.editPrompt}
               onRetryMessage={runtimeMutationDisabled ? undefined : actions.retryMessage}
               onDeleteMessage={actions.deleteMessage}
               onInspectEntry={onInspectEntry}

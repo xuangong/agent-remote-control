@@ -1,3 +1,6 @@
+import { readPromptEditReservation, retainPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
+import { preparePromptDraft, savePromptDraft } from '@orchardworks/agent-remote-web/react';
+import { useSessionMigrations } from './hooks/useSessionMigrations.js';
 import { ReplicaCache } from './replica-cache.js';
 import { DraftStore } from './draft-store.js';
 import { useSessionStars } from './hooks/useSessionStars.js';
@@ -777,6 +780,63 @@ function AppContent({
   const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
     liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, askEntry?.record?.target, askEntry?.attached, askVisible]);
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions);
+  const promptEditBusy = useRef(false);
+  const [promptEditPending, setPromptEditPending] = useState(false);
+  const promptEditReservation = useMemo<{ current: PromptEditReservation | undefined }>(() => ({ current: readPromptEditReservation(baseUrl) }), [baseUrl]);
+  const promptMigrations = useSessionMigrations({ baseUrl, enabled: userScoped, transport, current: activeOpened, loaded: openWindows,
+    blocked: migration => promptEditBusy.current || transitionRef.current || activeView !== 'workbench' || supportingRailOpen || (promptEditReservation.current?.operationId === migration.id && !promptEditReservation.current.restored),
+    apply: migration => tracking.replace(migration),
+    refreshReferences: () => { void favorites.refresh(); },
+    follow: async (session, source) => {
+      if (!sideSessions.some(item => sessionKey(item) === sessionKey(source))) return openSession(session);
+      const result = await new SessionDirectoryClient(baseUrl, undefined, session.hostId).attach(session.providerId, session.nativeSessionId);
+      const target = { ...session, agentId: result.agentId };
+      const fork = forkStore.find(source);
+      if (fork) forkStore.bind(fork.id, target);
+      rememberSession(target);
+      setSideSessions(values => values.map(item => sessionKey(item) === sessionKey(source) ? target : item));
+      setSideSelections(values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === sessionKey(source) ? sessionKey(target) : value])));
+      setSideFocus(value => value === sessionKey(source) ? sessionKey(target) : value);
+      return true;
+    },
+  });
+  async function editPrompt(entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry): Promise<void> {
+    const source = activeOpened; const item = entry.item; const sourceClient = clientRef.current;
+    if (!source || !sourceClient || !directory || source.providerId !== 'codex' || item.type !== 'user_message' || !item.messageId || !entry.turnId) throw new Error('This prompt cannot be edited.');
+    if (promptEditBusy.current) throw new Error('A prompt edit is already being prepared.');
+    promptEditBusy.current = true; setPromptEditPending(true);
+    const assertActiveAccount = () => { if (mountedTransport.current !== transport) throw new Error('The account connection changed. Reopen the source conversation before editing.'); };
+    try {
+      const draft = await preparePromptDraft(item, { scopeKey: JSON.stringify([source.agentId, state?.timeline.epoch]), bindings: entry.resources, resources: state?.resources ?? {},
+        resolveResource: sourceClient.resolveResource.bind(sourceClient), requestResource: async binding => (await sourceClient.requestResource(binding.resourceId)).payload.state });
+      assertActiveAccount();
+      const key = JSON.stringify([sessionKey(source), entry.turnId, item.messageId]);
+      let reservation = promptEditReservation.current?.key === key ? promptEditReservation.current : undefined;
+      if (!reservation) {
+        const storageKey = 'arc:prompt-edit-intent:' + baseUrl + ':' + key;
+        let operationId = crypto.randomUUID() as string;
+        try { const saved = sessionStorage.getItem(storageKey); if (saved && /^[a-f0-9-]{36}$/i.test(saved)) operationId = saved; else sessionStorage.setItem(storageKey, operationId); } catch { /* Preserve the same intent in memory when storage is unavailable. */ }
+        reservation = { key, operationId }; promptEditReservation.current = reservation;
+      }
+      retainPromptEditReservation(baseUrl, reservation);
+      if (!reservation.target) {
+        const targetDirectory = new SessionDirectoryClient(baseUrl, undefined, source.hostId);
+        const result = await targetDirectory.create(source.providerId, reservation.operationId, { editNativeSessionId: source.nativeSessionId, editTurnId: entry.turnId, editMessageId: item.messageId });
+        assertActiveAccount();
+        if (!result.nativeSessionId || result.nativeSessionId === source.nativeSessionId) throw new Error('The native prompt-edit branch could not be confirmed.');
+        reservation.target = { ...source, agentId: result.agentId, nativeSessionId: result.nativeSessionId, parentAgentId: undefined, parentNativeSessionId: undefined };
+      }
+      if (!reservation.restored) {
+        const text = await savePromptDraft(baseUrl, sessionKey(reservation.target), draft);
+        assertActiveAccount();
+        messageDrafts.set(reservation.target.agentId, text); reservation.restored = true;
+        finishPromptEditReservation(baseUrl, reservation.operationId);
+      }
+      rememberSession(reservation.target); setDirectoryRevision(value => value + 1);
+      promptMigrations.requestFollow(reservation.operationId);
+    } finally { promptEditBusy.current = false; setPromptEditPending(false); }
+  }
+
   const conversationHistory = useConversationHistory(addressSession, sessionEntries, openSession);
   useEffect(() => {
     if (addressSession && state?.agent && !initialState) saveLastSession(baseUrl, { ...addressSession, hostId: addressSession.hostId ?? 'local' });
@@ -916,6 +976,7 @@ function AppContent({
   }
 
   const clientActions: AppActions = actions ?? {
+    ...(userScoped && activeOpened && activeOpened.providerId === 'codex' && !activeOpened.parentNativeSessionId && !boundFork && !promptEditPending ? { editPrompt } : {}),
     loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
     sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
     sendMessageContent: async (content, options) => { await commandClient().sendMessageContent(content, options); },
@@ -1098,7 +1159,7 @@ function AppContent({
     <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
       <section
         ref={workbenchPanelRef}
-        className={sessionNotice && !(compactLayout && contextOpen) ? 'lab-workbench-with-notice' : undefined}
+        className={(sessionNotice && !(compactLayout && contextOpen)) || promptMigrations.notice ? 'lab-workbench-with-notice' : undefined}
         id="lab-workbench"
         data-testid="workbench"
         role="tabpanel"
@@ -1107,6 +1168,7 @@ function AppContent({
         hidden={activeView !== 'workbench'}
       >
         {sessionNotice && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
+        {promptMigrations.notice}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />

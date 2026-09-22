@@ -9,6 +9,7 @@ it('accepts an enrollment-only Host without advertising native providers', () =>
 it('accepts optional durable credential exchange while preserving legacy registration', () => {
   for (const message of [
     { type: 'register', installationId: 'i', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] },
+    { type: 'register', installationId: 'i', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex', promptEditing: true }] },
     { type: 'register', installationId: 'i', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], credentialRotation: true },
     { type: 'credential_issued', credential: 'durable-secret' }, { type: 'credential_saved' },
     { type: 'rpc_request', requestId: 'stop', method: 'POST', path: '/remote/stop', body: '{}' },

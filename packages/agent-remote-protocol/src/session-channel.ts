@@ -1,3 +1,4 @@
+import { SessionMigration } from './session-migration.js';
 import { type Static, Type } from '@sinclair/typebox';
 import { ClientMessage, IncompatibleProtocolVersionErrorMessage, NegotiateRequest, ServerMessage } from './messages.js';
 import { ProtocolVersionSchema } from './version.js';
@@ -14,6 +15,7 @@ export const SessionChannelClientMessage = Type.Union([
 export type SessionChannelClientMessage = Static<typeof SessionChannelClientMessage>;
 
 export const SessionChannelServerMessage = Type.Union([
+  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_migrated'), migration: SessionMigration }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready') }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('message'), subscriptionId: SubscriptionId, message: Type.Union([ServerMessage, IncompatibleProtocolVersionErrorMessage]) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('closed'), subscriptionId: SubscriptionId, code: Type.Integer(), reason: Type.String() }),

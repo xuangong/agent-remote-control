@@ -6,7 +6,7 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
@@ -54,6 +54,12 @@ export function createCodexSessionDirectory(
   }
   return {
     providerId: 'codex',
+    supportsPromptEditing: !!provider.forkForPromptEdit,
+    async validatePromptEdit(target) {
+      await sourceAccessCheck?.(target.nativeSessionId);
+      if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+      await provider.validatePromptEdit?.(target);
+    },
     reconcileIdleSession: id => provider.reconcileIdleSession?.(id) ?? Promise.resolve(false),
     canReleaseSession: id => provider.canReleaseSession?.(id) === true,
     sessionReleased(id) { opened.delete(id); },
@@ -64,6 +70,12 @@ export function createCodexSessionDirectory(
     workspaces: () => [...workspaces],
     async create(input) {
       if (closed) throw new Error('Codex directory is closed.');
+      if (input.editNativeSessionId) {
+        if (!provider.forkForPromptEdit || !input.editTurnId || !input.editMessageId) throw new Error('Native prompt editing is unavailable.');
+        await sourceAccessCheck?.(input.editNativeSessionId);
+        if (await references?.get(input.editNativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+        return remember(await provider.forkForPromptEdit({ nativeSessionId: input.editNativeSessionId, turnId: input.editTurnId, messageId: input.editMessageId }));
+      }
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(({ id }) => id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new Error('Unknown Codex workspace.');
       const cwd = input.cwd ?? selected?.path ?? workspaces[0]?.path;

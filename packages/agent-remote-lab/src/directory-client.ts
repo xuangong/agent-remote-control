@@ -12,7 +12,7 @@ export interface SessionSummary {
 export interface SessionCatalogPage { items: SessionSummary[]; hasMore: boolean; nextCursor?: string; revision: string }
 export interface SessionWorkspace { id: string; name: string; path: string }
 export interface WorkspaceFolderPage { path: string; parentPath: string | null; roots: string[]; folders: Array<{ name: string; path: string }>; nextOffset: number | null }
-export interface CreateSessionOptions { sourceNativeSessionId?: string; workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
+export interface CreateSessionOptions { editNativeSessionId?: string; editTurnId?: string; editMessageId?: string; sourceNativeSessionId?: string; workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
 export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string; createdAt?: string }
 export class DirectoryError extends Error {
   constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string) { super(message); }

@@ -23,6 +23,7 @@ import { TimelineDisplay, isContentOnlyItem } from './TimelineDisplay.js';
 export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
+  readonly onEditPrompt?: (entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry) => Promise<void>;
   readonly state: AgentReplicaState;
   readonly onRetryMessage?: (id: string) => Promise<void>;
   readonly onDeleteMessage?: (id: string) => void;
@@ -47,6 +48,7 @@ export interface AgentTimelineProps {
 
 export function AgentTimeline({
   state,
+  onEditPrompt,
   onRetryMessage,
   onDeleteMessage,
   registry,
@@ -121,6 +123,7 @@ export function AgentTimeline({
       {renderModel.length === 0 && outgoing.length === 0
         ? <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
         : renderModel.map(({ entry, key, messageGroup }) => <TimelineEntry key={key} entryKey={key}
+            onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
             timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
             inspected={inspectedEntryKey === key} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(key) : undefined}>
             <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}

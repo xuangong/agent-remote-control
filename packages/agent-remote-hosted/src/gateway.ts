@@ -1,3 +1,5 @@
+import { createSessionMigrations } from './session-migrations.js';
+import { PROTOCOL_VERSION, encodeSessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
 import { unavailableRoute } from './session-errors.js';
@@ -42,7 +44,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
   const tenants = new Map<string, Tenant>();
   const hostKeyOperations = new Map<string, Promise<unknown>>();
-  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number }>();
+  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string> }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
@@ -57,6 +59,17 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const host = broker?.visibleHosts(subject).find(host => host.id === item.hostId);
     return host ? { online: host.online, hostName: host.name } : undefined;
   });
+  const migrations = createSessionMigrations(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
+  function publishMigrations(socket: RelaySocket, channel: { subject: string; migrations?: Set<string> }) {
+    if (!channel.migrations || socket.readyState !== 1) return;
+    for (const migration of migrations.list(channel.subject)) {
+      if (channel.migrations.has(migration.id)) continue;
+      const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_migrated', migration });
+      if (encoded.status !== 'ok') continue;
+      if ((socket.bufferedAmount ?? 0) + encoded.json.length * 3 > 16 * 1024 * 1024) { socket.close(1013, 'Migration backlog'); return; }
+      try { socket.send(encoded.json); channel.migrations.add(migration.id); } catch { socket.close(1011, 'Migration delivery failed'); return; }
+    }
+  }
   const previewOrigin = validateGatewayOrigin(options.previewOrigin || auth.origin);
   const previewAccess = createPreviewAccess({ origin: auth.origin, previewOrigin,
     authorizeBrowser: async (request, entry) => {
@@ -98,6 +111,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   function published() {
     enforceChannels();
+    for (const [socket, channel] of browserChannels) publishMigrations(socket, channel);
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
     void previewAccess.enforce(); void subdomainAccess?.enforce();
     if (initialized && !refreshing) queueSchedule();
@@ -380,6 +394,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       }
       if (path === '/v1/remote/pairings' && request.method === 'POST' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
     }
+    if (path === '/v1/session-migrations' && request.method === 'GET') return json(200, { migrations: migrations.list(grant.subject) });
     if (path === '/v1/stars') {
       try {
         if (request.method === 'GET') return json(200, { stars: stars.list(grant.subject) });
@@ -430,7 +445,27 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return json(200, { entryUrl: previewAccess.issue({ source: request, subject: grant.subject, hostId, previewId, path: path + original.search + original.hash }) });
     }
     const revokeHost = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(path);
-    const execute = () => destination.broker.handleRequest(relative, context(request, grant));
+    const execute = async () => {
+      const editRoute = /^\/v1\/remote\/hosts\/([^/]+)\/create$/.exec(path);
+      const input = editRoute && request.method === 'POST' ? await readJson(relative.clone()) : undefined;
+      if (!input?.editNativeSessionId) return destination.broker.handleRequest(relative, context(request, grant));
+      if (typeof input.editNativeSessionId !== 'string' || typeof input.providerId !== 'string' || typeof input.operationId !== 'string') return json(400, { error: 'A complete prompt-edit identity is required.' });
+      const operationId = input.operationId;
+      const fromIdentity = { hostId: decodeURIComponent(editRoute![1]!), providerId: input.providerId, nativeSessionId: input.editNativeSessionId };
+      return withHostKey('prompt-edit:' + JSON.stringify([grant.subject, fromIdentity]), async () => {
+        try {
+          const from = state.read().tenants.flatMap(value => value.broker.bindings).find(binding => binding.hostId === fromIdentity.hostId && binding.providerId === fromIdentity.providerId && binding.nativeSessionId === fromIdentity.nativeSessionId);
+          if (!from || !destination.broker.canStarSession(fromIdentity, grant.subject)) return json(403, { error: 'Source session access is unavailable.' });
+          migrations.check(grant.subject, fromIdentity, operationId);
+          const response = await destination.broker.handleRequest(relative, context(request, grant));
+          if (!response?.ok) return response;
+          const result = await response.clone().json() as { agentId: string; nativeSessionId: string };
+          await migrations.save(grant.subject, { id: operationId, from: { ...fromIdentity, agentId: from.agentId },
+            to: { hostId: from.hostId, providerId: from.providerId, nativeSessionId: result.nativeSessionId, agentId: result.agentId }, createdAt: Date.now() });
+          return response;
+        } catch (error) { if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message }); throw error; }
+      });
+    };
     const result = durable && revokeHost && request.method === 'POST' ? await withHostKey(revokeHost[1]!, async () => {
       const identity = destination.broker.gatewayKeyHost(revokeHost[1]!, grant.subject);
       if (identity) {
@@ -487,7 +522,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return { accept(socket: RelaySocket) {
         if (closing || failed || sessions.expiresAt(request, grant) <= Date.now()) { socket.close(1008, 'Session expired'); return; }
         if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
-        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant) });
+        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
         acceptSessionChannel(socket, mode, async agentId => {
@@ -503,6 +538,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
           }
           return prepared;
         });
+        publishMigrations(socket, browserChannels.get(socket)!);
       } };
     }
     const destination = routeTenant(route.pathname, grant.subject) ?? owned;

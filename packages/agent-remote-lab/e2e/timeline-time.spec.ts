@@ -2,6 +2,28 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 test.use({ locale: 'en-GB', timezoneId: 'Asia/Shanghai' });
 
+test('edits a user prompt from the swipe timestamp on mobile and inline action on desktop', async ({ page, isMobile }, testInfo) => {
+  await page.goto('/e2e/fixtures/timeline-time.html?edit=1');
+  const user = page.locator('[data-entry-key="time:codex:1:user"]');
+  const height = (await user.boundingBox())!.height;
+  if (isMobile) {
+    await drag(page, user.locator('.agent-message'), -120);
+    await expect.poll(() => user.evaluate(element => {
+      const content = element.querySelector('.agent-entry-content')!.getBoundingClientRect();
+      const time = element.querySelector('.agent-entry-time')!.getBoundingClientRect();
+      return content.right <= time.left;
+    })).toBe(true);
+  }
+  else await user.hover();
+  const button = user.getByRole('button', { name: 'Edit from this message' }).filter({ visible: true });
+  await expect(button).toBeVisible();
+  expect(Math.abs((await user.boundingBox())!.height - height)).toBeLessThan(0.1);
+  await page.screenshot({ path: testInfo.outputPath('prompt-edit-action.png') });
+  if (isMobile) await button.tap(); else await button.click();
+  await expect(page.getByTestId('edits')).toHaveText('1');
+  await expect(page.locator('[data-entry-key="time:codex:2:assistant"] button[data-prompt-edit-action]')).toHaveCount(0);
+});
+
 async function drag(page: Page, target: Locator, dx: number, dy = 0, release = true) {
   const box = await target.boundingBox();
   if (!box) throw new Error('Swipe target is not visible');
@@ -28,7 +50,7 @@ test('reveals local timestamps in the sender direction without changing row heig
     await expect(time).toBeVisible();
     await expect(time).toContainText('18/09/2026');
     await expect(time).toContainText('10:11:17');
-    await expect(time).toHaveAttribute('datetime', '2026-09-18T02:11:17.158Z');
+    await expect(time.locator('time')).toHaveAttribute('datetime', '2026-09-18T02:11:17.158Z');
     expect(Math.abs((await assistant.boundingBox())!.height - rowHeight)).toBeLessThan(0.1);
     await page.screenshot({ path: testInfo.outputPath(dx < 0 ? 'user-time.png' : 'assistant-time.png') });
     await expect(time).toBeHidden({ timeout: 4000 });

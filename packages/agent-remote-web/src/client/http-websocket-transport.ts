@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  type SessionMigration,
   decodeAgentSnapshot,
   decodeHistoryPage,
   decodeIncompatibleProtocolVersionError,
@@ -55,6 +56,13 @@ export interface HttpWebSocketTransportDependencies {
 }
 
 export class HttpWebSocketTransport implements RemoteAgentTransport {
+  private readonly migrationListeners = new Set<(migration: SessionMigration) => void>();
+  private readonly migrations = new Map<string, SessionMigration>();
+  onSessionMigration(listener: (migration: SessionMigration) => void): () => void {
+    this.migrationListeners.add(listener);
+    for (const value of this.migrations.values()) listener(value);
+    return () => { this.migrationListeners.delete(listener); };
+  }
   private readonly fetchImplementation: typeof fetch;
   private readonly createWebSocket: (url: string) => WebSocketLike;
   private readonly createRequestId: () => string;
@@ -76,7 +84,13 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.createOperationId = dependencies.operationId ?? (() => crypto.randomUUID());
     if (dependencies.sessionChannels) {
       this.sessionChannels = new SessionChannelPool({
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}`)),
+        onMigration: migration => {
+          if (this.migrations.has(migration.id)) return;
+          this.migrations.set(migration.id, migration);
+          if (this.migrations.size > 1024) this.migrations.delete(this.migrations.keys().next().value!);
+          for (const listener of this.migrationListeners) listener(migration);
+        },
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),
@@ -173,6 +187,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
 
   dispose(): void {
     this.sessionChannels?.dispose();
+    this.migrations.clear(); this.migrationListeners.clear();
   }
 
   private connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection {

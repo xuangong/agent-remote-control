@@ -14,6 +14,7 @@ import type {
 type Mode = 'session' | 'activity';
 type Negotiation = Extract<ClientMessage, { type: 'negotiate' }>;
 interface Dependencies {
+  onMigration?(migration: import('@orchardworks/agent-remote-protocol').SessionMigration): void;
   createSocket(mode: Mode): WebSocketLike;
   connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection;
   observe(observation: RemoteProtocolObservation): void;
@@ -146,6 +147,7 @@ export class SessionChannelPool {
       const decoded = decodeSessionChannelServerMessage(data);
       if (decoded.status === 'rejected') { this.invalidBody(); this.failChannel(channel); return; }
       const frame = decoded.value;
+      if (frame.type === 'session_migrated') { this.dependencies.onMigration?.(frame.migration); return; }
       if (frame.type === 'ready' && !channel.ready) {
         channel.ready = true;
         this.supportedModes.add(mode);

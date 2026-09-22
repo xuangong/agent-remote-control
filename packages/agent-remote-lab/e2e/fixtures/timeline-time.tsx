@@ -19,16 +19,19 @@ const state = createReplicaState();
 function Fixture() {
   const [updated, setUpdated] = useState(false);
   const [side, setSide] = useState(false);
+  const editable = new URLSearchParams(location.search).has('edit');
+  const [edits, setEdits] = useState(0);
   return <div style={{ height: '100dvh', overflow: 'auto' }} data-testid="scroll">
+  {editable ? <output data-testid="edits">{edits}</output> : null}
   <button onClick={() => setUpdated(true)}>Update message</button>
   <button onClick={() => setSide(true)}>Open Side conversation</button>
   {side ? <AgentTimeline showHeader={false} state={{ ...state, timeline: { ...state.timeline, epoch: 'side', initialized: true, entries: [{
     providerId: 'codex', item: { type: 'assistant_message', messageId: 'side', text: 'Side conversation' }, timestamp: '2026-09-18T02:11:17.158Z',
     seqStart: 1, seqEnd: 1, sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
   }] } }} /> : null}
-  <AgentTimeline resolveSessionLink={() => ({ href: "#research", async open() { location.hash = "research"; } })} showHeader={false} state={{ ...state, timeline: { ...state.timeline, epoch: 'time', initialized: true, entries: items.map((item, i) => ({
+  <AgentTimeline onEditPrompt={editable ? async () => { setEdits(value => value + 1); } : undefined} resolveSessionLink={() => ({ href: "#research", async open() { location.hash = "research"; } })} showHeader={false} state={{ ...state, timeline: { ...state.timeline, epoch: 'time', initialized: true, entries: items.map((item, i) => ({
     providerId: 'codex', item: updated && item.type === 'assistant_message' && item.messageId === 'assistant' ? { ...item, text: item.text + '\n\nStreaming update' } : item, timestamp: i === 3 ? 'invalid' : '2026-09-18T02:11:17.158Z',
-    seqStart: i + 1, seqEnd: i + 1, sourceSeqRanges: [{ startSeq: i + 1, endSeq: i + 1 }], collapsed: [], resources: [],
+    turnId: 'turn-' + i, seqStart: i + 1, seqEnd: i + 1, sourceSeqRanges: [{ startSeq: i + 1, endSeq: i + 1 }], collapsed: [], resources: [],
   })) } }} />
 </div>;
 }

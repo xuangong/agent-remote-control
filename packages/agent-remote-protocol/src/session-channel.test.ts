@@ -6,6 +6,15 @@ const negotiate = { protocolVersion: version, type: 'negotiate' as const };
 const frame = (type: string, rest = {}) => ({ protocolVersion: version, type, ...rest });
 
 describe('session channel framing', () => {
+  it('round trips a bounded session migration and rejects incomplete target identities', () => {
+    const from = { hostId: 'host', providerId: 'codex', nativeSessionId: 'original', agentId: 'original-agent' };
+    const migration = { id: 'edit', from, to: { ...from, nativeSessionId: 'branch', agentId: 'branch-agent' }, createdAt: 1 };
+    const message = frame('session_migrated', { migration });
+    const encoded = protocol.encodeSessionChannelServerMessage(message as never);
+    expect(encoded.status).toBe('ok');
+    if (encoded.status === 'ok') expect(protocol.decodeSessionChannelServerMessage(encoded.json)).toEqual({ status: 'ok', value: message });
+    expect(protocol.decodeSessionChannelServerMessage(JSON.stringify(frame('session_migrated', { migration: { ...migration, to: { nativeSessionId: 'branch' } } }))).status).toBe('rejected');
+  });
   it('round trips all client and server frame kinds', () => {
     expect(protocol.encodeSessionChannelClientMessage).toBeTypeOf('function');
     for (const value of [frame('subscribe', { subscriptionId: 1, agentId: 'a', message: negotiate }), frame('message', { subscriptionId: 1, message: negotiate }), frame('unsubscribe', { subscriptionId: 1 }), frame('ping')]) {

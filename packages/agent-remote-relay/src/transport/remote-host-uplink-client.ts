@@ -42,7 +42,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly installationId: string;
   readonly name: string;
   readonly environment?: HostEnvironment;
-  readonly providers?: readonly { providerId: string; displayName: string }[];
+  readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true }[];
   readonly remoteKey: string;
   /** Must durably persist the offered credential before resolving. */
   readonly onCredential?: (credential: string) => Promise<void>;

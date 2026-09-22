@@ -8,6 +8,23 @@ import { readTrackedSessions } from '../tracking-state.js';
 import { sessionKey } from '../session-tree.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+it('migrates only exact native identities, resolves out-of-order branches and persists the local selection', async () => {
+  const transport = {} as RemoteAgentTransport;
+  let tracking!: SessionTracking;
+  function Fixture() { tracking = useSessionTracking('alice', transport); return null; }
+  await render(<Fixture />);
+  const sameTitle = { ...star, nativeSessionId: 'unrelated' };
+  await act(async () => { tracking.toggle(star); tracking.toggle(sameTitle); });
+  const from = { ...star, agentId: 'one' }, to = { ...from, nativeSessionId: 'new', agentId: 'two' };
+  const final = { ...from, nativeSessionId: 'latest', agentId: 'three' };
+  await act(async () => {
+    tracking.replace({ id: 'second', from: to, to: final, createdAt: 2 });
+    tracking.replace({ id: 'first', from, to, createdAt: 1 });
+    tracking.replace({ id: 'first', from, to, createdAt: 1 });
+  });
+  expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['latest', 'unrelated']);
+  expect(readTrackedSessions('alice').map(item => item.nativeSessionId)).toEqual(['latest', 'unrelated']);
+});
 it('keeps current sessions observed while excluding them from the tracking list', async () => {
   vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockResolvedValue({ agentId: 'agent' });
   const connections = new Set<string>();

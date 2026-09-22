@@ -1,25 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 
-const revealWidth = 116;
 const idle = { offset: 0, top: 0, dragging: false };
 
-export function useTimelineTimeSwipe(enabled: boolean, direction: -1 | 1) {
+export function useTimelineTimeSwipe(enabled: boolean, direction: -1 | 1, actionable = false) {
   const ref = useRef<HTMLDivElement>(null);
   const [reveal, setReveal] = useState(idle);
 
   useEffect(() => {
     const element = ref.current;
     if (!element || !enabled || !window.matchMedia) return;
+    const revealWidth = actionable ? 164 : 116;
     const mobile = window.matchMedia('(max-width: 1180px)');
     let gesture: { id: number; x: number; y: number; top: number; started: number; locked: boolean; distance: number } | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let suppressClickUntil = 0;
+    let actionTouch = false;
     function reset() {
       clearTimeout(timer);
       gesture = undefined;
       setReveal(idle);
     }
     function start(event: TouchEvent) {
+      if (event.target instanceof Element && event.target.closest('[data-prompt-edit-action]')) { clearTimeout(timer); suppressClickUntil = 0; actionTouch = true; return; }
       reset();
       suppressClickUntil = 0;
       if (!mobile.matches || event.touches.length !== 1 || window.getSelection()?.toString()) return;
@@ -55,11 +57,12 @@ export function useTimelineTimeSwipe(enabled: boolean, direction: -1 | 1) {
       setReveal({ offset: gesture.distance * direction, top: gesture.top, dragging: true });
     }
     function end() {
+      if (actionTouch) { actionTouch = false; timer = setTimeout(reset, 5000); return; }
       if (gesture?.locked) suppressClickUntil = Date.now() + 500;
       if (!gesture?.locked || gesture.distance < 36) { reset(); return; }
       setReveal({ offset: revealWidth * direction, top: gesture.top, dragging: false });
       gesture = undefined;
-      timer = setTimeout(reset, 1400);
+      timer = setTimeout(reset, actionable ? 5000 : 1400);
     }
     function click(event: MouseEvent) {
       if (Date.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
@@ -82,6 +85,6 @@ export function useTimelineTimeSwipe(enabled: boolean, direction: -1 | 1) {
       mobile.removeEventListener('change', reset);
       window.removeEventListener('blur', reset);
     };
-  }, [enabled, direction]);
+  }, [enabled, direction, actionable]);
   return { ref, reveal };
 }

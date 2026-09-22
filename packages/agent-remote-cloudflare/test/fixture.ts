@@ -100,9 +100,9 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
   async function upgrade(path: string, headers: Record<string, string>, requestOrigin = origin) {
     return (await upgradeResponse(path, headers, requestOrigin)).socket;
   }
-  async function host(key: string) {
+  async function host(key: string, promptEditing = false) {
     const socket = await upgrade('/ws/remote-host', { authorization: `Bearer ${key}` });
-    const registered = event(socket, 'message'); send(socket, { type: 'register', credentialRotation: true, installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
+    const registered = event(socket, 'message'); send(socket, { type: 'register', credentialRotation: true, installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex', ...(promptEditing ? { promptEditing: true } : {}) }] });
     let message = await registered;
     if (message.type === 'credential_issued') {
       key = message.credential; const saved = event(socket, 'message');

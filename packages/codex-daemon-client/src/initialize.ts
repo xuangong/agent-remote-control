@@ -5,7 +5,8 @@ export interface CodexInitialization {
   capabilities?: Record<string, unknown>;
 }
 
-export async function initializeCodexTransport(transport: CodexAppServerTransport, initialization: CodexInitialization): Promise<void> {
-  await transport.request('initialize', initialization);
+export async function initializeCodexTransport(transport: CodexAppServerTransport, initialization: CodexInitialization): Promise<unknown> {
+  const response = await transport.request('initialize', initialization);
   transport.notify('initialized', {});
+  return response;
 }

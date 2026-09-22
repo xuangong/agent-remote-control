@@ -6,6 +6,6 @@ export const providerInitialization: CodexInitialization = {
   capabilities: { experimentalApi: true, requestAttestation: false, mcpServerOpenaiFormElicitation: true },
 };
 
-export async function initializeCodexTransport(transport: CodexAppServerTransport): Promise<void> {
-  await initializeNativeTransport(transport, providerInitialization);
+export async function initializeCodexTransport(transport: CodexAppServerTransport): Promise<unknown> {
+  return initializeNativeTransport(transport, providerInitialization);
 }

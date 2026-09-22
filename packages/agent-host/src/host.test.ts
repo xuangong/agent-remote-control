@@ -76,6 +76,34 @@ function fixture(providerId: string, createSession: (nativeSessionId: string) =>
 }
 
 describe('Agent Host runtime', () => {
+  it('validates a prompt edit before dispatch and never reports a known rejection as an unknown mutation', async () => {
+    const codex = fixture('codex');
+    const validatePromptEdit = vi.fn(async () => { throw new Error('Only the first prompt of a turn can be edited.'); });
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter,
+      directory: { ...codex.directory, supportsPromptEditing: true, validatePromptEdit } }] });
+    try {
+      const request = { method: 'POST' as const, path: '/remote/create', sessionId: 'branch', body: JSON.stringify({
+        providerId: 'codex', operationId: operationId('edit-rejected'), editNativeSessionId: 'source', editTurnId: 'turn', editMessageId: 'steer',
+      }) };
+      const result = await host.control(request);
+      expect(result.status).toBe(400); expect(JSON.parse(result.body)).toMatchObject({ code: 'operation_rejected', error: 'Only the first prompt of a turn can be edited.' });
+      expect(JSON.parse((await host.control(request)).body).code).toBe('operation_rejected');
+      expect(validatePromptEdit).toHaveBeenCalledOnce(); expect(codex.createCount()).toBe(0);
+    } finally { await host.close(); }
+  });
+
+  it('deduplicates a complete prompt edit and rejects reuse for a different turn', async () => {
+    const codex = fixture('codex');
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: { ...codex.directory, supportsPromptEditing: true } }] });
+    try {
+      const input = { providerId: 'codex', operationId: operationId('edit'), editNativeSessionId: 'source', editTurnId: 'turn', editMessageId: 'message' };
+      const request = (body: unknown) => host.control({ method: 'POST', path: '/remote/create', sessionId: 'branch', body: JSON.stringify(body) });
+      expect((await request({ ...input, editMessageId: undefined })).status).toBe(400);
+      const first = await request(input); expect(first.status).toBe(200);
+      expect(await request(input)).toEqual(first); expect(codex.createCount()).toBe(1);
+      expect((await request({ ...input, editTurnId: 'another' })).status).toBe(409); expect(codex.createCount()).toBe(1);
+    } finally { await host.close(); }
+  });
   it('shares only registered catalog identities and follows a replacement Host without opening sessions', async () => {
     const first = await uplinkBroker('first'), second = await uplinkBroker('second');
     const registration = fixture('codex');

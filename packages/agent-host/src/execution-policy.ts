@@ -94,6 +94,8 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   return {
     providerId: directory.providerId,
     supportsSourceReferences: directory.supportsSourceReferences,
+    supportsPromptEditing: directory.supportsPromptEditing,
+    async validatePromptEdit(target) { await checkSource(target.nativeSessionId); await directory.validatePromptEdit?.(target); },
     reconcileIdleSession: directory.reconcileIdleSession?.bind(directory),
     canReleaseSession: directory.canReleaseSession?.bind(directory),
     sessionReleased: directory.sessionReleased?.bind(directory),
@@ -114,6 +116,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       if (input.workspaceId !== undefined && !selected) throw new HostExecutionPolicyError('Unknown local Host workspace.');
       const cwd = await allowedWorkspace(policy, input.cwd ?? selected?.path ?? policy.defaultWorkspace);
       if (input.sourceNativeSessionId) await checkSource(input.sourceNativeSessionId);
+      if (input.editNativeSessionId) await checkSource(input.editNativeSessionId);
       return directory.create({ ...input, cwd });
     },
     async open(nativeSessionId) {

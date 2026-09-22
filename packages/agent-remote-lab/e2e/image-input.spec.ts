@@ -155,3 +155,24 @@ test('keeps the composer border neutral while typing', async ({ page }) => {
   expect(await editor.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
   expect(await composer.evaluate(element => getComputedStyle(element).borderColor)).toBe(unfocusedBorder);
 });
+
+test('preserves pasted line breaks through typing, manual newline, and sending', async ({ page }) => {
+  const editor = page.getByTestId('prompt-input');
+  const text = 'Previews\nWork Mac\n\nRefresh\n  No active previews.';
+  await editor.focus();
+  await editor.evaluate((element, value) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/plain', value);
+    clipboard.setData('text/html', '<div>Previews</div><div>Work Mac</div>');
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true }));
+  }, text);
+  await expect.poll(() => editor.textContent()).toBe(text);
+  await editor.pressSequentially(' More');
+  await expect.poll(() => editor.textContent()).toBe(text + ' More');
+  await editor.press('Shift+Enter');
+  await editor.pressSequentially('Last line');
+  const expected = text + ' More\nLast line';
+  await expect.poll(() => editor.textContent()).toBe(expected);
+  await page.getByTestId('prompt-submit').click();
+  await expect.poll(async () => JSON.parse(await page.getByTestId('sent-content').innerText())).toEqual([{ type: 'text', text: expected }]);
+});

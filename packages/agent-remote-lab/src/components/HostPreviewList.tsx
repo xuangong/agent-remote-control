@@ -2,7 +2,8 @@ import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import { CopyTunnelUrl, usePreviewController, type PreviewContextValue } from '@orchardworks/agent-remote-web/react';
 
-export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, hostName }: {
+export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, hostName, hideEmpty = false }: {
+  readonly hideEmpty?: boolean;
   readonly hostName?: string;
   readonly onOpen?: () => void;
   readonly controller?: PreviewContextValue;
@@ -16,6 +17,7 @@ export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, ho
   useFeedbackToast('Preview', failure ?? controller?.error);
   if (!controller) return null;
   const registrations = controller.registrations.filter(item => item.status === 'active');
+  if (hideEmpty && registrations.length === 0) return null;
 
   async function unregister(id: string): Promise<void> {
     setBusy(id); setFailure(undefined);

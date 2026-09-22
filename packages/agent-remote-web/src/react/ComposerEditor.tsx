@@ -10,7 +10,7 @@ import { normalizeDraftParts, type DraftPart } from './composer-document.js';
 import { ImagePreview } from './ImagePreview.js';
 
 const schema = new Schema({ nodes: {
-  doc: { content: 'inline*' },
+  doc: { content: 'inline*', whitespace: 'pre' },
   text: { group: 'inline' },
   image: { inline: true, group: 'inline', atom: true, selectable: true, draggable: false,
     attrs: { imageId: {}, label: {} },

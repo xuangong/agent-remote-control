@@ -110,3 +110,21 @@ it('pastes restored image bytes at the mapped selection and ignores completion a
   await act(async () => finish([atom]));
   expect(parts).toBe(before);
 });
+
+it('preserves pasted newlines and blank lines when subsequent native typing updates the DOM', async () => {
+  let parts: DraftPart[] = [];
+  const container = await render(<ComposerEditor id="editor" parts={[]} images={{}} disabled={false}
+    onChange={value => { parts = value; }} onFiles={() => []} onImport={value => [...value]} onRetry={() => {}} onKeyDown={() => {}} />);
+  const editor = container.querySelector<HTMLElement>('[role="textbox"]')!;
+  const text = 'Previews\nWork Mac\n\nRefresh\n  No active previews.';
+  const paste = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, 'clipboardData', { value: { files: [], getData: (type: string) => type === 'text/plain' ? text : '' } });
+  await act(async () => { editor.focus(); editor.dispatchEvent(paste); });
+  expect(parts).toEqual([{ type: 'text', text }]);
+  // Native typing and IME mutate the editable DOM before ProseMirror reads it back.
+  await act(async () => {
+    editor.firstChild!.nodeValue = text + ' More';
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
+  expect(parts).toEqual([{ type: 'text', text: text + ' More' }]);
+});

@@ -13,7 +13,7 @@ export function HostPreviewGroups({ client, hosts, activeHostId, polling, onOpen
   return <section className="lab-preview-groups" aria-label="Host previews">
     <h2>Previews</h2>
     {owned.map(host => host.id === activeHostId && workspace
-      ? <HostPreviewList key={host.id} hostName={host.name} controller={workspace} onOpen={onOpen} onOpenSource={(sessionId, itemId) => onOpenSource(sessionId, itemId, host.id)} />
+      ? <HostPreviewList key={host.id} hideEmpty hostName={host.name} controller={workspace} onOpen={onOpen} onOpenSource={(sessionId, itemId) => onOpenSource(sessionId, itemId, host.id)} />
       : <PreviewProvider key={host.id} client={client} hostId={host.id} canManage polling={polling}>
         <HostGroup host={host} workspace={workspace} onOpen={onOpen} onOpenSource={onOpenSource} />
       </PreviewProvider>)}
@@ -24,7 +24,7 @@ function HostGroup({ host, workspace, onOpen, onOpenSource }: {
   host: RemoteHost; workspace?: PreviewContextValue; onOpen(): void; onOpenSource(sessionId: string, itemId: string, hostId: string): void;
 }) {
   const controller = usePreviewController()!;
-  return <HostPreviewList hostName={host.name} controller={{ ...controller, unregister: async id => {
+  return <HostPreviewList hideEmpty hostName={host.name} controller={{ ...controller, unregister: async id => {
     if (workspace) { await workspace.unregister(id, host.id); await controller.refresh(); }
     else await controller.unregister(id);
   }, open: (id, target) => {

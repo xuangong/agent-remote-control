@@ -13,7 +13,7 @@ it('groups identical local origins by Host and sends mutations and opens to the 
     show: { configurable: true, value() { this.setAttribute('open', ''); } },
     close: { configurable: true, value() { this.removeAttribute('open'); } },
   });
-  const removed = new Set<string>(); const pinned = new Set<string>();
+  const removed = new Set<string>(['empty']); const pinned = new Set<string>();
   const registrations = (host: string) => removed.has(host) ? [] : [{ id: `preview-${host}`, target: 'http://127.0.0.1:5173', status: 'active' as const,
     availability: 'online' as const, pathMode: 'strip' as const, sources: [], revision: 1, createdAt: 1, expiresAt: Date.now() + 60000,
     tunnelOrigin: `https://${host}.example`, tunnelNamePinned: pinned.has(host) }];
@@ -25,12 +25,13 @@ it('groups identical local origins by Host and sends mutations and opens to the 
     enter: vi.fn(async () => 'https://two.example/'),
     renew: vi.fn(async () => registrations('two')[0]!),
   } as unknown as HttpPreviewClient;
-  const hosts = [{ id: 'one', name: 'Work Mac', online: true }, { id: 'two', name: 'Home Mac', online: true }];
+  const hosts = [{ id: 'one', name: 'Work Mac', online: true }, { id: 'two', name: 'Home Mac', online: true }, { id: 'empty', name: 'Empty Host', online: true }];
   const container = await render(<PreviewProvider client={client} hostId="one" canManage>
     <HostPreviewGroups client={client} hosts={hosts} activeHostId="one" polling onOpen={() => {}} onOpenSource={() => {}} />
   </PreviewProvider>);
   const groups = container.querySelectorAll('.lab-host-previews');
   expect(groups).toHaveLength(2);
+  expect(container.textContent).not.toContain('Empty Host');
   expect(groups[0]!.textContent).toContain('Work Mac'); expect(groups[1]!.textContent).toContain('Home Mac');
   await act(async () => groups[1]!.querySelector<HTMLButtonElement>('.lab-preview-pin')!.click());
   expect(client.pinName).toHaveBeenCalledWith('two', 'preview-two', true);
@@ -41,5 +42,11 @@ it('groups identical local origins by Host and sends mutations and opens to the 
   expect(client.renew).toHaveBeenCalledWith('two', 'preview-two', 'http://127.0.0.1:5173', expect.any(AbortSignal));
   await act(async () => groups[1]!.querySelector<HTMLButtonElement>('.lab-preview-unregister')!.click());
   expect(client.unregister).toHaveBeenCalledWith('two', 'preview-two');
-  expect(groups[0]!.querySelectorAll('li')).toHaveLength(1); expect(groups[1]!.querySelectorAll('li')).toHaveLength(0);
+  expect(container.querySelectorAll('.lab-host-previews')).toHaveLength(1);
+  expect(container.textContent).not.toContain('Home Mac');
+  expect(container.textContent).toContain('Work Mac');
+  removed.delete('empty');
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(container.querySelectorAll('.lab-host-previews')).toHaveLength(2);
+  expect(container.textContent).toContain('Empty Host');
 });

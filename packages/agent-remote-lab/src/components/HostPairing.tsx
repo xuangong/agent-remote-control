@@ -1,5 +1,5 @@
 import type { ControllerIdentity, ControllerRelease, ControllerUpdateStatus, HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
-import { hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
+import { hostDisplayLabel, hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import { PairingKeys } from './PairingKeys.js';
@@ -66,7 +66,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     <select id="remote-host" value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
       {hosts.length > 0 && !selectedHost ? <option value={selectedHostId}>Select a Host</option> : null}
       {selectedHost && !matchingHosts.includes(selectedHost) ? <option value={selectedHost.id} disabled>{selectedHost.name} · Current selection (filtered out)</option> : null}
-      {hosts.length ? matchingHosts.map((host) => <option key={host.id} value={host.id}>{host.name} · {host.online ? 'Online' : 'Offline'}{host.access === 'shared' ? ' · Shared' : ''}{host.environment ? ` · ${hostEnvironmentLabels(host).join(' · ')}` : ' · Environment unknown'}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
+      {hosts.length ? matchingHosts.map((host) => <option key={host.id} value={host.id}>{hostDisplayLabel(host)}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
     </select>
     {selectedHost ? <div className="lab-host-environment" aria-label="Host environment">
       {selectedHost.environment ? <>

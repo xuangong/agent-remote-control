@@ -1,4 +1,7 @@
-const installerUrl = 'https://github.com/xuangong/agent-remote-control/releases/latest/download/install.sh';
+const installers = new Map([
+  ['install.xianliao.de5.net', 'https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.sh'],
+  ['wininstall.xianliao.de5.net', 'https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.ps1'],
+]);
 
 export default {
   fetch(request) {
@@ -8,7 +11,8 @@ export default {
       'Content-Type': 'text/plain; charset=utf-8',
       'X-Content-Type-Options': 'nosniff',
     };
-    if (url.hostname !== 'install.xianliao.de5.net' || url.pathname !== '/') {
+    const installerUrl = installers.get(url.hostname);
+    if (!installerUrl || url.pathname !== '/') {
       return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {

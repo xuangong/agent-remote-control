@@ -181,8 +181,11 @@ export class InputImageStore {
     const file = await open(temporary, 'w', 0o600);
     try { await file.writeFile(JSON.stringify(item)); await file.sync(); } finally { await file.close(); }
     await rename(temporary, this.path(item.key, 'json'));
-    const directory = await open(this.options.directory, 'r');
-    try { await directory.sync(); } finally { await directory.close(); }
+    // Windows cannot fsync a directory; the manifest file is already flushed.
+    if (process.platform !== 'win32') {
+      const directory = await open(this.options.directory, 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
+    }
   }
   private async expire(): Promise<void> {
     for (const item of this.manifests.values()) {

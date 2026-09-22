@@ -29,7 +29,7 @@
     "relay:local": "node scripts/relay-local.mjs",
     "build:agent-remote-controller": "node scripts/build-agent-host.mjs",
     "test:agent-remote-controller-package": "node scripts/run-tests.mjs host-package",
-    "test:windows": "node scripts/run-tests.mjs host-windows && node scripts/run-tests.mjs codex-transport && node scripts/run-tests.mjs windows-services",
+    "test:windows": "node scripts/run-tests.mjs host-windows && node scripts/run-tests.mjs codex-transport && node scripts/run-tests.mjs windows-services && node scripts/run-tests.mjs image-input",
     "test:controller-updates": "node scripts/run-tests.mjs controller-updates && node scripts/run-tests.mjs controller-updates-web && node scripts/run-tests.mjs controller-updates-relay",
     "test:codex-shared": "node scripts/run-tests.mjs codex-shared"
   },

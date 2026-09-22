@@ -99,6 +99,11 @@ connections retain their native argument semantics.
   and Linux. The Host does not add a local permission lock. Native requirements
   and idle-session checks still apply. Confirmed native permission changes from
   another client update the web controls through the shared daemon notifications.
+- On an authenticated Relay, permission changes require a gateway sign-in within
+  the last ten minutes. An older sign-in returns a request-scoped
+  `reauthentication_required` error without disconnecting the session or forwarding
+  the change to the Host. The web workbench offers **Sign in again**, preserves the
+  session return location, and requires the user to retry after authentication.
 - Closing a Remote session closes its connection, not the daemon or another
   subscriber. Native daemon lifetime and idle thread unloading remain native
   policies. The Provider reconnects automatically after a socket failure while

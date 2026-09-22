@@ -17,6 +17,8 @@ import { PlanningControl } from './PlanningControl.js';
 import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 import { useRecoveryNotice } from '../hooks/useRecoveryNotice.js';
+import { needsReauthentication } from '../security-client.js';
+import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 import type { TraceEntryRequest } from '../trace-model.js';
 
 export interface LabWorkbenchActions {
@@ -39,7 +41,7 @@ export interface LabWorkbenchActions {
 }
 
 export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftBinding, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { draftBinding?: DraftBinding; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
-  const suppliedFeedbackActions = useActionFeedback(suppliedActions, state?.agent?.id);
+  const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id);
   const actions = sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
@@ -114,6 +116,7 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
       <div hidden={composerHidden}>
         {composerContext}
         {composerNotice}
+        {reauthenticate ? <ReauthenticationNotice /> : null}
       </div>
       <div className="lab-composer-input-shell">
         <button ref={toastToggleAnchor} hidden={compact} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
@@ -160,23 +163,23 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
 }
 
 
-function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): LabWorkbenchActions {
+function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): { actions: LabWorkbenchActions; reauthenticate: boolean } {
   const activeSession = useRef(sessionId);
   activeSession.current = sessionId;
-  const [failure, setFailure] = useState<{ title: string; message: string }>();
-  useFeedbackToast(failure?.title ?? 'Session action', failure?.message);
+  const [failure, setFailure] = useState<{ title: string; message: string; reauthenticate: boolean }>();
+  useFeedbackToast(failure?.title ?? 'Session action', failure?.reauthenticate ? undefined : failure?.message);
   useEffect(() => setFailure(undefined), [sessionId]);
   function report<Args extends unknown[], Result>(title: string, action: ((...args: Args) => Result) | undefined) {
     return action ? async (...args: Args): Promise<Awaited<Result>> => {
       setFailure(undefined);
       try { return await action(...args); }
       catch (error) {
-        if (activeSession.current === sessionId) setFailure({ title, message: error instanceof Error ? error.message : 'The action could not be confirmed. Check its status before retrying.' });
+        if (activeSession.current === sessionId) setFailure({ title, message: error instanceof Error ? error.message : 'The action could not be confirmed. Check its status before retrying.', reauthenticate: needsReauthentication(error) });
         throw error;
       }
     } : undefined;
   }
-  return useMemo(() => ({ ...actions,
+  const reportedActions = useMemo(() => ({ ...actions,
     sendMessage: report('Send message', actions.sendMessage), sendMessageContent: report('Send message', actions.sendMessageContent), retryMessage: report('Retry message', actions.retryMessage),
     steer: report('Steer session', actions.steer), cancel: report('Stop work', actions.cancel),
     respondToInteraction: report('Submit response', actions.respondToInteraction),
@@ -185,6 +188,7 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): La
     loadOlder: report('Load conversation history', actions.loadOlder),
     editPrompt: report('Edit prompt', actions.editPrompt),
   }), [actions, sessionId]);
+  return { actions: reportedActions, reauthenticate: failure?.reauthenticate === true };
 }
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,

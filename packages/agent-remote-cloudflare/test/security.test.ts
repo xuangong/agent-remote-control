@@ -1,5 +1,50 @@
 import { expect, it } from 'vitest';
+import { PROTOCOL_VERSION, decodeServerMessage } from '../../agent-remote-protocol/src/index.js';
 import { event, fixture, origin, send } from './fixture.js';
+
+it('rejects stale permission changes without closing the session and permits retry after sign-in', async () => {
+  const f = await fixture(); const alice = await f.login('alice');
+  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
+  const host = await f.host(pairing.key);
+  const forwarded: any[] = [];
+  host.socket.addEventListener('message', message => {
+    const frame = JSON.parse(String(message.data));
+    if (frame.type === 'rpc_request') send(host.socket, { type: 'rpc_response', requestId: frame.requestId, status: 200, body: JSON.stringify({ agentId: 'permission-agent', nativeSessionId: 'permission-native' }) });
+    if (frame.type === 'stream_open') {
+      send(host.socket, { type: 'stream_opened', streamId: frame.streamId });
+      send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: '{"ready":true}' });
+    }
+    if (frame.type === 'stream_message') {
+      const request = JSON.parse(frame.message); forwarded.push(request);
+      send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: { requestId: request.payload.requestId, agentId: 'permission-agent', command: 'set_session_setting', accepted: true } }) });
+    }
+  });
+  expect((await f.json(alice.basePath + `v1/remote/hosts/${host.hostId}/attach`, alice.cookie, { providerId: 'codex', nativeSessionId: 'permission-native' })).status).toBe(200);
+  f.setAuthenticatedAt(Date.now() - 601_000);
+  expect((await f.json('/auth/refresh', alice.cookie, {})).status).toBe(200);
+  const path = alice.basePath + 'v1/sessions/permission-agent/events';
+  const stream = await f.upgrade(path, { cookie: alice.cookie, origin }); await event(stream, 'message');
+  const request = (settingId: string, requestId: string) => ({ protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', payload: { requestId, operationId: '00000000-0000-4000-8000-000000000001', agentId: 'permission-agent', settingId, value: 'next' } });
+  for (const setting of ['sandbox', 'approval', 'permissions']) {
+    const response = event(stream, 'message'); stream.send(JSON.stringify(request(setting, setting)));
+    const denied = await response;
+    expect(decodeServerMessage(JSON.stringify(denied)).status).toBe('ok');
+    expect(denied).toMatchObject({ type: 'protocol_error', payload: { requestId: setting, code: 'reauthentication_required', recoverable: true } });
+    expect(stream.readyState).toBe(1);
+  }
+  expect(forwarded).toEqual([]);
+  const model = event(stream, 'message'); stream.send(JSON.stringify(request('model', 'model')));
+  expect((await model).type).toBe('command_acknowledged');
+  expect(forwarded).toHaveLength(1);
+  f.setAuthenticatedAt(Date.now());
+  const renewed = await f.login('alice');
+  const fresh = await f.upgrade(path, { cookie: renewed.cookie, origin }); await event(fresh, 'message');
+  expect(forwarded).toHaveLength(1);
+  const changed = event(fresh, 'message'); fresh.send(JSON.stringify(request('sandbox', 'retry')));
+  expect((await changed).payload.requestId).toBe('retry');
+  expect(forwarded).toHaveLength(2);
+  expect(host.socket.readyState).toBe(1);
+}, 30000);
 
 it('isolates browser management, closes revoked live streams, and persists redacted audit after replacement', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const another = await f.login('alice'); const bob = await f.login('bob');

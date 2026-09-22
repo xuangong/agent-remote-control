@@ -1,5 +1,5 @@
 import { controllerReleases } from './controller-releases.js';
-import { releaseCoversHost, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
+import { decodeClientMessage, PROTOCOL_VERSION, releaseCoversHost, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
@@ -882,7 +882,15 @@ export function createHostBroker(options: HostBrokerOptions) {
           imageChunkBytes += bytes;
           if (bytes > 48 * 1024 || ++imageChunkCount > 2048 || imageChunkBytes > 48 * 1024 * 1024) return client.close(1008, 'Image upload rate exceeded');
         } else if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');
-        if (context.authorizeMessage?.(raw.toString()) === false) return client.close(1008, 'Recent authentication is required');
+        if (context.authorizeMessage?.(raw.toString()) === false) {
+          const decoded = decodeClientMessage(raw.toString());
+          if (decoded.status !== 'ok' || !('payload' in decoded.value) || !('requestId' in decoded.value.payload)) return client.close(1008, 'Invalid session message');
+          client.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: {
+            requestId: decoded.value.payload.requestId, code: 'reauthentication_required',
+            message: 'Sign in again before changing session permissions. Then retry the change.', recoverable: true,
+          } }));
+          return;
+        }
         if (!owner(subject)) {
           try { if (publicMessage.type === 'resource_resolve_request' && !(typeof publicMessage.payload?.locator === 'string' && /^input-image:[a-f0-9-]{36}$/.test(publicMessage.payload.locator))) return client.close(1008, 'Only the Host owner can resolve local files'); }
           catch { return client.close(1008, 'Invalid session message'); }

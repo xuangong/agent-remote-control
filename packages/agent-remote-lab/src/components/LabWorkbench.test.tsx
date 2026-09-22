@@ -6,6 +6,24 @@ import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { LabWorkbench } from './LabWorkbench.js';
 
+it('offers sign-in after a denied permission change while preserving the session and draft', async () => {
+  const setSessionSetting = vi.fn(async () => { throw Object.assign(new Error('Sign in again before changing session permissions.'), { code: 'reauthentication_required' }); });
+  const state = { ...replicaState, pendingInteractions: [], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null,
+    capabilities: { ...replicaState.agent!.capabilities, sessionSettings: true },
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, settings: [{ id: 'sandbox', category: 'permissions' as const, label: 'Sandbox', value: 'readOnly', mutable: true, scope: 'session' as const,
+      options: [{ value: 'readOnly', label: 'Read only' }, { value: 'dangerFullAccess', label: 'Full access' }] }] } } };
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" messageDraft="Keep my draft" actions={{ setSessionSetting }} />);
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-permissions-button"]')!.click());
+  const select = container.querySelector<HTMLSelectElement>('[data-testid="session-setting-sandbox"]')!;
+  await act(async () => { select.value = 'dangerFullAccess'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(setSessionSetting).toHaveBeenCalledExactlyOnceWith('sandbox', 'dangerFullAccess');
+  expect(container.querySelector('.lab-reauthentication a')?.getAttribute('href')).toMatch(/^\/auth\/login\?reauthenticate=1/);
+  expect(container.querySelector('.lab-reauthentication')?.textContent).toContain('will not run automatically');
+  expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.value).toBe('Keep my draft');
+  expect(select.value).toBe('readOnly');
+});
+
 describe('LabWorkbench', () => {
   it.each([
     ['starting', 'connecting', 'Opening session'],

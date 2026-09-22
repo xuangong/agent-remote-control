@@ -75,7 +75,7 @@ export function createControllerUpdater(options: {
   const path = join(options.stateDir, 'controller-updates/status.json');
   let cleanInstall = false;
   let status: ControllerUpdateStatus = { phase: 'idle', updatedAt: Date.now() };
-  let initialized: Promise<void> | undefined, work: Promise<void> | undefined, timer: ReturnType<typeof setTimeout> | undefined, closed = false, accepting = false;
+  let initialized: Promise<void> | undefined, work: Promise<void> | undefined, closed = false, accepting = false;
   async function init() { return initialized ??= (async () => {
     try { status = JSON.parse(await readFile(path, 'utf8')); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
     if (status.phase === 'waiting' || status.phase === 'downloading') await save({ ...status, phase: 'failed', message: 'The previous update was interrupted. Retry to continue.' });
@@ -89,7 +89,7 @@ export function createControllerUpdater(options: {
   async function save(value: ControllerUpdateStatus) { await mkdir(dirname(path), { recursive: true, mode: 0o700 }); status = { ...value, updatedAt: Date.now() }; await atomicPrivate(path, JSON.stringify(status)); }
   async function activate() {
     if (closed) return;
-    if (!options.beginRestart()) { timer = setTimeout(() => { void activate().catch(fail); }, 2000); timer.unref(); return; }
+    if (!options.beginRestart()) throw new Error('Controller is already stopping. Retry the update after it reconnects.');
     try {
       await save({ ...status, phase: 'restarting', message: undefined }); await options.restart(status.version!, ...(cleanInstall ? [true] as const : []));
     } catch (error) { options.cancelRestart?.(); throw error; }
@@ -118,12 +118,11 @@ export function createControllerUpdater(options: {
         if (!releaseCoversHost(release, options.identity)) throw new Error('This release does not support this Host platform or Node version.');
         await (options.install ?? ((r, reinstall) => installControllerRelease(options.stateDir, r, fetch, reinstall)))(release, ...(clean ? [true] as const : []));
         if (closed) return;
-        await save({ ...status, phase: 'waiting', message: 'Waiting for a safe restart window.' });
         await activate();
       })().catch(fail).finally(() => { work = undefined; });
       return { ...status };
     },
-    async close() { closed = true; clearTimeout(timer); await work; },
+    async close() { closed = true; await work; },
   };
 }
 

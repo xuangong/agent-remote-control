@@ -216,8 +216,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
   let draining = false;
-  let uncertainHostMutation = false;
-  let activeOperations = 0;
   let closed = false;
   let closePromise: Promise<void> | undefined;
 
@@ -247,7 +245,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return async (agent, operation, work) => {
       if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.');
       const binding = bindingFor(agent);
-      activeOperations++;
       const release = idle.retain(binding.agentId);
       try {
         return await operationCache.execute({
@@ -257,7 +254,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       } catch (error) {
         if (error instanceof OperationCacheError && ['operation_outcome_unknown', 'native_file_limit'].includes(error.code)) uncertainAgents.add(binding.agentId);
         throw error;
-      } finally { activeOperations--; release(); }
+      } finally { release(); }
     };
   }
   function lifecycle(event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled', binding: Binding) {
@@ -444,7 +441,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     diagnostic('host_request_started');
     const result = await controlRequest(request);
     const data = result.status >= 400 ? JSON.parse(result.body) : {};
-    if (request.method === 'POST' && ['operation_outcome_unknown', 'native_file_limit'].includes(data.code)) uncertainHostMutation = true;
     diagnostic('host_request_completed', result.status, typeof data.code === 'string' ? data.code : undefined);
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
   }
@@ -532,18 +528,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         : { agentId, status: 'failed' as const, message: 'Native cancellation did not complete.' };
     } finally { clearTimeout(timer); release(); }
   }
-  return { relay, async control(request) {
-      if (request.method !== 'POST') return control(request);
-      activeOperations++;
-      try { return await control(request); } finally { activeOperations--; }
-    }, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, control, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
-      if (closed || draining || uncertainHostMutation || pending.size || activeOperations || uncertainAgents.size || projections.size) return false;
-      for (const binding of bindingsByAgent.values()) {
-        const agent = liveAgent(binding.agentId);
-        if (agent && !agent.canRestartController(registration(binding.providerId).preservesWorkOnDisconnect === true && !registration(binding.providerId).directory.requiresController?.(binding.nativeSessionId))) return false;
-      }
-      draining = true; return true;
+      if (closed || draining) return false;
+      // An owner-confirmed update closes admission immediately. Shutdown and the
+      // launcher bound cleanup time; session state must not indefinitely defer it.
+      draining = true;
+      return true;
     },
     cancelControllerRestart() { if (!closed) draining = false; },
     resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },

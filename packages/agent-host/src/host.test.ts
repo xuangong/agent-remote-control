@@ -1,3 +1,7 @@
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { controllerReleases } from '@orchardworks/agent-remote-hosted';
 import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/src/index.js';
 import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
@@ -1243,7 +1247,7 @@ it('keeps partial child reconciliation pinned until the complete native check su
   } finally { await f.host.close(); vi.useRealTimers(); }
 });
 
-it.each([[false, false], [true, false], [true, true]])('restarts a live turn only when independent of the Controller: shared=%s tools=%s', async (preservesWorkOnDisconnect, requiresController) => {
+it.each([[false, false], [true, false], [true, true]])('starts a confirmed update during a live turn: shared=%s tools=%s', async (preservesWorkOnDisconnect, requiresController) => {
   const registration = { ...fixture('codex'), preservesWorkOnDisconnect };
   registration.directory.requiresController = () => requiresController!;
   const host = createAgentHostRuntime({ registrations: [registration] });
@@ -1251,14 +1255,12 @@ it.each([[false, false], [true, false], [true, true]])('restarts a live turn onl
     await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'live', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'live' }) });
     registration.sessions.get('live')!.emit({ type: 'observation', sourceKey: 'start', occurredAt: Date.now(), delivery: 'live', event: { type: 'turn_started', provider: 'codex', turnId: 'turn' } });
     await expect.poll(() => host.relay.requireAgent('live').snapshot().payload.activeTurn?.turnId).toBe('turn');
-    expect(host.beginControllerRestart()).toBe(preservesWorkOnDisconnect && !requiresController);
-    if (preservesWorkOnDisconnect && !requiresController) {
-      const result = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'late', body: JSON.stringify({ providerId: 'codex', operationId: operationId('late') }) });
-      expect(result.status).toBe(503); expect(registration.createCount()).toBe(0);
-    }
+    expect(host.beginControllerRestart()).toBe(true);
+    const result = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'late', body: JSON.stringify({ providerId: 'codex', operationId: operationId('late') }) });
+    expect(result.status).toBe(503); expect(registration.createCount()).toBe(0);
   } finally { await host.close(); }
 });
-it('does not restart shared Codex while an approval is pending', async () => {
+it('starts a confirmed update while a shared Codex approval is pending', async () => {
   const registration = { ...fixture('codex'), preservesWorkOnDisconnect: true };
   const host = createAgentHostRuntime({ registrations: [registration] });
   try {
@@ -1267,10 +1269,10 @@ it('does not restart shared Codex while an approval is pending', async () => {
       type: 'interaction_requested', provider: 'codex', request: { requestId: 'approval', kind: 'tool_approval', toolCallId: 'call', toolName: 'shell', summary: 'Run', detail: { type: 'shell', command: 'pwd' }, allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] },
     } });
     await expect.poll(() => host.relay.requireAgent('approval').snapshot().payload.pendingInteractions.length).toBe(1);
-    expect(host.beginControllerRestart()).toBe(false);
+    expect(host.beginControllerRestart()).toBe(true);
   } finally { await host.close(); }
 });
-it('waits for an admitted create operation before closing mutation admission', async () => {
+it('closes admission immediately while an admitted create operation settles', async () => {
   const registration = { ...fixture('codex'), preservesWorkOnDisconnect: true };
   const original = registration.directory.create;
   let entered = false, release!: () => void;
@@ -1280,20 +1282,64 @@ it('waits for an admitted create operation before closing mutation admission', a
   try {
     const creating = host.control({ method: 'POST', path: '/remote/create', sessionId: 'new', body: JSON.stringify({ providerId: 'codex', operationId: operationId('upgrade-create') }) });
     await expect.poll(() => entered).toBe(true);
-    expect(host.beginControllerRestart()).toBe(false);
+    expect(host.beginControllerRestart()).toBe(true);
+    const rejected = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'late', body: JSON.stringify({ providerId: 'codex', operationId: operationId('late-create') }) });
+    expect(rejected.status).toBe(503);
+    expect(JSON.parse(rejected.body).code).toBe('controller_updating');
     release(); expect((await creating).status).toBe(200);
-    await expect.poll(() => host.beginControllerRestart()).toBe(true);
+    expect(host.beginControllerRestart()).toBe(false);
     host.cancelControllerRestart();
     expect((await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'next', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'next' }) })).status).toBe(200);
   } finally { release(); await host.close(); }
 });
-it('does not restart after an unknown native create outcome', async () => {
+it('does not let an old unknown create outcome block a confirmed update', async () => {
   const registration = { ...fixture('codex'), preservesWorkOnDisconnect: true };
   registration.directory.create = async () => { throw new Error('Native create acknowledgement lost'); };
   const host = createAgentHostRuntime({ registrations: [registration] });
   try {
     const result = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'unknown', body: JSON.stringify({ providerId: 'codex', operationId: operationId('upgrade-unknown') }) });
     expect(JSON.parse(result.body).code).toBe('operation_outcome_unknown');
-    expect(host.beginControllerRestart()).toBe(false);
+    expect(host.beginControllerRestart()).toBe(true);
   } finally { await host.close(); }
+});
+
+it('activates an owner update over the real uplink while an approval is pending', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'host-immediate-update-'));
+  const broker = await uplinkBroker('host');
+  const registration = fixture('codex', id => new Session('codex', id, [
+    { type: 'observation', sourceKey: 'approval', occurredAt: 1, delivery: 'history', event: {
+      type: 'interaction_requested', provider: 'codex', request: {
+        kind: 'plan_approval', requestId: 'approval', plan: 'Continue?', allowedActions: ['approve'],
+      },
+    } },
+    { type: 'history_boundary' },
+  ]));
+  const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true };
+  const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'b'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', sha256: 'c'.repeat(64), nodeMajor: 22, platforms: ['darwin-arm64'] };
+  const staged = join(stateDir, 'controller-updates/packages/0.2.0/node_modules/@orchardworks/agent-remote-controller');
+  await mkdir(staged, { recursive: true });
+  await writeFile(join(staged, 'build-info.json'), JSON.stringify({ version: release.version, revision: release.revision, dirty: false }));
+  const lookup = vi.spyOn(controllerReleases, 'version').mockResolvedValue(release);
+  const restart = vi.fn();
+  const host = createAgentHost({ registrations: [registration], installationId: 'installation', name: 'Host',
+    controller: { identity, stateDir, restart }, uplink: { url: broker.url, remoteKey: 'initial-key' } });
+  try {
+    await host.ready;
+    expect((await broker.rpc('POST', '/remote/create', 'agent', {
+      providerId: 'codex', operationId: operationId('update-live-create'),
+    })).status).toBe(200);
+    const snapshot = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.5.0', 'agent');
+    expect(JSON.parse(snapshot.body).payload.pendingInteractions).toHaveLength(1);
+    expect((await broker.rpc('POST', '/remote/controller-update', undefined, {
+      version: '0.2.0', operationId: 'confirmed-update',
+    })).status).toBe(202);
+    await expect.poll(() => restart.mock.calls.length).toBe(1);
+    expect(restart).toHaveBeenCalledWith('0.2.0');
+    const status = await broker.rpc('GET', '/remote/controller-update');
+    expect(JSON.parse(status.body)).toMatchObject({ phase: 'restarting', operationId: 'confirmed-update' });
+    const rejected = await broker.rpc('POST', '/remote/create', 'late', { providerId: 'codex', operationId: operationId('update-late-create') });
+    expect(rejected.status).toBe(503);
+    expect(JSON.parse(rejected.body).code).toBe('controller_updating');
+    expect(registration.createCount()).toBe(1);
+  } finally { lookup.mockRestore(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
 });

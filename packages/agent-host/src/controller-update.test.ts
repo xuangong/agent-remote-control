@@ -11,22 +11,33 @@ afterEach(async () => { vi.useRealTimers(); for (const root of roots.splice(0)) 
 async function directory() { const root = await mkdtemp(join(tmpdir(), 'controller-update-')); roots.push(root); return root; }
 const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true };
 const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'b'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', sha256: 'c'.repeat(64), nodeMajor: 22, platforms: ['darwin-arm64'] };
-it.each(['darwin-arm64', 'win32-x64', 'linux-x64', 'linux-arm64'])('stages %s once and waits for safe restart across retries', async platform => {
+it.each(['darwin-arm64', 'win32-x64', 'linux-x64', 'linux-arm64'])('activates a verified %s update immediately and deduplicates retries', async platform => {
   const [os, arch] = platform.split('-');
-  const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: os!, arch: arch!, nodeMajor: 22, remoteUpdate: true };
-  const supportedRelease = { ...release, platforms: [platform] };
-  const stateDir = await directory(); let safe = false; let installations = 0; const restarted: string[] = [];
-  const updater = createControllerUpdater({ stateDir, identity, release: async () => supportedRelease,
-    install: async () => { installations++; }, beginRestart: () => safe, restart: version => { restarted.push(version); } });
+  const stateDir = await directory(); let installations = 0;
+  const beginRestart = vi.fn(() => true), restart = vi.fn();
+  const updater = createControllerUpdater({ stateDir, identity: { ...identity, platform: os!, arch: arch! },
+    release: async () => ({ ...release, platforms: [platform] }),
+    install: async () => { installations++; }, beginRestart, restart });
   try {
     await updater.request('0.2.0', 'operation-one');
-    await expect.poll(() => updater.status()).toMatchObject({ phase: 'waiting' });
+    await expect.poll(() => restart.mock.calls.length).toBe(1);
+    expect(restart).toHaveBeenCalledWith('0.2.0');
+    expect(beginRestart).toHaveBeenCalledTimes(1);
     await updater.request('0.2.0', 'operation-one');
     await expect(updater.request('0.2.0', 'operation-two')).rejects.toThrow('already pending');
-    expect(installations).toBe(1); expect(restarted).toEqual([]);
-    safe = true;
-    await expect.poll(() => restarted, { timeout: 4000 }).toEqual(['0.2.0']);
+    expect(installations).toBe(1); expect(restart).toHaveBeenCalledTimes(1);
     expect(JSON.parse(await readFile(join(stateDir, 'controller-updates/status.json'), 'utf8'))).toMatchObject({ phase: 'restarting', operationId: 'operation-one' });
+  } finally { await updater.close(); }
+});
+it('fails explicitly when restart admission is unavailable instead of polling indefinitely', async () => {
+  const beginRestart = vi.fn(() => false), restart = vi.fn();
+  const updater = createControllerUpdater({ stateDir: await directory(), identity,
+    release: async () => release, install: async () => {}, beginRestart, restart });
+  try {
+    await updater.request('0.2.0', 'operation-one');
+    await expect.poll(() => updater.status()).toMatchObject({ phase: 'failed', message: expect.stringContaining('already stopping') });
+    expect(beginRestart).toHaveBeenCalledTimes(1);
+    expect(restart).not.toHaveBeenCalled();
   } finally { await updater.close(); }
 });
 it('reports a failed download without stopping the running Controller and allows explicit retry', async () => {
@@ -78,13 +89,13 @@ it('accepts a later version after the launcher settles a candidate observed whil
   const prior = { phase: 'restarting', version: '0.2.0', operationId: 'previous-update', updatedAt: Date.now() };
   await writeFile(path, JSON.stringify(prior));
   const updater = createControllerUpdater({ stateDir, identity: { ...identity, version: '0.2.0' },
-    release: async () => ({ ...release, version: '0.3.0' }), install: async () => {}, beginRestart: () => false, restart: () => {} });
+    release: async () => ({ ...release, version: '0.3.0' }), install: async () => {}, beginRestart: () => true, restart: () => {} });
   try {
     expect((await updater.status()).phase).toBe('restarting');
     await writeFile(path, JSON.stringify({ ...prior, phase: 'succeeded' }));
     expect((await updater.status()).phase).toBe('succeeded');
     expect((await updater.request('0.3.0', 'next-update')).version).toBe('0.3.0');
-    await expect.poll(async () => (await updater.status()).phase).toBe('waiting');
+    await expect.poll(async () => (await updater.status()).phase).toBe('restarting');
   } finally { await updater.close(); }
 });
 
@@ -132,17 +143,16 @@ it('installs a verified package without lifecycle scripts and preserves the acti
   expect(JSON.parse(await readFile(join(clean,'build-info.json'),'utf8')).revision).toBe(release.revision);
   await expect(readFile(join(clean,'old-marker'))).rejects.toMatchObject({code:'ENOENT'});
 }, 15000);
-it('clean install stages fresh files even for the current version and keeps safe restart gating', async () => {
-  const root = await directory(); let safe = false;
+it('clean install activates fresh files immediately even for the current version', async () => {
+  const root = await directory();
   const install = vi.fn(async () => {}), restart = vi.fn();
-  const updater = createControllerUpdater({ stateDir:root, identity:{...identity,version:release.version},
-    release:async()=>release, install, beginRestart:()=>safe, restart });
+  const updater = createControllerUpdater({ stateDir: root, identity: { ...identity, version: release.version },
+    release: async () => release, install, beginRestart: () => true, restart });
   try {
-    await updater.request(release.version,'clean-install-intent',true);
-    await expect.poll(async()=>(await updater.status()).phase).toBe('waiting');
-    expect(install).toHaveBeenCalledWith(release,true);expect(restart).not.toHaveBeenCalled();
-    safe=true;
-    await expect.poll(()=>restart.mock.calls.length,{timeout:4000}).toBe(1);
-    expect(restart).toHaveBeenCalledWith(release.version,true);
-  } finally {await updater.close();}
+    await updater.request(release.version, 'clean-install-intent', true);
+    await expect.poll(() => restart.mock.calls.length).toBe(1);
+    expect(install).toHaveBeenCalledWith(release, true);
+    expect(restart).toHaveBeenCalledWith(release.version, true);
+    expect((await updater.status()).phase).toBe('restarting');
+  } finally { await updater.close(); }
 });

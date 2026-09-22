@@ -28,7 +28,7 @@ Requires Node >=22, npm, curl and tar on macOS, Linux, or inside your container.
 No Docker CLI, sudo or npm global install is used.
 Keys are prompted privately from the terminal unless a key input option is set.
 Existing installations are checked for compatible updates and require confirmation.
-Updates preserve Host state and use the existing safe restart and rollback flow. --no-start is suitable for container image builds;
+Updates preserve Host state and use the bounded restart and rollback flow. --no-start is suitable for container image builds;
 run agent-remote-controller foreground at container runtime, with persistent state.
 HELP
 }
@@ -99,7 +99,7 @@ prompt() {
   fi
   printf '%s' "${reply:-$prompt_fallback}"
 }
-# Delegate to the running Controller so runtime compatibility and safe restart
+# Delegate to the running Controller so runtime compatibility and restart
 # decisions use the actual Host, including its Node runtime inside Docker.
 update_existing() {
   set -- update --check
@@ -117,7 +117,7 @@ console.log(c.available?"yes":"no"); console.log(c.canClean?"yes":"no");
   printf '%s\n' "$message"
   [ "$clean" = 0 ] || [ "$can_clean" = yes ] || fail 'Clean install is unavailable for this launcher or release; existing files were not changed.'
   [ -n "$target" ] || return 0
-  printf 'The Controller will briefly reconnect; identity and configuration are preserved. Unsafe restarts wait for a safe window.\n'
+  printf 'The Controller restarts after verification; identity and configuration are preserved. Shared Codex daemon tasks continue; private tasks and Controller-hosted tool calls may be interrupted.\n'
   [ "$available" = no ] || printf '  Update: install the newer release with rollback.\n'
   [ "$can_clean" = no ] || printf '  Clean install: uninstall and reinstall the runtime; keep the bootstrap launcher, Host identity, settings and history.\n'
   answer=cancel

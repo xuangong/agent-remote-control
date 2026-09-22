@@ -8,7 +8,7 @@ Hosts register their running Controller identity and update capability. Owners c
 
 A packaged stable launcher supervises the Controller process. Updates install into a new private directory, preserving the previous package, credentials, native configuration and installation ID. The launcher switches its child and commits the active package only after the new Controller registers. Failed startup rolls back; connection loss during upgrade is not itself proof of success. Docker requires the state directory to remain writable and persistent.
 
-Shared Codex tasks do not prevent an update: its independent daemon is not restarted. In-flight mutations, approvals, unknown outcomes running private/Claude/Copilot sessions, and active sessions using Controller-hosted source tools delay switching. Admission closes during the final restart window to avoid accepting a new write after the safety check. Upgrade status persists locally and remains queryable after reconnect. Download/install failures leave the current process running. No automatic replay of a failed upgrade is performed.
+Once an owner confirms an update, a verified installation activates immediately. The Controller closes mutation admission before requesting replacement; running tasks, pending approvals, reconnecting sessions and old unknown outcomes do not defer it. Shutdown is bounded and startup failure still restores the previous Controller. The independent shared Codex daemon is not restarted, so its tasks continue. Private agent tasks, Controller-hosted source tools and in-flight requests may be interrupted; clients must inspect uncertain outcomes before retrying. Upgrade status persists locally and remains queryable after reconnect. Download/install failures leave the current process running. No automatic replay of a failed upgrade is performed.
 
 The first installation of this launcher is manual for legacy Controllers. Updating the package manager installation later should continue to use the same state directory. Releases do not automatically publish to npm; npm publication remains a separate explicit workflow.
 
@@ -17,7 +17,7 @@ The stable launcher itself remains at its bootstrap version and supervises versi
 ## Windows
 
 Windows x64 uses the same release discovery, owner confirmation, checksum verification,
-safe restart admission and registration-based rollback as macOS. A release must list
+immediate restart admission and registration-based rollback as macOS. A release must list
 `win32-x64`; an installed VS Code or native agent does not establish Controller update
 support. The Host must report a clean release identity and run through the packaged
 `dist/launcher.js` entry point. Development builds and older installations that invoke
@@ -59,7 +59,7 @@ update requests through the Worker HTTP/WebSocket boundary.
 ## Linux and containers
 
 Linux x64 and ARM64 use the same release discovery, owner confirmation, verified
-installation, safe restart admission and registration-based rollback. Releases must
+installation, immediate restart admission and registration-based rollback. Releases must
 list `linux-x64` or `linux-arm64` for the Host. Node 22 or newer and npm are required;
 the updater supports official Node installations and distribution npm layouts such as
 Debian/Ubuntu's `/usr/share/nodejs/npm`. It runs npm with the current Node executable

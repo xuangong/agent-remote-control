@@ -21,6 +21,8 @@ it('requires confirmation for one Host and retains the operation ID on explicit 
   const container = await render(<ControllerUpdates service={service} hosts={[host, ...others]} />);
   await act(async () => container.querySelector('button')!.click());
   await act(async () => button(container, 'Update Host').click());
+  expect(container.textContent).toContain('restarts as soon as the download is verified');
+  expect(container.textContent).toContain('may be interrupted');
   expect(requests).toEqual([]);
   await act(async () => button(container, 'Confirm update').click());
   expect(requests).toHaveLength(1); expect(container.textContent).toContain('Host connection lost');

@@ -94,7 +94,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
       })}</ul>
       {release ? <a href={`https://github.com/xuangong/agent-remote-control/releases/tag/controller-v${release.version}`} target="_blank" rel="noreferrer">Release notes and manual installation</a> : null}
       {actionable.length > 1 ? <button type="button" disabled={busy} onClick={() => setConfirm(actionable.map(host => host.id))}>Update {actionable.length} Hosts</button> : null}
-      {confirm?.length ? <div role="group" aria-label="Confirm Controller update"><p>Update {confirm.length} online {confirm.length === 1 ? 'Host' : 'Hosts'} to {release?.version}? Remote connections briefly reconnect. Shared Codex tasks keep running; other active tasks and pending approvals delay restart. Offline Hosts are skipped.</p>
+      {confirm?.length ? <div role="group" aria-label="Confirm Controller update"><p>Update {confirm.length} online {confirm.length === 1 ? 'Host' : 'Hosts'} to {release?.version}? The Controller restarts as soon as the download is verified. Remote connections briefly reconnect. Shared Codex daemon tasks keep running; private agent tasks and Controller-hosted tool calls may be interrupted. Offline Hosts are skipped.</p>
         <button type="button" disabled={busy} onClick={() => void update(eligible.filter(host => confirm.includes(host.id)))}>Confirm update</button><button type="button" onClick={() => setConfirm(null)}>Cancel</button>
       </div> : null}
     </div> : null}

@@ -113,7 +113,7 @@ sh install.sh --version X.Y.Z --yes
 sh install.sh --clean --yes
 ```
 
-Clean install downloads a fresh runtime and dependencies, waits for a safe shutdown,
+Clean install downloads a fresh runtime and dependencies, performs a bounded shutdown,
 uninstalls the old managed runtime and installs the fresh package. The bootstrap
 launcher, Host identity, device credential, settings and history are retained.
 A temporary runtime backup and journal restore the previous version if startup fails
@@ -126,10 +126,11 @@ bootstrap launcher; older launchers only offer ordinary updates. An orphaned sta
 directory is protected: locate its existing executable rather than creating a new
 identity. A stopped Controller must be started with its saved settings first.
 
-Shared Codex tasks keep running during Controller replacement. Private tasks,
-approvals or uncertain operations can delay the safe restart window. The installer
-reports a queued update without claiming activation is complete. Failed or uncertain
-requests are never automatically replayed. The local CLI provides:
+Verified updates restart the Controller immediately without waiting for idle sessions
+or approvals. Shared Codex daemon tasks keep running. Private tasks, Controller-hosted
+tool calls and in-flight requests may be interrupted. Older Controllers can still
+report a queued update; the installer does not mistake this for completed activation.
+Failed or uncertain requests are never automatically replayed. The local CLI provides:
 
 ```sh
 agent-remote-controller update --check

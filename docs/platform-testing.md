@@ -4,6 +4,8 @@ Run these profiles directly on Windows, macOS, and Linux machines. No GitHub
 Actions workflow is required. Use the same committed revision on all machines;
 dirty reports are useful during development but are not release evidence.
 
+For a directly shareable Mac handoff, use [macOS test instructions](platform-testing-macos.md).
+
 ## Machine setup
 
 Use a dedicated worktree, Node.js 22 or newer, and the repository's pinned pnpm.

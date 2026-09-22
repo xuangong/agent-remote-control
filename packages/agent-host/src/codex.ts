@@ -26,5 +26,5 @@ export async function createCodexHostRegistration(options: CodexHostRegistration
   const scope = createHash('sha256').update(JSON.stringify([env.CODEX_HOME ?? join(homedir(), '.codex'), options.socketPath ?? '', options.connectionMode ?? 'private'])).digest('hex');
   const references = Number(match[1]) > 0 || Number(match[2]) >= 155
     ? new SessionReferenceStore(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'codex', scope)) : undefined;
-  return { adapter: provider, directory: createCodexSessionDirectory(provider, options.workspaces ?? [], references) };
+  return { preservesWorkOnDisconnect: options.connectionMode === 'shared', adapter: provider, directory: createCodexSessionDirectory(provider, options.workspaces ?? [], references) };
 }

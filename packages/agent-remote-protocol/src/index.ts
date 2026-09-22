@@ -23,3 +23,4 @@ export * from './host-environment.js';
 export * from './pairing.js';
 
 export * from './session-migration.js';
+export * from './controller-release.js';

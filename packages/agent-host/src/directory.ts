@@ -11,6 +11,7 @@ export function createCodexSessionDirectory(
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
   const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string }>();
+  const controllerTools = new Set<string>();
   let discovery: Promise<CodexSessionSummary[]> | undefined;
   let closed = false;
   let sourceAccessCheck: ((nativeSessionId: string) => Promise<void>) | undefined;
@@ -54,6 +55,7 @@ export function createCodexSessionDirectory(
   }
   return {
     providerId: 'codex',
+    requiresController: id => controllerTools.has(id),
     supportsPromptEditing: !!provider.forkForPromptEdit,
     async validatePromptEdit(target) {
       await sourceAccessCheck?.(target.nativeSessionId);
@@ -62,7 +64,7 @@ export function createCodexSessionDirectory(
     },
     reconcileIdleSession: id => provider.reconcileIdleSession?.(id) ?? Promise.resolve(false),
     canReleaseSession: id => provider.canReleaseSession?.(id) === true,
-    sessionReleased(id) { opened.delete(id); },
+    sessionReleased(id) { opened.delete(id); controllerTools.delete(id); },
     supportsSourceReferences: !!references && !!provider.readSessionHistory,
     ...(provider.readSessionWorkspace ? { sessionWorkspace: provider.readSessionWorkspace.bind(provider) } : {}),
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
@@ -86,6 +88,7 @@ export function createCodexSessionDirectory(
       const session = await provider.createSession({ ...config, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
         ...(systemPrompt ? { systemPrompt } : {}) });
       const id = await remember(session);
+      if (extensions.tools?.length || config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
         try { await references!.set({ sourceNativeSessionId, systemPrompt, handle: opened.get(id)!.handle }); }
         catch (error) { opened.delete(id); await session.dispose(); throw error; }
@@ -102,7 +105,9 @@ export function createCodexSessionDirectory(
       // Let native saved settings win after a Host restart; only restore Host instructions and tools.
       const session = await provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
         extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : undefined);
-      await remember(session); return session;
+      await remember(session);
+      if (extensions?.tools?.length) controllerTools.add(nativeSessionId);
+      return session;
     },
     async openChild(parentNativeSessionId, nativeSessionId) {
       if (closed) throw new Error('Codex directory is closed.');

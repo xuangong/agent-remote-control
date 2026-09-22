@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { controllerIdentity, requestLauncherRestart } from './controller-update.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -27,7 +28,7 @@ import { selectTerminalChoice } from './terminal-select.js';
 import { createInterface } from 'node:readline';
 import { renderSessionQr } from './share-qr.js';
 
-interface DaemonState { pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' | 'windows' }
+interface DaemonState { launcherPid?: number; pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' | 'windows' }
 const args = process.argv.slice(2);
 const command = args[0] ?? 'help';
 const stateDir = resolve(process.env.AGENT_HOST_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'agent-host'));
@@ -43,7 +44,8 @@ if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(
 }
 
 async function main(): Promise<void> {
-  if (command === 'help' || command === '--help' || command === '-h') help();
+  if (command === '--version') { const identity = await controllerIdentity(import.meta.url); if (!identity) throw new Error('Controller build identity is unavailable.'); process.stdout.write(`${identity.version} ${identity.revision}\n`); }
+  else if (command === 'help' || command === '--help' || command === '-h') help();
   else if (command === 'codex') process.exitCode = await runCodexCommand(args.slice(1), stateDir, process.env);
   else if (command === 'environment') process.stdout.write(`${JSON.stringify(await detectHostEnvironment(), null, 2)}\n`);
   else if (command === 'foreground') await serve(false);
@@ -107,7 +109,8 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   const registrations = await createHostRegistrations(environment,
     (line) => writeDiagnostic(line, diagnosticSecrets));
-  const host = createAgentHost({ registrations, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+  const identity = await controllerIdentity(import.meta.url);
+  const host = createAgentHost({ ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     vscodeTunnel: { stateDirectory: stateDir, executable: environment.AGENT_HOST_VSCODE?.trim() || undefined,
       disconnectTimeoutMs: environment.AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS ? Number(environment.AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS) : undefined },
     preview: { stateDirectory: stateDir, ttlMs: Number(environment.AGENT_HOST_PREVIEW_TTL_MS ?? 3_600_000),
@@ -122,6 +125,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   if (!daemon) {
     process.stdout.write('Agent Host is running in the foreground.\n');
     await saveRegisteredConnection(stateDir, configuration, host.ready);
+    process.send?.({ type: 'controller-ready', version: identity?.version });
     process.stdout.write('Agent Host uplink is registered.\n');
     await waitForSignal(host);
     return;
@@ -154,7 +158,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   });
   await new Promise<void>((resolve, reject) => { management.once('error', reject); management.listen(socket, resolve); });
   if (process.platform !== 'win32') await chmod(socket, 0o600);
-  await atomicJson(stateFile, { pid: process.pid, token, socket, startedAt: new Date().toISOString(), ...(supervisor ? { supervisor } : {}) });
+  await atomicJson(stateFile, { ...(process.env.AGENT_HOST_LAUNCHER_PID ? { launcherPid: Number(process.env.AGENT_HOST_LAUNCHER_PID) } : {}), pid: process.pid, token, socket, startedAt: new Date().toISOString(), ...(supervisor ? { supervisor } : {}) });
   const shutdown = async () => {
     management.close();
     try { await within(host.close(), shutdownTimeout()); }
@@ -172,6 +176,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   }
   process.once('SIGTERM', stopDaemon);
   process.once('SIGINT', stopDaemon);
+  void host.ready.then(() => { process.send?.({ type: 'controller-ready', version: identity?.version }); }).catch(() => undefined);
   await new Promise<void>(() => undefined);
 }
 
@@ -282,7 +287,7 @@ async function start(enableAutostart = false): Promise<void> {
         if (supervisor!.kind === 'windows') childPid = await supervisor!.start();
         else await supervisor!.start();
       } else {
-        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_serve'], { detached: true, windowsHide: true, stdio: ['ignore', log.fd, log.fd],
+        const child = spawn(process.execPath, [process.env.AGENT_HOST_LAUNCHER ?? fileURLToPath(import.meta.url), '_serve'], { detached: true, windowsHide: true, stdio: ['ignore', log.fd, log.fd],
           env: { ...configuration.environment, AGENT_HOST_MANAGEMENT_TOKEN: randomBytes(32).toString('hex'), AGENT_HOST_LAUNCHD: undefined, AGENT_HOST_SUPERVISOR: undefined } });
         childPid = child.pid;
         await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
@@ -293,7 +298,7 @@ async function start(enableAutostart = false): Promise<void> {
     const deadline = Date.now() + 45_000;
     while (Date.now() < deadline) {
       const state = await readState();
-      if (state && (managed ? state.supervisor === supervisor!.kind : state.pid === childPid) && await authenticateSavedDaemon(state)) {
+      if (state && (managed ? state.supervisor === supervisor!.kind : (state.pid === childPid || state.launcherPid === childPid)) && await authenticateSavedDaemon(state)) {
         process.stdout.write(`Agent Host daemon started (pid ${state.pid}); ${managed ? 'login startup enabled; ' : ''}log: ${daemonLogFile}.\n`); return;
       }
       if (childPid && !processAlive(childPid)) break;
@@ -371,7 +376,7 @@ async function pair(): Promise<void> {
     : `Agent Host uplink registered as ${String(response.hostId)} without restarting sessions.\n`);
 }
 function loginStartup(configuration?: HostConnection) {
-  const options = { stateDir, home: homedir(), nodePath: realpathSync(process.execPath), cliPath: fileURLToPath(import.meta.url),
+  const options = { stateDir, home: homedir(), nodePath: realpathSync(process.execPath), cliPath: process.env.AGENT_HOST_LAUNCHER ?? fileURLToPath(import.meta.url),
     cwd: configuration?.environment.AGENT_HOST_WORKSPACE ?? configuration?.environment.AGENT_REMOTE_WORKSPACE ?? process.cwd(),
     path: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' };
   if (process.platform === 'linux') return { kind: 'systemd' as const,

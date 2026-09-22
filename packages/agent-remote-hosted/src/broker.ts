@@ -1,3 +1,5 @@
+import { controllerReleases } from './controller-releases.js';
+import { releaseCoversHost, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
@@ -13,6 +15,7 @@ type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedA
 type Host = {
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
+  controller?: ControllerIdentity;
   tunnelToken?: string;
   ready?: boolean; credentialRotation?: boolean; gatewayKeyRequested?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
@@ -29,13 +32,14 @@ export interface RemoteHostBrokerState {
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
 export interface HostBrokerOptions {
   ownerSubject?: string;
   userStreamCount?(subject: string): number;
+  controllerReleases?: Pick<typeof controllerReleases, 'latest'>;
   origin: string;
   rpcTimeoutMs?: number;
   heartbeatIntervalMs?: number;
@@ -86,7 +90,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   function snapshot(): RemoteHostBrokerState {
     return { pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose }) => ({ ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller }) => ({ ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -144,7 +148,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
   }
   function visibleHosts(subject?: string) {
-    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment }) => ({
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller }) => ({
+      ...(controller ? { controller } : {}),
       ...(environment ? { environment } : {}),
       ...(credentialRotation ? {credentialRotation:true} : {}), id, name, online: ready === true && socket?.readyState === RELAY_SOCKET_OPEN, providers,
       ...(options.durable && owner(subject) ? { managed: true } : {}),
@@ -297,7 +302,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, pairingPurpose: purpose,
+          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, pairingPurpose: purpose,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
@@ -627,6 +632,27 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (access?.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
     const subject = principal(context);
+    if (url.pathname === '/v1/remote/controller-release' && request.method === 'GET') {
+      requireOwner(subject);
+      return json(200, { release: await (options.controllerReleases ?? controllerReleases).latest() });
+    }
+    const controllerUpdate = /^\/v1\/remote\/hosts\/([^/]+)\/controller-update$/.exec(url.pathname);
+    if (controllerUpdate) {
+      requireOwner(subject); requireAccess(controllerUpdate[1]!, subject);
+      const host = requireHost(controllerUpdate[1]!);
+      if (!host.controller?.remoteUpdate) return json(409, { error: 'Install the release launcher locally before using remote updates.' });
+      if (!['GET', 'POST'].includes(request.method)) return json(405, { error: 'Method is not allowed.' });
+      let body: string | undefined;
+      if (request.method === 'POST') {
+        const input = await readBody(request);
+        const release = await (options.controllerReleases ?? controllerReleases).latest();
+        if (!release || input.version !== release.version || !releaseCoversHost(release, host.controller)
+          || typeof input.operationId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(input.operationId)) return json(409, { error: 'Refresh the Controller release and Host list before confirming this update.' });
+        body = JSON.stringify({ version: release.version, operationId: input.operationId });
+      }
+      const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/controller-update', undefined, body);
+      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
     const vscodeTunnel = /^\/v1\/remote\/hosts\/([^/]+)\/vscode-tunnel(?:\/(start|stop))?$/.exec(url.pathname);
     if (vscodeTunnel) {
       requireOwner(subject); requireAccess(vscodeTunnel[1]!, subject);
@@ -881,7 +907,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
-    return /^\/v1\/remote\/(hosts|pairings)(\/|$)/.test(url.pathname) || !!(session && bindings.has(session[1]!));
+    return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings)(\/|$)/.test(url.pathname) || !!(session && bindings.has(session[1]!));
   };
   const handlesUpgrade = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);

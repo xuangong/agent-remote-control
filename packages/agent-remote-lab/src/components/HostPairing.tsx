@@ -1,4 +1,4 @@
-import type { HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
+import type { ControllerIdentity, ControllerRelease, ControllerUpdateStatus, HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
 import { hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
@@ -8,6 +8,7 @@ import { HostSecurityActions } from './HostSecurityActions.js';
 export interface HostProvider { providerId: string; displayName: string }
 export interface RemoteHost {
   id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
+  controller?: ControllerIdentity;
   credentialRotation?: boolean; environment?: HostEnvironment;
   access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
 }
@@ -17,6 +18,8 @@ export interface PairingRecord { id: string; purpose: PairingPurpose; createdAt:
 export interface PairingHistory { pairings: PairingRecord[]; availablePurposes?: PairingPurpose[] }
 export interface HostStopResult { agentId: string; status: 'cancelled' | 'unsupported' | 'failed'; message?: string }
 export interface HostPairingService {
+  controllerRelease?(): Promise<{ release: ControllerRelease | null }>;
+  controllerUpdate?(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus>;
   invitation?: PairingInvitation;
   hosts(): Promise<{ hosts: RemoteHost[] }>;
   pair(purpose?: PairingPurpose): Promise<PairingInvitation>;

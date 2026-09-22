@@ -1,3 +1,4 @@
+import type { ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './components/HostPairing.js';
 export interface SessionSummary {
   nativeSessionId: string;
@@ -55,8 +56,8 @@ export class SessionDirectoryClient {
 export class RemoteHostClient implements HostPairingService {
   invitation?: PairingInvitation;
   constructor(private readonly baseUrl: string) {}
-  private async request<T>(path: string, method = 'GET', requestBody?: unknown): Promise<T> {
-    const response = await fetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method,
+  private async request<T>(path: string, method = 'GET', requestBody?: unknown, timeoutMs?: number): Promise<T> {
+    const response = await fetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
     const body = await response.json();
     if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
@@ -64,6 +65,10 @@ export class RemoteHostClient implements HostPairingService {
   }
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
+  }
+  controllerRelease(): Promise<{ release: ControllerRelease | null }> { return this.request('controller-release', 'GET', undefined, 35000); }
+  controllerUpdate(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus> {
+    return this.request(`hosts/${encodeURIComponent(hostId)}/controller-update`, input ? 'POST' : 'GET', input, 20000);
   }
   pair(purpose: PairingPurpose = 'host-only'): Promise<PairingInvitation> { return this.request('pairings', 'POST', { purpose }); }
   pairings(): Promise<PairingHistory> { return this.request('pairings'); }

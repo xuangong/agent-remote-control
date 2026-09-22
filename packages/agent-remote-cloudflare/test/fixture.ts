@@ -25,7 +25,7 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { previewOrigin?: string; previewDomain?: string } = {}) {
+export async function fixture(options: { previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown> } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: `
@@ -59,6 +59,10 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },
       outboundService: async request => {
+        if (options.controllerRelease && ['api.github.com', 'github.com'].includes(new URL(request.url).hostname)) {
+          const manifest = options.controllerRelease;
+          return Response.json(new URL(request.url).pathname.endsWith('controller-release.json') ? manifest : [{ tag_name: `controller-v${manifest.version}`, draft: false, prerelease: false, published_at: '2026-09-22', assets: [{ name: 'controller-release.json' }, { name: manifest.asset }] }]);
+        }
         authorityCalls++;
         const body = await request.text(); const token = request.headers.get('authorization')?.slice(7) ?? '';
         const parts = token.split('.'); const claims = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString());
@@ -100,9 +104,9 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
   async function upgrade(path: string, headers: Record<string, string>, requestOrigin = origin) {
     return (await upgradeResponse(path, headers, requestOrigin)).socket;
   }
-  async function host(key: string, promptEditing = false) {
+  async function host(key: string, promptEditing = false, controller?: Record<string, unknown>) {
     const socket = await upgrade('/ws/remote-host', { authorization: `Bearer ${key}` });
-    const registered = event(socket, 'message'); send(socket, { type: 'register', credentialRotation: true, installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex', ...(promptEditing ? { promptEditing: true } : {}) }] });
+    const registered = event(socket, 'message'); send(socket, { type: 'register', ...(controller ? { controller } : {}), credentialRotation: true, installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex', ...(promptEditing ? { promptEditing: true } : {}) }] });
     let message = await registered;
     if (message.type === 'credential_issued') {
       key = message.credential; const saved = event(socket, 'message');

@@ -1337,3 +1337,11 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-prompt-edit-notice { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 12px; font-size: 12px; color: var(--agent-muted); }
 .lab-prompt-edit-notice a { text-decoration: underline; white-space: nowrap; }
 .lab-prompt-edit-notice button { background: transparent; border: 0; font: inherit; color: inherit; cursor: pointer; }
+
+.lab-controller-updates { padding: 8px 0; font-size: 13px; }
+.lab-controller-updates > button { width: 100%; text-align: left; }
+.lab-controller-updates ul { display: grid; gap: 8px; padding: 0; list-style: none; }
+.lab-controller-updates li { display: grid; gap: 3px; padding: 8px; background: var(--agent-panel); border-radius: 8px; overflow-wrap: anywhere; }
+.lab-controller-updates li span, .lab-controller-updates small { color: var(--agent-muted); }
+.lab-controller-updates [role="group"] { padding: 8px; border: 1px solid var(--agent-border); border-radius: 8px; }
+.lab-controller-updates a { display: block; margin: 8px 0; }

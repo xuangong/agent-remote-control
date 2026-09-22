@@ -1,3 +1,5 @@
+import { createControllerUpdater } from './controller-update.js';
+import type { ControllerIdentity } from '@orchardworks/agent-remote-protocol';
 import { createIdleSessions } from './idle-sessions.js';
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
@@ -19,6 +21,8 @@ export interface AgentHostDirectory {
   readonly supportsSourceReferences?: boolean;
   readonly supportsPromptEditing?: boolean;
   validatePromptEdit?(target: { nativeSessionId: string; turnId: string; messageId: string }): Promise<void>;
+  /** Active work uses tools served by the Controller process. */
+  requiresController?(nativeSessionId: string): boolean;
   /** Must guarantee disposal only detaches this client's idle runtime connection. */
   canReleaseSession?(nativeSessionId: string): boolean;
   reconcileIdleSession?(nativeSessionId: string): Promise<boolean>;
@@ -33,7 +37,7 @@ export interface AgentHostDirectory {
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close(): Promise<void> | void;
 }
-export interface AgentHostProviderRegistration { adapter: AgentProviderAdapter; directory: AgentHostDirectory }
+export interface AgentHostProviderRegistration { adapter: AgentProviderAdapter; directory: AgentHostDirectory; preservesWorkOnDisconnect?: boolean }
 export interface AgentHostRuntimeOptions {
   registrations: readonly AgentHostProviderRegistration[];
   onRequestDiagnostic?: (diagnostic: AgentHostRequestDiagnostic) => void;
@@ -60,10 +64,13 @@ export interface AgentHostRuntime {
   executeOperation(scope: string): SessionWireOperationExecutor;
   acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
   setRelayConnected(connected: boolean): void;
+  beginControllerRestart(): boolean;
+  cancelControllerRestart(): void;
   resolveSession(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;
   close(): Promise<void>;
 }
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
+  controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string): void | Promise<void> };
   vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
   installationId: string;
@@ -86,6 +93,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
   const runtime = createAgentHostRuntime({ ...options, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
   runtime.setRelayConnected(false);
+  const updater = options.controller ? createControllerUpdater({ ...options.controller, beginRestart: runtime.beginControllerRestart, cancelRestart: runtime.cancelControllerRestart }) : undefined;
   const previews = options.preview ? createControllerPreviews(options.preview) : undefined;
   const vscodeTunnel = options.vscodeTunnel ? createVscodeTunnelManager({ ...options.vscodeTunnel, installationId: options.installationId }) : undefined;
   let state: AgentHost['state'] = 'connecting';
@@ -97,7 +105,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   const connect = (config: AgentHostOptions['uplink']): Connection => {
     runtime.setRelayConnected(false);
     const current = ++generation;
-    return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment,
+    return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
       providers: options.registrations.map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) })), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
@@ -107,7 +115,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         credentialPersistence = pending;
         return pending;
       } : undefined,
-      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: request => request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
+      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: async request => request.path === '/remote/controller-update' && updater ? (async () => {
+        try { const body = request.method === 'POST' ? JSON.parse(request.body ?? '{}') : undefined;
+          return { status: request.method === 'POST' ? 202 : 200, body: JSON.stringify(request.method === 'POST' ? await updater.request(body.version, body.operationId) : await updater.status()) };
+        } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.' }) }; }
+      })() : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
         : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
       operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
@@ -153,7 +165,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         throw error;
       }
     },
-    close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed';
+    close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed'; updater?.close();
       connection.superseded = true;
       await bounded(Promise.allSettled([connection.client.close(), previews?.close(), vscodeTunnel?.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
     })(); },
@@ -196,6 +208,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const uncertainAgents = new Set<string>();
   const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
+  let draining = false;
+  let uncertainHostMutation = false;
+  let activeOperations = 0;
   let closed = false;
   let closePromise: Promise<void> | undefined;
 
@@ -223,7 +238,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   }
   function executeOperation(scope: string): SessionWireOperationExecutor {
     return async (agent, operation, work) => {
+      if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.');
       const binding = bindingFor(agent);
+      activeOperations++;
       const release = idle.retain(binding.agentId);
       try {
         return await operationCache.execute({
@@ -233,7 +250,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       } catch (error) {
         if (error instanceof OperationCacheError && ['operation_outcome_unknown', 'native_file_limit'].includes(error.code)) uncertainAgents.add(binding.agentId);
         throw error;
-      } finally { release(); }
+      } finally { activeOperations--; release(); }
     };
   }
   function lifecycle(event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled', binding: Binding) {
@@ -420,12 +437,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     diagnostic('host_request_started');
     const result = await controlRequest(request);
     const data = result.status >= 400 ? JSON.parse(result.body) : {};
+    if (request.method === 'POST' && ['operation_outcome_unknown', 'native_file_limit'].includes(data.code)) uncertainHostMutation = true;
     diagnostic('host_request_completed', result.status, typeof data.code === 'string' ? data.code : undefined);
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
   }
   async function controlRequest(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> {
     try {
       if (closed) throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
+      if (draining && request.method === 'POST') throw new HostRequestError(503, 'controller_updating', 'Controller is updating. Reconnect before retrying.');
       const url = new URL(request.path, 'http://agent-host.local');
       if (request.method === 'GET') {
         const providerId = string(url.searchParams.get('providerId'), 'providerId');
@@ -506,7 +525,20 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         : { agentId, status: 'failed' as const, message: 'Native cancellation did not complete.' };
     } finally { clearTimeout(timer); release(); }
   }
-  return { relay, control, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, async control(request) {
+      if (request.method !== 'POST') return control(request);
+      activeOperations++;
+      try { return await control(request); } finally { activeOperations--; }
+    }, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+    beginControllerRestart() {
+      if (closed || draining || uncertainHostMutation || pending.size || activeOperations || uncertainAgents.size || projections.size) return false;
+      for (const binding of bindingsByAgent.values()) {
+        const agent = liveAgent(binding.agentId);
+        if (agent && !agent.canRestartController(registration(binding.providerId).preservesWorkOnDisconnect === true && !registration(binding.providerId).directory.requiresController?.(binding.nativeSessionId))) return false;
+      }
+      draining = true; return true;
+    },
+    cancelControllerRestart() { if (!closed) draining = false; },
     resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },
     close(): Promise<void> { return closePromise ??= (async () => {
       closed = true;

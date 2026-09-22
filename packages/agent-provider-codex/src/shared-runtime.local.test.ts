@@ -25,6 +25,7 @@ async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'arc-shared-'));
   const socketPath = join(home, 'server.sock');
   let ordinal = 0;
+  let pendingResponse: (() => void) | undefined;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', chunk => chunks.push(Buffer.from(chunk)));
@@ -49,7 +50,9 @@ async function fixture() {
         { type: 'response.completed', response: { id: `response-${id}`, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } },
       ];
       response.writeHead(200, { 'content-type': 'text/event-stream' });
-      response.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
+      const finish = () => response.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
+      if (prompt.includes('hold for controller upgrade')) pendingResponse = finish;
+      else finish();
     });
   });
   server.listen(0, '127.0.0.1');
@@ -101,7 +104,7 @@ stream_max_retries = 0
   try {
     await waitForDaemon();
     const provider = () => new CodexAppServerProvider({ executable, env, connectionMode: 'shared', socketPath, requestTimeoutMs: 5000 });
-    return { home, get daemon() { return daemon; }, sessions, provider, restartDaemon, close };
+    return { home, get hasPendingResponse() { return !!pendingResponse; }, releaseResponse() { pendingResponse?.(); pendingResponse = undefined; }, get daemon() { return daemon; }, sessions, provider, restartDaemon, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -291,4 +294,31 @@ it.runIf(executable)('reconciles an unknown send and resumes after release while
     await until(stream, event => event.type === 'turn_completed');
     restored!.release();
   } finally { await host.close(); await f.close(); }
+}, 30000);
+
+
+it.runIf(executable)('keeps a running turn alive with no Controller subscriber during an upgrade', async () => {
+  const f = await fixture();
+  const provider = f.provider();
+  const directory = createCodexSessionDirectory(provider, []);
+  const host = createAgentHostRuntime({ registrations: [{ adapter: provider, directory, preservesWorkOnDisconnect: true }] });
+  try {
+    const native = await directory.create({ cwd: f.home });
+    await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'upgrade-session', body: JSON.stringify({ providerId: 'codex', nativeSessionId: native }) });
+    const lease = await host.acquireSession('upgrade-session');
+    await lease!.agent.sendMessage('Please hold for controller upgrade');
+    await expect.poll(() => f.hasPendingResponse).toBe(true);
+    const handle = (await (await directory.open(native)).runtimeInfo()).persistence!;
+    expect(host.beginControllerRestart()).toBe(true);
+    await host.close();
+    expect(f.daemon.exitCode).toBeNull();
+    f.releaseResponse();
+    await expect.poll(async () => JSON.stringify(await f.provider().readSessionHistory(native, { limit: 2 })), { timeout: 8000 }).toContain('SHARED_OK');
+    const restored = await f.provider().resumeSession(handle); f.sessions.push(restored);
+    const stream = restored.observe()[Symbol.asyncIterator]();
+    while ((await stream.next()).value?.type !== 'history_boundary') { /* Drain history. */ }
+    await restored.sendMessage('Continue after controller upgrade');
+    await until(stream, event => event.type === 'turn_completed');
+    expect(f.daemon.exitCode).toBeNull();
+  } finally { f.releaseResponse(); await host.close(); await f.close(); }
 }, 30000);

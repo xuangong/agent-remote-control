@@ -28,7 +28,7 @@ test('packs the public Controller name with the unchanged command and npm regist
   assert.notEqual(manifest.private, true);
   assert.deepEqual(manifest.publishConfig, { access: 'public', registry: 'https://registry.npmjs.org/' });
   assert.deepEqual(manifest.os, ['darwin', 'linux', 'win32']);
-  assert.deepEqual(manifest.bin, { 'agent-remote-controller': 'dist/cli.js' });
+  assert.deepEqual(manifest.bin, { 'agent-remote-controller': 'dist/launcher.js' });
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
 });
 
@@ -48,7 +48,7 @@ test('installs the tarball independently and manages a paired daemon from a path
     DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config') });
   const run = async (args, overrides = {}) => {
-    try { return await exec(windows ? process.execPath : bin, windows ? [join(packageRoot, 'dist/cli.js'), ...args] : args,
+    try { return await exec(windows ? process.execPath : bin, windows ? [join(packageRoot, 'dist/launcher.js'), ...args] : args,
       { cwd: directory, env: { ...env, ...overrides }, timeout: 60000 }); }
     catch (error) {
       const log = await readFile(join(state, 'agent-host.log'), 'utf8').catch(() => '');

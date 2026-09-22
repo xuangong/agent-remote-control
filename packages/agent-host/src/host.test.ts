@@ -1242,3 +1242,58 @@ it('keeps partial child reconciliation pinned until the complete native check su
     expect(f.registration.sessions.get('native')!.disposed).toBe(true);
   } finally { await f.host.close(); vi.useRealTimers(); }
 });
+
+it.each([[false, false], [true, false], [true, true]])('restarts a live turn only when independent of the Controller: shared=%s tools=%s', async (preservesWorkOnDisconnect, requiresController) => {
+  const registration = { ...fixture('codex'), preservesWorkOnDisconnect };
+  registration.directory.requiresController = () => requiresController!;
+  const host = createAgentHostRuntime({ registrations: [registration] });
+  try {
+    await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'live', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'live' }) });
+    registration.sessions.get('live')!.emit({ type: 'observation', sourceKey: 'start', occurredAt: Date.now(), delivery: 'live', event: { type: 'turn_started', provider: 'codex', turnId: 'turn' } });
+    await expect.poll(() => host.relay.requireAgent('live').snapshot().payload.activeTurn?.turnId).toBe('turn');
+    expect(host.beginControllerRestart()).toBe(preservesWorkOnDisconnect && !requiresController);
+    if (preservesWorkOnDisconnect && !requiresController) {
+      const result = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'late', body: JSON.stringify({ providerId: 'codex', operationId: operationId('late') }) });
+      expect(result.status).toBe(503); expect(registration.createCount()).toBe(0);
+    }
+  } finally { await host.close(); }
+});
+it('does not restart shared Codex while an approval is pending', async () => {
+  const registration = { ...fixture('codex'), preservesWorkOnDisconnect: true };
+  const host = createAgentHostRuntime({ registrations: [registration] });
+  try {
+    await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'approval', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'approval' }) });
+    registration.sessions.get('approval')!.emit({ type: 'observation', sourceKey: 'approval', occurredAt: Date.now(), delivery: 'live', event: {
+      type: 'interaction_requested', provider: 'codex', request: { requestId: 'approval', kind: 'tool_approval', toolCallId: 'call', toolName: 'shell', summary: 'Run', detail: { type: 'shell', command: 'pwd' }, allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] },
+    } });
+    await expect.poll(() => host.relay.requireAgent('approval').snapshot().payload.pendingInteractions.length).toBe(1);
+    expect(host.beginControllerRestart()).toBe(false);
+  } finally { await host.close(); }
+});
+it('waits for an admitted create operation before closing mutation admission', async () => {
+  const registration = { ...fixture('codex'), preservesWorkOnDisconnect: true };
+  const original = registration.directory.create;
+  let entered = false, release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  registration.directory.create = async input => { entered = true; await blocked; return original(input); };
+  const host = createAgentHostRuntime({ registrations: [registration] });
+  try {
+    const creating = host.control({ method: 'POST', path: '/remote/create', sessionId: 'new', body: JSON.stringify({ providerId: 'codex', operationId: operationId('upgrade-create') }) });
+    await expect.poll(() => entered).toBe(true);
+    expect(host.beginControllerRestart()).toBe(false);
+    release(); expect((await creating).status).toBe(200);
+    await expect.poll(() => host.beginControllerRestart()).toBe(true);
+    host.cancelControllerRestart();
+    expect((await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'next', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'next' }) })).status).toBe(200);
+  } finally { release(); await host.close(); }
+});
+it('does not restart after an unknown native create outcome', async () => {
+  const registration = { ...fixture('codex'), preservesWorkOnDisconnect: true };
+  registration.directory.create = async () => { throw new Error('Native create acknowledgement lost'); };
+  const host = createAgentHostRuntime({ registrations: [registration] });
+  try {
+    const result = await host.control({ method: 'POST', path: '/remote/create', sessionId: 'unknown', body: JSON.stringify({ providerId: 'codex', operationId: operationId('upgrade-unknown') }) });
+    expect(JSON.parse(result.body).code).toBe('operation_outcome_unknown');
+    expect(host.beginControllerRestart()).toBe(false);
+  } finally { await host.close(); }
+});

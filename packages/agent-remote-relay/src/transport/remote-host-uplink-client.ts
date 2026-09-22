@@ -2,7 +2,7 @@ import { WebSocket } from 'ws';
 
 import {
   decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
-  type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
+  type ControllerIdentity, type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
   type PreviewRegistrationSnapshot,
 } from '@orchardworks/agent-remote-protocol';
 
@@ -42,6 +42,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly installationId: string;
   readonly name: string;
   readonly environment?: HostEnvironment;
+  readonly controller?: ControllerIdentity;
   readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true }[];
   readonly remoteKey: string;
   /** Must durably persist the offered credential before resolving. */
@@ -194,6 +195,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'register', installationId: options.installationId,
         ...(options.onCredential ? { credentialRotation: true } : {}),
         ...(options.environment ? { environment: options.environment } : {}),
+        ...(options.controller ? { controller: options.controller } : {}),
         name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providers }),
       }));
     });

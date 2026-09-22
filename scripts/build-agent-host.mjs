@@ -33,18 +33,20 @@ try {
     banner: { js: 'import { createRequire as agentHostCreateRequire } from "node:module"; const require = agentHostCreateRequire(import.meta.url);' },
   });
   await chmod(join(stage, 'dist/cli.js'), 0o755);
+  await cp(join(root, 'scripts/controller-launcher.mjs'), join(stage, 'dist/launcher.js'));
+  await chmod(join(stage, 'dist/launcher.js'), 0o755);
   await writeFile(join(stage, 'package.json'), JSON.stringify({
     name: manifest.name, version: manifest.version,
     repository: { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-host' },
     publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
     description: 'Agent Remote Controller CLI: connect local Codex, Claude Code and Copilot to a Relay.',
-    type: 'module', bin: { 'agent-remote-controller': 'dist/cli.js' }, engines: { node: '>=22' }, os: ['darwin', 'linux', 'win32'],
+    type: 'module', bin: { 'agent-remote-controller': 'dist/launcher.js' }, engines: { node: '>=22' }, os: ['darwin', 'linux', 'win32'],
     files: ['dist', 'README.md', 'licenses', 'NOTICE', 'build-info.json'],
     dependencies: sdkDependencies,
   }, null, 2) + '\n');
   const { stdout: revision } = await exec('git', ['rev-parse', 'HEAD'], { cwd: root });
   const { stdout: changes } = await exec('git', ['status', '--porcelain'], { cwd: root });
-  await writeFile(join(stage, 'build-info.json'), JSON.stringify({ revision: revision.trim(), dirty: changes.length > 0,
+  await writeFile(join(stage, 'build-info.json'), JSON.stringify({ version: manifest.version, revision: revision.trim(), dirty: changes.length > 0,
     builtAt: new Date().toISOString(), dependencies: sdkDependencies }, null, 2) + '\n');
   await cp(join(root, 'packages/agent-host/README.md'), join(stage, 'README.md'));
   await cp(join(root, 'NOTICE.md'), join(stage, 'NOTICE'));

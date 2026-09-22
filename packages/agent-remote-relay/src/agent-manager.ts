@@ -217,6 +217,14 @@ export class AgentManager {
       && (!state.runtimeInfo.connection || state.runtimeInfo.connection.state === 'connected');
   }
 
+  canRestartController(preservesNativeWork: boolean): boolean {
+    const state = this.state.payload;
+    return !this.closed && !this.historyLoading && this.pendingCommandExecutions === 0
+      && state.pendingInteractions.length === 0
+      && (!state.runtimeInfo.connection || state.runtimeInfo.connection.state === 'connected')
+      && (preservesNativeWork || ((state.status === 'idle' || state.status === 'closed') && state.activeTurn === null));
+  }
+
   snapshot(): AgentSnapshot {
     return structuredClone(this.state);
   }

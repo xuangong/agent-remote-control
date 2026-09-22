@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readdir, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,6 +71,15 @@ it('preserves ordered images through a private native app-server and fresh histo
       if (event.type === 'history_boundary') break;
       if (event.event.type === 'timeline' && event.event.item.type === 'user_message') replay = event.event.item.content;
     }
+    expect(replay?.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join(''), version).toBe('Before [image #1] between [image #2] after');
+    const rollouts = (await readdir(join(home, 'sessions'), { recursive: true })).filter(path => path.endsWith('.jsonl'));
+    const persisted = (await Promise.all(rollouts.map(path => readFile(join(home, 'sessions', path), 'utf8')))).join('\n');
+    const messages = persisted.split('\n').filter(Boolean).map(line => JSON.parse(line))
+      .filter(row => row.type === 'event_msg' && row.payload?.type === 'item_completed' && row.payload.item?.type === 'UserMessage');
+    const nativeContent = messages[0]?.payload.item.content as Array<{ type: string; text?: string; text_elements?: unknown[] }>;
+    expect(nativeContent?.filter(part => part.type === 'text').map(part => part.text).join(''), version)
+      .toBe('Before [image #1] between [image #2] after');
+    expect(nativeContent?.filter(part => part.text_elements?.length).map(part => part.text), version).toEqual(['[image #1]', '[image #2]']);
     expect(replay?.map(part => part.type), version).toEqual(['text','image','text','image','text']);
     expect(replay?.filter(part => part.type === 'image').map(part => part.sha256), version).toEqual(hashes);
     const request = inputs[0] as { input: Array<{ role?: string; content?: Array<{ type: string; text?: string }> }> };

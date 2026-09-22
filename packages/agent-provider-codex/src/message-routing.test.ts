@@ -192,12 +192,15 @@ it('preserves ordered images for both turn start and steer, including image-only
   const h = await harness();
   await h.session.sendMessageContent!(richParts);
   await h.session.sendMessageContent!(richParts);
-  const expected = richParts.map(part => part.type === 'text'
-    ? { type: 'text', text: part.text, text_elements: [] } : { type: 'localImage', path: part.path });
+  const expected = richParts.flatMap(part => part.type === 'text'
+    ? [{ type: 'text', text: part.text, text_elements: [] }] : [
+      { type: 'text', text: `[${part.label}]`, text_elements: [{ byteRange: { start: 0, end: 10 }, placeholder: `[${part.label}]` }] },
+      { type: 'localImage', path: part.path },
+    ]);
   expect(h.requests.find(r => r.method === 'turn/start')?.params.input).toEqual(expected);
   expect(h.requests.find(r => r.method === 'turn/steer')?.params.input).toEqual(expected);
   await h.session.sendMessageContent!([richParts[1]]);
-  expect(h.requests.at(-1)?.params.input).toEqual([{ type: 'localImage', path: '/managed/one.png' }]);
+  expect(h.requests.at(-1)?.params.input).toEqual([expected[1], expected[2]]);
   expect(h.session.capabilities.imageInput).toMatchObject({ maxImages: 8 });
 });
 it('preserves rich input when an explicitly rejected stale steer becomes a start', async () => {

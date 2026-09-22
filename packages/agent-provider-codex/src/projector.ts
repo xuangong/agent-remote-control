@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { codexToolResult } from './tool-result.js';
 import { CodexImageRegistry } from './images.js';
+import { codexImagePlaceholderLabel } from './message-content.js';
 import type {
   AgentStreamEvent,
   AgentUserMessagePart,
@@ -514,9 +515,13 @@ export class CodexEventProjector {
     let imageIndex = 0;
     for (const [index, entry] of item.content.entries()) {
       if (!isRecord(entry)) continue;
-      if (entry.type === 'text' && typeof entry.text === 'string') content.push({ type: 'text', text: entry.text });
+      if (entry.type === 'text' && typeof entry.text === 'string') {
+        if (codexImagePlaceholderLabel(entry, item.content[index + 1]) === undefined) content.push({ type: 'text', text: entry.text });
+      }
       else if (entry.type === 'image' || entry.type === 'localImage') {
-        const image = this.images.projectUser(id, index, entry, `image #${++imageIndex}`, this.cwd);
+        const label = codexImagePlaceholderLabel(item.content[index - 1], entry);
+        const image = this.images.projectUser(id, index, entry, label ?? `image #${imageIndex + 1}`, this.cwd);
+        imageIndex++;
         content.push(image.part);
         resourceReferences.push(...image.resourceReferences);
       }

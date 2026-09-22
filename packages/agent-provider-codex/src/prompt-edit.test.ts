@@ -81,3 +81,19 @@ it('does not request persisted history for an unmaterialized first-prompt branch
     expect(app.requests.some(request => ['thread/fork', 'turn/start'].includes(request.method))).toBe(false);
   } finally { await session.dispose(); }
 });
+
+it('allows persisted image placeholders that the web composer can restore', async () => {
+  const content = [
+    { type: 'text', text: '[image #1]', text_elements: [{ byteRange: { start: 0, end: 10 }, placeholder: '[image #1]' }] },
+    { type: 'localImage', path: '/managed/image.png' },
+  ];
+  const { transport } = fixture([{ id: 'turn-2', status: 'completed', items: [{ ...prompt, content }] }]);
+  try { await expect(preparePromptEdit(transport, target, { userAgent: 'codex_cli_rs/0.155.1' })).resolves.toMatchObject({ cwd: '/tmp' }); }
+  finally { await transport.dispose(); }
+});
+it('still rejects other native text bindings during prompt editing', async () => {
+  const content = [{ type: 'text', text: '$skill', text_elements: [{ byteRange: { start: 0, end: 6 }, placeholder: '$skill' }] }];
+  const { transport } = fixture([{ id: 'turn-2', status: 'completed', items: [{ ...prompt, content }] }]);
+  try { await expect(preparePromptEdit(transport, target, { userAgent: 'codex_cli_rs/0.155.1' })).rejects.toThrow(/bindings/); }
+  finally { await transport.dispose(); }
+});

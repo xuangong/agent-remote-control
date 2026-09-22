@@ -1,5 +1,6 @@
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
+import { codexImagePlaceholderLabel } from './message-content.js';
 
 export interface CodexPromptEditTarget { nativeSessionId: string; turnId: string; messageId: string }
 
@@ -34,9 +35,10 @@ export async function preparePromptEdit(
       if (turn.items.some((item: unknown) => isRecord(item) && ['enteredReviewMode', 'exitedReviewMode'].includes(String(item.type)))) throw new Error('Review prompts cannot be edited here. Use the matching Codex CLI.');
       const firstPrompt = turn.items.find((item: unknown) => isRecord(item) && item.type === 'userMessage');
       if (!isRecord(firstPrompt) || firstPrompt.id !== target.messageId) throw new Error('This message is no longer available or is a mid-turn steer. Only the first prompt of a turn can be edited.');
-      if (!Array.isArray(firstPrompt.content) || firstPrompt.content.length === 0 || firstPrompt.content.some(part => !isRecord(part)
+      if (!Array.isArray(firstPrompt.content) || firstPrompt.content.length === 0 || firstPrompt.content.some((part, index, content) => !isRecord(part)
         || !['text', 'localImage', 'image'].includes(String(part.type))
-        || part.type === 'text' && (typeof part.text !== 'string' || Array.isArray(part.text_elements) && part.text_elements.length > 0))) {
+        || part.type === 'text' && (typeof part.text !== 'string' || Array.isArray(part.text_elements) && part.text_elements.length > 0
+          && codexImagePlaceholderLabel(part, content[index + 1]) === undefined))) {
         throw new Error('This prompt contains native input bindings that cannot be restored in the web composer. Edit it in the Codex CLI.');
       }
       return { ...(index + 1 < result.data.length || next ? { beforeTurnId: target.turnId } : {}),

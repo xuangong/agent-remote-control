@@ -176,3 +176,41 @@ test('preserves pasted line breaks through typing, manual newline, and sending',
   await page.getByTestId('prompt-submit').click();
   await expect.poll(async () => JSON.parse(await page.getByTestId('sent-content').innerText())).toEqual([{ type: 'text', text: expected }]);
 });
+
+test('lays out image atoms like inline text in both drafts and sent messages', async ({ page }, info) => {
+  const editor = page.getByTestId('prompt-input');
+  await editor.fill('Before ');
+  const plainHeight = (await editor.boundingBox())!.height;
+  await editor.press('End');
+  await upload(page);
+  const atom = editor.locator('[data-image-id]');
+  await expect(atom).toHaveAttribute('data-state', 'ready');
+  await editor.press('End'); await editor.pressSequentially(' after');
+  expect((await editor.boundingBox())!.height).toBeCloseTo(plainHeight, 0);
+  for (const target of [atom]) {
+    const style = await target.evaluate(element => {
+      const css = getComputedStyle(element); const parent = getComputedStyle(element.parentElement!);
+      return { font: css.fontSize, parentFont: parent.fontSize, height: element.getBoundingClientRect().height,
+        lineHeight: parseFloat(parent.lineHeight), border: css.borderTopWidth, padding: css.paddingLeft, align: css.verticalAlign };
+    });
+    expect(style.font).toBe(style.parentFont);
+    expect(style.height).toBeLessThanOrEqual(style.lineHeight + 1);
+    expect(style.border).toBe('0px'); expect(style.padding).toBe('0px'); expect(style.align).toBe('baseline');
+  }
+  await page.getByTestId('prompt-submit').click();
+  const message = page.getByRole('article', { name: 'User message' });
+  await expect(message).toContainText('Before [image #1] after');
+  const tag = message.getByRole('button', { name: 'Preview image #1' });
+  const geometry = await tag.evaluate(element => {
+    const css = getComputedStyle(element); const parent = getComputedStyle(element.parentElement!);
+    const text = document.createRange(); text.selectNodeContents(element);
+    return { font: css.fontSize, parentFont: parent.fontSize, height: element.getBoundingClientRect().height,
+      width: element.getBoundingClientRect().width, textWidth: text.getBoundingClientRect().width,
+      lineHeight: parseFloat(parent.lineHeight), border: css.borderTopWidth, padding: css.paddingLeft, align: css.verticalAlign };
+  });
+  expect(geometry.font).toBe(geometry.parentFont);
+  expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight + 1);
+  expect(geometry.width).toBeCloseTo(geometry.textWidth, 0);
+  expect(geometry.border).toBe('0px'); expect(geometry.padding).toBe('0px'); expect(geometry.align).toBe('baseline');
+  await page.screenshot({ path: info.outputPath('inline-image-message.png') });
+});

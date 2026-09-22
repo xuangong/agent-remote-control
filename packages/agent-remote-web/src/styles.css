@@ -691,10 +691,15 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-composer .agent-composer-editor:focus-visible { outline: none; }
 .agent-composer-editor:empty::before { content: attr(data-placeholder); color: var(--agent-text-muted, #888); pointer-events: none; }
 .agent-composer-editor[aria-disabled="true"] { opacity: .65; }
-.agent-image-tag { display: inline-block; box-sizing: border-box; width: 7.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: text-bottom; border: 1px solid currentColor; border-radius: 5px; padding: 0 5px; line-height: 1.5; font: inherit; font-size: .9em; color: inherit; background: transparent; cursor: pointer; }
-.agent-image-tag[data-state="pending"], .agent-image-tag[data-state="uploading"] { border-style: dashed; opacity: .75; }
-.agent-image-tag[data-state="failed"], .agent-image-tag[data-state="unavailable"] { color: #b34238; }
-.agent-image-tag.ProseMirror-selectednode { outline: 2px solid Highlight; outline-offset: 2px; }
+/* Image atoms occupy the same line box as ordinary message text. */
+.agent-composer .agent-composer-editor .agent-image-tag,
+.agent-message .agent-message-ordered-content .agent-image-tag { display: inline-block; box-sizing: border-box; width: auto; min-width: 0; height: auto; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 2px; white-space: nowrap; vertical-align: baseline; font: inherit; line-height: inherit; color: inherit; background-color: transparent; box-shadow: none; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--agent-muted); text-underline-offset: .18em; cursor: pointer; transform: none; }
+.agent-image-tag[data-state="pending"], .agent-image-tag[data-state="uploading"] { opacity: .75; }
+.agent-composer .agent-image-tag[data-state="failed"], .agent-composer .agent-image-tag[data-state="unavailable"] { color: var(--agent-danger); }
+.agent-message .agent-image-tag:disabled { opacity: 1; cursor: default; }
+.agent-composer .agent-composer-editor .agent-image-tag:hover,
+.agent-message .agent-message-ordered-content .agent-image-tag:hover:not(:disabled) { background-color: var(--agent-surface-selected); text-decoration-style: solid; }
+.agent-image-tag.ProseMirror-selectednode { background-color: var(--agent-surface-selected); outline: 1px solid var(--agent-signal); outline-offset: 1px; }
 .agent-image-preview { box-sizing: border-box; width: min(680px, calc(100vw - 24px)); height: min(680px, calc(100dvh - 48px)); max-width: none; max-height: none; margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--agent-rule); border-radius: 16px; background: var(--agent-panel); color: var(--agent-ink); box-shadow: 0 20px 72px oklch(0.2 0.01 250 / .24); font: 14px/1.5 system-ui, sans-serif; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .agent-image-preview[open] { display: flex; flex-direction: column; }
 .agent-image-preview::backdrop { background: oklch(0.18 0.01 250 / .58); }

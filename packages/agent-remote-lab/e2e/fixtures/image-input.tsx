@@ -14,7 +14,11 @@ function Fixture() {
   const [ready, setReady] = useState(true);
   const [fail, setFail] = useState(false);
   const [sent, setSent] = useState<readonly MessagePart[]>([]);
-  const state = { ...replicaState, agent: { ...replicaState.agent!, id: session, status: 'idle' as const, activeTurn: null,
+  const state = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false, entries: sent.length ? [{
+    providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-22T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+    item: { type: 'user_message' as const, text: sent.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join(''),
+      content: sent.map(part => part.type === 'text' ? part : { type: 'image' as const, label: part.label, locator: `input-image:${part.attachmentId}` }) },
+  }] : [] }, agent: { ...replicaState.agent!, id: session, status: 'idle' as const, activeTurn: null,
     capabilities: { ...replicaState.agent!.capabilities, imageInput: { mediaTypes: ['image/png', 'image/jpeg', 'image/webp'] as const, maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } } };
   return <RecoveryScope.Provider value={scope}><div style={{ height: '100dvh', display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr) auto' }}>
     <nav><button onClick={() => setSession(value => value === 'one' ? 'two' : 'one')}>Switch session</button><button onClick={() => setReady(value => !value)}>Toggle connection</button><button onClick={() => setFail(value => !value)}>Toggle upload failure</button></nav>

@@ -1420,3 +1420,45 @@ it.each([false, true])('preserves diagnostic capability independently of unreada
     expect(JSON.parse(update.body).diagnosticDelivery).toBeUndefined();
   } finally { await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
 });
+
+it('renames by native identity once per operation without loading a session', async () => {
+  const f = fixture('codex'); let writes = 0; let title = 'Original';
+  f.directory.renameSession = async (id, name) => { expect(id).toBe('saved'); writes++; title = name; return title; };
+  const host = createAgentHostRuntime({ registrations: [f] });
+  try {
+    const request = { method: 'POST' as const, path: '/remote/session/rename', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'saved', title: 'Renamed', operationId: operationId('rename') }) };
+    const result = await host.control(request);
+    expect(result.status).toBe(200); expect(JSON.parse(result.body)).toEqual({ title: 'Renamed' });
+    expect((await host.control(request)).status).toBe(200); expect(writes).toBe(1); expect(f.sessions.size).toBe(0);
+    expect((await host.control({ ...request, body: JSON.stringify({ ...JSON.parse(request.body), title: 'Different' }) })).status).toBe(409);
+  } finally { await host.close(); }
+});
+
+it('reconciles a repeated rename with the current native title instead of restoring an old cached result', async () => {
+  const f=fixture('codex'); let title='Original'; let writes=0;
+  f.directory.renameSession=async (_id,name)=>{writes++;title=name;return name;};
+  f.directory.sessionTitle=async()=>title;
+  const host=createAgentHostRuntime({registrations:[f]});
+  const request={method:'POST' as const,path:'/remote/session/rename',body:JSON.stringify({providerId:'codex',nativeSessionId:'saved',title:'First',operationId:operationId('first-name')})};
+  try {
+    expect((await host.control(request)).status).toBe(200);
+    title='Newer native title';
+    expect(JSON.parse((await host.control(request)).body)).toEqual({title:'Newer native title'});expect(writes).toBe(1);
+  } finally {await host.close();}
+});
+
+it('reconciles an uncertain rename without repeating the native write', async () => {
+  const f = fixture('codex'); let title = 'Original', writes = 0, readable = false;
+  f.directory.renameSession = async (_id, name) => { writes++; title = name; throw new Error('Reply lost'); };
+  f.directory.sessionTitle = async () => { if (!readable) throw new Error('Disconnected'); return title; };
+  const host = createAgentHostRuntime({ registrations: [f] });
+  const request = { method: 'POST' as const, path: '/remote/session/rename', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'saved', title: 'Renamed', operationId: operationId('uncertain-rename') }) };
+  try {
+    expect((await host.control(request)).status).toBe(503);
+    readable = true;
+    expect(JSON.parse((await host.control(request)).body)).toEqual({ title: 'Renamed' });
+    expect(writes).toBe(1);
+    title = 'Changed elsewhere';
+    expect((await host.control(request)).status).toBe(503); expect(writes).toBe(1);
+  } finally { await host.close(); }
+});

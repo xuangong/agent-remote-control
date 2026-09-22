@@ -70,6 +70,33 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); } finally { await transport.dispose(); }
   }
 
+  async readSessionTitle(nativeSessionId: string): Promise<string | undefined> {
+    const transport = await this.createTransport();
+    try {
+      await initializeCodexTransport(transport);
+      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false });
+      if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== nativeSessionId) throw new Error('Native session metadata is unavailable.');
+      return readString(response.thread.name);
+    } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); }
+    finally { await transport.dispose(); }
+  }
+
+  async renameSession(nativeSessionId: string, title: string): Promise<string> {
+    const name = title.trim();
+    if (!name || name.length > 512 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error('Enter a session name of up to 512 characters.');
+    const transport = await this.createTransport();
+    try {
+      await initializeCodexTransport(transport);
+      await transport.request('thread/name/set', { threadId: nativeSessionId, name });
+      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false });
+      if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== nativeSessionId || !readString(response.thread.name)) {
+        throw new Error('The native session name could not be confirmed. Refresh before retrying.');
+      }
+      return response.thread.name as string;
+    } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); }
+    finally { await transport.dispose(); }
+  }
+
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
     const transport = await this.createTransport(config.cwd);
     try {

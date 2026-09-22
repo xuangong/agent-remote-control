@@ -1,3 +1,4 @@
+import { RenameSessionDialog } from './RenameSessionDialog.js';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { SessionStars } from '../../hooks/useSessionStars.js';
@@ -16,6 +17,7 @@ export function FavoriteTree({favorites,tracking,activeKey,busy,onOpen}:{favorit
   const storageKey=`agent-remote-favorite-folders:${favorites.scope}`;
   const [expanded,setExpanded]=useState<Set<string>>(()=>{try{const saved=JSON.parse(localStorage.getItem(storageKey)??'[]');return new Set(Array.isArray(saved)?saved.filter((id:unknown)=>typeof id==='string'):[]);}catch{return new Set();}});
   const [menu,setMenu]=useState<string>(),[edit,setEdit]=useState<FavoriteEdit>(),[focused,setFocused]=useState<string>();
+  const [renameSession,setRenameSession]=useState<VisibleSessionStar>();
   const root=useRef<HTMLDivElement>(null),menuRoot=useRef<HTMLDivElement>(null);
   const nodes=favoriteNodes(favorites.folders,favorites.stars),visible=visibleFavoriteNodes(nodes,expanded);
   const disabled=!!favorites.pending||favorites.loading;
@@ -86,6 +88,7 @@ export function FavoriteTree({favorites,tracking,activeKey,busy,onOpen}:{favorit
             <button type="button" className="lab-favorite-more" aria-label={`Actions for ${node.title}`} aria-expanded={menu===node.id} disabled={disabled} onClick={()=>setMenu(menu===node.id?undefined:node.id)}>⋯</button>
             {menu===node.id?createPortal(<div ref={menuRoot} data-favorites-dialog style={{top:menuTop,left:menuLeft}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onBlur={e=>{e.stopPropagation();if(e.relatedTarget instanceof Node&&!e.currentTarget.contains(e.relatedTarget))setMenu(undefined);}} className="lab-favorite-menu" role="group" aria-label={`Actions for ${node.title}`} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const index=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(index+(e.key==='ArrowDown'?1:buttons.length-1))%buttons.length]?.focus();}if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu();}}}>
               {node.folder?<><button type="button" onClick={()=>action({type:'create',parentId:node.id})}>New folder</button><button type="button" onClick={()=>action({type:'rename',node})}>Rename</button></>:<button type="button" disabled={!tracked&&!node.session!.available} onClick={()=>{tracking.toggle(node.session!);closeMenu();}}>{tracked?'Untrack':'Track'}</button>}
+              {node.session?.canRename ? <button type="button" disabled={!node.session.available||!node.session.online} onClick={()=>{setMenu(undefined);setRenameSession(node.session);}}>Rename session…</button> : null}
               <button type="button" onClick={()=>action({type:'move',node})}>Move to…</button>
               <button type="button" disabled={position===0} onClick={()=>{void favorites.change({type:'move',id:node.id,parentId:node.parentId,beforeId:siblings[position-1]!.id});closeMenu();}}>Move up</button>
               <button type="button" disabled={position===siblings.length-1} onClick={()=>{void favorites.change({type:'move',id:node.id,parentId:node.parentId,beforeId:siblings[position+2]?.id??null});closeMenu();}}>Move down</button>
@@ -96,6 +99,7 @@ export function FavoriteTree({favorites,tracking,activeKey,busy,onOpen}:{favorit
       </div>
     </div>
     <p className="lab-favorite-drag-status" role="status">{drag.drag ? drag.drag.target ? `Moving ${drag.drag.title}. Release to place.` : `Moving ${drag.drag.title}. Choose a folder or gap.` : ''}</p>
+    {renameSession?<RenameSessionDialog favorites={favorites} session={renameSession} onClose={()=>{setRenameSession(undefined);requestAnimationFrame(()=>focusNode(renameSession.favoriteId!));}}/>:null}
     {edit?<FavoriteDialog favorites={favorites} edit={edit} onClose={()=>{const id=edit&&'node' in edit?edit.node.id:undefined;setEdit(undefined);requestAnimationFrame(()=>{if(id)focusNode(id);else root.current?.parentElement?.querySelector<HTMLButtonElement>('.lab-favorites-toolbar button')?.focus();});}}/>:null}
   </div>;
 }

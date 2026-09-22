@@ -1,3 +1,4 @@
+import type { SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
   type SessionMigration,
@@ -56,6 +57,13 @@ export interface HttpWebSocketTransportDependencies {
 }
 
 export class HttpWebSocketTransport implements RemoteAgentTransport {
+  private readonly titleListeners = new Set<(session: SessionTitleUpdate) => void>();
+  private readonly titles = new Map<string, SessionTitleUpdate>();
+  onSessionTitle(listener: (session: SessionTitleUpdate) => void): () => void {
+    this.titleListeners.add(listener);
+    for (const value of this.titles.values()) listener(value);
+    return () => { this.titleListeners.delete(listener); };
+  }
   private readonly migrationListeners = new Set<(migration: SessionMigration) => void>();
   private readonly migrations = new Map<string, SessionMigration>();
   onSessionMigration(listener: (migration: SessionMigration) => void): () => void {
@@ -84,13 +92,21 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.createOperationId = dependencies.operationId ?? (() => crypto.randomUUID());
     if (dependencies.sessionChannels) {
       this.sessionChannels = new SessionChannelPool({
+        onTitle: session => {
+          const key = JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]);
+          const previous = this.titles.get(key);
+          if (previous && previous.revision >= session.revision) return;
+          this.titles.set(key, session);
+          if (this.titles.size > 1024) this.titles.delete(this.titles.keys().next().value!);
+          for (const listener of this.titleListeners) listener(session);
+        },
         onMigration: migration => {
           if (this.migrations.has(migration.id)) return;
           this.migrations.set(migration.id, migration);
           if (this.migrations.size > 1024) this.migrations.delete(this.migrations.keys().next().value!);
           for (const listener of this.migrationListeners) listener(migration);
         },
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1`)),
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),
@@ -187,6 +203,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
 
   dispose(): void {
     this.sessionChannels?.dispose();
+    this.titles.clear(); this.titleListeners.clear();
     this.migrations.clear(); this.migrationListeners.clear();
   }
 

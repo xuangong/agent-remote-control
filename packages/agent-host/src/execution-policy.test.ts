@@ -120,3 +120,13 @@ it('masks the actual Relay configuration namespace while preserving native provi
   expect(sanitized).toMatchObject({ OPENAI_API_KEY: 'openai', ANTHROPIC_API_KEY: 'anthropic', ANTHROPIC_AUTH_TOKEN: 'anthropic-token',
     GH_TOKEN: 'github', GITHUB_TOKEN: 'github-token', COPILOT_GITHUB_TOKEN: 'copilot', CODEX_HOME: '/native-profile' });
 });
+
+it('checks native workspace metadata before renaming even when the catalog omits the session', async () => {
+  const f = await fixture(); let name = 'Original';
+  const directory = protectHostDirectory({ ...f.source, list: () => [], sessionWorkspace: async () => f.info.cwd,
+    renameSession: async (_id, title) => { name = title; return name; } }, f.policy!);
+  expect(await directory.renameSession!('session', 'Allowed')).toBe('Allowed');
+  f.info.cwd = f.outside;
+  await expect(directory.renameSession!('session', 'Blocked')).rejects.toThrow(/workspace/i);
+  expect(name).toBe('Allowed');
+});

@@ -156,7 +156,7 @@ function AppContent({
       });
     };
   }, [transport, injectedTransport]);
-  const favorites = useSessionStars(baseUrl, userScoped);
+  const favorites = useSessionStars(baseUrl, userScoped, transport);
   const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
     try {
       const target = readControllerLocation(new URLSearchParams(window.location.search));
@@ -782,6 +782,18 @@ function AppContent({
   const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
     liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, askEntry?.record?.target, askEntry?.attached, askVisible]);
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const remove = transport.onSessionTitle?.(session => {
+      const update = (items: OpenedSession[]) => {
+        if (!items.some(item => sessionKey(item) === sessionKey(session) && item.title !== session.title)) return items;
+        return items.map(item => sessionKey(item) === sessionKey(session) ? { ...item, title: session.title } : item);
+      };
+      setOpenedSessions(update); setSideSessions(update); tracking.rename(session);
+      clearTimeout(timer); timer = setTimeout(() => setDirectoryRevision(value => value + 1), 100);
+    });
+    return () => { remove?.(); clearTimeout(timer); };
+  }, [transport, tracking.rename]);
   const promptEditBusy = useRef(false);
   const [promptEditPending, setPromptEditPending] = useState(false);
   const promptEditReservation = useMemo<{ current: PromptEditReservation | undefined }>(() => ({ current: readPromptEditReservation(baseUrl) }), [baseUrl]);

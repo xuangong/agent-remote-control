@@ -47,6 +47,17 @@ function connect(transport: HttpWebSocketTransport, agentId: string, activity = 
 }
 
 describe('session channel transport', () => {
+  it('delivers ordered title updates once across channels and replays the latest name', async () => {
+    const harness = await server(); connect(harness.transport, 'session'); connect(harness.transport, 'session', true);
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    const received = vi.fn(); harness.transport.onSessionTitle(received);
+    const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Renamed', revision: 3 };
+    for (const socket of harness.sockets) socket.send(JSON.stringify({ protocolVersion: version, type: 'session_title_updated', session }));
+    await vi.waitFor(() => expect(received).toHaveBeenCalledOnce());
+    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_title_updated', session: { ...session, title: 'Old', revision: 2 } }));
+    const late = vi.fn(); harness.transport.onSessionTitle(late); expect(late).toHaveBeenCalledWith(session);
+  });
+
   it('delivers account migrations once across content and activity channels and replays to a late listener', async () => {
     const harness = await server();
     connect(harness.transport, 'original'); connect(harness.transport, 'original', true);
@@ -76,7 +87,7 @@ describe('session channel transport', () => {
     const b = connect(harness.transport, 'b');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
-    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1', '/base/v1/session-channel?observation=session&migrations=1']);
+    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1']);
     const subscriptions = harness.frames.map(({ frame }) => frame);
     expect(subscriptions.map((frame) => frame.type)).toEqual(['subscribe', 'subscribe', 'subscribe']);
     const firstId = subscriptions.find((frame) => frame.agentId === 'a' && !frame.message.observation).subscriptionId;
@@ -125,7 +136,7 @@ describe('session channel transport', () => {
     expect(() => a.connection.send(negotiate)).toThrow();
     connect(harness.transport, 'a');
     await vi.waitFor(() => expect(harness.frames).toHaveLength(4));
-    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1', '/base/v1/session-channel?observation=session&migrations=1']);
+    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1']);
     expect(harness.frames.filter(({ frame }) => frame.type === 'message')).toHaveLength(1);
   }, 10_000);
 
@@ -135,7 +146,7 @@ describe('session channel transport', () => {
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     harness.sockets[0]!.close();
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
-    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1', '/base/v1/sessions/agent%20one/events']);
+    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1', '/base/v1/sessions/agent%20one/events']);
     expect(harness.frames[0]!.frame).toEqual(negotiate);
     expect(a.opened).toHaveBeenCalledTimes(1);
     expect(a.disconnect).not.toHaveBeenCalled();

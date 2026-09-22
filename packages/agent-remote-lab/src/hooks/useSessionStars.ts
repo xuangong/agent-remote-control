@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { watchPageResume } from '@orchardworks/agent-remote-web';
+import { type RemoteAgentTransport, watchPageResume } from '@orchardworks/agent-remote-web';
 import { SessionStarsClient, FavoritesConflict, type FavoriteChange, type FavoritesSnapshot, type StarInput } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useFeedbackToast } from '../components/Toast.js';
 const empty = (): FavoritesSnapshot => ({ revision: 0, folders: [], stars: [] });
-export function useSessionStars(baseUrl: string, enabled: boolean) {
+export function useSessionStars(baseUrl: string, enabled: boolean, transport?: RemoteAgentTransport) {
   const service = useMemo(() => new SessionStarsClient(baseUrl), [baseUrl]);
   const [snapshot, setSnapshot] = useState<FavoritesSnapshot>(empty);
   const [loading, setLoading] = useState(enabled);
@@ -31,6 +31,18 @@ export function useSessionStars(baseUrl: string, enabled: boolean) {
     const unwatch = watchPageResume(() => void refresh());
     return () => { ++generation.current; requestController.current?.abort(); unwatch(); };
   }, [refresh, enabled]);
+  useEffect(() => {
+    if (!enabled) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const remove = transport?.onSessionTitle?.(session => {
+      const key = sessionKey(session);
+      const previous = latest.current;
+      if (!previous.stars.some(star => sessionKey(star) === key && star.title !== session.title)) return;
+      publish({ ...previous, stars: previous.stars.map(star => sessionKey(star) === key ? { ...star, title: session.title } : star) });
+      clearTimeout(timer); timer = setTimeout(() => void refresh(), 100);
+    });
+    return () => { remove?.(); clearTimeout(timer); };
+  }, [enabled, transport, refresh]);
   async function change(command: FavoriteChange): Promise<boolean> {
     if (!enabled || busy.current || loading) return false;
     busy.current = true;

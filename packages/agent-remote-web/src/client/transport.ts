@@ -53,6 +53,7 @@ export interface RemoteConnection {
 }
 
 export interface RemoteAgentTransport {
+  onSessionTitle?(listener: (session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate) => void): () => void;
   onSessionMigration?(listener: (migration: import('@orchardworks/agent-remote-protocol').SessionMigration) => void): () => void;
   fetchSnapshot(agentId: string, options?: RemoteRequestOptions): Promise<AgentSnapshot>;
   fetchTimeline(

@@ -20,6 +20,9 @@ export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
   readonly providerId: string;
   readonly supportsSourceReferences?: boolean;
+  validateSessionRename?(nativeSessionId: string): Promise<void>;
+  sessionTitle?(nativeSessionId: string): Promise<string | undefined>;
+  renameSession?(nativeSessionId: string, title: string): Promise<string>;
   readonly supportsPromptEditing?: boolean;
   validatePromptEdit?(target: { nativeSessionId: string; turnId: string; messageId: string }): Promise<void>;
   /** Active work uses tools served by the Controller process. */
@@ -116,7 +119,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
-      providers: options.registrations.map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) })), url: config.url, remoteKey: config.remoteKey,
+      providers: options.registrations.map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) })), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
           if (generation !== current || closed) throw new Error('Host credential persistence was superseded.');
@@ -485,6 +488,32 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       if (request.method === 'POST') {
         const payload = body(request.body);
+        if (url.pathname === '/remote/session/rename') {
+          const providerId = string(payload.providerId, 'providerId');
+          const nativeSessionId = string(payload.nativeSessionId, 'nativeSessionId');
+          const title = string(payload.title, 'title').trim();
+          if (!title || title.length > 512 || /[\u0000-\u001f\u007f]/.test(title) || request.sessionId || Object.keys(payload).some(key => !['providerId', 'nativeSessionId', 'title', 'operationId'].includes(key))) {
+            throw new HostRequestError(400, 'invalid_request', 'A valid session name is required.');
+          }
+          const directory = registration(providerId).directory;
+          if (!directory.renameSession) throw new HostRequestError(400, 'unsupported_configuration', 'Native session renaming is unavailable. Update the Controller.');
+          await directory.validateSessionRename?.(nativeSessionId);
+          let result: { title: string };
+          try {
+            result = await operationCache.execute({ operationId: string(payload.operationId, 'operationId'), scope: operationScope(request),
+              kind: 'rename_session', target: JSON.stringify([providerId, nativeSessionId]), parameters: { title } }, {
+              dispatch: async () => ({ title: await directory.renameSession!(nativeSessionId, title) }),
+            });
+          } catch (error) {
+            if (!(error instanceof OperationCacheError) || error.code !== 'operation_outcome_unknown') throw error;
+            const confirmed = await directory.sessionTitle?.(nativeSessionId).catch(() => undefined);
+            if (confirmed === title) return json(200, { title: confirmed });
+            throw new OperationCacheError('operation_outcome_unknown', 'The session name could not be confirmed. Retry to check the same change.');
+          }
+          // A retry must not overwrite newer native metadata with its cached result.
+          const currentTitle = await directory.sessionTitle?.(nativeSessionId);
+          return json(200, { title: currentTitle ?? result.title });
+        }
         if (url.pathname === '/remote/workspace-folders/create') {
           registration(string(payload.providerId, 'providerId'));
           if (request.sessionId) throw new HostRequestError(400, 'invalid_request', 'Folder creation does not target a session.');

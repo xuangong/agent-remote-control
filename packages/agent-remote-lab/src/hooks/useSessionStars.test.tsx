@@ -6,7 +6,7 @@ import { SessionStarsClient } from '../session-stars-client.js';
 import { FavoritesList, FavoritesMenu } from '../components/SessionFavorites.js';
 import type { SessionTracking } from './useSessionTracking.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1, favoriteId: 's', folderId: null, order: 0, available: true, online: true };
-const tracking: SessionTracking = { replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
+const tracking: SessionTracking = { rename: vi.fn(), replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
 afterEach(() => vi.restoreAllMocks());
 it('keeps failed saves visible without pretending the favorite was saved', async () => {
   vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:[]});

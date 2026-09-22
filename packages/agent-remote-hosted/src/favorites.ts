@@ -18,7 +18,7 @@ export const MAX_FAVORITE_FOLDERS = 128;
 export const MAX_FAVORITE_DEPTH = 8;
 const MAX_TREES = 1024;
 type OrganizedSavedStar = SavedSessionStar & { favoriteId: string; folderId: string | null; order: number };
-type Access = (subject: string, item: StarIdentity) => { online: boolean; hostName: string } | undefined;
+type Access = (subject: string, item: StarIdentity) => { online: boolean; hostName: string; canRename?: boolean } | undefined;
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const label = (value: unknown, max: number): value is string => typeof value === 'string' && !!value.trim() && value.length <= max && !/[\u0000-\u001f]/.test(value);
 const id = (value: unknown): value is string => label(value, 128);
@@ -117,11 +117,22 @@ export function createFavorites(state: RelayState, access: Access) {
     const tree = organizeFavorites(draft, subject);
     return { revision: tree.revision, folders: sorted(tree.folders), stars: sorted(savedStars(draft, subject)).map(({ subject: _, ...star }) => {
       const host = access(subject, star);
-      return { ...star, available: !!host, online: host?.online ?? false, ...(host ? { hostName: host.hostName } : {}) };
+      return { ...star, available: !!host, online: host?.online ?? false, ...(host ? { hostName: host.hostName, ...(host.canRename ? { canRename: true } : {}) } : {}) };
     }) };
   }
   return {
     list(subject: string): FavoritesSnapshot { return snapshot(structuredClone(state.read()), subject); },
+    async renameSession(identity: StarIdentity, title: string): Promise<void> {
+      if (!label(title, 512)) fail(502, 'invalid_session_title', 'The native session name is invalid.');
+      await state.mutate(draft => {
+        const changed = new Set<string>();
+        for (const star of draft.sessionStars ?? []) {
+          if (starKey(star) !== starKey(identity) || star.title === title) continue;
+          star.title = title; changed.add(star.subject);
+        }
+        for (const subject of changed) advanceFavorites(draft, organizeFavorites(draft, subject));
+      });
+    },
     async execute(subject: string, body: unknown): Promise<FavoritesSnapshot> {
       if (!validCommand(body)) fail(400, 'invalid_favorite', 'The favorites command is invalid.');
       const command = body as FavoriteCommand;

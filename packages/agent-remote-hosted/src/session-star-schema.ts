@@ -1,7 +1,7 @@
 export interface StarIdentity { hostId: string; providerId: string; nativeSessionId: string }
 export interface SessionStar extends StarIdentity { title: string; parentNativeSessionId?: string; workspace?: string; starredAt: number; favoriteId?: string; folderId?: string | null; order?: number }
 export interface SavedSessionStar extends SessionStar { subject: string }
-export interface VisibleSessionStar extends SessionStar { available: boolean; online: boolean; hostName?: string }
+export interface VisibleSessionStar extends SessionStar { available: boolean; online: boolean; hostName?: string; canRename?: boolean }
 export const MAX_USER_STARS = 256;
 export const starKey = (value: StarIdentity): string => JSON.stringify([value.hostId, value.providerId, value.nativeSessionId]);
 export const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);

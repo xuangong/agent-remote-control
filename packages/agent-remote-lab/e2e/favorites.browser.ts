@@ -8,7 +8,7 @@ import { createRelayState } from '@orchardworks/agent-remote-hosted/state';
 import { createFavorites } from '@orchardworks/agent-remote-hosted/favorites';
 const auth={origin:'http://localhost',issuer:'https://issuer.example',secret:'s'.repeat(32)};
 async function seed() {
- const state=createRelayState(auth,undefined,()=>{},()=>{}), favorites=createFavorites(state,()=>({online:true,hostName:'zhangxians-Mac-mini.local'}));
+ const state=createRelayState(auth,undefined,()=>{},()=>{}), favorites=createFavorites(state,()=>({online:true,hostName:'zhangxians-Mac-mini.local',canRename:true}));
  await favorites.execute('alice',{type:'create-folder',revision:0,id:'work',parentId:null,title:'Work'});
  await favorites.execute('alice',{type:'create-folder',revision:1,id:'child',parentId:'work',title:'Research'});
  await favorites.execute('alice',{type:'save-session',revision:2,folderId:null,session:{hostId:'mac',providerId:'codex',nativeSessionId:'1',title:'核实 dsh 集成链路及 BPP 事件上报机制'}});
@@ -30,6 +30,12 @@ it.each(['chromium','webkit'] as const)('organizes favorites over HTTP with desk
  const script=(await build({stdin:{contents:source,loader:'tsx',resolveDir:fileURLToPath(new URL('../src/',import.meta.url))},bundle:true,write:false,format:'iife',platform:'browser',define:{'process.env.NODE_ENV':'"production"'}})).outputFiles[0]!.text;
  const css=await readFile(new URL('../src/app.css',import.meta.url),'utf8');
  const server=createServer(async(req,res)=>{
+  if(req.url==='/v1/remote/hosts/mac/session/rename' && req.method==='POST') {
+   let body='';for await(const chunk of req)body+=chunk;
+   const input=JSON.parse(body);expect(input.providerId).toBe('codex');expect(input.nativeSessionId).toBe('1');expect(input.operationId).toBeTruthy();
+   await favorites.renameSession({hostId:'mac',providerId:input.providerId,nativeSessionId:input.nativeSessionId},input.title);
+   res.setHeader('content-type','application/json');res.end(JSON.stringify({title:input.title}));return;
+  }
   if(req.url==='/v1/favorites') {
    res.setHeader('content-type','application/json');
    try { let body='';for await(const chunk of req)body+=chunk;res.end(JSON.stringify(req.method==='POST'?await favorites.execute('alice',JSON.parse(body)):favorites.list('alice'))); }
@@ -49,6 +55,15 @@ it.each(['chromium','webkit'] as const)('organizes favorites over HTTP with desk
    await page.goto(`http://127.0.0.1:${(server.address() as any).port}`);
    try { await page.locator('[data-favorite-id="work"]').waitFor(); } catch(error) { console.error({errors,body:await page.locator('body').innerText()}); throw error; }
    const first=favorites.list('alice').stars[0]!.favoriteId,second=favorites.list('alice').stars[1]!.favoriteId;
+   await page.locator(`[data-favorite-id="${first}"]`).getByRole('button',{name:/Actions for/}).click();
+   await page.getByRole('button',{name:'Rename session…',exact:true}).click();
+   await page.getByRole('textbox',{name:'Name',exact:true}).fill('Native session name');
+   await page.screenshot({path:fileURLToPath(new URL(`../test-results/favorites/rename-${name}-${width}.png`,import.meta.url)),fullPage:true});
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+   await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});
+   expect(favorites.list('alice').stars.find(s=>s.favoriteId===first)).toMatchObject({nativeSessionId:'1',title:'Native session name',folderId:null});
+   expect(favorites.list('alice').stars.find(s=>s.favoriteId===second)?.title).toBe('核实 dsh 集成链路及 BPP 事件上报机制');
+   await browserExpect(page.locator(`[data-favorite-id="${first}"]`)).toContainText('Native session name');
    await drag(page,second,first,.05);
    await expect.poll(()=>favorites.list('alice').stars.find(s=>s.favoriteId===second)?.order).toBe(1);
    await drag(page,first,'work');

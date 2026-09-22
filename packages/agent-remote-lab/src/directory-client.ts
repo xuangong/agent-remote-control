@@ -30,6 +30,9 @@ export class SessionDirectoryClient {
     if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined);
     return data as T;
   }
+  rename(providerId: string, nativeSessionId: string, title: string, operationId: string): Promise<{ title: string }> {
+    return this.request('session/rename', { providerId, nativeSessionId, title, operationId }, AbortSignal.timeout(35000));
+  }
   list(providerId: string, cursor?: string): Promise<SessionCatalogPage> {
     const query = new URLSearchParams({ providerId, limit: '30' });
     if (cursor) query.set('cursor', cursor);

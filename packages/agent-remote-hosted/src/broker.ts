@@ -12,7 +12,7 @@ import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 
 type RpcResponse = { status: number; body: string; requestId?: string };
-type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true };
+type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true };
 type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
   connectionId?: string; stopDiagnostics?(): void;
@@ -827,6 +827,22 @@ export function createHostBroker(options: HostBrokerOptions) {
         } };
       });
       return json(200, { ok: true });
+    }
+    const rename = /^\/v1\/remote\/hosts\/([^/]+)\/session\/rename$/.exec(url.pathname);
+    if (rename && request.method === 'POST') {
+      requireAccess(rename[1]!, subject);
+      const host = requireHost(rename[1]!);
+      const input = await readBody(request);
+      const providerId = required(input.providerId, 'providerId'), nativeSessionId = required(input.nativeSessionId, 'nativeSessionId');
+      const binding = nativeBindings.get(JSON.stringify([host.id, providerId, nativeSessionId]));
+      if (!owner(subject) && (!binding || !sessionAllowed(binding, subject))) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      if (!host.providers.some(provider => provider.providerId === providerId && provider.sessionRename)) throw new BrokerError(400, 'unsupported_configuration', 'Native session renaming is unavailable. Update the Controller.');
+      const title = required(input.title, 'title').trim();
+      if (!title || title.length > 512 || /[\u0000-\u001f\u007f]/.test(title) || Object.keys(input).some(key => !['providerId', 'nativeSessionId', 'title', 'operationId'].includes(key))) throw new BrokerError(400, 'invalid_request', 'Enter a session name of up to 512 characters.');
+      const result = await rpc(host, 'POST', '/remote/session/rename', undefined, JSON.stringify({ providerId, nativeSessionId, title, operationId: required(input.operationId, 'operationId') }));
+      requireAccess(host.id, subject);
+      if (!owner(subject) && (!binding || !sessionAllowed(binding, subject))) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      return rawJson(result);
     }
     const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|workspace-folders(?:\/create)?|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {

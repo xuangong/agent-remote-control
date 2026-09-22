@@ -36,3 +36,16 @@ it('hydrates native model and cwd when resuming a discovered thread', async () =
   try { expect(await session.runtimeInfo()).toMatchObject({ cwd: '/original', model: 'native-model' }); }
   finally { await session.dispose(); }
 });
+
+it('renames persisted native metadata without resuming or forking the session', async () => {
+  let name = 'Original';
+  const app = createScriptedAppServer({
+    'thread/name/set': params => { name = String(params.name); return {}; },
+    'thread/read': () => ({ thread: { id: 'saved', name } }),
+  });
+  const provider = new CodexAppServerProvider({ spawn: () => app.child });
+  expect(await provider.renameSession('saved', '  New title  ')).toBe('New title');
+  expect(app.requests.filter(r => r.method.startsWith('thread/')).map(r => r.method)).toEqual(['thread/name/set', 'thread/read']);
+  expect(name).toBe('New title');
+  expect(app.child.killed).toBe(true);
+});

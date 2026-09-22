@@ -14,7 +14,12 @@ export const SessionChannelClientMessage = Type.Union([
 ]);
 export type SessionChannelClientMessage = Static<typeof SessionChannelClientMessage>;
 
+export const SessionTitleUpdate = Strict({ hostId: Type.String({ minLength: 1, maxLength: 512 }), providerId: Type.String({ minLength: 1, maxLength: 512 }),
+  nativeSessionId: Type.String({ minLength: 1, maxLength: 4096 }), title: Type.String({ minLength: 1, maxLength: 512 }), revision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }) });
+export type SessionTitleUpdate = Static<typeof SessionTitleUpdate>;
+
 export const SessionChannelServerMessage = Type.Union([
+  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_title_updated'), session: SessionTitleUpdate }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_migrated'), migration: SessionMigration }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready') }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('message'), subscriptionId: SubscriptionId, message: Type.Union([ServerMessage, IncompatibleProtocolVersionErrorMessage]) }),

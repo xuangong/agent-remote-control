@@ -49,7 +49,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const tenants = new Map<string, Tenant>();
   const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
-  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string> }>();
+  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string> }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
@@ -62,7 +62,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const starAccess = (subject: string, item: import('./session-stars.js').StarIdentity) => {
     const broker = [...tenants.values()].find(value => value.broker.canStarSession(item, subject))?.broker;
     const host = broker?.visibleHosts(subject).find(host => host.id === item.hostId);
-    return host ? { online: host.online, hostName: host.name } : undefined;
+    return host ? { online: host.online, hostName: host.name, canRename: host.providers.some(provider => provider.providerId === item.providerId && provider.sessionRename === true) } : undefined;
   };
   const stars = createSessionStars(state, starAccess);
   const favorites = createFavorites(state, starAccess);
@@ -76,6 +76,22 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if ((socket.bufferedAmount ?? 0) + encoded.json.length * 3 > 16 * 1024 * 1024) { socket.close(1013, 'Migration backlog'); return; }
       try { socket.send(encoded.json); channel.migrations.add(migration.id); } catch { socket.close(1011, 'Migration delivery failed'); return; }
     }
+  }
+  function publishTitles(socket: RelaySocket, channel: { subject: string; titles?: Map<string, string> }) {
+    if (!channel.titles || socket.readyState !== 1) return;
+    const snapshot = favorites.list(channel.subject);
+    const keys = new Set<string>();
+    for (const star of snapshot.stars) {
+      if (!star.available) continue;
+      const { hostId, providerId, nativeSessionId, title } = star;
+      const key = JSON.stringify([hostId, providerId, nativeSessionId]); keys.add(key);
+      if (channel.titles.get(key) === title) continue;
+      const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_title_updated', session: { hostId, providerId, nativeSessionId, title, revision: snapshot.revision } });
+      if (encoded.status !== 'ok') continue;
+      if ((socket.bufferedAmount ?? 0) + encoded.json.length * 3 > 16 * 1024 * 1024) { socket.close(1013, 'Title update backlog'); return; }
+      try { socket.send(encoded.json); channel.titles.set(key, title); } catch { socket.close(1011, 'Title update delivery failed'); return; }
+    }
+    for (const key of channel.titles.keys()) if (!keys.has(key)) channel.titles.delete(key);
   }
   const previewOrigin = validateGatewayOrigin(options.previewOrigin || auth.origin);
   const previewAccess = createPreviewAccess({ origin: auth.origin, previewOrigin,
@@ -118,7 +134,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   function published() {
     enforceChannels();
-    for (const [socket, channel] of browserChannels) publishMigrations(socket, channel);
+    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); }
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
     void previewAccess.enforce(); void subdomainAccess?.enforce();
     if (initialized && !refreshing) queueSchedule();
@@ -487,6 +503,21 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     const revokeHost = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(path);
     const execute = async () => {
+      const renameRoute = /^\/v1\/remote\/hosts\/([^/]+)\/session\/rename$/.exec(path);
+      if (renameRoute && request.method === 'POST') {
+        const input = await readJson(relative.clone());
+        if (typeof input?.providerId !== 'string' || typeof input.nativeSessionId !== 'string') return json(400, { error: 'A native session identity is required.' });
+        const identity = { hostId: decodeURIComponent(renameRoute[1]!), providerId: input.providerId, nativeSessionId: input.nativeSessionId };
+        if (!favorites.list(grant.subject).stars.some(star => star.hostId === identity.hostId && star.providerId === identity.providerId && star.nativeSessionId === identity.nativeSessionId && star.available)) return json(403, { error: 'Choose an accessible favorite session to rename.' });
+        return withHostKey('session-name:' + JSON.stringify(identity), async () => {
+          const response = await destination.broker.handleRequest(relative, context(request, grant));
+          if (response?.ok) {
+            const result = await response.clone().json() as { title: string };
+            await favorites.renameSession(identity, result.title);
+          }
+          return response;
+        });
+      }
       const editRoute = /^\/v1\/remote\/hosts\/([^/]+)\/create$/.exec(path);
       const input = editRoute && request.method === 'POST' ? await readJson(relative.clone()) : undefined;
       if (!input?.editNativeSessionId) return destination.broker.handleRequest(relative, context(request, grant));
@@ -566,7 +597,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return { accept(socket: RelaySocket) {
         if (closing || failed || sessions.expiresAt(request, grant) <= Date.now()) { socket.close(1008, 'Session expired'); return; }
         if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
-        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}) });
+        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
         acceptSessionChannel(socket, mode, async agentId => {
@@ -583,6 +614,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
           return prepared;
         });
         publishMigrations(socket, browserChannels.get(socket)!);
+        publishTitles(socket, browserChannels.get(socket)!);
       } };
     }
     const destination = routeTenant(route.pathname, grant.subject) ?? owned;

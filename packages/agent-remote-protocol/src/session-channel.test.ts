@@ -40,3 +40,14 @@ describe('session channel framing', () => {
     expect(protocol.decodeSessionChannelClientMessage('{').status).toBe('rejected');
   });
 });
+
+it('round trips native title updates and bounds their identity and revision', () => {
+  const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Renamed', revision: 12 };
+  const message = frame('session_title_updated', { session });
+  const encoded = protocol.encodeSessionChannelServerMessage(message as never);
+  expect(encoded.status).toBe('ok');
+  if (encoded.status === 'ok') expect(protocol.decodeSessionChannelServerMessage(encoded.json)).toEqual({ status: 'ok', value: message });
+  for (const invalid of [{ ...session, hostId: '' }, { ...session, title: 'x'.repeat(513) }, { ...session, revision: -1 }, { ...session, revision: Number.MAX_SAFE_INTEGER + 1 }, { ...session, extra: true }]) {
+    expect(protocol.decodeSessionChannelServerMessage(JSON.stringify(frame('session_title_updated', { session: invalid }))).status).toBe('rejected');
+  }
+});

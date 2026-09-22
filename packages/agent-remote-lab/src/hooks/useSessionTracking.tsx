@@ -57,6 +57,15 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     current.current = next; setSelection({ scope: baseUrl, sessions: next });
     if (exists && !visible.current.has(key)) setObservations(values => { const next = { ...values }; delete next[key]; return next; });
   }
+  const rename = useCallback((session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate) => {
+    const key = sessionKey(session);
+    setSelection(previous => {
+      if (previous.scope !== baseUrl || !previous.sessions.some(item => sessionKey(item) === key && item.title !== session.title)) return previous;
+      const sessions = previous.sessions.map(item => sessionKey(item) === key ? { ...item, title: session.title } : item);
+      try { saveTrackedSessions(baseUrl, sessions); } catch { /* Keep the confirmed title for this page. */ }
+      return { ...previous, sessions };
+    });
+  }, [baseUrl]);
   const update = useCallback((key: string, value: SessionObservation) => {
     if (!observed.current.some(item => sessionKey(item.session) === key)) return;
     setObservations(previous => {
@@ -95,7 +104,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   }
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} />), [observedSessions, baseUrl, transport, update, retries]);
   useFeedbackToast('Session tracking', error);
-  return { replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
+  return { rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 

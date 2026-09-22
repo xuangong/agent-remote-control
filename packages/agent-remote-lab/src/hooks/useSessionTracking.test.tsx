@@ -234,3 +234,20 @@ it('observes a minimized auxiliary Ask independently and replaces only its subsc
   expect(readTrackedSessions('alice')).toEqual([]);
   expect(fetchSnapshot).not.toHaveBeenCalled(); expect(fetchTimeline).not.toHaveBeenCalled();
 });
+
+it('renames only the matching tracked identity without restarting observation', async () => {
+  vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockResolvedValue({ agentId: 'agent' });
+  const start = vi.spyOn(RemoteActivityClient.prototype, 'start').mockImplementation(() => {});
+  const stop = vi.spyOn(RemoteActivityClient.prototype, 'stop').mockImplementation(() => {});
+  const transport = {} as RemoteAgentTransport;
+  let tracking!: SessionTracking;
+  function Fixture() { tracking = useSessionTracking('alice', transport); return <>{tracking.observers}</>; }
+  await render(<Fixture />);
+  const unrelated = { ...star, nativeSessionId: 'other' };
+  await act(async () => { tracking.toggle(star); tracking.toggle(unrelated); });
+  expect(start).toHaveBeenCalledTimes(2);
+  await act(async () => tracking.rename({ ...star, title: 'Renamed', revision: 1 }));
+  expect(tracking.sessions).toEqual([{ ...star, title: 'Renamed' }, unrelated]);
+  expect(readTrackedSessions('alice')).toEqual(tracking.sessions);
+  expect(start).toHaveBeenCalledTimes(2); expect(stop).not.toHaveBeenCalled();
+});

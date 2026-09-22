@@ -20,7 +20,7 @@ identity. Controller npm lifecycle scripts are disabled.
 
 ## Install and pair
 
-Once a release containing this installer is published, run:
+Run:
 
 ```sh
 curl -fsSL --proto '=https' --proto-redir '=https' \
@@ -30,8 +30,9 @@ curl -fsSL --proto '=https' --proto-redir '=https' \
 
 The script reads terminal input through `/dev/tty`, so piping the script does not
 consume the pairing key. To inspect it before execution, download it with `-o
-install.sh`, then run `sh install.sh --install-codex`. Until the release is published,
-use the script from this checkout; the public download URL is not available yet.
+install.sh`, then run `sh install.sh --install-codex`. The script is also available
+from the repository at
+`https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.sh`.
 
 The installer prompts for the Relay (default `https://agents.xianliao.de5.net`) and
 recommends a weather-city-random Host name. It then guides you through:

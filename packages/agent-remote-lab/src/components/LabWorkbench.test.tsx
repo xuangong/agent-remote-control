@@ -45,6 +45,7 @@ describe('LabWorkbench', () => {
   it.each([
     ['starting', 'connecting', 'Opening session'],
     ['idle', 'catching_up', 'Synchronizing'],
+    ['idle', 'disconnected', 'Reconnecting'],
     ['idle', 'idle', 'Disconnected'],
     ['starting', 'ready', 'Starting'],
     ['closed', 'ready', 'Closed'],
@@ -55,6 +56,10 @@ describe('LabWorkbench', () => {
     const state = { ...replicaState, agent: { ...replicaState.agent!, status: agentStatus } };
     const container = await render(<LabWorkbench state={state} sessionStatus={sessionStatus} actions={{}} />);
     expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe(expected);
+    if (sessionStatus !== 'ready') {
+      expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(expected);
+      expect(container.querySelector('[data-testid="cancel-submit"]')?.matches(':disabled')).toBe(true);
+    }
   });
 
   it('indicates a pending answer even before an Agent status change arrives', async () => {

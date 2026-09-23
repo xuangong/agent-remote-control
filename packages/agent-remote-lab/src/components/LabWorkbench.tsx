@@ -142,6 +142,7 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
             draft={messageDraft}
             onDraftChange={onMessageDraftChange}
             disabled={sessionStatus !== 'ready'}
+            disabledLabel={activityLabel}
             recovering={!runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
             onSendMessage={suppliedFeedbackActions.sendMessage}
             onCancel={actions.cancel}

@@ -5,13 +5,14 @@ export interface AgentActivityStatusProps {
   state: AgentReplicaState;
   visible?: boolean;
   disabled: boolean;
+  disabledLabel?: string;
   commandPending?: boolean;
   interruptDisabled: boolean;
   interruptLabel: string;
   onInterrupt(): void;
 }
 
-export function AgentActivityStatus({ state, visible = true, disabled, commandPending = false, interruptDisabled, interruptLabel, onInterrupt }: AgentActivityStatusProps) {
+export function AgentActivityStatus({ state, visible = true, disabled, disabledLabel, commandPending = false, interruptDisabled, interruptLabel, onInterrupt }: AgentActivityStatusProps) {
   const agent = state.agent;
   const terminal = agent?.status === 'failed' || agent?.status === 'closed';
   const active = Boolean(agent?.activeTurn) && !terminal;
@@ -20,7 +21,7 @@ export function AgentActivityStatus({ state, visible = true, disabled, commandPe
   const runtimeConnection = agent?.runtimeInfo.connection;
   const runtimeUnavailable = runtimeConnection !== undefined && runtimeConnection.state !== 'connected';
   const unavailable = disabled || runtimeUnavailable;
-  const label = disabled ? 'Waiting for session'
+  const label = disabled ? disabledLabel ?? 'Waiting for session'
     : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
     : runtimeConnection?.state === 'restoring' ? 'Restoring'
     : runtimeConnection?.state === 'unavailable' ? 'Native runtime unavailable'

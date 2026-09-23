@@ -55,20 +55,6 @@ body {
   background: var(--obs-canvas);
 }
 
-/* The standalone status bar overlays the page. Paint its safe area without
-   adding another layout inset or changing the conversation's coordinates. */
-@media (display-mode: standalone) {
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0 0 auto;
-    height: env(safe-area-inset-top, 0px);
-    background: var(--obs-text);
-    pointer-events: none;
-    z-index: 2000;
-  }
-}
-
 button,
 input,
 select,

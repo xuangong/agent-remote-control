@@ -215,10 +215,15 @@ bar. Apple's archived [meta tag reference](https://developer.apple.com/library/a
 describes this distinction; actual iOS behavior still requires verification.
 
 The outer mobile navigation owns the top inset. The optional secondary Header
-does not add it again. A pointer-transparent decorative
-strip paints the system status area dark in standalone mode, without adding a
-layout row or changing shell coordinates. The rest of the page retains its light
-theme. No rotation timers, scroll resets or viewport policy changes are added.
+does not add it again. No rotation timers, scroll resets or viewport policy
+changes are added.
+
+The initial trial also painted a fixed dark strip over the top safe area. The
+user subsequently reported a dark flash at the top. Since the strip height
+directly followed the changing inset, it could appear abruptly during rotation.
+The decorative strip has been removed; the existing surface backgrounds now
+paint the safe area. This does not change layout geometry. Native status text
+contrast and remaining page movement still need device verification.
 
 Diagnostics include the current document's `statusBarStyle`. This identifies
 the loaded HTML declaration, not proof that an existing Home Screen installation

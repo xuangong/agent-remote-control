@@ -194,6 +194,12 @@ write while that intent is retained. Retrying a completed operation reads curren
 metadata instead of restoring an older cached name. The operation cache retains
 intents for its existing ten-minute lifetime and is process-local.
 
+The Host uplink carries this operation as `POST /remote/session/rename`, with a
+JSON body and no Relay `sessionId`. The request-path schema permits this exact
+endpoint; other session mutation paths and appended query/subpaths remain invalid.
+Transport coverage verifies the rename response and subsequent heartbeat on the
+same Host connection.
+
 Only after native confirmation does the hosted service update matching favorites
 by `(hostId, providerId, nativeSessionId)`, including other accounts' saved copies.
 Session-channel clients opt into title notifications with `titles=1`. The optional

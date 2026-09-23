@@ -2,12 +2,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createAgentRemoteRelay } from '../relay.js';
-import { createRemoteHostUplinkClient } from './remote-host-uplink-client.js';
+import { createRemoteHostUplinkClient, type RemoteHostUplinkClientOptions } from './remote-host-uplink-client.js';
 
 const closeables: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closeables.splice(0).reverse()) await close(); });
 
-async function broker(heartbeat: { intervalMs: number; timeoutMs: number }, providers?: Array<{ providerId: string; displayName: string }>) {
+async function broker(heartbeat: { intervalMs: number; timeoutMs: number }, providers?: Array<{ providerId: string; displayName: string }>,
+  control: RemoteHostUplinkClientOptions['control'] = async () => ({ status: 404, body: '{}' })) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>(resolve => server.once('listening', resolve));
   closeables.push(() => new Promise<void>(resolve => {
@@ -35,7 +36,7 @@ async function broker(heartbeat: { intervalMs: number; timeoutMs: number }, prov
   closeables.push(() => relay.close());
   const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers,
     url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`,
-    resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
+    resolveSession: () => undefined, control,
     reconnectBaseDelayMs: 5, reconnectMaxDelayMs: 10,
     onStateChange: state => states.push(state),
   });
@@ -129,3 +130,25 @@ describe('Remote Host uplink heartbeat', () => {
     }
   });
 });
+
+it('delivers a session rename over the live uplink without disconnecting the Host', async () => {
+  const body = JSON.stringify({ providerId: 'codex', nativeSessionId: 'native', title: 'Renamed', operationId: 'rename-intent' });
+  const requests: unknown[] = [];
+  const b = await broker({ intervalMs: 30000, timeoutMs: 10000 }, undefined, async request => {
+    requests.push(request);
+    return { status: 200, body: JSON.stringify({ title: 'Renamed' }) };
+  });
+  const socket = b.connections[0]!;
+  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId: 'rename',
+    method: 'POST', path: '/remote/session/rename', body }));
+  await until(() => b.responses.length === 1);
+  expect(requests).toEqual([{ requestId: 'rename', method: 'POST', path: '/remote/session/rename', body,
+    operationScope: expect.any(String) }]);
+  expect(b.responses).toEqual([{ uplinkVersion: 2, type: 'rpc_response', requestId: 'rename', status: 200,
+    body: JSON.stringify({ title: 'Renamed' }) }]);
+  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat', nonce: 'after-rename' }));
+  await until(() => b.acknowledgements.includes('after-rename'));
+  expect(socket.readyState).toBe(1);
+  expect(b.registrations()).toBe(1);
+  expect(b.states).toEqual(['connecting', 'registered']);
+}, 10000);

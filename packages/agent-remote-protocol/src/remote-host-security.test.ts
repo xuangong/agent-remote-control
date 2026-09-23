@@ -21,3 +21,15 @@ it('accepts optional durable credential exchange while preserving legacy registr
     { type: 'rpc_request', requestId: 'stop', method: 'POST', path: '/remote/stop', body: '{}', sessionId: 'other' },
   ]) expect(decodeRemoteHostUplinkMessage(JSON.stringify({ uplinkVersion: 2, ...message })).status).toBe('rejected');
 });
+
+it('accepts native session rename only as a host-scoped POST with a body', () => {
+  const message = { uplinkVersion: 2, type: 'rpc_request', requestId: 'rename',
+    method: 'POST', path: '/remote/session/rename',
+    body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native', title: 'Renamed', operationId: 'rename-intent' }) };
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify(message))).toEqual({ status: 'ok', value: message });
+  for (const change of [
+    { method: 'GET' }, { body: undefined }, { sessionId: 'relay-session' },
+    { path: '/remote/session/rename/extra' }, { path: '/remote/session/rename?extra=1' },
+    { path: '/remote/session/delete' },
+  ]) expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...message, ...change })).status).toBe('rejected');
+}, 10000);

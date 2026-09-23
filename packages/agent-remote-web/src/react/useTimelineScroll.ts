@@ -138,13 +138,17 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     const viewport = viewportRef.current;
     const content = contentRef.current;
     if (!viewport || !content || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => updateRef.current());
+    // Correct width-driven text reflow during resize, before animation callbacks.
+    // ResizeObserver remains responsible for later content and composer changes.
+    const resize = () => updateRef.current();
+    window.addEventListener('resize', resize);
+    const observer = new ResizeObserver(resize);
     observer.observe(viewport);
     observer.observe(content);
     // A replacement can move the reading line without changing the outer height.
     const mutations = new MutationObserver(() => updateRef.current());
     mutations.observe(content, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['open', 'hidden'] });
-    return () => { observer.disconnect(); mutations.disconnect(); };
+    return () => { window.removeEventListener('resize', resize); observer.disconnect(); mutations.disconnect(); };
   }, []);
 
   function pauseFollowing(): void {

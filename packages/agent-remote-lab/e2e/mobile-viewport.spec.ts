@@ -195,3 +195,40 @@ for (const first of ['window', 'visualViewport'] as const) {
     await expect(input).toBeFocused();
   });
 }
+
+for (const reading of [false, true]) {
+  test(`positions reflowed long content before the first portrait animation frame (reading=${reading})`, async ({ page }) => {
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.goto('/e2e/fixtures/markdown-reading.html?cached=1');
+    const timeline = page.getByTestId('timeline');
+    const paragraph = page.locator('.agent-markdown p').filter({ hasText: /^Paragraph 10\./ });
+    await expect(paragraph).toBeAttached();
+    await expect.poll(() => timeline.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(1);
+    if (reading) {
+      await timeline.dispatchEvent('wheel', { deltaY: -1 });
+      await paragraph.evaluate(node => {
+        const viewport = node.closest('.lab-timeline-scroll')!;
+        viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 4;
+        viewport.dispatchEvent(new Event('scroll'));
+      });
+      await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
+    }
+    // Record the first frame, rather than polling until the later observer catches up.
+    await page.evaluate((reading) => {
+      const viewport = document.querySelector('[data-testid="timeline"]')!;
+      const paragraph = Array.from(viewport.querySelectorAll('.agent-markdown p')).find(el => el.textContent?.startsWith('Paragraph 10.'))!;
+      const readingOffset = paragraph.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+      window.addEventListener('resize', () => requestAnimationFrame(() => {
+        const error = reading
+          ? paragraph.getBoundingClientRect().top - viewport.getBoundingClientRect().top - readingOffset
+          : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+        document.documentElement.dataset.rotationPositionError = String(error);
+      }), { once: true });
+    }, reading);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('html')).toHaveAttribute('data-rotation-position-error');
+    const error = Number(await page.locator('html').getAttribute('data-rotation-position-error'));
+    expect(Math.abs(error)).toBeLessThan(1);
+    if (reading) await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
+  });
+}

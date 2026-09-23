@@ -4,7 +4,7 @@ test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
 test.beforeEach(async ({ page }) => { await page.goto('/e2e/fixtures/workbench.html'); });
 
-test('keeps the composer fixed while an editable draft becomes ready to send', async ({ page }) => {
+test('keeps the composer fixed and accepting drafts through session recovery', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 740 });
   const input = page.getByTestId('prompt-input');
   const send = page.getByTestId('prompt-submit');
@@ -17,12 +17,14 @@ test('keeps the composer fixed while an editable draft becomes ready to send', a
   await expect(send).toBeEnabled();
   const ready = await geometry();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-synchronizing', { detail: true })));
-  await expect(send).toBeDisabled();
+  await expect(page.locator('.lab-conversation-status')).toHaveText('Synchronizing');
+  await expect(send).toBeEnabled();
   await expect(input).toBeEnabled();
   expect(await geometry()).toEqual(ready);
   await input.fill('My draft is ready');
   const syncing = await geometry();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-synchronizing', { detail: false })));
+  await expect(page.locator('.lab-conversation-status')).not.toHaveText('Synchronizing');
   await expect(send).toBeEnabled();
   await expect(input).toHaveValue('My draft is ready');
   expect(await geometry()).toEqual(syncing);

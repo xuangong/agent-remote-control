@@ -10,7 +10,7 @@ export class CodexDaemonControlError extends Error {
 export class CodexDaemonRestartUnknown extends Error {}
 
 /** Records intent before dispatch. Revision checks also reject retries older than the last operation. */
-export function createCodexDaemonControl(options: { stateDir: string; restart(): Promise<void> }) {
+export function createCodexDaemonControl(options: { stateDir: string; restart(operationId: string): Promise<void> }) {
   const path = join(options.stateDir, 'codex-daemon-operation.json');
   let state: CodexDaemonStatus;
   let initialization: Promise<void> | undefined;
@@ -45,7 +45,7 @@ export function createCodexDaemonControl(options: { stateDir: string; restart():
   async function complete(operationId: string) {
     let phase: CodexDaemonStatus['phase'] = 'ready';
     let message = 'Codex daemon is ready. Interrupted tasks do not resume automatically.';
-    try { await options.restart(); }
+    try { await options.restart(operationId); }
     catch (error) {
       phase = error instanceof CodexDaemonRestartUnknown ? 'unknown' : 'failed';
       message = phase === 'unknown' ? 'The restart outcome is unknown. Inspect native state before restarting again.'

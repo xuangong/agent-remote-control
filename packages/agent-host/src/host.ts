@@ -81,7 +81,7 @@ export interface AgentHostRuntime {
   close(): Promise<void>;
 }
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
-  codexDaemon?: { stateDir: string; restart(): Promise<void> };
+  codexDaemon?: { stateDir: string; restart(operationId: string): Promise<void> };
   controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string, clean?: boolean): void | Promise<void> };
   vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };

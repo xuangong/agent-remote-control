@@ -10,7 +10,7 @@ async function run(root: string, args: string[]) { let output = ''; await runDia
 const relay = { id: 'e1', timestamp: '2026-09-20T01:00:00.000Z', source: 'relay', hostId: 'h1', relayInstanceId: 'r1', event: 'host_disconnected' };
 it('finds log paths without requiring connection configuration or running services', async () => {
   const root = await setup();
-  expect(await run(root, ['--paths'])).toEqual({ controller: join(root, 'agent-host.log'), server: join(root, 'relay-diagnostics.log') });
+  expect(await run(root, ['--paths'])).toEqual({ controller: join(root, 'agent-host.log'), server: join(root, 'relay-diagnostics.log'), daemon: join(root, 'codex-daemon.log') });
 });
 it('reads archived records by source and event time without merging sources', async () => {
   const root = await setup();
@@ -29,4 +29,10 @@ it('skips partial archives and unvalidated server log records', async () => {
 });
 it.each([['--limit', '0'], ['--limit', '1001'], ['--limit', '1x'], ['--since', 'yesterday'], ['--source', 'relay'], ['--unknown']])('rejects invalid options %j', async (...args) => {
   await expect(run(await setup(), args)).rejects.toThrow();
+});
+it('queries daemon evidence by the native event time', async () => {
+  const root = await setup();
+  const event = { timestamp: '2026-09-23T03:47:30Z', observedAt: '2026-09-23T03:48:00Z', event: 'native_daemon_event' };
+  await writeFile(join(root, 'codex-daemon.log'), JSON.stringify(event) + '\n');
+  expect(await run(root, ['--source', 'daemon', '--since', '2026-09-23T03:47:00Z'])).toEqual({ daemon: [event] });
 });

@@ -52,3 +52,31 @@ it.each([['exec', 'hello'], ['daemon', 'status'], ['daemon', 'stop']])(
     expect(await runCodexCommand(args, f.root, { ...f.environment, OPENAI_API_KEY: 'inherited-key' })).toBe(0);
     expect((await f.captured()).openaiKey).toBe('inherited-key');
   }, 10000);
+
+it('persists daemon lifecycle intent, environment presence and result without credentials', async () => {
+  const f = await fixture();
+  const home = join(f.root, 'home');
+  expect(await runCodexCommand(['daemon', 'restart'], f.root, { ...f.environment, CODEX_HOME: home,
+    OPENAI_API_KEY: 'private-openai-value', CODEX_GATEWAY_API_KEY: 'private-gateway-value' })).toBe(0);
+  const text = await readFile(join(f.root, 'codex-daemon.log'), 'utf8');
+  const events = text.trim().split('\n').map(line => JSON.parse(line));
+  expect(events.map(event => event.event)).toEqual(['daemon_command_started', 'daemon_command_dispatched', 'daemon_command_completed']);
+  expect(events[0]).toMatchObject({ origin: 'cli', action: 'restart', environment: { OPENAI_API_KEY: 'present', CODEX_GATEWAY_API_KEY: 'present' } });
+  expect(events[1]).toMatchObject({ operationId: events[0].operationId, targetPid: expect.any(Number) });
+  expect(events[2]).toMatchObject({ operationId: events[0].operationId, exitCode: 0 });
+  expect(text).not.toContain('private-openai-value');
+  expect(text).not.toContain('private-gateway-value');
+}, 10000);
+it('keeps a website restart operation identifiable and appends failures instead of overwriting evidence', async () => {
+  const f = await fixture();
+  const operationId = '00000000-0000-4000-8000-000000000001';
+  await writeFile(f.environment.AGENT_HOST_CODEX, '#!/usr/bin/env node\nprocess.exit(7);\n', { mode: 0o700 });
+  expect(await runCodexCommand(['daemon', 'restart'], f.root, { ...f.environment, CODEX_HOME: join(f.root, 'home'),
+    AGENT_HOST_DAEMON_ORIGIN: 'website', AGENT_HOST_DAEMON_OPERATION_ID: operationId })).toBe(7);
+  await runCodexCommand(['daemon', 'stop'], f.root, { ...f.environment, CODEX_HOME: join(f.root, 'home') });
+  const events = (await readFile(join(f.root, 'codex-daemon.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  expect(events).toHaveLength(6);
+  expect(events[0]).toMatchObject({ operationId, origin: 'website', event: 'daemon_command_started' });
+  expect(events[2]).toMatchObject({ operationId, exitCode: 7 });
+  expect(events[3].operationId).not.toBe(operationId);
+}, 10000);

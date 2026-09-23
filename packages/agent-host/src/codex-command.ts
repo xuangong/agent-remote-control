@@ -1,3 +1,4 @@
+import { recordDaemonCommand } from './codex-daemon-diagnostics.js';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -21,6 +22,9 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
   const separator = args.indexOf('--');
   const options = args.slice(0, separator < 0 ? args.length : separator);
   let nativeArgs: string[];
+  const diagnostics = <T>(run: (onSpawn: (pid: number) => void) => Promise<T>) => recordDaemonCommand({ stateDir, home, action: args[1] ?? 'status', environment: env,
+    origin: environment.AGENT_HOST_DAEMON_ORIGIN === 'website' ? 'website' : 'cli',
+    operationId: /^[a-f0-9-]{36}$/i.test(environment.AGENT_HOST_DAEMON_OPERATION_ID ?? '') ? environment.AGENT_HOST_DAEMON_OPERATION_ID : undefined }, run);
   const daemon = args[0] === 'daemon';
   // Both native Unix lifecycle commands and the Windows manager inherit this environment.
   if (daemon && ['start', 'restart'].includes(args[1] ?? '')) env.OPENAI_API_KEY = 'arc';
@@ -28,7 +32,8 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
     if (configured.AGENT_HOST_CODEX_SOCKET) throw new Error('Windows shared Codex selects its daemon through CODEX_HOME; remove the Unix socket override.');
     if (configured.AGENT_HOST_CODEX_NOFILE) throw new Error('AGENT_HOST_CODEX_NOFILE is only supported on Unix.');
     if (args.length > 2) throw new Error('Windows daemon management accepts only start, restart, stop, or status. Configure native options in CODEX_HOME.');
-    return manageWindowsCodexDaemon(args[1] ?? 'status', executable, resolve(home), env);
+    const run = () => manageWindowsCodexDaemon(args[1] ?? 'status', executable, resolve(home), env);
+    return ['start', 'restart', 'stop'].includes(args[1] ?? '') ? diagnostics(run) : run();
   }
   if (daemon) {
     if (resolve(socket) !== defaultSocket) throw new Error('Cannot manage a daemon for a custom socket. Use the native daemon owner directly, or configure the matching CODEX_HOME and default socket.');
@@ -58,8 +63,9 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
     command = '/bin/sh';
     nativeArgs = ['-c', 'if ! ulimit -Sn "$1"; then echo "Cannot set Codex daemon file descriptor limit to $1. Daemon was not started or restarted. Check the system hard limit or set AGENT_HOST_CODEX_NOFILE." >&2; exit 1; fi; shift; exec "$@"', 'agent-remote-controller', limit, executable, ...nativeArgs];
   }
-  return new Promise<number>((resolveResult, reject) => {
+  const run = (onSpawn?: (pid: number) => void) => new Promise<number>((resolveResult, reject) => {
     const child = spawn(...nativeInvocation(command, nativeArgs), { env, stdio: 'inherit' });
+    child.once('spawn', () => { if (child.pid) onSpawn?.(child.pid); });
     const interrupt = () => { child.kill('SIGINT'); };
     const terminate = () => { child.kill('SIGTERM'); };
     process.on('SIGINT', interrupt);
@@ -68,6 +74,7 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
     child.once('error', error => { cleanup(); reject(error); });
     child.once('exit', (code, signal) => { cleanup(); resolveResult(code ?? (signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 1)); });
   });
+  return daemon && ['start', 'restart', 'stop'].includes(args[1] ?? '') ? diagnostics(run) : run();
 }
 
 const nativeCommands = new Set([

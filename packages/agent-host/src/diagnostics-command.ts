@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { isRelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
 import { DEFAULT_DIAGNOSTIC_LOG_ARCHIVES, DEFAULT_DIAGNOSTIC_LOG_MAX_BYTES, DEFAULT_DIAGNOSTIC_LINE_MAX_BYTES } from './diagnostic-log.js';
 
-type Source = 'controller' | 'server';
+type Source = 'controller' | 'server' | 'daemon';
 
 export async function runDiagnosticsCommand(args: string[], directory: string, print: (text: string) => void): Promise<void> {
   let source: Source | 'all' = 'all', since: number | undefined, limit = 100, pathsOnly = false;
@@ -11,13 +11,13 @@ export async function runDiagnosticsCommand(args: string[], directory: string, p
     const option = args[index];
     if (option === '--paths') { pathsOnly = true; continue; }
     const value = args[++index];
-    if (option === '--source' && (value === 'controller' || value === 'server' || value === 'all')) source = value;
+    if (option === '--source' && (value === 'controller' || value === 'server' || value === 'daemon' || value === 'all')) source = value;
     else if (option === '--since' && value && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value))) since = Date.parse(value);
     else if (option === '--limit' && value && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 1000) limit = Number(value);
-    else throw new Error('Usage: diagnostics [--paths] [--source controller|server|all] [--since ISO] [--limit 1..1000]');
+    else throw new Error('Usage: diagnostics [--paths] [--source controller|server|daemon|all] [--since ISO] [--limit 1..1000]');
   }
-  const paths = { controller: join(directory, 'agent-host.log'), server: join(directory, 'relay-diagnostics.log') };
-  const selected: Source[] = source === 'all' ? ['controller', 'server'] : [source];
+  const paths = { controller: join(directory, 'agent-host.log'), server: join(directory, 'relay-diagnostics.log'), daemon: join(directory, 'codex-daemon.log') };
+  const selected: Source[] = source === 'all' ? ['controller', 'server', 'daemon'] : [source];
   const result: Partial<Record<Source, unknown>> = {};
   for (const key of selected) result[key] = pathsOnly ? paths[key] : await readRecords(paths[key], key, since, limit);
   print(`${JSON.stringify(result, null, 2)}\n`);

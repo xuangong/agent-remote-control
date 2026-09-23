@@ -14,13 +14,13 @@ export function supportsCodexDaemonControl(environment: NodeJS.ProcessEnv, platf
 }
 
 /** Uses the same CLI lifecycle path as local commands, including locale, key, socket and descriptor limits. */
-export async function restartCodexDaemon(options: { stateDir: string; environment: NodeJS.ProcessEnv; cli?: string; timeoutMs?: number }): Promise<void> {
+export async function restartCodexDaemon(options: { stateDir: string; environment: NodeJS.ProcessEnv; cli?: string; timeoutMs?: number; operationId?: string }): Promise<void> {
   if (!supportsCodexDaemonControl(options.environment)) throw new Error('Shared Codex daemon management is unavailable for this Host configuration.');
   const cli = options.cli ?? fileURLToPath(new URL('./cli.js', import.meta.url));
   for (const action of ['restart', 'status']) {
     try {
       await promisify(execFile)(process.execPath, [cli, 'codex', 'daemon', action], {
-        env: { ...options.environment, AGENT_HOST_STATE_DIR: options.stateDir },
+        env: { ...options.environment, AGENT_HOST_STATE_DIR: options.stateDir, AGENT_HOST_DAEMON_ORIGIN: 'website', AGENT_HOST_DAEMON_OPERATION_ID: options.operationId },
         timeout: options.timeoutMs ?? 45000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024, windowsHide: true,
       });
     } catch (error) {

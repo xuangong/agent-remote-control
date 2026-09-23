@@ -47,3 +47,17 @@ IndexedDB version 2 keeps the existing metadata document shape and moves bytes i
 After deployment, rollback must preserve this version-2 reader/writer module. A version-1-only bundle cannot open the upgraded database. Do not delete drafts or downgrade the database. The migration test covers old embedded drafts and both readable representations; packaging a rollback build remains a release task.
 
 Cache limits are soft: mounted Main/Side/Ask panes, uncertain/failed outgoing messages, and dirty or failed-to-save drafts take priority over eviction. Payload estimates are not heap measurements. Real iPhone home-screen keyboard behavior, suspension/resume, and energy impact remain device acceptance work.
+
+## Long-reply scrolling
+
+The `e2e/timeline-scroll.browser.ts` regression renders 1,200 paragraphs with inline formatting and the production `useTimelineScroll` hook. At paragraph 1,000 in a 390px viewport, baseline `487cdfa` made 9,006 `Range.getClientRects()` calls for one `captureReadingText` operation in both Chromium and WebKit. The optimized path makes 5 calls and saves the same anchor in this fixture.
+
+The renderer now uses browser caret hit testing to locate text near the visible top before measuring its first visible character. Unsupported APIs, overlays, non-Markdown targets, and offscreen results fall back to the existing text walk. Hit testing does not change the user's selection. The saved anchor format and resize/restore behavior remain compatible.
+
+Run the bounded browser regressions from the repository root:
+
+```sh
+pnpm test:preview-browser
+```
+
+The browser suite also checks width changes, earlier content growth, unavailable/invalid hit tests, and text selection. This is a measured reduction in scroll-handler work inside long replies, not an FPS result for an entire production conversation or a real-iPhone smoothness guarantee. Large DOM paint costs and the fallback path are outside this optimization.

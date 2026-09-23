@@ -9,7 +9,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'arc-codex-command-')); roots.push(root);
   const capture = join(root, 'native.json'); const executable = join(root, 'codex');
-  await writeFile(executable, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.TEST_CAPTURE, JSON.stringify({args:process.argv.slice(2),home:process.env.CODEX_HOME,key:process.env.CODEX_GATEWAY_API_KEY,relayKey:process.env.AGENT_HOST_REMOTE_KEY,locale:process.env.LC_ALL}));\n`, { mode: 0o700 });
+  await writeFile(executable, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.TEST_CAPTURE, JSON.stringify({args:process.argv.slice(2),home:process.env.CODEX_HOME,key:process.env.CODEX_GATEWAY_API_KEY,relayKey:process.env.AGENT_HOST_REMOTE_KEY,locale:process.env.LC_ALL,openaiKey:process.env.OPENAI_API_KEY}));\n`, { mode: 0o700 });
   const environment = { AGENT_HOST_CODEX: executable, TEST_CAPTURE: capture };
   return { root, environment, captured: async () => JSON.parse(await readFile(capture, 'utf8')) };
 }
@@ -29,3 +29,26 @@ it('loads the managed Gateway key and private home from the saved opt-in for nat
   expect(await runCodexCommand(['exec', 'hello'], f.root, { TEST_CAPTURE: f.environment.TEST_CAPTURE })).toBe(0);
   expect(await f.captured()).toEqual({ args: ['exec', 'hello'], home, key: 'sk_private_gateway_key', locale: 'C' });
 }, 10000);
+
+it.each([
+  ['daemon', 'start'], ['daemon', 'restart'],
+  ['app-server', 'daemon', 'start'], ['app-server', 'daemon', 'restart'],
+])('injects the daemon API key for %j', async (...args) => {
+  const f = await fixture();
+  for (const inheritedKey of [undefined, '', 'inherited-key']) {
+    expect(await runCodexCommand(args, f.root, {
+      ...f.environment, CODEX_HOME: join(f.root, 'home'), OPENAI_API_KEY: inheritedKey,
+      CODEX_GATEWAY_API_KEY: 'gateway-key',
+    })).toBe(0);
+    expect(await f.captured()).toMatchObject({
+      args: ['app-server', 'daemon', args.at(-1)],
+      openaiKey: 'arc', key: 'gateway-key', locale: 'C',
+    });
+  }
+}, 10000);
+it.each([['exec', 'hello'], ['daemon', 'status'], ['daemon', 'stop']])(
+  'preserves the API key outside daemon startup for %j', async (...args) => {
+    const f = await fixture();
+    expect(await runCodexCommand(args, f.root, { ...f.environment, OPENAI_API_KEY: 'inherited-key' })).toBe(0);
+    expect((await f.captured()).openaiKey).toBe('inherited-key');
+  }, 10000);

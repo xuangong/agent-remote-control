@@ -24,6 +24,7 @@ if (args.includes('--version')) { console.log('codex-cli 0.153.4'); process.exit
 if (args[0] !== 'app-server') {
   require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify({args, hasToken:!!process.env.CODEX_REMOTE_AUTH_TOKEN})); process.exit();
 }
+if(process.env.OPENAI_API_KEY !== 'arc') { console.error('Missing daemon API key'); process.exit(1); }
 const {WebSocketServer} = require(${JSON.stringify(wsPath)});
 const url = new URL(args[args.indexOf('--listen')+1]);
 const token = require('node:fs').readFileSync(args[args.indexOf('--ws-token-file')+1], 'utf8');

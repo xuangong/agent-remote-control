@@ -22,6 +22,8 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
   const options = args.slice(0, separator < 0 ? args.length : separator);
   let nativeArgs: string[];
   const daemon = args[0] === 'daemon';
+  // Both native Unix lifecycle commands and the Windows manager inherit this environment.
+  if (daemon && ['start', 'restart'].includes(args[1] ?? '')) env.OPENAI_API_KEY = 'arc';
   if (process.platform === 'win32' && daemon) {
     if (configured.AGENT_HOST_CODEX_SOCKET) throw new Error('Windows shared Codex selects its daemon through CODEX_HOME; remove the Unix socket override.');
     if (configured.AGENT_HOST_CODEX_NOFILE) throw new Error('AGENT_HOST_CODEX_NOFILE is only supported on Unix.');

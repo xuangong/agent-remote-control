@@ -61,6 +61,13 @@ in `<CODEX_HOME>/agent-remote-daemon`. Keep that directory private to your accou
 Unix socket and file-descriptor-limit overrides must be unset on Windows.
 On macOS/Linux, the Controller daemon start/restart command defaults to a soft
 file descriptor limit of `8192`, configurable through `AGENT_HOST_CODEX_NOFILE`.
+On every platform, `agent-remote-controller codex daemon start|restart` explicitly
+sets `OPENAI_API_KEY=arc` for the daemon process, replacing any inherited value.
+The `codex app-server daemon start|restart` aliases do the same. No shell-specific
+environment assignment is needed in PowerShell, Command Prompt, or Unix shells.
+This leaves `CODEX_GATEWAY_API_KEY` and ordinary Codex CLI invocation credentials
+unchanged. Starting an already running daemon does not change its environment;
+use an explicit restart to apply it.
 
 Use `agent-remote-controller codex daemon status|restart|stop` to manage this
 independent runtime. Stopping the Controller or closing a client leaves it running.

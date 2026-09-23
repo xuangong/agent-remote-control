@@ -399,7 +399,12 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (['/auth/sessions', '/auth/sessions/revoke', '/auth/sessions/revoke-all', '/auth/audit'].includes(url.pathname)) {
       const grant = await authorize(request); if (grant instanceof Response) return grant;
       if (request.headers.has('origin') && !originAllowed(request)) return json(403, {error:'Origin is not allowed.'});
-      if (request.method === 'GET' && url.pathname === '/auth/sessions') return json(200, {sessions:sessions.list(grant.subject, request), authenticatedAt:grant.authenticatedAt ?? null, recentAuthentication:security.recent(grant.authenticatedAt)});
+      if (request.method === 'GET' && url.pathname === '/auth/sessions') {
+        const browser = await sessions.browserCookie(request);
+        const response = json(200, { sessions: sessions.list(grant.subject, request), authenticatedAt: grant.authenticatedAt ?? null, recentAuthentication: security.recent(grant.authenticatedAt) });
+        if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${browser}; ${cookieFlags}; Max-Age=31536000`);
+        return response;
+      }
       if (request.method === 'GET' && url.pathname === '/auth/audit') return json(200, {events:security.events(grant.subject)});
       if (request.method !== 'POST' || !originAllowed(request)) return json(403, {error:'Same-origin POST is required.'});
       if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, {error:'JSON is required.'});

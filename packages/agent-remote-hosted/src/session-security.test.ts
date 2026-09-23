@@ -97,7 +97,8 @@ it('upgrades a legacy current login without merging unrelated legacy records', a
   await sessions.exchange(grant, new Request(auth.origin, { headers: { cookie: `__Host-arc_browser=${cookie}` } }));
   const rows = sessions.list('alice', request);
   expect(rows).toHaveLength(2);
-  expect(rows.find(row => row.current)?.sessionCount).toBe(2);
+  expect(rows.find(row => row.current)).toMatchObject({ sessionCount: 2, identified: true });
+  expect(rows.find(row => !row.current)).toMatchObject({ identified: false });
 });
 
 it('keeps only the latest daily activity within a rolling seven-day window', () => {

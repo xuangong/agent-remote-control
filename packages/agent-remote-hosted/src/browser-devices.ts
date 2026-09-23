@@ -34,7 +34,7 @@ export function browserActivity(values: number[], now = Date.now()): number[] {
 
 export function browserGroups(records: SavedGatewaySession[], currentHash?: string) {
   const now = Date.now();
-  const groups = new Map<string, { id: string; label: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean; sessionCount: number; activity: number[] }>();
+  const groups = new Map<string, { id: string; label: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean; identified: boolean; sessionCount: number; activity: number[] }>();
   for (const record of records) {
     const id = record.browserId ? `browser:${record.browserId}` : record.id!;
     const lastSeenAt = record.lastSeenAt ?? record.createdAt ?? 0;
@@ -48,7 +48,7 @@ export function browserGroups(records: SavedGatewaySession[], currentHash?: stri
       existing.current ||= currentHash === record.hash;
       existing.sessionCount++;
       existing.activity = browserActivity([...existing.activity, ...activity], now);
-    } else groups.set(id, { id, label: record.label ?? 'Previously signed-in browser', createdAt: record.createdAt ?? 0, lastSeenAt, expiresAt: record.sessionExpiresAt, current: currentHash === record.hash, sessionCount: 1, activity });
+    } else groups.set(id, { id, label: record.label ?? 'Previously signed-in browser', createdAt: record.createdAt ?? 0, lastSeenAt, expiresAt: record.sessionExpiresAt, current: currentHash === record.hash, identified: !!record.browserId, sessionCount: 1, activity });
   }
   return [...groups.values()].filter(row => row.current || row.lastSeenAt > now - browserActivityWindow)
     .sort((a, b) => Number(b.current) - Number(a.current) || b.lastSeenAt - a.lastSeenAt);

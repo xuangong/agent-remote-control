@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { SecurityPanel } from './SecurityPanel.js';
 const now = Date.now();
-const current = { id: 'current-id', label: 'This laptop', createdAt: now, lastSeenAt: now, expiresAt: now + 3600000, current: true };
+const current = { id: 'current-id', label: 'This laptop', createdAt: now, lastSeenAt: now, expiresAt: now + 3600000, current: true, identified: true };
 const other = { ...current, id: 'other-id', label: 'Mobile Safari', current: false };
 const list = { sessions: [current, other], authenticatedAt: now, recentAuthentication: true };
 afterEach(() => vi.unstubAllGlobals());
@@ -70,4 +70,18 @@ it('shows one browser row with grouped sign-ins and expandable seven-day activit
   expect(view.textContent).toContain('3 sign-ins');
   expect(view.textContent).toContain('Activity in the last 7 days');
   expect(view.querySelectorAll('details li')).toHaveLength(2);
+});
+
+it('separates unidentified old sign-ins from the browser inventory instead of claiming each is a device', async () => {
+  const legacy = { ...other, identified: false, id: 'legacy-one' };
+  vi.stubGlobal('fetch', async (url: string) => url === '/auth/sessions' ? Response.json({ ...list, sessions: [current, legacy, { ...legacy, id: 'legacy-two' }] }) : Response.json({ events: [] }));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={() => undefined} />);
+  expect(view.querySelectorAll('[aria-label="Identified browsers"] > li')).toHaveLength(1);
+  const older = view.querySelector<HTMLDetailsElement>('.gateway-security-legacy')!;
+  expect(older).not.toBeNull();
+  expect(older.open).toBe(false);
+  expect(older.querySelector('summary')?.textContent).toBe('Earlier sign-ins (2)');
+  expect(older.textContent).not.toContain('Browser legacy');
+  await act(async () => { older.open = true; button(older, 'Sign out this login').click(); });
+  expect(view.querySelector('[aria-label="Confirm browser sign-out"]')?.textContent).toContain('earlier sign-in');
 });

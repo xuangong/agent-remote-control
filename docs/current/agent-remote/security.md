@@ -205,3 +205,9 @@ observations from retained sign-ins, not a complete login audit. Session expirat
 and sign-out can remove their history. The seven-day filter does not expire access.
 Signing out a row revokes all credentials in that account's browser group, including
 older credentials; signing out all browsers also covers entries outside the window.
+
+The main browser list contains identified browser groups. Unidentified legacy
+credentials appear under the collapsed Earlier sign-ins section, with an explicit
+record count rather than a device count. Each remains individually revocable.
+Opening the inventory also establishes the current browser identity, even if the
+page has not called the status or refresh endpoint since the feature was deployed.

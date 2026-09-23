@@ -1,7 +1,7 @@
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { signInReturnKey } from '@orchardworks/agent-remote-hosted/access-page';
 
-export interface BrowserSession { id: string; label: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean; sessionCount?: number; activity?: number[] }
+export interface BrowserSession { id: string; label: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean; identified?: boolean; sessionCount?: number; activity?: number[] }
 export interface BrowserSessions { sessions: BrowserSession[]; authenticatedAt: number | null; recentAuthentication: boolean }
 export interface SecurityEvent { id: string; at: number; action: string; outcome: string; hostId?: string }
 export class SecurityError extends Error {
@@ -35,7 +35,7 @@ export async function browserSessions(signal?: AbortSignal): Promise<BrowserSess
   const value = await request('/auth/sessions', signal);
   if (!record(value) || !Array.isArray(value.sessions) || typeof value.recentAuthentication !== 'boolean' ||
     !(value.authenticatedAt === null || timestamp(value.authenticatedAt)) || !value.sessions.every(item => record(item) &&
-      typeof item.id === 'string' && typeof item.label === 'string' && timestamp(item.createdAt) && timestamp(item.lastSeenAt) && timestamp(item.expiresAt) && typeof item.current === 'boolean' && (item.sessionCount === undefined || (Number.isInteger(item.sessionCount) && (item.sessionCount as number) > 0)) && (item.activity === undefined || (Array.isArray(item.activity) && item.activity.length <= 8 && item.activity.every(timestamp))))) throw new SecurityError('The browser session list is invalid.');
+      typeof item.id === 'string' && typeof item.label === 'string' && timestamp(item.createdAt) && timestamp(item.lastSeenAt) && timestamp(item.expiresAt) && typeof item.current === 'boolean' && (item.identified === undefined || typeof item.identified === 'boolean') && (item.sessionCount === undefined || (Number.isInteger(item.sessionCount) && (item.sessionCount as number) > 0)) && (item.activity === undefined || (Array.isArray(item.activity) && item.activity.length <= 8 && item.activity.every(timestamp))))) throw new SecurityError('The browser session list is invalid.');
   return value as unknown as BrowserSessions;
 }
 export async function securityAudit(signal?: AbortSignal): Promise<SecurityEvent[]> {

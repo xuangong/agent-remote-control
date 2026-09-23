@@ -77,9 +77,10 @@ it('preserves an unconsumed browser challenge through restart and consumes it ex
   await f.restart();
   const accepted = await exchange();
   expect(accepted.status).toBe(200);
-  expect(accepted.headers.getSetCookie()).toHaveLength(2);
+  expect(accepted.headers.getSetCookie()).toHaveLength(3);
   expect(accepted.headers.getSetCookie()[0]).toContain('arc_session=');
-  expect(accepted.headers.getSetCookie()[1]).toContain('arc_login=;');
+  expect(accepted.headers.getSetCookie().some(cookie => cookie.startsWith('arc_browser='))).toBe(true);
+  expect(accepted.headers.getSetCookie().some(cookie => cookie.startsWith('arc_login=;'))).toBe(true);
   expect(await accepted.json()).toMatchObject({ hostId: 'selected-host', returnPath: '/?host=selected-host&provider=claude&session=native-child&parent=native-root' });
   await f.restart();
   expect((await exchange()).status).toBe(401);

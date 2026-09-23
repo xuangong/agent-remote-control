@@ -4,6 +4,7 @@ import { browserSessions, revokeAllBrowserSessions, revokeBrowserSession, securi
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 
 const time = (value: number) => value === 0 ? 'Not recorded' : new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const identifiedBrowser = (session: BrowserSession) => session.current || (session.identified ?? session.id.startsWith('browser:'));
 const readable = (value: string) => value.replace(/[_.-]+/g, ' ').replace(/^./, letter => letter.toUpperCase());
 export function SecurityPanel({ onClose, onSignedOut }: { onClose(): void; onSignedOut(): void }) {
   const [sessions, setSessions] = useState<BrowserSessions>();
@@ -46,6 +47,13 @@ export function SecurityPanel({ onClose, onSignedOut }: { onClose(): void; onSig
       if (!abort?.signal.aborted) { if (error instanceof SecurityError && error.status === 401) onSignedOut(); else setFailure(error instanceof Error ? error.message : 'Could not sign out the browser.'); }
     } finally { if (!abort?.signal.aborted) setBusy(false); }
   }
+  const renderSession = (session: BrowserSession) => <li key={session.id}>
+          <div><strong>{session.label}</strong>{session.current ? <span className="gateway-security-current">This browser</span> : null}
+            <p>Last active <time dateTime={session.lastSeenAt ? new Date(session.lastSeenAt).toISOString() : undefined}>{time(session.lastSeenAt)}</time></p>
+            <p>{identifiedBrowser(session) ? 'Browser' : 'Sign-in record'} {session.id.replace(/^browser:/, '').slice(0, 8)}{session.sessionCount && session.sessionCount > 1 ? ` · ${session.sessionCount} sign-ins` : ''}</p>
+            {session.activity?.length ? <details><summary>Activity in the last 7 days</summary><ul>{session.activity.map(at => <li key={at}><time dateTime={new Date(at).toISOString()}>{time(at)}</time></li>)}</ul><p>Latest activity per UTC day.</p></details> : null}</div>
+          <button type="button" disabled={busy} aria-label={session.current ? undefined : `Sign out ${session.label}`} onClick={() => setConfirmation(session)}>{session.current ? 'Sign out this browser' : identifiedBrowser(session) ? 'Sign out browser' : 'Sign out this login'}</button>
+        </li>;
   return <main className="gateway-security" aria-labelledby="security-title" onKeyDown={event => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose(); } }}>
     <div className="gateway-security-content">
       <header className="gateway-security-header"><button type="button" disabled={busy} onClick={onClose}>Back to conversation</button><h1 id="security-title" ref={heading} tabIndex={-1}>Security</h1></header>
@@ -56,17 +64,16 @@ export function SecurityPanel({ onClose, onSignedOut }: { onClose(): void; onSig
         {notice ? <p role="status">{notice}</p> : null}
         {!sessions && !failure ? <p role="status">Loading signed-in browsers…</p> : null}
         {sessions?.sessions.length === 0 ? <p>No active browsers were returned. Refresh to check your access.</p> : null}
-        <ul className="gateway-security-list">{sessions?.sessions.map(session => <li key={session.id}>
-          <div><strong>{session.label}</strong>{session.current ? <span className="gateway-security-current">This browser</span> : null}
-            <p>Last active <time dateTime={session.lastSeenAt ? new Date(session.lastSeenAt).toISOString() : undefined}>{time(session.lastSeenAt)}</time></p>
-            <p>Browser {session.id.replace(/^browser:/, '').slice(0, 8)}{session.sessionCount && session.sessionCount > 1 ? ` · ${session.sessionCount} sign-ins` : ''}</p>
-            {session.activity?.length ? <details><summary>Activity in the last 7 days</summary><ul>{session.activity.map(at => <li key={at}><time dateTime={new Date(at).toISOString()}>{time(at)}</time></li>)}</ul><p>Latest activity per UTC day.</p></details> : null}</div>
-          <button type="button" disabled={busy} aria-label={session.current ? undefined : `Sign out ${session.label}`} onClick={() => setConfirmation(session)}>{session.current ? 'Sign out this browser' : 'Sign out browser'}</button>
-        </li>)}</ul>
+        <ul className="gateway-security-list" aria-label="Identified browsers">{sessions?.sessions.filter(identifiedBrowser).map(renderSession)}</ul>
+        {sessions?.sessions.some(session => !identifiedBrowser(session)) ? <details className="gateway-security-legacy">
+          <summary>Earlier sign-ins ({sessions.sessions.filter(session => !identifiedBrowser(session)).length})</summary>
+          <p>These older sign-ins have no browser identity. They may belong to the same device; each record is not a separate browser. Review and sign out any you do not recognize.</p>
+          <ul className="gateway-security-list">{sessions.sessions.filter(session => !identifiedBrowser(session)).map(renderSession)}</ul>
+        </details> : null}
         <p>Signing out a browser revokes all its sign-ins. Hosts stay paired. Sign out all browsers also includes browsers inactive for more than 7 days.</p>
         {sessions?.sessions.length ? <button type="button" disabled={busy} onClick={() => setConfirmation('all')}>Sign out all browsers</button> : null}
         {confirmation ? <div className="gateway-security-confirmation" role="group" aria-label="Confirm browser sign-out">
-          <p>{confirmation === 'all' ? 'Sign out every browser, including this one?' : `Sign out ${confirmation.label}${confirmation.current ? ' (this browser)' : ''}?`}</p>
+          <p>{confirmation === 'all' ? 'Sign out every browser, including this one?' : `Sign out ${confirmation.label}${confirmation.current ? ' (this browser)' : identifiedBrowser(confirmation) ? '' : ' (earlier sign-in)'}?`}</p>
           <button type="button" disabled={busy} onClick={() => void revoke()}>{busy ? 'Signing out…' : 'Confirm sign out'}</button>
           <button type="button" disabled={busy} onClick={() => setConfirmation(undefined)}>Cancel</button>
         </div> : null}

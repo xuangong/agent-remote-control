@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { getLayoutDiagnosticsStatus, recordViewportDecision } from '../layout-diagnostics.js';
 
 export function useVisualViewport(onUpdate?: () => void) {
   const latestUpdate = useRef(onUpdate);
@@ -40,6 +41,9 @@ export function useVisualViewport(onUpdate?: () => void) {
         // Retain its bounds and safe-area policy until both viewports describe the
         // same width, instead of expanding to full height and shrinking again.
         if (aligned) occluded = Math.max(layoutHeight, retainReference ? unobscuredHeight : 0) - height > 100;
+        const diagnostic = getLayoutDiagnosticsStatus().recording
+          ? { aligned, height, layoutHeight, referenceHeight: unobscuredHeight, editing, occluded } : undefined;
+        if (diagnostic) recordViewportDecision('before', diagnostic);
         shell.dataset.viewportOccluded = String(occluded);
         if (aligned && occluded) {
           shell.style.setProperty('--lab-viewport-height', `${height}px`);
@@ -51,6 +55,7 @@ export function useVisualViewport(onUpdate?: () => void) {
           shell.style.removeProperty('--lab-viewport-height');
           shell.style.removeProperty('--lab-viewport-top');
         }
+        if (diagnostic) recordViewportDecision('after', diagnostic);
         latestUpdate.current?.();
       });
     };

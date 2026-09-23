@@ -1,4 +1,6 @@
 import { CachePrivacySettings } from './components/CachePrivacySettings.js';
+import { LayoutDiagnosticsSettings } from './components/LayoutDiagnosticsSettings.js';
+import { stopLayoutDiagnostics } from './layout-diagnostics.js';
 import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 import { WorkspaceReady, workspaceFetch, workspaceSocket, readWorkspaceAccess } from './workspace-access.js';
 import { readWorkspaceSnapshot, saveWorkspaceSnapshot } from './workspace-cache.js';
@@ -149,6 +151,7 @@ function AppContent({
   useEffect(() => { if (accessReady) setActivated(true); }, [accessReady]);
   const accessReadyRef = useRef(accessReady); accessReadyRef.current = accessReady;
   const shellRef = useVisualViewport();
+  useEffect(() => () => stopLayoutDiagnostics('unmount'), []);
   const askPositionRef = useRef<FloatingPosition>(null);
   const askTriggerRef = useRef<HTMLButtonElement>(null);
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
@@ -1182,6 +1185,7 @@ function AppContent({
       {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         <MobileDisplaySettings />
         <CachePrivacySettings />
+        <LayoutDiagnosticsSettings />
       </section> : null}
       {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
       {directory && sessionPanel !== 'favorites' ? <HostPairing compact={compactLayout && sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}

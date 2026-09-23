@@ -998,6 +998,11 @@ textarea {
 .gateway-private { display: contents; }
 .gateway-private[hidden] { display: none; }
 
+.lab-layout-diagnostics-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lab-layout-diagnostics-note { font-size: 12px; color: var(--obs-text-secondary); }
+.lab-layout-diagnostics-output { display: grid; gap: 6px; min-width: 0; margin-top: 12px; }
+.lab-layout-diagnostics-output textarea { min-width: 0; max-width: 100%; height: 150px; font-family: var(--obs-mono); font-size: 16px; overflow-wrap: anywhere; }
+
 .lab-mobile-navigation { display: none; }
 .lab-session-search, .lab-browse-provider { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; margin: 12px 0; color: var(--obs-text-secondary); }
 .lab-session-search input { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); color: var(--obs-text); background: var(--obs-surface); }

@@ -10,8 +10,6 @@ export function useVisualViewport(onUpdate?: () => void) {
     const shell = ref.current;
     if (!viewport || !shell) return;
     const coarsePointer = window.matchMedia('(pointer: coarse)');
-    const standalonePhone = /iPhone/.test(navigator.userAgent) &&
-      ((navigator as Navigator & { standalone?: boolean }).standalone === true || window.matchMedia('(display-mode: standalone)').matches);
     let frame = 0;
     let settling: number[] = [];
     let referenceWidth = window.innerWidth;
@@ -43,28 +41,16 @@ export function useVisualViewport(onUpdate?: () => void) {
         // Retain its bounds and safe-area policy until both viewports describe the
         // same width, instead of expanding to full height and shrinking again.
         if (aligned) occluded = Math.max(layoutHeight, retainReference ? unobscuredHeight : 0) - height > 100;
-        let standaloneHeight: number | null = null;
-        if (standalonePhone && coarsePointer.matches && aligned && !occluded &&
-            screen.height > screen.width && Math.abs(screen.width - window.innerWidth) <= 1 &&
-            Math.abs(viewport.height - layoutHeight) <= 1 && Math.abs(viewport.offsetTop) <= 1 && Math.abs(window.scrollY) <= 1) {
-          const topInset = Number.parseFloat(getComputedStyle(shell).getPropertyValue('--lab-safe-area-top')) || 0;
-          // A Home Screen launch can reserve the notch while excluding that same
-          // inset from all viewport heights. Expand only for that exact mismatch;
-          // release the override as soon as native geometry agrees with the screen.
-          if (topInset > 0 && Math.abs(screen.height - layoutHeight - topInset) <= 1) standaloneHeight = screen.height;
-        }
         const diagnostic = getLayoutDiagnosticsStatus().recording
-          ? { aligned, height, layoutHeight, referenceHeight: unobscuredHeight, editing, occluded, standaloneHeight } : undefined;
+          ? { aligned, height, layoutHeight, referenceHeight: unobscuredHeight, editing, occluded } : undefined;
         if (diagnostic) recordViewportDecision('before', diagnostic);
         shell.dataset.viewportOccluded = String(occluded);
         if (aligned && occluded) {
           shell.style.setProperty('--lab-viewport-height', `${height}px`);
           shell.style.setProperty('--lab-viewport-top', `${viewport.offsetTop}px`);
-        } else if (standaloneHeight !== null) {
-          shell.style.setProperty('--lab-viewport-height', `${standaloneHeight}px`);
-          shell.style.removeProperty('--lab-viewport-top');
         } else if (!occluded) {
           // Let CSS dynamic viewport units participate in the native rotation.
+          // The physical screen can exceed the usable Home Screen viewport.
           // Copying unoccluded measurements into pixels adds a second layout pass
           // and converts late fractional height/offset samples into content shifts.
           shell.style.removeProperty('--lab-viewport-height');

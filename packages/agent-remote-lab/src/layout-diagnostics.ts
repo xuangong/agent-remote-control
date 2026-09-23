@@ -2,7 +2,7 @@
 const limits = { maxSamples: 800, frameWindowMs: 3000, recordingMs: 600_000 };
 type StopReason = 'manual' | 'timeout' | 'pagehide' | 'unmount';
 type Status = { recording: boolean; hasRecording: boolean; stopReason?: StopReason };
-type ViewportDecision = { aligned: boolean; height: number; layoutHeight: number; referenceHeight: number; editing: boolean; occluded: boolean; standaloneHeight?: number | null };
+type ViewportDecision = { aligned: boolean; height: number; layoutHeight: number; referenceHeight: number; editing: boolean; occluded: boolean };
 let status: Status = { recording: false, hasRecording: false };
 const listeners = new Set<() => void>();
 let samples: Record<string, unknown>[] = [];

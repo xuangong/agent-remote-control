@@ -52,7 +52,7 @@ test('reserves the notch once above navigation and keeps controls inside each ro
 
 // Replay the contradictory launch measurements; desktop WebKit cannot reproduce
 // the native Home Screen window or its system scroll-edge effect.
-test('fills the standalone launch gap and hands sizing back after native recovery', async ({ page, browserName }, info) => {
+test('keeps composer controls inside the standalone viewport before native recovery', async ({ page, browserName }, info) => {
   test.skip(browserName !== 'chromium' || !info.project.use.isMobile, 'Uses CSS safe-area emulation through CDP.');
   await page.setViewportSize({ width: 402, height: 812 });
   const cdp = await page.context().newCDPSession(page);
@@ -69,16 +69,27 @@ test('fills the standalone launch gap and hands sizing back after native recover
   await page.goto('/e2e/fixtures/session-stars.html?sidebar=1');
   const shell = page.locator('.lab-shell');
   const dock = page.locator('.lab-composer-dock').first();
-  await expect(shell).toHaveCSS('height', '874px');
   await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
+  const expectVisibleComposer = async () => {
+    const viewportBottom = await page.evaluate(() => visualViewport!.offsetTop + visualViewport!.height);
+    await expect.poll(async () => {
+      const send = (await page.getByTestId('prompt-submit').boundingBox())!;
+      return send.y + send.height;
+    }).toBeLessThanOrEqual(viewportBottom);
+    const frame = (await page.locator('.lab-composer-dock .agent-composer').first().boundingBox())!;
+    const bounds = (await dock.boundingBox())!;
+    expect(frame.y).toBeGreaterThanOrEqual(0);
+    expect(frame.y + frame.height).toBeLessThanOrEqual(viewportBottom - 34);
+    expect(bounds.y + bounds.height).toBeCloseTo(viewportBottom, 1);
+  };
+  await expectVisibleComposer();
   const before = (await dock.boundingBox())!;
-  expect(before.y + before.height).toBeCloseTo(874, 1);
-  const frame = (await page.locator('.lab-composer-dock .agent-composer').first().boundingBox())!;
-  expect(before.y + before.height - frame.y - frame.height).toBeCloseTo(40, 1);
+  await page.screenshot({ path: info.outputPath('standalone-launch-composer.png') });
   await page.setViewportSize({ width: 402, height: 874 });
-  await expect.poll(() => shell.evaluate(el => el.style.getPropertyValue('--lab-viewport-height'))).toBe('');
+  await expect(shell).toHaveCSS('height', '874px');
+  await expectVisibleComposer();
   const after = (await dock.boundingBox())!;
-  expect(after.y).toBeCloseTo(before.y, 1);
+  expect(after.y - before.y).toBeCloseTo(62, 1);
   await expect(page.getByRole('navigation', { name: 'Session navigation' })).toHaveCSS('filter', 'none');
   // An independent sticky navigation layer must keep both menus usable.
   await page.getByRole('button', { name: 'Favorites', exact: true }).click();

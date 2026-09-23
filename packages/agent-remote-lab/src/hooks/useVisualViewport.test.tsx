@@ -1,4 +1,4 @@
-import { act, type CSSProperties } from 'react';
+import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup';
 import { useVisualViewport } from './useVisualViewport';
@@ -9,15 +9,15 @@ function property(target: object, key: string, value: unknown) {
   descriptors.push([target, key, Object.getOwnPropertyDescriptor(target, key)]);
   Object.defineProperty(target, key, { configurable: true, value });
 }
-function Harness({ safeAreaTop = 0 }: { safeAreaTop?: number }) {
+function Harness() {
   const ref = useVisualViewport();
-  return <main ref={ref} style={{ '--lab-safe-area-top': `${safeAreaTop}px` } as CSSProperties}><textarea defaultValue="Keep this draft" /></main>;
+  return <main ref={ref}><textarea defaultValue="Keep this draft" /></main>;
 }
 async function advance(ms: number) {
   await act(async () => { vi.advanceTimersByTime(ms); });
 }
-async function mount(safeAreaTop = 0) {
-  const container = await render(<Harness safeAreaTop={safeAreaTop} />);
+async function mount() {
+  const container = await render(<Harness />);
   await advance(1000);
   return container.querySelector('main')!;
 }
@@ -186,14 +186,14 @@ function standaloneLaunch() {
   Object.assign(viewport, { width: 402, height: 812 });
 }
 
-it('fills the standalone screen when launch bounds omit exactly the reserved top safe area', async () => {
+it('keeps standalone viewport sizing through keyboard recovery on a larger physical screen', async () => {
   standaloneLaunch();
-  const shell = await mount(62);
-  expect(height(shell)).toBe('874px');
+  const shell = await mount();
+  expect(height(shell)).toBe('');
   expect(shell.dataset.viewportOccluded).toBe('false');
   shell.querySelector('textarea')!.focus();
   await advance(32);
-  expect(height(shell)).toBe('874px');
+  expect(height(shell)).toBe('');
   viewport.height = 400;
   viewport.dispatchEvent(new Event('resize'));
   await advance(32);
@@ -202,9 +202,9 @@ it('fills the standalone screen when launch bounds omit exactly the reserved top
   viewport.height = 812;
   viewport.dispatchEvent(new Event('resize'));
   await advance(32);
-  expect(height(shell)).toBe('874px');
+  expect(height(shell)).toBe('');
   expect(shell.dataset.viewportOccluded).toBe('false');
-  // Release the override even when document.clientHeight is still stale.
+  // Native viewport recovery can leave document.clientHeight stale.
   property(window, 'innerHeight', 874);
   Object.assign(viewport, { height: 874 });
   window.dispatchEvent(new Event('resize'));
@@ -213,10 +213,10 @@ it('fills the standalone screen when launch bounds omit exactly the reserved top
   expect(shell.querySelector('textarea')!.value).toBe('Keep this draft');
 });
 
-it('releases the launch correction on rotation before receiving matching visual viewport bounds', async () => {
+it('keeps CSS sizing when standalone rotation bounds arrive separately', async () => {
   standaloneLaunch();
-  const shell = await mount(62);
-  expect(height(shell)).toBe('874px');
+  const shell = await mount();
+  expect(height(shell)).toBe('');
   property(window, 'innerWidth', 874);
   property(window, 'innerHeight', 402);
   property(document.documentElement, 'clientHeight', 402);
@@ -225,22 +225,3 @@ it('releases the launch correction on rotation before receiving matching visual 
   expect(height(shell)).toBe('');
   expect(shell.dataset.viewportOccluded).toBe('false');
 });
-
-for (const scenario of ['browser', 'other-device', 'no-inset', 'different-gap', 'narrow-window', 'offset', 'zoom'] as const) {
-  it(`does not expand standalone launch bounds for ${scenario}`, async () => {
-    standaloneLaunch();
-    let inset = 62;
-    if (scenario === 'browser') {
-      property(navigator, 'standalone', false);
-      property(window, 'matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)' }));
-    }
-    if (scenario === 'other-device') property(navigator, 'userAgent', 'Android');
-    if (scenario === 'no-inset') inset = 0;
-    if (scenario === 'different-gap') inset = 34;
-    if (scenario === 'narrow-window') property(screen, 'width', 430);
-    if (scenario === 'offset') viewport.offsetTop = 62;
-    if (scenario === 'zoom') viewport.scale = 2;
-    const shell = await mount(inset);
-    expect(height(shell)).toBe('');
-  });
-}

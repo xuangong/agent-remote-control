@@ -249,15 +249,18 @@ window and shell heights remain 874 px, the top safe area remains 62 px, and the
 composer moves down by exactly 62 px. `document.clientHeight` remains stale at
 812 px. There is no keyboard occlusion in either settled state.
 
-For an iPhone Home Screen window at scale 1, the viewport hook now corrects only
-an exact screen-height-minus-top-inset mismatch. It requires matching screen and
-window widths, matching visual and layout heights, portrait screen geometry,
-a positive measured top inset, and zero viewport/root scroll offsets. The top
-inset comes from CSS rather than a device-specific number. Keyboard sizing keeps
-priority. Native recovery or rotation removes the correction; normal browser
-tabs, zero-inset older installations, unrelated height differences and zoom do
-not qualify. The same inherited inset is available to the toast viewport hook.
-No additional polling, reloads or scroll resets are introduced.
+A later device screenshot shows that usable content ends at exactly 812 px,
+leaving the remaining 62 px blank. Expanding the shell to the physical screen
+height therefore places composer controls outside the visible window. A browser
+replay confirms this: with an 812 px viewport and an 874 px shell, the send button
+extends to 829 px. Returning the shell to `100dvh` places it within the viewport.
+
+The viewport hook leaves unoccluded sizing to CSS dynamic viewport units and does
+not expand to `screen.height`. Keyboard bounds still take priority. This fixes
+application-owned clipping; it does not establish why the native window leaves
+62 px blank, nor does it recover screen space outside that window. Regression
+tests check the composer and send button before enlarging the simulated viewport,
+then check native recovery, keyboard dismissal and rotation separately.
 
 Mobile navigation is independently sticky with an opaque background. WebKit's
 [fixed-container sampling](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/page/LocalFrameView.cpp)
@@ -266,9 +269,10 @@ recognizes fixed/sticky edge containers, and its
 uses native content insets and color-extension views when deciding whether to
 hide the system edge effect. This motivates exposing the header as its own edge
 instead of relying on the viewport-sized fixed shell. It is a targeted mitigation,
-not proof that a particular iOS build will suppress all system blur. No CSS blur,
+not proof that a particular iOS build will suppress all system blur. The device
+still shows a washed-out navigation row, so this remains unresolved. No CSS blur,
 extra overlay, or extra top padding is added. Diagnostics include the header's
-position, background, opacity and filter styles plus the chosen launch correction.
+position, background, opacity and filter styles.
 
 Home Screen web apps are the primary mobile target, regardless of which browser
 added the icon. Ordinary browser tabs are a separate validation environment.

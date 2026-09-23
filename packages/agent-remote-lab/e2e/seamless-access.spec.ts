@@ -23,7 +23,7 @@ test('cached startup and foreground recovery keep the editor while business traf
     const timeline = page.getByTestId('timeline');
     await timeline.evaluate(element => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -150, bubbles: true }));
-      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - 150);
+      element.scrollTop = -150;
       element.dispatchEvent(new Event('scroll'));
     });
     const readingTop = await timeline.evaluate(element => element.scrollTop);

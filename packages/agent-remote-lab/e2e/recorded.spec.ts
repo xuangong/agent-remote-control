@@ -13,7 +13,7 @@ test('sends a multiline conversation through the Relay and returns focus to an e
   const input = page.getByTestId('prompt-input');
   const timeline = page.getByTestId('timeline');
   const expectLatest = async (): Promise<void> => {
-    await expect.poll(() => timeline.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(1);
+    await expect.poll(() => timeline.evaluate((element) => -element.scrollTop)).toBeLessThanOrEqual(1);
     await expect(page.getByRole('button', { name: 'Back to latest' })).toHaveCount(0);
   };
   await expect(input).toBeEnabled();

@@ -170,11 +170,11 @@ test('restores the reading anchor after reload instead of jumping to latest', as
   await timeline.focus();
   await timeline.evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
-    element.scrollTop = 120;
+    element.scrollTop = 120 - (element.scrollHeight - element.clientHeight);
     element.dispatchEvent(new Event('scroll', { bubbles: true }));
   });
   await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
-  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBe(120);
+  await expect.poll(() => timeline.evaluate((element) => element.scrollHeight - element.clientHeight + element.scrollTop)).toBe(120);
   const before = await timeline.evaluate((element) => {
     const top = element.getBoundingClientRect().top;
     const entry = [...element.querySelectorAll<HTMLElement>('[data-entry-key]')].find((item) => item.getBoundingClientRect().bottom > top)!;

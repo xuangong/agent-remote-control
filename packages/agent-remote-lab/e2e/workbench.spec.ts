@@ -33,6 +33,15 @@ test('keeps the composer fixed and accepting drafts through session recovery', a
 test('starts at the latest content and follows streaming growth and composer resizing', async ({ page }) => {
   const timeline = page.getByTestId('timeline');
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
+  await timeline.evaluate(element => {
+    const native = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+    element.dataset.scrollWrites = '0';
+    Object.defineProperty(element, 'scrollTop', {
+      configurable: true,
+      get: () => native.get!.call(element),
+      set: value => { element.dataset.scrollWrites = String(Number(element.dataset.scrollWrites) + 1); native.set!.call(element, value); },
+    });
+  });
   await page.getByRole('button', { name: 'Grow last message' }).click();
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
   const input = page.getByTestId('prompt-input');
@@ -40,6 +49,7 @@ test('starts at the latest content and follows streaming growth and composer res
   await input.fill('first\nsecond\nthird\nfourth\nfifth');
   await expect.poll(async () => (await input.boundingBox())!.height).toBeGreaterThan(before);
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
+  await expect(timeline).toHaveAttribute('data-scroll-writes', '0');
   await input.press('Shift+Enter');
   await expect(input).toHaveValue('first\nsecond\nthird\nfourth\nfifth\n');
   await input.press('Enter');
@@ -53,10 +63,10 @@ test('protects earlier reading from live updates and resumes following on reques
   await timeline.hover();
   await page.mouse.wheel(0, -500);
   await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
-  const before = await timeline.evaluate((element) => element.scrollTop);
+  const before = await readingOffset(timeline);
   await page.getByRole('button', { name: 'Append live' }).click();
   await page.getByRole('button', { name: 'Grow last message' }).click();
-  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBeCloseTo(before, 0);
+  await expect.poll(async () => Math.abs(await readingOffset(timeline) - before)).toBeLessThan(1);
   await page.getByRole('button', { name: 'Back to latest' }).click();
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
   await expect(page.getByRole('button', { name: 'Back to latest' })).toHaveCount(0);
@@ -66,27 +76,28 @@ test('anchors earlier history by visible entry while live content also arrives',
   const timeline = page.getByTestId('timeline');
   await timeline.hover();
   await page.mouse.wheel(0, -100);
-  await timeline.evaluate((element) => { element.scrollTop = 500; });
+  await timeline.evaluate((element) => { element.scrollTop += 500 - (element.getBoundingClientRect().top + parseFloat(getComputedStyle(element).paddingTop) - element.firstElementChild!.getBoundingClientRect().top); });
   await expect(page.getByRole('button', { name: 'Loading earlier activity…' })).toBeDisabled();
-  expect(await timeline.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await readingOffset(timeline)).toBeGreaterThan(0);
   const anchor = await visibleAnchor(timeline);
   await page.getByRole('button', { name: 'Append live' }).click();
   await page.getByRole('button', { name: 'Complete history with live' }).click();
   await expect(timeline.locator('.agent-timeline-entry')).toHaveCount(52);
   await expect.poll(async () => timeline.evaluate((element, expected) => {
     const entry = Array.from(element.querySelectorAll<HTMLElement>('[data-entry-key]')).find((node) => node.dataset.entryKey === expected.key)!;
-    return entry.getBoundingClientRect().top - element.getBoundingClientRect().top - expected.offset;
-  }, anchor)).toBeCloseTo(0, 0);
+    return Math.abs(entry.getBoundingClientRect().top - element.getBoundingClientRect().top - expected.offset);
+  }, anchor)).toBeLessThan(1);
 });
 
 test('protects keyboard reading and follows again after returning to the end', async ({ page }) => {
   const timeline = page.getByTestId('timeline');
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
   await timeline.press('Home');
-  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect.poll(async () => Math.abs(await readingOffset(timeline))).toBeLessThan(1);
+  const start = await readingOffset(timeline);
   await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
   await page.getByRole('button', { name: 'Append live' }).click();
-  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect.poll(async () => Math.abs(await readingOffset(timeline) - start)).toBeLessThan(1);
   await timeline.press('End');
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
   await page.getByRole('button', { name: 'Append live' }).click();
@@ -129,9 +140,9 @@ test('protects touch reading through live updates', async ({ page }, testInfo) =
   await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
   expect(await bottomDistance(timeline)).toBeGreaterThan(64);
   await settled;
-  const top = await timeline.evaluate((element) => element.scrollTop);
+  const top = await readingOffset(timeline);
   await page.getByRole('button', { name: 'Append live' }).click();
-  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBeCloseTo(top, 0);
+  await expect.poll(async () => Math.abs(await readingOffset(timeline) - top)).toBeLessThan(1);
   await session.detach();
 });
 
@@ -188,9 +199,9 @@ test('protects reading after dragging the scrollbar', async ({ page }, testInfo)
   await page.mouse.up();
   await settled;
   await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
-  const top = await timeline.evaluate((element) => element.scrollTop);
+  const top = await readingOffset(timeline);
   await page.getByRole('button', { name: 'Append live' }).click();
-  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBeCloseTo(top, 0);
+  await expect.poll(async () => Math.abs(await readingOffset(timeline) - top)).toBeLessThan(1);
 });
 
 test('keeps an earlier control in view when reached with Tab', async ({ page }) => {
@@ -218,11 +229,11 @@ test('restores the reading position across hidden Trace and follows after epoch 
   await timeline.hover();
   await page.mouse.wheel(0, -600);
   await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
-  const before = await timeline.evaluate((element) => element.scrollTop);
+  const before = await readingOffset(timeline);
   await page.getByRole('button', { name: 'Toggle Trace' }).click();
   await page.getByRole('button', { name: 'Append live' }).click();
   await page.getByRole('button', { name: 'Toggle Trace' }).click();
-  await expect.poll(() => timeline.evaluate((element) => element.scrollTop)).toBeCloseTo(before, 0);
+  await expect.poll(async () => Math.abs(await readingOffset(timeline) - before)).toBeLessThan(1);
   await page.getByRole('button', { name: 'Replace epoch' }).click();
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
   await timeline.hover();
@@ -259,15 +270,20 @@ test('folds the input into a bottom tab while preserving the draft and reading p
     await toggle.click();
     await expect.poll(() => timeline.evaluate((element, saved) => {
       const entry = [...element.querySelectorAll<HTMLElement>('[data-entry-key]')].find(node => node.dataset.entryKey === saved.key)!;
-      return entry.getBoundingClientRect().top - element.getBoundingClientRect().top - saved.offset;
-    }, anchor)).toBeCloseTo(0, 0);
+      return Math.abs(entry.getBoundingClientRect().top - element.getBoundingClientRect().top - saved.offset);
+    }, anchor)).toBeLessThan(1);
   }
   await expect(input).toHaveValue('Continue reviewing later');
   await page.screenshot({ path: testInfo.outputPath('input-expanded.png') });
 });
 
 async function bottomDistance(timeline: Locator): Promise<number> {
-  return timeline.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
+  return timeline.evaluate(element => element.firstElementChild!.getBoundingClientRect().bottom
+    - element.getBoundingClientRect().bottom + parseFloat(getComputedStyle(element).paddingBottom));
+}
+async function readingOffset(timeline: Locator): Promise<number> {
+  return timeline.evaluate(element => element.getBoundingClientRect().top + parseFloat(getComputedStyle(element).paddingTop)
+    - element.firstElementChild!.getBoundingClientRect().top);
 }
 async function visibleAnchor(timeline: Locator): Promise<{ key: string; offset: number }> {
   return timeline.evaluate((element) => {

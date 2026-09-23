@@ -45,17 +45,17 @@ test('inspects a live tool and returns to a stable conversation anchor', async (
   await expect(entry).toHaveAttribute('data-inspected', 'true');
   await expect(prompt).toHaveValue('Keep this draft');
   const anchor = await entry.evaluate(element => element.getBoundingClientRect().top);
-  const top = await viewport.evaluate(element => element.scrollTop);
+  const top = await viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop);
   await page.getByRole('button', { name: 'Append event', exact: true }).click();
-  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(top);
+  await expect.poll(() => viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop)).toBe(top);
   expect(Math.abs(await entry.evaluate(element => element.getBoundingClientRect().top) - anchor)).toBeLessThanOrEqual(1);
   await viewport.hover();
   await page.mouse.wheel(0, 160);
-  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).not.toBe(top);
-  const readingTop = await viewport.evaluate(element => element.scrollTop);
+  await expect.poll(() => viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop)).not.toBe(top);
+  const readingTop = await viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop);
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
   await page.getByRole('tab', { name: 'Workbench', exact: true }).click();
-  await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(readingTop);
+  await expect.poll(() => viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop)).toBe(readingTop);
   expect(errors).toEqual([]);
 });
 

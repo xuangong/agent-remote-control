@@ -11,7 +11,7 @@ export interface TimelineReadingContinuity { identity: string; positions: Timeli
 
 interface TimelineHistoryLoading { hasOlder: boolean; cursor?: string; load(): void | Promise<void> }
 
-export function useTimelineScroll(identity: string, visible = true, positions?: TimelineReadingPositions, continuity?: TimelineReadingContinuity, history?: TimelineHistoryLoading, contentRevision: unknown = Symbol()) {
+export function useTimelineScroll(identity: string, visible = true, positions?: TimelineReadingPositions, continuity?: TimelineReadingContinuity, history?: TimelineHistoryLoading, contentRevision: unknown = Symbol(), scrollOrigin: 'top' | 'bottom' = 'top') {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const entryIndex = useRef(new TimelineEntryIndex());
@@ -38,17 +38,27 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   const historyIntent = useRef(false);
   const [historyState, setHistoryState] = useState<{ identity: string; pending: boolean; error?: string }>();
 
+  // Bottom-origin viewports use column-reverse around one normally ordered content
+  // element. Zero stays at the latest content as the browser lays out new dimensions.
+  function bottomDistance(viewport: HTMLDivElement): number {
+    return scrollOrigin === 'bottom' ? -viewport.scrollTop : viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+  }
+
+  function readingOffset(viewport: HTMLDivElement): number {
+    return scrollOrigin === 'bottom' ? Math.max(0, viewport.scrollHeight - viewport.clientHeight) + viewport.scrollTop : viewport.scrollTop;
+  }
+
   function prefetchHistory(): void {
     const viewport = viewportRef.current;
     const source = historyRef.current;
     if (!viewport || !isVisible.current || following.current || !historyIntent.current || !source?.hasOlder || !source.cursor || loading.current) return;
-    if (viewport.scrollTop > Math.max(600, viewport.clientHeight * 1.5) || attemptedCursor.current === source.cursor) return;
+    if (readingOffset(viewport) > Math.max(600, viewport.clientHeight * 1.5) || attemptedCursor.current === source.cursor) return;
     attemptedCursor.current = source.cursor;
     void loadOlder(source.load).catch(() => {});
   }
 
   function updateLatest(viewport: HTMLDivElement): void {
-    const next = !following.current && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 64;
+    const next = !following.current && bottomDistance(viewport) > 64;
     if (latestVisible.current === next) return;
     latestVisible.current = next;
     setShowLatest(next);
@@ -69,7 +79,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     if (!viewport || !viewport.clientHeight) return;
     if (following.current) {
       if (currentIdentity.current !== undefined) positionsRef.current?.set(currentIdentity.current, { following: true });
-      captureReadingContinuity(viewport.scrollTop);
+      captureReadingContinuity(readingOffset(viewport));
       return;
     }
     const bounds = viewport.getBoundingClientRect();
@@ -86,14 +96,14 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     if (currentIdentity.current !== undefined) positionsRef.current?.set(currentIdentity.current, {
       following: following.current, anchor: anchor.current,
     });
-    captureReadingContinuity(viewport.scrollTop);
+    captureReadingContinuity(readingOffset(viewport));
   }
 
   function updatePosition(): void {
     const viewport = viewportRef.current;
     if (!viewport || !isVisible.current || !viewport.clientHeight) return;
     if (following.current) {
-      const bottom = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      const bottom = scrollOrigin === 'bottom' ? 0 : Math.max(0, viewport.scrollHeight - viewport.clientHeight);
       // Native bottom bounce can exceed the scroll range; let it settle without corrective writes.
       if (bottom - viewport.scrollTop > 1) viewport.scrollTop = bottom;
     } else if (anchor.current) {
@@ -106,7 +116,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
         if (Math.abs(adjustment) > 1) viewport.scrollTop += adjustment;
       }
     } else if (pendingScrollTop.current !== undefined && viewport.querySelector('[data-entry-key]')) {
-      viewport.scrollTop = pendingScrollTop.current;
+      viewport.scrollTop = pendingScrollTop.current - (scrollOrigin === 'bottom' ? Math.max(0, viewport.scrollHeight - viewport.clientHeight) : 0);
       pendingScrollTop.current = undefined;
     }
     expectedScroll.current = viewport.scrollTop;
@@ -184,7 +194,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       }
       following.current = false;
       historyIntent.current = true;
-    } else if (viewport.scrollTop > lastScrollTop.current && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1) {
+    } else if (viewport.scrollTop > lastScrollTop.current && bottomDistance(viewport) <= 1) {
       following.current = true;
     }
     expectedScroll.current = undefined;
@@ -192,7 +202,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     captureAnchor();
     updateLatest(viewport);
     prefetchHistory();
-  }, []);
+  }, [scrollOrigin]);
 
   function scrollToLatest(): void {
     draggingScrollbar.current = false;

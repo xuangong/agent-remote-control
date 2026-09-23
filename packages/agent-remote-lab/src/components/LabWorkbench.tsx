@@ -201,7 +201,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ state, sessionStatus
   const display = useContext(TimelineDisplay);
   const contentRevision = useMemo(() => ({}), [state, display, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
-    actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined, contentRevision);
+    actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined, contentRevision, 'bottom');
   const consumedReveal = useRef<string>();
   useLayoutEffect(() => {
     if (!visible || !revealEntry) return;

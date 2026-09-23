@@ -9,8 +9,8 @@ const followingPositions = new Map<string, { following: boolean; scrollTop?: num
 let root: Root;
 let container: HTMLDivElement;
 
-function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, continuityIdentity, history, firstIndex = 0, onRender, controls }: { controls?: (scroll: ReturnType<typeof useTimelineScroll>) => void; history?: Parameters<typeof useTimelineScroll>[4]; firstIndex?: number; identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
-  const scroll = useTimelineScroll(identity, true, positions, continuityIdentity ? { identity: continuityIdentity, positions: followingPositions } : undefined, history);
+function Surface({ scrollOrigin = 'top', identity = 'epoch-one', empty = false, entryCount = 10, continuityIdentity, history, firstIndex = 0, onRender, controls }: { scrollOrigin?: 'top' | 'bottom'; controls?: (scroll: ReturnType<typeof useTimelineScroll>) => void; history?: Parameters<typeof useTimelineScroll>[4]; firstIndex?: number; identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
+  const scroll = useTimelineScroll(identity, true, positions, continuityIdentity ? { identity: continuityIdentity, positions: followingPositions } : undefined, history, undefined, scrollOrigin);
   controls?.(scroll);
   onRender?.(scroll.showLatest);
   return <div onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove} onWheel={scroll.onWheel} onScroll={scroll.onScroll} ref={(element) => {
@@ -22,15 +22,19 @@ function Surface({ identity = 'epoch-one', empty = false, entryCount = 10, conti
       clientHeight: { get: () => 100 },
       scrollHeight: { get: () => {
         const height = element.querySelectorAll('[data-entry-key]').length * 100;
-        top = Math.max(0, Math.min(top, height - 100));
+        top = scrollOrigin === 'bottom' ? Math.max(-Math.max(0, height - 100), Math.min(top, 0)) : Math.max(0, Math.min(top, height - 100));
         return height;
       } },
-      scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = Math.max(0, Math.min(value, element.scrollHeight - 100)); } },
+      scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = scrollOrigin === 'bottom' ? Math.max(-Math.max(0, element.scrollHeight - 100), Math.min(value, 0)) : Math.max(0, Math.min(value, element.scrollHeight - 100)); } },
     });
     element.getBoundingClientRect = () => ({ top: 0, bottom: 100 } as DOMRect);
   }}>
     <div ref={scroll.contentRef}>{empty ? null : Array.from({ length: entryCount }, (_, index) => <div key={index} data-entry-key={`${identity}:${index + firstIndex}`} ref={(element) => {
-      if (element) element.getBoundingClientRect = () => ({ top: index * 100 - scroll.viewportRef.current!.scrollTop, bottom: (index + 1) * 100 - scroll.viewportRef.current!.scrollTop } as DOMRect);
+      if (element) element.getBoundingClientRect = () => {
+        const viewport = scroll.viewportRef.current!;
+        const offset = viewport.scrollTop + (scrollOrigin === 'bottom' ? Math.max(0, viewport.scrollHeight - viewport.clientHeight) : 0);
+        return { top: index * 100 - offset, bottom: (index + 1) * 100 - offset } as DOMRect;
+      };
     }}>Message {index}</div>)}</div>
   </div>;
 }
@@ -238,4 +242,31 @@ it('positions only when the explicit content revision changes', () => {
   expect(reads).toBe(0);
   act(() => root.render(<StableSurface contentRevision={{}} />));
   expect(reads).toBeGreaterThan(0);
+});
+
+
+describe('bottom-origin timelines', () => {
+  it('lets layout keep the latest content at zero without corrective writes', () => {
+    act(() => root.render(<Surface scrollOrigin="bottom" />));
+    const writes = vi.spyOn(viewport(), 'scrollTop', 'set');
+    act(() => root.render(<Surface scrollOrigin="bottom" entryCount={12} />));
+    expect(viewport().scrollTop).toBe(0);
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('preserves an earlier reading anchor as the negative scroll range grows', () => {
+    act(() => root.render(<Surface scrollOrigin="bottom" />));
+    act(() => {
+      viewport().dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+      viewport().scrollTop = -660;
+      viewport().dispatchEvent(new Event('scroll'));
+    });
+    act(() => root.render(<Surface scrollOrigin="bottom" entryCount={12} />));
+    expect(viewport().scrollTop).toBe(-860);
+    expect(positions.get('epoch-one')?.following).toBe(false);
+    act(() => root.unmount());
+    root = createRoot(container);
+    act(() => root.render(<Surface scrollOrigin="bottom" entryCount={12} />));
+    expect(viewport().scrollTop).toBe(-860);
+  });
 });

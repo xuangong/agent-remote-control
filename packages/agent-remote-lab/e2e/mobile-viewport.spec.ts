@@ -9,7 +9,7 @@ for (const recovery of ['delayed-viewport', 'window-first'] as const) {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
-      const viewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0, scale: 1 });
+      const viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, scale: 1 });
       Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
     });
     await page.goto('/');
@@ -57,5 +57,46 @@ for (const recovery of ['delayed-viewport', 'window-first'] as const) {
     await expect(page.locator('.lab-shell')).toHaveAttribute('data-viewport-occluded', 'false');
     await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBe(844);
     await expect(input).toHaveValue('A draft kept while switching apps');
+  });
+}
+
+for (const first of ['window', 'visualViewport'] as const) {
+  test(`rotates to portrait without a second conversation resize (${first} first)`, async ({ page }) => {
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.addInitScript(() => {
+      const viewport = Object.assign(new EventTarget(), { width: 844, height: 390, offsetTop: 0, scale: 1 });
+      Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByTestId('session-create').click();
+    const input = page.getByTestId('prompt-input');
+    await expect(input).toBeEnabled();
+    await input.fill('A draft kept through rotation');
+    await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBe(390);
+    const rotateVisualViewport = () => page.evaluate(() => {
+      Object.assign(window.visualViewport!, { width: 390, height: 844 });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    if (first === 'visualViewport') {
+      await rotateVisualViewport();
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      expect((await page.locator('.lab-shell').boundingBox())!.height).toBe(390);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.dispatchEvent(new Event('orientationchange')));
+    // Allow the resize observer and viewport hook to run, but keep the native
+    // visual viewport stale until after measuring the intermediate layout.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const shell = page.locator('.lab-shell');
+    expect((await shell.boundingBox())!.height).toBe(844);
+    await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
+    const before = (await page.getByTestId('prompt-submit').boundingBox())!;
+    if (first === 'window') await rotateVisualViewport();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const after = (await page.getByTestId('prompt-submit').boundingBox())!;
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
+    expect(after.y + after.height).toBeLessThanOrEqual(844);
+    await expect(input).toHaveValue('A draft kept through rotation');
   });
 }

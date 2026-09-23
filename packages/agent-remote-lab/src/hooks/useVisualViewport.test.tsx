@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup';
 import { useVisualViewport } from './useVisualViewport';
 
-let viewport: EventTarget & { height: number; offsetTop: number; scale: number };
+let viewport: EventTarget & { width: number; height: number; offsetTop: number; scale: number };
 const descriptors: Array<[object, string, PropertyDescriptor | undefined]> = [];
 function property(target: object, key: string, value: unknown) {
   descriptors.push([target, key, Object.getOwnPropertyDescriptor(target, key)]);
@@ -25,7 +25,7 @@ function height(shell: HTMLElement) { return shell.style.getPropertyValue('--lab
 
 beforeEach(() => {
   vi.useFakeTimers();
-  viewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0, scale: 1 });
+  viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, scale: 1 });
   property(window, 'visualViewport', viewport);
   property(window, 'innerHeight', 844);
   property(window, 'innerWidth', 390);
@@ -107,3 +107,32 @@ it('stops sampling after settling and while hidden', async () => {
   await advance(10000);
   expect(height(shell)).toBe('844px');
 });
+
+for (const first of ['window', 'visualViewport'] as const) {
+  it(`does not apply stale landscape height or keyboard occlusion when ${first} rotates first`, async () => {
+    property(window, 'innerWidth', 844);
+    property(window, 'innerHeight', 390);
+    property(document.documentElement, 'clientHeight', 390);
+    Object.assign(viewport, { width: 844, height: 390 });
+    const shell = await mount();
+    const rotateWindow = () => {
+      property(window, 'innerWidth', 390);
+      property(window, 'innerHeight', 844);
+      property(document.documentElement, 'clientHeight', 844);
+      window.dispatchEvent(new Event('resize'));
+    };
+    const rotateVisualViewport = () => {
+      Object.assign(viewport, { width: 390, height: 844 });
+      viewport.dispatchEvent(new Event('resize'));
+    };
+    (first === 'window' ? rotateWindow : rotateVisualViewport)();
+    window.dispatchEvent(new Event('orientationchange'));
+    await advance(32);
+    expect(height(shell)).toBe(first === 'window' ? '844px' : '390px');
+    expect(shell.dataset.viewportOccluded).toBe('false');
+    (first === 'window' ? rotateVisualViewport : rotateWindow)();
+    await advance(32);
+    expect(height(shell)).toBe('844px');
+    expect(shell.dataset.viewportOccluded).toBe('false');
+  });
+}

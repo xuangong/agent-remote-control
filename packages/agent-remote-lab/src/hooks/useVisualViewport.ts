@@ -20,12 +20,14 @@ export function useVisualViewport(onUpdate?: () => void) {
         frame = 0;
         // Preserve pinch zoom, tolerating the rounding of an unzoomed viewport.
         if (document.hidden || Math.abs(viewport.scale - 1) > .01) return;
-        // On foreground restoration the window and visual viewport can resize
-        // separately. Fit within both until their measurements agree again.
-        const height = Math.min(viewport.height, window.innerHeight);
+        // Rotation can deliver window and visual viewport dimensions separately.
+        // Only compare heights from the same width; a stale landscape height must
+        // not shrink the portrait shell or be interpreted as keyboard occlusion.
+        const aligned = Math.abs(viewport.width - window.innerWidth) <= 1;
+        const height = aligned ? Math.min(viewport.height, window.innerHeight) : window.innerHeight;
         if (height <= 0) return;
         shell.style.setProperty('--lab-viewport-height', `${height}px`);
-        shell.style.setProperty('--lab-viewport-top', `${viewport.offsetTop}px`);
+        shell.style.setProperty('--lab-viewport-top', `${aligned ? viewport.offsetTop : 0}px`);
         const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
         const editing = document.activeElement?.matches('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]') ?? false;
         const retainReference = coarsePointer.matches && (editing || occluded);
@@ -36,7 +38,7 @@ export function useVisualViewport(onUpdate?: () => void) {
           unobscuredHeight = layoutHeight;
         }
         // Ignore small browser-chrome changes and preserve hardware-keyboard focus.
-        occluded = Math.max(layoutHeight, retainReference ? unobscuredHeight : 0) - height > 100;
+        occluded = aligned && Math.max(layoutHeight, retainReference ? unobscuredHeight : 0) - height > 100;
         shell.dataset.viewportOccluded = String(occluded);
         latestUpdate.current?.();
       });

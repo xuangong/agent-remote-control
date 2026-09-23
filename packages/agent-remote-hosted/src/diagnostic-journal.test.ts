@@ -77,3 +77,21 @@ it('bounds per-host and global retention and drops expired or unvalidated input'
  expect(pruneRelayDiagnostics(Array.from({length:5000},(_,i)=>entry('e'+i,'h'+i)),now)).toHaveLength(4096);
  expect(pruneRelayDiagnostics([{...entry('old'),timestamp:new Date(now-86400001).toISOString()},{...entry('bad'),body:'secret'},entry('ok')],now).map(e=>e.id)).toEqual(['ok']);
 });
+
+it('preserves original runtime metadata through recovery and ignores malformed optional identifiers', async () => {
+ let saved: RelayDiagnostic[] = [];
+ const first = createDiagnosticJournal({ context: { runtimeInstanceId: 'runtime-1', workerVersionId: 'version-1', startReason: 'runtime_start' },
+   storage: { async save(entries) { saved = entries; } } });
+ first.record('one', { event: 'relay_started' }); await first.close();
+ const original = saved[0]!;
+ const recovered = createDiagnosticJournal({ context: { runtimeInstanceId: 'runtime-1', workerVersionId: 'version-1', startReason: 'core_recovery' },
+   storage: { initial: saved, async save(entries) { saved = entries; } } });
+ recovered.record('one', { event: 'relay_started' }); await recovered.close();
+ expect(saved[0]).toEqual(original);
+ expect(saved[1]).toMatchObject({ runtimeInstanceId: 'runtime-1', workerVersionId: 'version-1', startReason: 'core_recovery' });
+ expect(saved[1]!.relayInstanceId).not.toBe(original.relayInstanceId);
+ const malformed = createDiagnosticJournal({ context: { workerVersionId: 'private\ntext' }, storage: { async save(entries) { saved = entries; } } });
+ malformed.record('one', { event: 'host_registered' }); await malformed.close();
+ expect(saved).toHaveLength(1);
+ expect(saved[0]).not.toHaveProperty('workerVersionId');
+});

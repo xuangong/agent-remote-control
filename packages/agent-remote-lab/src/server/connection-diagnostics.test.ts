@@ -34,7 +34,7 @@ async function setup(options: Partial<RemoteHostBrokerOptions> = {}, initial: Re
   return { url, post, journal, broker, close, saved: () => saved };
 }
 
-async function connect(url: string, key: string, installationId: string, supported = true, append?: (entries: RelayDiagnostic[]) => Promise<void>, capabilityStatus = 200) {
+async function connect(url: string, key: string, installationId: string, supported = true, append?: (entries: RelayDiagnostic[]) => Promise<void>, capabilityStatus = 200, diagnosticVersion = 1) {
   const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
   cleanup.push(async () => { socket.terminate(); });
   const batches: RelayDiagnostic[][] = [], calls: string[] = [], errors: unknown[] = [];
@@ -49,7 +49,7 @@ async function connect(url: string, key: string, installationId: string, support
       let status = 200, body = '{}';
       if (message.path === '/remote/controller-update') {
         status = capabilityStatus;
-        body = JSON.stringify(supported ? { diagnosticDelivery: 1 } : {});
+        body = JSON.stringify(supported ? { diagnosticDelivery: diagnosticVersion } : {});
       }
       else if (message.path === '/remote/diagnostics/relay') {
         const entries = parseRelayDiagnosticBatch(JSON.parse(message.body!));
@@ -157,3 +157,28 @@ it('records browser stream opening, readiness and closure without conversation c
   expect(JSON.stringify(native.batches)).not.toContain('private conversation content');
   expect(native.errors).toEqual([]);
 }, 10_000);
+
+it.each(['close', 'terminate'] as const)('preserves the native close code after %s through reconnect into the Host log', async operation => {
+  const directory = await mkdtemp(join(tmpdir(), 'arc-close-diagnostic-'));
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'relay-diagnostics.log');
+  const sink = createRelayDiagnosticSink({ path });
+  const f = await setup();
+  const pair = await (await f.post('/v1/remote/pairings')).json();
+  const native = await connect(f.url, pair.key, 'close-installation', true, sink.append, 200, 3);
+  const closed = once(native.socket, 'close');
+  if (operation === 'close') native.socket.close(1000, 'private-close-reason');
+  else native.socket.terminate();
+  await closed;
+  await expect.poll(() => f.saved().find(entry => entry.event === 'host_disconnected')).toMatchObject({
+    reason: 'socket_closed', closeCode: operation === 'close' ? 1000 : 1006, heartbeatAgeMs: expect.any(Number),
+  });
+  const resumed = await connect(f.url, pair.key, 'close-installation', true, sink.append, 200, 3);
+  await expect.poll(() => resumed.batches.flat().some(entry => entry.event === 'host_disconnected'), { timeout: 4000 }).toBe(true);
+  const log = await readFile(path, 'utf8');
+  expect(log).not.toContain('private-close-reason');
+  const entry = log.trim().split('\n').map(line => JSON.parse(line)).find(entry => entry.event === 'host_disconnected');
+  expect(entry.closeCode).toBe(operation === 'close' ? 1000 : 1006);
+  expect(entry.wasClean).toBeUndefined(); // Node ws does not expose this browser CloseEvent field.
+  expect([...native.errors, ...resumed.errors]).toEqual([]);
+}, 10000);

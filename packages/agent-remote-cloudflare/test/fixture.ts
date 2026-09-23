@@ -25,7 +25,7 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown> } = {}) {
+export async function fixture(options: { previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; workerVersionId?: string } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: `
@@ -57,7 +57,7 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
   async function start() {
     mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { RELAY: { className: 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
-      bindings: { AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
+      bindings: { ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },

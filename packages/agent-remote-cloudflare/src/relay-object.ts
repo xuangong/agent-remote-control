@@ -12,6 +12,7 @@ export interface RelayEnvironment {
   AGENT_REMOTE_SIGNING_SECRET: string;
   RELAY: DurableObjectNamespace;
   ASSETS: Fetcher;
+  CF_VERSION_METADATA?: { id: string };
 }
 
 /** One private object owns all authenticated namespaces and their shared-Host relationships. */
@@ -19,13 +20,14 @@ export class RelayObject {
   private core: ReturnType<typeof createHostedRelay> | undefined;
   private readonly ready: Promise<void>;
   private recoveryRequired = false;
+  private readonly runtimeInstanceId = crypto.randomUUID();
   private replacingCore = false;
   constructor(private readonly context: DurableObjectState, private readonly env: RelayEnvironment) {
     this.ready = context.blockConcurrencyWhile(async () => {
-      try { this.initialize(); } catch { /* Invalid persisted configuration remains unavailable without exposing it. */ }
+      try { this.initialize('runtime_start'); } catch { /* Invalid persisted configuration remains unavailable without exposing it. */ }
     });
   }
-  private initialize() {
+  private initialize(startReason: 'runtime_start' | 'core_recovery') {
     const auth = { origin: validateGatewayOrigin(this.env.AGENT_REMOTE_RELAY_URL), issuer: validateGatewayOrigin(this.env.AGENT_REMOTE_ISSUER), secret: this.env.AGENT_REMOTE_SIGNING_SECRET };
     if (typeof auth.secret !== 'string' || new TextEncoder().encode(auth.secret).byteLength < 32) throw new Error('Relay configuration is invalid.');
     const storage = new SqliteRelayStore(this.context.storage, auth);
@@ -42,7 +44,8 @@ export class RelayObject {
         await this.context.storage.setAlarm(Date.now() + 60_000);
       },
     };
-    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth), scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
+    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
+      diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
   }
   async fetch(request: Request): Promise<Response> {
     await this.ready;
@@ -75,7 +78,7 @@ export class RelayObject {
     await this.ready;
     try {
       if (this.recoveryRequired) await this.discardCore();
-      if (!this.core) { this.recoveryRequired = false; this.initialize(); }
+      if (!this.core) { this.recoveryRequired = false; this.initialize('core_recovery'); }
       await this.core!.refresh();
     } catch {
       // A failed core remains closed to traffic. A later alarm can restore the last atomic commit.

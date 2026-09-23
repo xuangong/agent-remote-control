@@ -1,5 +1,5 @@
 import { createDiagnosticJournal } from './diagnostic-journal.js';
-import type { RelayDiagnosticStore } from './relay-diagnostics.js';
+import type { RelayDiagnosticStore, RelayDiagnosticContext } from './relay-diagnostics.js';
 import { createFavorites } from './favorites.js';
 import { createSessionMigrations } from './session-migrations.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
@@ -36,6 +36,7 @@ export interface HostedRelayOptions extends GatewayAuthOptions {
   previewDomain?: string;
   storage?: RelayStateStore;
   diagnosticStorage?: RelayDiagnosticStore;
+  diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
   maxTenants?: number;
   clientAddress?(request: Request): string;
@@ -47,7 +48,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const auth = { origin: validateGatewayOrigin(options.origin), issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
   if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
   const tenants = new Map<string, Tenant>();
-  const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage});
+  const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage,context:options.diagnosticContext});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
   const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string> }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();

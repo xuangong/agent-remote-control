@@ -118,7 +118,10 @@ export function relaySocket(socket: WebSocket): RelaySocket {
       };
       socket.on('message', receive); return () => { socket.off('message', receive); };
     },
-    onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
+    onClose(listener) {
+      const closed = (code: number) => listener({ code });
+      socket.on('close', closed); return () => { socket.off('close', closed); };
+    },
     onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
   };
 }

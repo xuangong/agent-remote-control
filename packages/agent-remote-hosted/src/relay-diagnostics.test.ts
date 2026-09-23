@@ -17,3 +17,21 @@ it('negotiates authority diagnostics without blocking older Controller log deliv
  expect(relayDiagnosticsForVersion(batch, 1)).toEqual([event]);
  expect(relayDiagnosticsForVersion(batch, 2)).toEqual(batch);
 });
+
+it('validates transport and runtime metadata and downconverts it for older Controllers', async () => {
+ const { relayDiagnosticsForVersion } = await import('./relay-diagnostics.js');
+ const current = { ...event, closeCode: 1006, wasClean: false, runtimeInstanceId: 'runtime-1', workerVersionId: 'version-1' };
+ const started = { ...event, event: 'relay_started', reason: undefined, startReason: 'core_recovery', runtimeInstanceId: 'runtime-1', workerVersionId: 'version-1' };
+ expect(isRelayDiagnostic(current)).toBe(true);
+ expect(isRelayDiagnostic(started)).toBe(true);
+ for (const invalid of [{ ...current, wasClean: 'false' }, { ...current, workerVersionId: 'secret\nvalue' }, { ...started, startReason: 'arbitrary error text' }]) {
+   expect(isRelayDiagnostic(invalid)).toBe(false);
+ }
+ const batch = parseRelayDiagnosticBatch({ entries: [current, started] })!;
+ expect(relayDiagnosticsForVersion(batch, 3)).toEqual(batch);
+ for (const version of [1, 2]) {
+   const legacy = relayDiagnosticsForVersion(batch, version);
+   expect(legacy[0]).toEqual({ ...event, closeCode: 1006 });
+   expect(legacy[1]).toEqual({ ...event, event: 'relay_started', reason: undefined });
+ }
+});

@@ -1,4 +1,4 @@
-import { BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN, type RelaySocket } from '@orchardworks/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN, type RelaySocketClose, type RelaySocket } from '@orchardworks/agent-remote-hosted';
 
 /** Workers has no public egress queue metric; native buffering cannot be measured here. */
 export class WorkerRelaySocket implements RelaySocket {
@@ -29,7 +29,11 @@ export class WorkerRelaySocket implements RelaySocket {
     if (this.socket.readyState < 2) this.socket.close(code, reason);
   }
   onMessage(listener: (data: string, binary: boolean) => void | Promise<void>) { this.messages.add(listener); return () => { this.messages.delete(listener); }; }
-  onClose(listener: () => void) { this.socket.addEventListener('close', listener); return () => this.socket.removeEventListener('close', listener); }
+  onClose(listener: (details?: RelaySocketClose) => void) {
+    const closed = (event: CloseEvent) => listener({ code: event.code, wasClean: event.wasClean });
+    this.socket.addEventListener('close', closed);
+    return () => this.socket.removeEventListener('close', closed);
+  }
   onError(listener: () => void) {
     const handler = () => { try { listener(); } finally { this.close(1011, 'Relay socket failed'); } };
     this.socket.addEventListener('error', handler); return () => this.socket.removeEventListener('error', handler);

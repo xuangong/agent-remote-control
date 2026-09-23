@@ -1,13 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { isRelayDiagnostic, MAX_DIAGNOSTIC_BATCH, pruneRelayDiagnostics, type RelayDiagnostic, type RelayDiagnosticStore } from './relay-diagnostics.js';
+import { isRelayDiagnostic, MAX_DIAGNOSTIC_BATCH, pruneRelayDiagnostics, type RelayDiagnostic, type RelayDiagnosticStore, type RelayDiagnosticContext } from './relay-diagnostics.js';
 
 type Details = Omit<RelayDiagnostic, 'id' | 'timestamp' | 'source' | 'hostId' | 'relayInstanceId'>;
 type Sender = (entries: RelayDiagnostic[]) => Promise<{status: number}>;
 interface Connection { send: Sender; timer?: ReturnType<typeof setTimeout>; pending: boolean; unsupported: boolean }
 /** Diagnostic persistence and delivery are deliberately independent of business state commits. */
-export function createDiagnosticJournal(options: {storage?: RelayDiagnosticStore; now?(): number} = {}) {
+export function createDiagnosticJournal(options: {storage?: RelayDiagnosticStore; context?: RelayDiagnosticContext; now?(): number} = {}) {
   const now = options.now ?? Date.now;
   const relayInstanceId = randomUUID();
+  const metadata: RelayDiagnosticContext = {};
+  for (const key of ['runtimeInstanceId', 'workerVersionId'] as const) {
+    const value = options.context?.[key];
+    if (typeof value === 'string' && /^[a-zA-Z0-9_:.-]{1,128}$/.test(value)) metadata[key] = value;
+  }
+  const startReason = options.context?.startReason;
   let entries = pruneRelayDiagnostics(options.storage?.initial, now());
   const connections = new Map<string, Connection>();
   let closed = false, dirty = false;
@@ -58,7 +64,7 @@ export function createDiagnosticJournal(options: {storage?: RelayDiagnosticStore
   return {
     record(hostId:string, details:Details) {
       if(closed)return;
-      const event={...details,id:randomUUID(),timestamp:new Date(now()).toISOString(),source:'relay' as const,hostId,relayInstanceId};
+      const event={...details,...metadata,...(details.event === 'relay_started' && startReason ? { startReason } : {}),id:randomUUID(),timestamp:new Date(now()).toISOString(),source:'relay' as const,hostId,relayInstanceId};
       if(!isRelayDiagnostic(event))return;
       entries=pruneRelayDiagnostics([...entries,event],now());void persist();
       const connection=connections.get(hostId);if(connection)schedule(hostId,connection);

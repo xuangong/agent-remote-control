@@ -218,11 +218,11 @@ export function createHostBroker(options: HostBrokerOptions) {
       catch (error) { clearTimeout(timer); host.pending.delete(requestId); if (!diagnosticRequest) diagnostic(host, {event:'rpc_failed',requestId,operation:diagnosticOperation(path),reason:error instanceof BrokerError && error.code==='host_backpressure'?'host_backpressure':'write_failed'}); reject(error); }
     });
   }
-  function disconnected(host: Host, socket: RelaySocket, reason: RelayDiagnostic['reason'] = 'socket_closed', closeCode?: number, heartbeatAgeMs?: number) {
+  function disconnected(host: Host, socket: RelaySocket, reason: RelayDiagnostic['reason'] = 'socket_closed', closeCode?: number, heartbeatAgeMs?: number, wasClean?: boolean) {
     uplinkCleanups.get(socket)?.();
     if (host.socket !== socket) return;
     host.stopDiagnostics?.(); host.stopDiagnostics=undefined;
-    diagnostic(host, {event:'host_disconnected',reason,closeCode,heartbeatAgeMs,pendingRequests:[...host.pending.values()].filter(p=>!p.diagnostic).length,streams:host.streams.size});
+    diagnostic(host, {event:'host_disconnected',reason,closeCode,heartbeatAgeMs,wasClean,pendingRequests:[...host.pending.values()].filter(p=>!p.diagnostic).length,streams:host.streams.size});
     previews.disconnect(host.id); host.tunnelToken = undefined;
     host.socket = undefined; host.ready = false;
     for (const [requestId, pending] of host.pending) {
@@ -260,7 +260,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     cancelExpiry = expire(socket, () => keys.get(credentialHash) === credential ? Math.min(credential.expires, context.connectionExpiresAt?.() ?? credential.expires) : 0, () => keys.get(credentialHash) !== credential ? 1008 : context.connectionExpiryCode?.() ?? 1008, code => closeConnection(code, 'Credential expired'));
     if (!retired) timer = setTimeout(() => closeConnection(1008, 'Registration deadline exceeded'), 10_000);
     socket.onError(() => closeConnection(1011, 'Host transport failed'));
-    socket.onClose(() => { cleanup(); if (host) disconnected(host, socket); });
+    socket.onClose(details => { cleanup(); if (host) disconnected(host, socket, 'socket_closed', details?.code, Math.max(0, now() - lastHeartbeatAck), details?.wasClean); });
     const current = () => !retired && host?.socket === socket && host.ready === true;
     function sendHeartbeat() {
       if (!current()) return;

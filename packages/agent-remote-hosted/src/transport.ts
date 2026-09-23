@@ -2,6 +2,12 @@ export const RELAY_SOCKET_OPEN = 1;
 export const BROKER_MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const BROKER_MAX_BODY_BYTES = 64 * 1024;
 
+export interface RelaySocketClose {
+  code?: number;
+  /** Only supplied when the native runtime exposes CloseEvent.wasClean. */
+  wasClean?: boolean;
+}
+
 /** Runtime adapters deliver validated frames and own their native socket lifecycle. */
 export interface RelaySocket {
   readonly readyState: number;
@@ -9,7 +15,7 @@ export interface RelaySocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
   onMessage(listener: (data: string, binary: boolean) => void | Promise<void>): () => void;
-  onClose(listener: () => void): () => void;
+  onClose(listener: (details?: RelaySocketClose) => void): () => void;
   onError(listener: () => void): () => void;
 }
 

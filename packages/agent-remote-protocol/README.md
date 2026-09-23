@@ -118,3 +118,17 @@ independent diagnostic capability while preserving its original error status. Pu
 unchanged; no register/registered fields are added. Codec fixtures live in
 `src/relay-diagnostics.test.ts`; real transport coverage also verifies legacy
 capability discovery and reconnect delivery.
+
+Diagnostic delivery versions are independent of the public session protocol:
+
+- Version 1 accepts connection and stream diagnostics.
+- Version 2 additionally accepts authority renewal events and lease/retry timing.
+- Version 3 additionally accepts `wasClean`, `runtimeInstanceId`, `workerVersionId`,
+  and `startReason` (`runtime_start` or `core_recovery`, on `relay_started` only).
+
+Relay removes unsupported optional fields/events before sending to older
+Controllers. `closeCode` records the native socket close code; `wasClean` is
+included only when exposed by the runtime. Node ws does not expose `wasClean`,
+so it remains absent rather than being inferred from the code. Raw close reasons
+are never logged. Server-initiated retirement retains its first cause and code;
+a later native close event does not replace it or emit a duplicate disconnect.

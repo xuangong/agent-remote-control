@@ -239,3 +239,40 @@ Home Screen entry before changing layout code again.
 CSS safe-area values via Chromium's CDP inset override. WebKit runs the metadata
 and recorder checks, but skips the CDP-only inset test. These tests establish
 safe-area ownership and control bounds, not native iPhone rotation smoothness.
+
+## Standalone launch height and navigation edge
+
+The 08:59 UTC device trace on 2026-09-23 describes a different failure from the
+older rotation trace: at launch, window, visual viewport and shell heights are
+812 px while the top safe area is already 62 px. After a landscape/portrait cycle,
+window and shell heights remain 874 px, the top safe area remains 62 px, and the
+composer moves down by exactly 62 px. `document.clientHeight` remains stale at
+812 px. There is no keyboard occlusion in either settled state.
+
+For an iPhone Home Screen window at scale 1, the viewport hook now corrects only
+an exact screen-height-minus-top-inset mismatch. It requires matching screen and
+window widths, matching visual and layout heights, portrait screen geometry,
+a positive measured top inset, and zero viewport/root scroll offsets. The top
+inset comes from CSS rather than a device-specific number. Keyboard sizing keeps
+priority. Native recovery or rotation removes the correction; normal browser
+tabs, zero-inset older installations, unrelated height differences and zoom do
+not qualify. The same inherited inset is available to the toast viewport hook.
+No additional polling, reloads or scroll resets are introduced.
+
+Mobile navigation is independently sticky with an opaque background. WebKit's
+[fixed-container sampling](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/page/LocalFrameView.cpp)
+recognizes fixed/sticky edge containers, and its
+[top scroll-pocket policy](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/ios/WKWebViewIOS.mm)
+uses native content insets and color-extension views when deciding whether to
+hide the system edge effect. This motivates exposing the header as its own edge
+instead of relying on the viewport-sized fixed shell. It is a targeted mitigation,
+not proof that a particular iOS build will suppress all system blur. No CSS blur,
+extra overlay, or extra top padding is added. Diagnostics include the header's
+position, background, opacity and filter styles plus the chosen launch correction.
+
+Home Screen web apps are the primary mobile target, regardless of which browser
+added the icon. Ordinary browser tabs are a separate validation environment.
+Browser tests replay the launch geometry and verify safe-area ownership, keyboard
+and rotation recovery, and menu interaction. A real cold launch must still verify
+both the bottom gap and title clarity; desktop WebKit does not implement the
+native iOS window or its system edge composition.

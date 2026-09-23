@@ -2,7 +2,7 @@
 const limits = { maxSamples: 800, frameWindowMs: 3000, recordingMs: 600_000 };
 type StopReason = 'manual' | 'timeout' | 'pagehide' | 'unmount';
 type Status = { recording: boolean; hasRecording: boolean; stopReason?: StopReason };
-type ViewportDecision = { aligned: boolean; height: number; layoutHeight: number; referenceHeight: number; editing: boolean; occluded: boolean };
+type ViewportDecision = { aligned: boolean; height: number; layoutHeight: number; referenceHeight: number; editing: boolean; occluded: boolean; standaloneHeight?: number | null };
 let status: Status = { recording: false, hasRecording: false };
 const listeners = new Set<() => void>();
 let samples: Record<string, unknown>[] = [];
@@ -47,7 +47,9 @@ function capture(reason: string, decision?: ViewportDecision) {
     composers: [...document.querySelectorAll('.lab-composer-dock')].slice(0, 4).map(bounds),
     shellStyle: shellStyle ? { top: shellStyle.top, height: shellStyle.height, position: shellStyle.position,
       viewportTop: shellStyle.getPropertyValue('--lab-viewport-top'), viewportHeight: shellStyle.getPropertyValue('--lab-viewport-height'), occluded: shell?.dataset.viewportOccluded ?? null } : null,
-    headerStyle: headerStyle ? { paddingTop: headerStyle.paddingTop, height: headerStyle.height, display: headerStyle.display } : null,
+    headerStyle: headerStyle ? { paddingTop: headerStyle.paddingTop, height: headerStyle.height, display: headerStyle.display,
+      position: headerStyle.position, backgroundColor: headerStyle.backgroundColor, opacity: headerStyle.opacity,
+      filter: headerStyle.filter, backdropFilter: headerStyle.backdropFilter } : null,
     safeArea: safeArea ? { top: safeArea.paddingTop, bottom: safeArea.paddingBottom, left: safeArea.paddingLeft, right: safeArea.paddingRight } : null,
     orientation: screen.orientation?.type ?? null, angle: screen.orientation?.angle ?? null,
     visibility: document.visibilityState,

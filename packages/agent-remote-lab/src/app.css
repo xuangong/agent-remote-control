@@ -55,6 +55,20 @@ body {
   background: var(--obs-canvas);
 }
 
+/* The standalone status bar overlays the page. Paint its safe area without
+   adding another layout inset or changing the conversation's coordinates. */
+@media (display-mode: standalone) {
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    background: var(--obs-text);
+    pointer-events: none;
+    z-index: 2000;
+  }
+}
+
 button,
 input,
 select,
@@ -1013,7 +1027,7 @@ textarea {
   .lab-mobile-navigation button { flex: 0 0 auto; min-height: 48px; padding-inline: 8px; border-color: transparent; color: var(--obs-action); }
   .lab-mobile-navigation select { flex: 1 1 0; width: 0; min-width: 0; min-height: 44px; border-color: transparent; background: var(--obs-surface); }
   .lab-mobile-session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-  .lab-shell .lab-app-bar { grid-row: 2; grid-column: 1; padding-left: 8px; }
+  .lab-shell .lab-app-bar { grid-row: 2; grid-column: 1; padding-left: 8px; padding-top: 0; }
   .lab-shell .lab-main-stage { grid-row: 3; grid-column: 1; border: 0; border-radius: 0; }
   .lab-view-options { left: auto; right: max(8px, env(safe-area-inset-right)); top: env(safe-area-inset-top); }
   .lab-view-options-trigger { min-height: 48px; }

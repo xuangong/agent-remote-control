@@ -192,3 +192,45 @@ foreground recovery, Settings remounting, clipboard fallback and JSON download.
 Browser tests exercise the viewport hook's before/after positions in Chromium and
 WebKit. These simulated viewport events verify the recorder, not a physical iOS
 27 rotation fix. Real-device recording remains necessary.
+
+## Device trace and edge-to-edge trial
+
+The user's 2026-09-23 recording captures the residual movement. At 5855 ms,
+portrait viewport height changes to 874 px and the top safe area becomes 62 px.
+Navigation padding changes from 0 to 62 px; its height changes from 49 to 111 px.
+The composer top becomes 734.41 px. At 6141 ms, viewport height returns to 812 px,
+top inset returns to zero and composer top returns to 672.41 px. This interval
+lasts approximately 286 ms. A subsequent short root-scroll sequence goes from
+0 to 62 to 0; the sampled shell rectangle correspondingly moves to y=-62 and back.
+
+Throughout this sequence, keyboard occlusion is false, shell computed top is zero,
+and viewport top/height overrides are absent. This rules out application keyboard
+offset compensation for this recording. It does not establish which native
+WebKit component causes the temporary viewport/safe-area change.
+
+The Home Screen entry now requests `black-translucent` instead of `default`, while
+retaining `viewport-fit=cover`. The intended contract is one edge-to-edge viewport
+with CSS safe-area padding, rather than a page normally below the system status
+bar. Apple's archived [meta tag reference](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariHTMLRef/Articles/MetaTags.html)
+describes this distinction; actual iOS behavior still requires verification.
+
+The outer mobile navigation owns the top inset. The optional secondary Header
+does not add it again. A pointer-transparent decorative
+strip paints the system status area dark in standalone mode, without adding a
+layout row or changing shell coordinates. The rest of the page retains its light
+theme. No rotation timers, scroll resets or viewport policy changes are added.
+
+Diagnostics include the current document's `statusBarStyle`. This identifies
+the loaded HTML declaration, not proof that an existing Home Screen installation
+has adopted the native mode. For device validation, fully close and reopen the
+Home Screen app after deployment and record another rotation. Check whether
+settled portrait mode consistently uses the full height with a nonzero top inset,
+and whether the transient 62 px down-and-back movement has disappeared. Also check
+status text contrast, keyboard access, foreground recovery and both orientations.
+If an existing installation retains the old native mode, compare a newly added
+Home Screen entry before changing layout code again.
+
+`e2e/standalone-layout.spec.ts` verifies served launch metadata and exercises real
+CSS safe-area values via Chromium's CDP inset override. WebKit runs the metadata
+and recorder checks, but skips the CDP-only inset test. These tests establish
+safe-area ownership and control bounds, not native iPhone rotation smoothness.

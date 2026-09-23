@@ -1,3 +1,4 @@
+import { conversationSessionStorage } from '../conversation-storage.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
@@ -38,7 +39,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
   }
   // A tab-local ledger keeps retries idempotent without populating the normal fork list.
   const storage = useMemo(() => {
-    try { return window.sessionStorage; } catch { return undefined; }
+    try { return conversationSessionStorage; } catch { return undefined; }
   }, [baseUrl]);
   const store = useMemo(() => new ForkStore(`ask:${baseUrl}`, storage), [baseUrl, storage]);
   const inputsKey = (key: string) => `agent-remote-ask:${baseUrl}:inputs:${key}`;

@@ -1,3 +1,4 @@
+import { conversationLocalStorage } from './conversation-storage.js';
 import { decodeAgentSnapshot, decodeHistoryPage, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
@@ -23,13 +24,13 @@ export function saveWorkspaceSnapshot(scope: string, target: ControllerLocation,
       entries.splice(0, Math.max(1, Math.floor(entries.length / 2)));
       encoded = JSON.stringify({ identity: identity(target), snapshot: { protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: agent }, history });
     }
-    if (encoded.length <= maxCharacters) localStorage.setItem(keyFor(scope), encoded);
+    if (encoded.length <= maxCharacters) conversationLocalStorage.setItem(keyFor(scope), encoded);
   } catch { /* Quota failure must not affect the live workspace or durable drafts. */ }
 }
 export function readWorkspaceSnapshot(scope: string, target?: ControllerLocation): AgentReplicaState | undefined {
   if (!target?.nativeSessionId) return;
   try {
-    const raw = localStorage.getItem(keyFor(scope));
+    const raw = conversationLocalStorage.getItem(keyFor(scope));
     if (!raw || raw.length > maxCharacters) return;
     const saved = JSON.parse(raw);
     if (saved.identity !== identity(target)) return;

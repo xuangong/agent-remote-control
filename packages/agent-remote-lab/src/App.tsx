@@ -1,3 +1,5 @@
+import { CachePrivacySettings } from './components/CachePrivacySettings.js';
+import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 import { WorkspaceReady, workspaceFetch, workspaceSocket, readWorkspaceAccess } from './workspace-access.js';
 import { readWorkspaceSnapshot, saveWorkspaceSnapshot } from './workspace-cache.js';
 import { ControllerUpdates } from './components/ControllerUpdates.js';
@@ -498,7 +500,7 @@ function AppContent({
 
   useEffect(() => {
     if (!directory) return;
-    try { window.localStorage.setItem(openedSessionsKey(baseUrl), JSON.stringify(openedSessions)); } catch { /* Storage may be unavailable in private browser contexts. */ }
+    try { conversationLocalStorage.setItem(openedSessionsKey(baseUrl), JSON.stringify(openedSessions)); } catch { /* Storage may be unavailable in private browser contexts. */ }
   }, [baseUrl, directory, openedSessions]);
 
   function rememberSession(value: OpenedSession): void {
@@ -875,7 +877,7 @@ function AppContent({
       if (!reservation) {
         const storageKey = 'arc:prompt-edit-intent:' + baseUrl + ':' + key;
         let operationId = crypto.randomUUID() as string;
-        try { const saved = sessionStorage.getItem(storageKey); if (saved && /^[a-f0-9-]{36}$/i.test(saved)) operationId = saved; else sessionStorage.setItem(storageKey, operationId); } catch { /* Preserve the same intent in memory when storage is unavailable. */ }
+        try { const saved = conversationSessionStorage.getItem(storageKey); if (saved && /^[a-f0-9-]{36}$/i.test(saved)) operationId = saved; else conversationSessionStorage.setItem(storageKey, operationId); } catch { /* Preserve the same intent in memory when storage is unavailable. */ }
         reservation = { key, operationId }; promptEditReservation.current = reservation;
       }
       retainPromptEditReservation(baseUrl, reservation);
@@ -1179,7 +1181,7 @@ function AppContent({
       {!compactLayout && accountAction ? <div className="lab-sidebar-account">{accountAction}</div> : null}
       {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         <MobileDisplaySettings />
-        <p>Message drafts and reading positions are saved in this browser tab. Use Sessions to switch conversations.</p>
+        <CachePrivacySettings />
       </section> : null}
       {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
       {directory && sessionPanel !== 'favorites' ? <HostPairing compact={compactLayout && sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
@@ -1363,7 +1365,7 @@ function sessionStatusLabel(status: RemoteSessionStatus): string {
 function openedSessionsKey(baseUrl: string): string { return `agent-remote-opened:${baseUrl}`; }
 function readOpenedSessions(baseUrl: string): OpenedSession[] {
   try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(openedSessionsKey(baseUrl)) ?? '[]');
+    const value: unknown = JSON.parse(conversationLocalStorage.getItem(openedSessionsKey(baseUrl)) ?? '[]');
     if (!Array.isArray(value)) return [];
     return value.filter((item): item is OpenedSession => item !== null && typeof item === 'object' && ['agentId', 'providerId', 'nativeSessionId', 'title'].every((key) => typeof item[key] === 'string')).slice(0, 100).map(openedSessionMetadata);
   } catch { return []; }

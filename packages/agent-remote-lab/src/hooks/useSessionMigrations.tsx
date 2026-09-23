@@ -1,3 +1,4 @@
+import { conversationSessionStorage } from '../conversation-storage.js';
 import { workspaceFetch } from '../workspace-access.js';
 import { useEffect, useRef, useState } from 'react';
 import { watchPageResume, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
@@ -36,13 +37,13 @@ export function useSessionMigrations(options: {
     setRequested(value => value === id ? undefined : value);
     setSeen(values => {
       const next = new Set(values); next.add(id);
-      try { sessionStorage.setItem('arc:prompt-edits:' + scope, JSON.stringify([...next].slice(-1024))); } catch { /* Tab-local memory still prevents repeat switches. */ }
+      try { conversationSessionStorage.setItem('arc:prompt-edits:' + scope, JSON.stringify([...next].slice(-1024))); } catch { /* Tab-local memory still prevents repeat switches. */ }
       return next;
     });
   }
   useEffect(() => {
     applied.current.clear(); setRecords([]); setPrevious(undefined); setRequested(undefined);
-    try { const saved: unknown = JSON.parse(sessionStorage.getItem('arc:prompt-edits:' + scope) ?? '[]'); setSeen(new Set(Array.isArray(saved) ? saved.filter(value => typeof value === 'string') : [])); } catch { setSeen(new Set()); }
+    try { const saved: unknown = JSON.parse(conversationSessionStorage.getItem('arc:prompt-edits:' + scope) ?? '[]'); setSeen(new Set(Array.isArray(saved) ? saved.filter(value => typeof value === 'string') : [])); } catch { setSeen(new Set()); }
     if (!options.enabled) return;
     const abort = new AbortController();
     let fetching = false;

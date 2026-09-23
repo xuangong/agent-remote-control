@@ -1,3 +1,4 @@
+import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 const pending = new Map<string, { serialize(): string; durable: boolean }>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -14,7 +15,7 @@ export function flushRecoveryWrites(prefix = ''): void {
   for (const [key, { serialize, durable }] of pending) {
     if (!key.startsWith(prefix)) continue;
     pending.delete(key);
-    try { const value = serialize(); sessionStorage.setItem(key, value); if (durable) localStorage.setItem(key, value); }
+    try { const value = serialize(); conversationSessionStorage.setItem(key, value); if (durable) conversationLocalStorage.setItem(key, value); }
     catch { /* Editing and reading remain usable when browser storage is unavailable. */ }
   }
   releaseIfEmpty();

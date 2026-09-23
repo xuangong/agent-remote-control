@@ -11,4 +11,4 @@ export * from './client/remote-activity-client.js';
 
 export { watchPagePolling } from './client/page-polling.js';
 
-export { clearImageDraftScope } from './image-drafts.js';
+export { clearImageDraftScope, configureImageDraftPersistence, clearPersistedImageDrafts } from './image-drafts.js';

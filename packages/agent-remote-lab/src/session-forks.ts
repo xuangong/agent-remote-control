@@ -1,3 +1,4 @@
+import { conversationLocalStorage } from './conversation-storage.js';
 import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { RemoteOperationError } from '@orchardworks/agent-remote-web';
@@ -86,7 +87,7 @@ export class ForkStore {
   private readonly storage?: Storage;
   constructor(baseUrl: string, storage?: Storage) {
     this.key = `agent-remote-forks:${baseUrl}:record:`;
-    try { this.storage = storage ?? window.localStorage; } catch { /* Normal conversations remain usable when storage is unavailable. */ }
+    try { this.storage = storage ?? conversationLocalStorage; } catch { /* Normal conversations remain usable when storage is unavailable. */ }
   }
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);

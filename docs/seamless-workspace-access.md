@@ -26,3 +26,13 @@ The server continues to authorize every API and WebSocket request. A local displ
 ## Validation
 
 `e2e/seamless.playwright.config.ts` runs real local Gateway, Relay, Host-uplink and session-channel transports with a fixture authority. It covers desktop Chromium and iPhone WebKit, cached startup with a delayed access check, editor identity and draft preservation, foreground suspension, business request ordering, and automatic Gateway return. It does not use a real Google account or restart a native daemon.
+
+## Optional device cache protection
+
+Settings includes **Clear chat cache on close**, off by default. Turning it on requires confirmation of both the benefit and the recovery cost. Cancellation leaves the existing preference and data untouched; turning it off does not need confirmation.
+
+When enabled, the application immediately removes its persisted conversation data and uses page-local memory for subsequent reads and writes. This avoids relying on unload callbacks, which mobile browsers may omit when terminating a background page. Backgrounding alone does not discard the live page; refresh, navigation to a new document (including an authorization redirect), closing, or OS termination loses local drafts and recovery records. Remote conversations remain available after access and session recovery, but reopening cannot show their local snapshot first.
+
+The protected data includes workspace snapshots, reading positions, draft text and image bytes in IndexedDB, outgoing-message feedback, Ask input queues, fork context, prompt-edit reservations, recent-session metadata, and tracking lists. No pending message is replayed by changing the preference. Clearing stored copies preserves the active page's in-memory draft and delivery state. Delayed recovery writes and image writes already in flight are fenced against recreating disk copies. Other tabs observe the device preference, and storage boundaries recheck it before writing, even if a tab has not yet received its storage event. Suspended tabs apply cleanup when they resume; they cannot be forcibly executed by another tab.
+
+A cleanup failure remains visible in Settings with a retry action. Login credentials, account access metadata, display preferences, remote history, and account-level Favorites are preserved. This is protection against local chat-data residue, not a device lock or sign-out. A signed-in browser can still retrieve remote conversations; sign out before handing the device to another person. It cannot erase browser history, downloaded files, OS app-switcher screenshots, or copies outside the application's stores. No service worker or application Cache Storage is used for conversation recovery.

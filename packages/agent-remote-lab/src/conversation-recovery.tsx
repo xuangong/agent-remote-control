@@ -1,3 +1,4 @@
+import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite } from './recovery-writes.js';
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
@@ -15,7 +16,7 @@ export const RecoveryScope = createContext<ReadingPositions | undefined>(undefin
 
 export function readLastSession(scope: string): ControllerLocation | undefined {
   try {
-    const path = localStorage.getItem(`${prefix}${scope}:session`);
+    const path = conversationLocalStorage.getItem(`${prefix}${scope}:session`);
     if (!path?.startsWith('/?')) return;
     const location = readControllerLocation(new URLSearchParams(path.slice(2)));
     if (location.hostId && location.providerId && location.nativeSessionId) return location;
@@ -23,14 +24,14 @@ export function readLastSession(scope: string): ControllerLocation | undefined {
 }
 
 export function saveLastSession(scope: string, location: ControllerLocation): void {
-  try { localStorage.setItem(`${prefix}${scope}:session`, controllerPath(location)); }
+  try { conversationLocalStorage.setItem(`${prefix}${scope}:session`, controllerPath(location)); }
   catch { /* The current conversation remains usable without storage. */ }
 }
 
 export function readDrafts(scope: string): Record<string, string> {
   flushRecoveryWrites(`${prefix}${scope}:drafts`);
   try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(`${prefix}${scope}:drafts`) ?? '{}');
+    const value: unknown = JSON.parse(conversationSessionStorage.getItem(`${prefix}${scope}:drafts`) ?? '{}');
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
     return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
   } catch { return {}; }
@@ -45,8 +46,8 @@ export function clearConversationRecovery(scope?: string): void {
   cancelRecoveryWrites(scope ? `${prefix}${scope}:` : prefix);
   if (scope) void clearImageDraftScope(scope).catch(() => { /* Signout still completes when browser storage is unavailable. */ });
   try {
-    for (const storage of [sessionStorage, localStorage]) {
-      for (const key of Object.keys(storage)) if (key.startsWith(scope ? `${prefix}${scope}:` : prefix)) storage.removeItem(key);
+    for (const storage of [conversationSessionStorage, conversationLocalStorage]) {
+      for (const key of Array.from({ length: storage.length }, (_, index) => storage.key(index)!)) if (key.startsWith(scope ? `${prefix}${scope}:` : prefix)) storage.removeItem(key);
     }
   } catch { /* Signing out must also work when storage is disabled. */ }
 }
@@ -59,7 +60,7 @@ export class ReadingPositions extends Map<string, TimelineReadingPosition> {
     this.storageKey = `${prefix}${scope}:reading`;
     flushRecoveryWrites(this.storageKey);
     try {
-      const entries: unknown = JSON.parse(sessionStorage.getItem(this.storageKey) ?? localStorage.getItem(this.storageKey) ?? '[]');
+      const entries: unknown = JSON.parse(conversationSessionStorage.getItem(this.storageKey) ?? conversationLocalStorage.getItem(this.storageKey) ?? '[]');
       if (Array.isArray(entries)) for (const entry of entries.slice(-80)) {
         if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue;
         const value = entry[1];

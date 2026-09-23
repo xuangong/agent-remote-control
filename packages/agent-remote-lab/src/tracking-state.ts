@@ -1,3 +1,4 @@
+import { conversationLocalStorage } from './conversation-storage.js';
 import type { AgentStatus, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { RemoteSessionStatus } from '@orchardworks/agent-remote-web';
 import { validSessionStar, starKey, type SessionStar } from '@orchardworks/agent-remote-hosted/session-star-schema';
@@ -18,13 +19,13 @@ export function nextObservation(previous: SessionObservation | undefined, next: 
 }
 export function readTrackedSessions(scope: string): SessionStar[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(`agent-remote-tracking:${scope}`) ?? '[]');
+    const value: unknown = JSON.parse(conversationLocalStorage.getItem(`agent-remote-tracking:${scope}`) ?? '[]');
     if (!Array.isArray(value)) return [];
     return [...new Map(value.filter(validSessionStar).map(item => [starKey(item), item])).values()].slice(0, MAX_TRACKED_SESSIONS);
   } catch { return []; }
 }
 export function saveTrackedSessions(scope: string, sessions: SessionStar[]): void {
-  localStorage.setItem(`agent-remote-tracking:${scope}`, JSON.stringify(sessions.map(({ hostId, providerId, nativeSessionId, title, starredAt, parentNativeSessionId, workspace }) => ({ hostId, providerId, nativeSessionId, title, starredAt, parentNativeSessionId, workspace }))));
+  conversationLocalStorage.setItem(`agent-remote-tracking:${scope}`, JSON.stringify(sessions.map(({ hostId, providerId, nativeSessionId, title, starredAt, parentNativeSessionId, workspace }) => ({ hostId, providerId, nativeSessionId, title, starredAt, parentNativeSessionId, workspace }))));
 }
 export function observationLabel(value?: SessionObservation): string {
   if (!value) return 'Connecting';

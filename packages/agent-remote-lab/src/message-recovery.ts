@@ -1,9 +1,10 @@
+import { conversationLocalStorage } from './conversation-storage.js';
 import type { AgentReplica, OutgoingMessage } from '@orchardworks/agent-remote-web';
 
 export function recoverMessages(replica: AgentReplica, relay: string, session: string, agentId: string): () => void {
   const key = `agent-remote:recovery:${relay}:outbox:${session}`;
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(key) ?? '[]');
+    const value: unknown = JSON.parse(conversationLocalStorage.getItem(key) ?? '[]');
     if (Array.isArray(value)) replica.restoreMessages(value.filter(validMessage).map(message => ({ ...message, agentId })));
   } catch { /* Stored feedback must not prevent conversation recovery. */ }
   let previous = replica.getState().outgoingMessages;
@@ -12,8 +13,8 @@ export function recoverMessages(replica: AgentReplica, relay: string, session: s
     if (messages === previous) return;
     previous = messages;
     try {
-      if (messages?.length) localStorage.setItem(key, JSON.stringify(messages));
-      else localStorage.removeItem(key);
+      if (messages?.length) conversationLocalStorage.setItem(key, JSON.stringify(messages));
+      else conversationLocalStorage.removeItem(key);
     } catch { /* Feedback remains in memory if browser storage is unavailable or full. */ }
   });
 }

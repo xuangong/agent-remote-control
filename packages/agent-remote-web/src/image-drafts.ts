@@ -18,6 +18,39 @@ export interface ImageDraft {
   images: Record<string, DraftImage>;
   nextLabel: number;
 }
+let persistentDrafts = () => true;
+let persistenceGeneration = 0;
+const memoryDrafts = new Map<string, ImageDraft>();
+const privateDraftKeys = new Set<string>();
+/** The embedding application owns the device's retention preference. */
+export function configureImageDraftPersistence(persistent: () => boolean): void { persistentDrafts = persistent; }
+/** Remove disk copies without interrupting editors or their in-memory retry state. */
+export async function clearPersistedImageDrafts(): Promise<void> {
+  persistenceGeneration++;
+  for (const key of memoryDrafts.keys()) privateDraftKeys.add(key);
+  if (typeof indexedDB === 'undefined') return;
+  await transaction('readwrite', (drafts, images) => {
+    drafts.clear(); images.clear();
+    return () => undefined;
+  });
+}
+function rememberDraft(draft: ImageDraft): void {
+  memoryDrafts.delete(draft.key);
+  memoryDrafts.set(draft.key, copyDraft(draft));
+  if (!persistentDrafts()) { privateDraftKeys.add(draft.key); return; }
+  // Durable recovery remains in IndexedDB. Bound the extra transition cache.
+  let bytes = 0;
+  for (const entry of memoryDrafts.values()) for (const image of Object.values(entry.images)) bytes += image.blob?.size ?? 0;
+  for (const [key, entry] of memoryDrafts) {
+    if (memoryDrafts.size <= 32 && bytes <= 32 * 1024 * 1024) break;
+    if (privateDraftKeys.has(key)) continue;
+    memoryDrafts.delete(key);
+    for (const image of Object.values(entry.images)) bytes -= image.blob?.size ?? 0;
+  }
+}
+function copyDraft(draft: ImageDraft): ImageDraft {
+  return { ...draft, parts: draft.parts.map(part => ({ ...part })), images: Object.fromEntries(Object.entries(draft.images).map(([id, image]) => [id, { ...image }])) };
+}
 const scopeGenerations = new Map<string, number>();
 const localImages = new Map<string, { scope: string; blob: Blob }>();
 const imageOwners = new Map<object, Set<string>>();
@@ -115,18 +148,26 @@ interface StoredImageBytes { key: string; scope: string; imageId: string; blob?:
 export async function restoreCachedDraftImage(scope: string, imageId: string): Promise<Blob | undefined> {
   const cached = lookupDraftImage(scope, imageId);
   if (cached) return cached;
+  for (const draft of memoryDrafts.values()) {
+    const blob = draft.scope === scope ? draft.images[imageId]?.blob : undefined;
+    if (blob) { cacheDraftImage(scope, imageId, blob, imageDraftScopeGeneration(scope)); return blob; }
+  }
+  if (!persistentDrafts()) return;
   const generation = imageDraftScopeGeneration(scope);
   const records = await transaction<StoredImageBytes[]>('readonly', (_drafts, images) => {
     const request = images.index('imageId').getAll(imageId);
     return () => request.result;
   });
-  if (generation !== imageDraftScopeGeneration(scope)) return;
+  if (!persistentDrafts() || generation !== imageDraftScopeGeneration(scope)) return;
   const image = records.find(record => record.scope === scope);
   const blob = image?.blob ?? (image?.blobBytes ? new Blob([image.blobBytes], { type: image.blobMediaType }) : undefined);
   if (blob) cacheDraftImage(scope, imageId, blob, generation);
   return blob;
 }
 export async function readImageDraft(key: string): Promise<ImageDraft | undefined> {
+  if (!persistentDrafts()) { const draft = memoryDrafts.get(key); return draft ? copyDraft(draft) : undefined; }
+  const retentionGeneration = persistenceGeneration;
+  const generations = new Map(scopeGenerations);
   const value = await transaction<unknown>('readonly', (store, images) => {
     const request = store.get(key);
     request.onsuccess = () => {
@@ -143,7 +184,13 @@ export async function readImageDraft(key: string): Promise<ImageDraft | undefine
     };
     return () => request.result;
   });
-  if (value === undefined) return undefined;
+  if (!persistentDrafts() || retentionGeneration !== persistenceGeneration) {
+    const draft = memoryDrafts.get(key); return draft ? copyDraft(draft) : undefined;
+  }
+  if (value === undefined) {
+    const draft = privateDraftKeys.has(key) ? memoryDrafts.get(key) : undefined;
+    return draft ? copyDraft(draft) : undefined;
+  }
   if (!value || typeof value !== 'object' || !('version' in value) || value.version !== 1 || !('parts' in value) || !Array.isArray(value.parts)) throw new Error('Saved image draft has an unsupported format.');
   const draft = value as ImageDraft;
   if (draft.key !== key || typeof draft.scope !== 'string' || !Number.isSafeInteger(draft.nextLabel) || draft.nextLabel < 1
@@ -157,15 +204,20 @@ export async function readImageDraft(key: string): Promise<ImageDraft | undefine
     if (!image.blob && image.blobBytes && Object.prototype.toString.call(image.blobBytes) === '[object ArrayBuffer]') image.blob = new Blob([image.blobBytes], { type: image.blobMediaType });
     delete image.blobBytes; delete image.blobMediaType; delete image.blobKey;
   }
+  if ((generations.get(draft.scope) ?? 0) !== imageDraftScopeGeneration(draft.scope)) return;
+  rememberDraft(draft);
   return draft;
 }
 export async function writeImageDraft(draft: ImageDraft, generation = imageDraftScopeGeneration(draft.scope)): Promise<void> {
   if (generation !== imageDraftScopeGeneration(draft.scope)) return;
   const referenced = new Set(draft.parts.flatMap(part => part.type === 'image' ? [part.imageId] : []));
   draft = { ...draft, images: Object.fromEntries(Object.entries(draft.images).filter(([id]) => referenced.has(id))) };
+  rememberDraft(draft);
+  if (!persistentDrafts()) return;
+  const retentionGeneration = persistenceGeneration;
   const save = async (record: ImageDraft) => {
     await transaction('readwrite', (store, images) => {
-      if (generation !== imageDraftScopeGeneration(draft.scope)) return () => undefined;
+      if (!persistentDrafts() || retentionGeneration !== persistenceGeneration || generation !== imageDraftScopeGeneration(draft.scope)) return () => undefined;
       const metadata: ImageDraft = { ...record, images: {} };
       const retained = new Set<string>();
       for (const [id, image] of Object.entries(record.images) as [string, StoredDraftImage][]) {
@@ -200,6 +252,7 @@ export async function writeImageDraft(draft: ImageDraft, generation = imageDraft
 /** Clear only the explicitly signed-out account/relay scope. */
 export async function clearImageDraftScope(scope: string): Promise<void> {
   scopeGenerations.set(scope, imageDraftScopeGeneration(scope) + 1);
+  for (const [key, draft] of memoryDrafts) if (draft.scope === scope) { memoryDrafts.delete(key); privateDraftKeys.delete(key); }
   for (const [id, image] of localImages) if (image.scope === scope) localImages.delete(id);
   await transaction('readwrite', (drafts, images) => {
     for (const store of [drafts, images]) {

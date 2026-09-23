@@ -168,3 +168,36 @@ it('upgrades embedded version-one drafts without losing image bytes and can read
     upgraded.close();
   } finally { vi.unstubAllGlobals(); }
 });
+
+it('uses memory for private image drafts, clears persisted bytes, and fences writes already converting blobs', async () => {
+  vi.resetModules();
+  const { configureImageDraftPersistence, clearPersistedImageDrafts, readImageDraft, writeImageDraft, restoreCachedDraftImage } = await import('./image-drafts.js');
+  let persistent = true;
+  configureImageDraftPersistence(() => persistent);
+  const saved = draft('private-images');
+  await writeImageDraft(saved);
+  let release!: (value: ArrayBuffer) => void;
+  const delayed = draft('delayed-private-images');
+  vi.spyOn(delayed.images[delayed.scope]!.blob!, 'arrayBuffer').mockImplementation(() => new Promise(resolve => { release = resolve; }));
+  const pending = writeImageDraft(delayed);
+  persistent = false;
+  await clearPersistedImageDrafts();
+  persistent = true;
+  release(new ArrayBuffer(11)); await pending;
+  persistent = false;
+  expect((await readImageDraft(saved.key))?.parts).toEqual(saved.parts);
+  expect((await readImageDraft(delayed.key))?.parts).toEqual(delayed.parts);
+  expect((await restoreCachedDraftImage(saved.scope, saved.scope))?.size).toBe(11);
+  await writeImageDraft({ ...saved, parts: [{ type: 'text', text: 'private edit' }] });
+  expect((await readImageDraft(saved.key))?.parts).toEqual([{ type: 'text', text: 'private edit' }]);
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const open = indexedDB.open('agent-remote-image-drafts', 2);
+    open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
+  });
+  try {
+    const tx = db.transaction(['drafts', 'images'], 'readonly');
+    const drafts = tx.objectStore('drafts').count(); const images = tx.objectStore('images').count();
+    await new Promise<void>(resolve => { tx.oncomplete = () => resolve(); });
+    expect(drafts.result).toBe(0); expect(images.result).toBe(0);
+  } finally { db.close(); persistent = true; configureImageDraftPersistence(() => true); }
+});

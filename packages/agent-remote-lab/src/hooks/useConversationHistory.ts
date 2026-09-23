@@ -1,3 +1,4 @@
+import { conversationSessionStorage } from '../conversation-storage.js';
 import { useEffect, useRef, useState } from 'react';
 import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import { sessionKey, sessionRootKey, type SessionEntry } from '../session-tree.js';
@@ -6,7 +7,7 @@ interface Visit { id: string; session: SessionEntry; root: string }
 const storageKey = 'agent-remote-conversation-history';
 function restoreVisits(): Visit[] {
   try {
-    const visits: Visit[] = JSON.parse(window.sessionStorage.getItem(storageKey) ?? '[]');
+    const visits: Visit[] = JSON.parse(conversationSessionStorage.getItem(storageKey) ?? '[]');
     if (!Array.isArray(visits) || !visits.some(visit => visit.id === window.history.state?.agentRemoteVisit)) return [];
     for (const visit of visits) {
       if (typeof visit.id !== 'string' || typeof visit.root !== 'string' || typeof visit.session?.title !== 'string' || typeof visit.session?.nativeSessionId !== 'string' || typeof visit.session?.providerId !== 'string') return [];
@@ -31,7 +32,7 @@ export function useConversationHistory(current: SessionEntry | undefined, known:
   const root = current ? sessionRootKey(current, known) : undefined;
 
   function write(visit: Visit, push: boolean): void {
-    try { window.sessionStorage.setItem(storageKey, JSON.stringify(visits.current)); } catch { /* Navigation still works when browser storage is unavailable. */ }
+    try { conversationSessionStorage.setItem(storageKey, JSON.stringify(visits.current)); } catch { /* Navigation still works when browser storage is unavailable. */ }
     const state = { ...window.history.state, agentRemoteVisit: visit.id };
     const path = controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local' });
     if (push) window.history.pushState(state, '', path);

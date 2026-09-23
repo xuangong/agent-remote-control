@@ -26,8 +26,6 @@ export function useVisualViewport(onUpdate?: () => void) {
         const aligned = Math.abs(viewport.width - window.innerWidth) <= 1;
         const height = aligned ? Math.min(viewport.height, window.innerHeight) : window.innerHeight;
         if (height <= 0) return;
-        shell.style.setProperty('--lab-viewport-height', `${height}px`);
-        shell.style.setProperty('--lab-viewport-top', `${aligned ? viewport.offsetTop : 0}px`);
         const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
         const editing = document.activeElement?.matches('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]') ?? false;
         const retainReference = coarsePointer.matches && (editing || occluded);
@@ -38,8 +36,21 @@ export function useVisualViewport(onUpdate?: () => void) {
           unobscuredHeight = layoutHeight;
         }
         // Ignore small browser-chrome changes and preserve hardware-keyboard focus.
-        occluded = aligned && Math.max(layoutHeight, retainReference ? unobscuredHeight : 0) - height > 100;
+        // A mismatched rotation sample cannot establish that the keyboard closed.
+        // Retain its bounds and safe-area policy until both viewports describe the
+        // same width, instead of expanding to full height and shrinking again.
+        if (aligned) occluded = Math.max(layoutHeight, retainReference ? unobscuredHeight : 0) - height > 100;
         shell.dataset.viewportOccluded = String(occluded);
+        if (aligned && occluded) {
+          shell.style.setProperty('--lab-viewport-height', `${height}px`);
+          shell.style.setProperty('--lab-viewport-top', `${viewport.offsetTop}px`);
+        } else if (!occluded) {
+          // Let CSS dynamic viewport units participate in the native rotation.
+          // Copying unoccluded measurements into pixels adds a second layout pass
+          // and converts late fractional height/offset samples into content shifts.
+          shell.style.removeProperty('--lab-viewport-height');
+          shell.style.removeProperty('--lab-viewport-top');
+        }
         latestUpdate.current?.();
       });
     };

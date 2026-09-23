@@ -79,7 +79,7 @@ it('fits a resized window while visual viewport bounds are stale and restores af
   property(window, 'innerHeight', 844);
   window.dispatchEvent(new Event('resize'));
   await advance(32);
-  expect(height(shell)).toBe('844px');
+  expect(height(shell)).toBe('');
   expect(shell.dataset.viewportOccluded).toBe('false');
 });
 
@@ -92,7 +92,7 @@ it('preserves pinch zoom and does not treat hardware keyboard focus as occlusion
   viewport.scale = 2;
   viewport.dispatchEvent(new Event('resize'));
   await advance(32);
-  expect(height(shell)).toBe('844px');
+  expect(height(shell)).toBe('');
 });
 
 it('stops sampling after settling and while hidden', async () => {
@@ -100,12 +100,12 @@ it('stops sampling after settling and while hidden', async () => {
   await advance(3000);
   viewport.height = 400;
   await advance(10000);
-  expect(height(shell)).toBe('844px');
+  expect(height(shell)).toBe('');
   property(document, 'hidden', true);
   document.dispatchEvent(new Event('visibilitychange'));
   viewport.dispatchEvent(new Event('resize'));
   await advance(10000);
-  expect(height(shell)).toBe('844px');
+  expect(height(shell)).toBe('');
 });
 
 for (const first of ['window', 'visualViewport'] as const) {
@@ -128,11 +128,49 @@ for (const first of ['window', 'visualViewport'] as const) {
     (first === 'window' ? rotateWindow : rotateVisualViewport)();
     window.dispatchEvent(new Event('orientationchange'));
     await advance(32);
-    expect(height(shell)).toBe(first === 'window' ? '844px' : '390px');
+    expect(height(shell)).toBe('');
     expect(shell.dataset.viewportOccluded).toBe('false');
     (first === 'window' ? rotateVisualViewport : rotateWindow)();
     await advance(32);
-    expect(height(shell)).toBe('844px');
+    expect(height(shell)).toBe('');
+    expect(shell.dataset.viewportOccluded).toBe('false');
+  });
+}
+
+for (const first of ['window', 'visualViewport'] as const) {
+  it(`retains keyboard safe-area suppression while ${first} rotates first`, async () => {
+    property(window, 'innerWidth', 844);
+    property(window, 'innerHeight', 390);
+    property(document.documentElement, 'clientHeight', 390);
+    Object.assign(viewport, { width: 844, height: 390 });
+    const shell = await mount();
+    shell.querySelector('textarea')!.focus();
+    viewport.height = 200;
+    viewport.dispatchEvent(new Event('resize'));
+    await advance(32);
+    expect(shell.dataset.viewportOccluded).toBe('true');
+    const rotateWindow = () => {
+      property(window, 'innerWidth', 390);
+      property(window, 'innerHeight', 844);
+      property(document.documentElement, 'clientHeight', 844);
+      window.dispatchEvent(new Event('resize'));
+    };
+    const rotateViewport = () => {
+      Object.assign(viewport, { width: 390, height: 500 });
+      viewport.dispatchEvent(new Event('resize'));
+    };
+    (first === 'window' ? rotateWindow : rotateViewport)();
+    window.dispatchEvent(new Event('orientationchange'));
+    await advance(32);
+    expect(shell.dataset.viewportOccluded).toBe('true');
+    expect(height(shell)).toBe('200px');
+    (first === 'window' ? rotateViewport : rotateWindow)();
+    await advance(32);
+    expect(height(shell)).toBe('500px');
+    expect(shell.dataset.viewportOccluded).toBe('true');
+    viewport.height = 844;
+    viewport.dispatchEvent(new Event('resize'));
+    await advance(32);
     expect(shell.dataset.viewportOccluded).toBe('false');
   });
 }

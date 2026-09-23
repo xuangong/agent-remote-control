@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-test('serves the edge-to-edge Home Screen configuration', async ({ page }) => {
+test('serves the non-overlay Home Screen status bar configuration', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black-translucent');
+  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'default');
   await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
 });
 

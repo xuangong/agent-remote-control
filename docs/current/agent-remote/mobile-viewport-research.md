@@ -208,8 +208,8 @@ and viewport top/height overrides are absent. This rules out application keyboar
 offset compensation for this recording. It does not establish which native
 WebKit component causes the temporary viewport/safe-area change.
 
-The Home Screen entry now requests `black-translucent` instead of `default`, while
-retaining `viewport-fit=cover`. The intended contract is one edge-to-edge viewport
+The edge-to-edge trial requested `black-translucent` instead of `default`, while
+retaining `viewport-fit=cover`. The intended contract was one edge-to-edge viewport
 with CSS safe-area padding, rather than a page normally below the system status
 bar. Apple's archived [meta tag reference](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariHTMLRef/Articles/MetaTags.html)
 describes this distinction; actual iOS behavior still requires verification.
@@ -280,3 +280,24 @@ Browser tests replay the launch geometry and verify safe-area ownership, keyboar
 and rotation recovery, and menu interaction. A real cold launch must still verify
 both the bottom gap and title clarity; desktop WebKit does not implement the
 native iOS window or its system edge composition.
+
+## Restoring the original status bar mode
+
+Both `controller-v0.2.15` and `restore/pre-favorites-tree-20260924` used `default`.
+Commit `f305e2d` changed the native Home Screen status bar mode to
+`black-translucent`. Removing the dark overlay and the later screen-height
+expansion did not undo that mode change. The title washout and inconsistent
+launch safe area were reported after the mode change, making it the first
+variable to restore for device comparison.
+
+The entry now requests `default` again. It retains `viewport-fit=cover`, existing
+safe-area padding, the sticky navigation, keyboard handling, native timeline
+anchoring and the composer bounds fix. No additional geometry compensation is
+introduced. The browser test verifies the served launch declaration; it cannot
+prove how an installed iPhone window composes the status bar.
+
+Device acceptance must check title clarity, cold-launch bounds, both rotation
+directions and keyboard recovery after fully closing and reopening the Home
+Screen app. Compare a newly added entry if an existing installation retains its
+previous native mode. The earlier rotation shift may return with `default`;
+that requires separate diagnosis rather than restoring screen-height expansion.

@@ -1,3 +1,4 @@
+import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './components/HostPairing.js';
 export interface SessionSummary {
@@ -70,6 +71,11 @@ export class RemoteHostClient implements HostPairingService {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
   controllerRelease(options: { refresh?: boolean } = {}): Promise<{ release: ControllerRelease | null }> { return this.request(`controller-release${options.refresh ? '?refresh=1' : ''}`, 'GET', undefined, 35000); }
+  async codexDaemon(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus> {
+    const value = await this.request(`hosts/${encodeURIComponent(hostId)}/codex-daemon`, input ? 'POST' : 'GET', input, 15000);
+    if (!isCodexDaemonStatus(value)) throw new Error('The daemon result could not be verified. Check status before restarting again.');
+    return value;
+  }
   controllerUpdate(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus> {
     return this.request(`hosts/${encodeURIComponent(hostId)}/controller-update`, input ? 'POST' : 'GET', input, 20000);
   }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { restartCodexDaemon, supportsCodexDaemonControl } from './codex-daemon-runner.js';
 import { controllerIdentity, requestLauncherRestart } from './controller-update.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -140,6 +141,8 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
     (line) => writeDiagnostic(line, diagnosticSecrets));
   const identity = await controllerIdentity(import.meta.url);
   const host = createAgentHost({ ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+    ...(registrations.some(value => value.adapter.descriptor.providerId === 'codex') && supportsCodexDaemonControl(environment)
+      ? { codexDaemon: { stateDir, restart: () => restartCodexDaemon({ stateDir, environment }) } } : {}),
     vscodeTunnel: { stateDirectory: stateDir, executable: environment.AGENT_HOST_VSCODE?.trim() || undefined,
       disconnectTimeoutMs: environment.AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS ? Number(environment.AGENT_HOST_VSCODE_DISCONNECT_TIMEOUT_MS) : undefined },
     preview: { stateDirectory: stateDir, ttlMs: Number(environment.AGENT_HOST_PREVIEW_TTL_MS ?? 3_600_000),

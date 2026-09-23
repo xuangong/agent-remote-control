@@ -562,7 +562,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       });
     }
     if (request.method !== 'GET' && result) {
-      const action = path === '/v1/remote/pairings' ? 'pairing_created' : path.startsWith('/v1/remote/pairings/') ? (request.method === 'DELETE' ? 'pairing_deleted' : 'pairing_revoked') : /\/revoke$/.test(path) ? 'host_revoked' : /\/rotate$/.test(path) ? 'credential_rotation_requested' : /\/stop$/.test(path) ? 'host_stop_requested' : undefined;
+      const action = path === '/v1/remote/pairings' ? 'pairing_created' : path.startsWith('/v1/remote/pairings/') ? (request.method === 'DELETE' ? 'pairing_deleted' : 'pairing_revoked') : /\/revoke$/.test(path) ? 'host_revoked' : /\/rotate$/.test(path) ? 'credential_rotation_requested' : /\/stop$/.test(path) ? 'host_stop_requested' : /\/codex-daemon$/.test(path) ? 'codex_daemon_restart_requested' : undefined;
       if (action) await security.record(grant.subject, action, result.ok ? 'allowed' : 'denied', /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)?.[1]);
     }
     return result ?? (path === '/v1/providers' && request.method === 'GET'

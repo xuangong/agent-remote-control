@@ -218,3 +218,28 @@ Validation includes real HTTP/WebSocket Worker tests, Chromium/WebKit at mobile 
 desktop widths, and an isolated Codex 0.155.1 private app-server rename/read test that
 verifies persistence across restart without inference. It does not mutate existing
 user sessions or restart the shared daemon.
+
+
+### Shared Codex daemon lifecycle
+
+Codex providers may advertise `daemonControl: true` in Host uplink registration.
+The owner-only hosted route `GET|POST /v1/remote/hosts/:hostId/codex-daemon`
+forwards the exact `/remote/codex-daemon` uplink route without a Relay session ID.
+GET has no body; POST accepts only `{ operationId, revision }`, both UUIDs. POST
+uses the existing authenticated, same-origin mutation protection and is audited
+as `codex_daemon_restart_requested`. No native command or socket is supplied by
+the browser.
+
+`CodexDaemonStatus` reports `revision`, optional `operationId`, `updatedAt`,
+optional bounded `message`, and one of `idle`, `restarting`, `ready`, `failed`, or
+`unknown`. An accepted intent returns HTTP 202 immediately after persistence.
+The Controller serializes intents, deduplicates the latest operation ID, and
+rejects old revisions or concurrent new operations with HTTP 409. Readers can
+query the last outcome after browser or uplink replacement; they must not infer
+that a missing reply means the restart did not execute. A Controller restart
+never replays unfinished daemon operations.
+
+Fixtures cover capability registration, strict route/method/body scope, owner
+and CSRF authorization, old-Controller rejection, uplink replacement during a
+job, persistence failures, and browser polling without mutation replay. Deploy
+updated strict-schema Server participants before capability-advertising Hosts.

@@ -1,3 +1,4 @@
+import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
 import { createControllerUpdater } from './controller-update.js';
 import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
@@ -80,6 +81,7 @@ export interface AgentHostRuntime {
   close(): Promise<void>;
 }
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
+  codexDaemon?: { stateDir: string; restart(): Promise<void> };
   controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string, clean?: boolean): void | Promise<void> };
   vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
@@ -107,6 +109,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   const runtime = createAgentHostRuntime({ ...options, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
   runtime.setRelayConnected(false);
   const updater = options.controller ? createControllerUpdater({ ...options.controller, beginRestart: runtime.beginControllerRestart, cancelRestart: runtime.cancelControllerRestart }) : undefined;
+  const codexDaemon = options.codexDaemon ? createCodexDaemonControl(options.codexDaemon) : undefined;
   const previews = options.preview ? createControllerPreviews(options.preview) : undefined;
   const vscodeTunnel = options.vscodeTunnel ? createVscodeTunnelManager({ ...options.vscodeTunnel, installationId: options.installationId }) : undefined;
   let state: AgentHost['state'] = 'connecting';
@@ -119,7 +122,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
-      providers: options.registrations.map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) })), url: config.url, remoteKey: config.remoteKey,
+      providers: options.registrations.map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(codexDaemon && adapter.descriptor.providerId === 'codex' ? { daemonControl: true as const } : {}), ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) })), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
           if (generation !== current || closed) throw new Error('Host credential persistence was superseded.');
@@ -139,7 +142,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           return { status: 202, body: JSON.stringify(await updater.request(body.version, body.operationId)) };
         } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.',
           ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 2 } : {}) }) }; }
-      })() : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
+      })() : request.path === '/remote/codex-daemon' && codexDaemon ? codexDaemon.control(request) : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
         : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
       operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,

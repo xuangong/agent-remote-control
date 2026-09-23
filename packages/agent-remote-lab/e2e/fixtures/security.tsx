@@ -15,7 +15,7 @@ function Conversation({ accountAction, baseUrl }: { accountAction: ReactNode; ba
     <button onClick={() => setSide(true)}>Open side conversation</button>
     {side ? <aside>Side conversation remains open</aside> : null}
     <button onClick={() => setSettings(value => !value)}>Settings</button>
-    {settings ? <section aria-label="Controller settings">{accountAction}<HostPairing service={service} selectedHostId="studio" hosts={[{ id: 'studio', name: 'Studio Mac', managed: true, credentialRotation: true, online: true, access: 'owner' }]} onSelect={() => undefined} onRetryHosts={() => undefined} /></section> : null}
+    {settings ? <section aria-label="Controller settings">{accountAction}<HostPairing service={service} selectedHostId="studio" hosts={[{ id: 'studio', name: 'Studio Mac', managed: true, credentialRotation: true, online: true, access: 'owner', providers: [{ providerId: 'codex', displayName: 'Codex', ...(new URLSearchParams(location.search).has('daemon-control') ? { daemonControl: true as const } : {}) }] }]} onSelect={() => undefined} onRetryHosts={() => undefined} /></section> : null}
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<GatewayController>{(baseUrl, accountAction) => <Conversation baseUrl={baseUrl} accountAction={accountAction} />}</GatewayController>);

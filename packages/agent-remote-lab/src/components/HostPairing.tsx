@@ -1,11 +1,11 @@
-import type { ControllerIdentity, ControllerRelease, ControllerUpdateStatus, HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
+import type { CodexDaemonRestart, CodexDaemonStatus, ControllerIdentity, ControllerRelease, ControllerUpdateStatus, HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
 import { hostDisplayLabel, hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import { PairingKeys } from './PairingKeys.js';
 import { HostSecurityActions } from './HostSecurityActions.js';
 
-export interface HostProvider { providerId: string; displayName: string }
+export interface HostProvider { providerId: string; displayName: string; daemonControl?: true }
 export interface RemoteHost {
   id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
   controller?: ControllerIdentity;
@@ -18,6 +18,7 @@ export interface PairingRecord { id: string; purpose: PairingPurpose; createdAt:
 export interface PairingHistory { pairings: PairingRecord[]; availablePurposes?: PairingPurpose[] }
 export interface HostStopResult { agentId: string; status: 'cancelled' | 'unsupported' | 'failed'; message?: string }
 export interface HostPairingService {
+  codexDaemon?(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus>;
   controllerRelease?(options?: { refresh?: boolean }): Promise<{ release: ControllerRelease | null }>;
   controllerUpdate?(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus>;
   invitation?: PairingInvitation;
@@ -100,7 +101,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
       <button type="button" disabled={revoking} onClick={() => void revoke()}>{revoking ? 'Revoking…' : 'Confirm revoke'}</button>
       <button type="button" disabled={revoking} onClick={() => setRevokeTarget(undefined)}>Cancel</button>
     </div> : null}
-    {selectedHost ? <HostSecurityActions key={selectedHost.id} host={selectedHost} service={service} /> : null}
+    {selectedHost ? <HostSecurityActions key={selectedHost.id} host={selectedHost} service={service} visible={managementVisible} /> : null}
     {onNewSession ? <button type="button" disabled={quotaExhausted} onClick={onNewSession}>New session</button> : null}
     <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>
     </div>

@@ -229,3 +229,40 @@ archive history, stop the daemon, or close another CLI/client's subscription. Co
 controls when an unsubscribed native thread is unloaded, so a reduction in
 `thread/loaded/list` is not guaranteed to be immediate. Private Codex runtimes,
 Claude and Copilot are not automatically disposed by this mechanism.
+
+## Owner-requested daemon restart
+
+Host settings expose **Restart Codex daemon** when the Controller advertises the
+Codex `daemonControl` capability. The account owner must explicitly confirm the
+Host-wide impact: every shared Codex session on that Host, including local CLI
+sessions, disconnects; running tasks are interrupted and do not resume
+automatically. Saved conversation history is preserved. Shared-account guests
+cannot read or invoke this control. Private Codex runtimes and custom sockets do
+not advertise it.
+
+The Controller runs its existing `codex daemon restart` command, followed by
+`codex daemon status`. This preserves the configured Codex home, executable,
+locale, Unix file descriptor limit, and `OPENAI_API_KEY=arc` injection on daemon
+start. Windows uses the existing Windows daemon lifecycle manager. Updating the
+Controller itself still does not restart Codex.
+
+Before dispatch, the Controller records an operation ID and a new revision in
+`codex-daemon-operation.json` under its state directory. Repeating the current
+operation returns its saved outcome; stale revisions and concurrent new intents
+are rejected. The job survives Relay disconnection. A Controller process
+replacement with an unfinished record reports `unknown` and never replays the
+restart. Execution timeout or an unsaved result also leaves the outcome unknown.
+Only an explicit, newly confirmed intent may start another restart.
+
+The website queries the outcome without automatically resending a restart.
+Polling pauses when Host management is hidden or the page is backgrounded and
+is bounded to two minutes per foreground observation window. **Check status**
+remains available afterward. The saved result describes the last operation,
+not continuous daemon health. A `ready` result confirms that the restart and
+subsequent readiness probe completed; it does not assert recovery of every
+session. No messages or interrupted turns are replayed.
+
+Deploy the Server and website before installing a Controller that advertises
+this capability: older strict uplink decoders reject unknown provider fields.
+The updated Server accepts older Controllers but does not offer the operation
+for them.

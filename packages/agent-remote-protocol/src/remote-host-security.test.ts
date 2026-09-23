@@ -33,3 +33,17 @@ it('accepts native session rename only as a host-scoped POST with a body', () =>
     { path: '/remote/session/delete' },
   ]) expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...message, ...change })).status).toBe('rejected');
 }, 10000);
+
+it('permits advertised Codex daemon control and only its exact GET/POST management route', () => {
+  const register = { uplinkVersion: 2, type: 'register', installationId: 'host', name: 'Host',
+    providers: [{ providerId: 'codex', displayName: 'Codex', daemonControl: true }] };
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify(register)).status).toBe('ok');
+  const request = { uplinkVersion: 2, type: 'rpc_request', requestId: 'daemon', method: 'GET', path: '/remote/codex-daemon' };
+  for (const input of [request, { ...request, method: 'POST', body: '{}' }]) {
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify(input)).status).toBe('ok');
+  }
+  for (const change of [{ method: 'POST' }, { body: '{}' }, { sessionId: 'session' },
+    { path: '/remote/codex-daemon/stop' }, { path: '/remote/codex-daemon?command=stop' }]) {
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...request, ...change })).status).toBe('rejected');
+  }
+}, 10000);

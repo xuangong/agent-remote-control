@@ -94,3 +94,27 @@ it('manages pairing invitations using scoped URLs and explicit purposes', async 
     ]);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+it('queries daemon outcomes and posts one explicit intent with no automatic replay', async () => {
+  const requests: Array<{ method?: string; path?: string; body: string }> = [];
+  const revision = '00000000-0000-4000-8000-000000000001';
+  const operationId = '00000000-0000-4000-8000-000000000002';
+  let invalid = false;
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const chunk of request) body += String(chunk);
+    requests.push({ method: request.method, path: request.url, body });
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(invalid ? { phase: 'ready' } : { revision, phase: 'idle', updatedAt: 0 }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new RemoteHostClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/tenant/`);
+    expect((await client.codexDaemon('host/one')).phase).toBe('idle');
+    invalid = true;
+    await expect(client.codexDaemon('host/one', { operationId, revision })).rejects.toThrow(/could not be verified/);
+    expect(requests).toEqual([
+      { method: 'GET', path: '/u/tenant/v1/remote/hosts/host%2Fone/codex-daemon', body: '' },
+      { method: 'POST', path: '/u/tenant/v1/remote/hosts/host%2Fone/codex-daemon', body: JSON.stringify({ operationId, revision }) },
+    ]);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

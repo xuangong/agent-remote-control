@@ -51,3 +51,38 @@ test('rotation reauthentication preserves only the canonical session target and 
   expect(await page.evaluate(() => sessionStorage.getItem('agent-remote-sign-in-return'))).toBe('/?host=studio&provider=codex&session=native-one');
   expect(rotations).toBe(1);
 });
+
+
+test('daemon restart requires Host confirmation and fits the settings panel', async ({ page }, testInfo) => {
+  const revision = '00000000-0000-4000-8000-000000000001';
+  let writes = 0;
+  let status: Record<string, unknown> = { revision, phase: 'idle', updatedAt: 0 };
+  await page.route('**/auth/status', route => route.fulfill({ json: { basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 120000 } }));
+  await page.route('**/v1/remote/hosts/studio/codex-daemon', route => {
+    if (route.request().method() === 'POST') {
+      writes++;
+      const intent = route.request().postDataJSON();
+      expect(intent.revision).toBe(revision);
+      status = { revision: '00000000-0000-4000-8000-000000000002', operationId: intent.operationId, phase: 'restarting', updatedAt: 1 };
+    }
+    return route.fulfill({ json: status });
+  });
+  await page.goto('/e2e/fixtures/security.html?daemon-control');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Restart Codex daemon', exact: true }).click();
+  const confirmation = page.getByRole('group', { name: 'Confirm Codex daemon restart' });
+  await expect(confirmation).toContainText('Studio Mac');
+  await expect(confirmation).toContainText('including local CLI sessions');
+  await expect(confirmation).toContainText('Running tasks will be interrupted');
+  expect(writes).toBe(0);
+  await confirmation.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('daemon-confirmation.png'), fullPage: true });
+  await confirmation.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+  await expect(page.getByText('Restarting Codex daemon…', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Restart Codex daemon', exact: true })).toBeDisabled();
+  status = { ...status, phase: 'ready', updatedAt: 2 };
+  await expect(page.getByText('Restart completed.', { exact: false })).toBeVisible();
+  expect(writes).toBe(1);
+  await expect(page.getByLabel('Message draft')).toHaveValue('Unsent draft');
+});

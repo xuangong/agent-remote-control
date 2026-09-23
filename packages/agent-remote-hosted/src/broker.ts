@@ -1,3 +1,4 @@
+import { isCodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { DiagnosticJournal } from './diagnostic-journal.js';
 import { relayDiagnosticsForVersion, RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from './relay-diagnostics.js';
 import { controllerReleases } from './controller-releases.js';
@@ -12,7 +13,7 @@ import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 
 type RpcResponse = { status: number; body: string; requestId?: string };
-type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true };
+type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
 type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
   connectionId?: string; stopDiagnostics?(): void;
@@ -685,6 +686,24 @@ export function createHostBroker(options: HostBrokerOptions) {
         body = JSON.stringify({ version: release.version, operationId: input.operationId });
       }
       const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/controller-update', undefined, body);
+      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
+    const codexDaemon = /^\/v1\/remote\/hosts\/([^/]+)\/codex-daemon$/.exec(url.pathname);
+    if (codexDaemon) {
+      requireOwner(subject); requireAccess(codexDaemon[1]!, subject);
+      if (!['GET', 'POST'].includes(request.method)) return json(405, { error: 'Method is not allowed.' });
+      const host = requireHost(codexDaemon[1]!);
+      if (!host.providers.some(provider => provider.providerId === 'codex' && provider.daemonControl)) {
+        throw new BrokerError(400, 'unsupported_configuration', 'This Host does not support remote shared Codex daemon control.');
+      }
+      let body: string | undefined;
+      if (request.method === 'POST') {
+        const input = await readBody(request);
+        if (!isCodexDaemonRestart(input)) throw new BrokerError(400, 'invalid_request', 'Refresh daemon state before confirming restart.');
+        body = JSON.stringify(input);
+      }
+      const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/codex-daemon', undefined, body);
+      requireOwner(principal(context)); requireAccess(codexDaemon[1]!, principal(context));
       return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
     const vscodeTunnel = /^\/v1\/remote\/hosts\/([^/]+)\/vscode-tunnel(?:\/(start|stop))?$/.exec(url.pathname);

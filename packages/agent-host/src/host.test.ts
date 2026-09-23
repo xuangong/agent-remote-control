@@ -1462,3 +1462,27 @@ it('reconciles an uncertain rename without repeating the native write', async ()
     expect((await host.control(request)).status).toBe(503); expect(writes).toBe(1);
   } finally { await host.close(); }
 });
+
+it('keeps daemon restart jobs alive across uplink replacement and reports the same outcome', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'arc-host-daemon-'));
+  const broker = await uplinkBroker('daemon-control-host');
+  let finish!: () => void; let calls = 0;
+  const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'daemon-control', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'test-key' },
+    codexDaemon: { stateDir, restart: async () => { calls++; await new Promise<void>(resolve => { finish = resolve; }); } } });
+  try {
+    await host.ready;
+    expect(broker.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX', daemonControl: true }]);
+    const initial = await broker.rpc('GET', '/remote/codex-daemon');
+    expect(initial.status).toBe(200);
+    const input = { operationId: operationId('daemon-restart'), revision: JSON.parse(initial.body).revision };
+    expect((await broker.rpc('POST', '/remote/codex-daemon', undefined, input)).status).toBe(202);
+    await expect.poll(() => calls).toBe(1);
+    await host.replaceUplink({ url: broker.url, remoteKey: 'test-key' });
+    expect(JSON.parse((await broker.rpc('GET', '/remote/codex-daemon')).body).phase).toBe('restarting');
+    finish();
+    await expect.poll(async () => JSON.parse((await broker.rpc('GET', '/remote/codex-daemon')).body).phase).toBe('ready');
+    expect(JSON.parse((await broker.rpc('POST', '/remote/codex-daemon', undefined, input)).body).phase).toBe('ready');
+    expect(calls).toBe(1);
+  } finally { finish?.(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
+}, 10000);

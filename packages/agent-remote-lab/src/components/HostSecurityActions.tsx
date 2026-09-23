@@ -1,10 +1,11 @@
+import { HostCodexDaemon } from './HostCodexDaemon.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import type { HostPairingService, RemoteHost, HostStopResult } from './HostPairing.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 
-export function HostSecurityActions({ host, service }: { host: RemoteHost; service: HostPairingService }) {
+export function HostSecurityActions({ host, service, visible = true }: { host: RemoteHost; service: HostPairingService; visible?: boolean }) {
   const [action, setAction] = useState<'rotate' | 'stop'>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -26,6 +27,7 @@ export function HostSecurityActions({ host, service }: { host: RemoteHost; servi
   }
   if (host.access === 'shared' || !host.managed) return null;
   return <div className="lab-host-security">
+    <HostCodexDaemon host={host} service={service} visible={visible} />
     <div className="lab-host-security-actions">
       {host.credentialRotation && service.rotate ? <button type="button" disabled={busy} onClick={() => setAction('rotate')}>Rotate credential</button> : null}
       {service.stop ? <button type="button" disabled={busy || !host.online} onClick={() => setAction('stop')}>Stop work</button> : null}

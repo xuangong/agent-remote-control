@@ -24,3 +24,4 @@ export * from './pairing.js';
 
 export * from './session-migration.js';
 export * from './controller-release.js';
+export * from './codex-daemon.js';

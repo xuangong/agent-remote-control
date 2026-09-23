@@ -6,13 +6,14 @@ import { createGatewayRelay } from '../src/server/gateway-relay.js';
 import { createGatewayStaticPages } from '../src/server/gateway-static.js';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
 
-export async function sessionLinkFixture() {
+export async function sessionLinkFixture(options: { automaticSignIn?: boolean } = {}) {
   const secret = 'session-link-fixture-secret-01234567890123456789';
   let subject = 'alice';
   let url = '';
   const authority = createServer((request, response) => {
     const challenge = new URL(request.url!, issuer).searchParams.get('challenge');
     const ticket = sign(challenge!, subject);
+    if (options.automaticSignIn) { response.writeHead(302, { location: `${url}/auth/callback#ticket=${ticket}` }); response.end(); return; }
     response.writeHead(200, { 'content-type': 'text/html' });
     response.end(`<a href="${url}/auth/callback#ticket=${ticket}">Sign in as ${subject}</a>`);
   });

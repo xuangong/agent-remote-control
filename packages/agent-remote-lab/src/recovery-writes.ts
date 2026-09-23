@@ -1,9 +1,9 @@
-const pending = new Map<string, () => string>();
+const pending = new Map<string, { serialize(): string; durable: boolean }>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 /** Persist the latest value at most once per burst, including before suspension. */
-export function queueRecoveryWrite(key: string, serialize: () => string): void {
-  pending.set(key, serialize);
+export function queueRecoveryWrite(key: string, serialize: () => string, durable = false): void {
+  pending.set(key, { serialize, durable });
   if (timer !== undefined) return;
   window.addEventListener('pagehide', flushAll);
   document.addEventListener('visibilitychange', onVisibility);
@@ -11,10 +11,10 @@ export function queueRecoveryWrite(key: string, serialize: () => string): void {
 }
 
 export function flushRecoveryWrites(prefix = ''): void {
-  for (const [key, serialize] of pending) {
+  for (const [key, { serialize, durable }] of pending) {
     if (!key.startsWith(prefix)) continue;
     pending.delete(key);
-    try { sessionStorage.setItem(key, serialize()); }
+    try { const value = serialize(); sessionStorage.setItem(key, value); if (durable) localStorage.setItem(key, value); }
     catch { /* Editing and reading remain usable when browser storage is unavailable. */ }
   }
   releaseIfEmpty();

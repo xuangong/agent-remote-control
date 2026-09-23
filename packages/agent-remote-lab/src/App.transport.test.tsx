@@ -24,7 +24,7 @@ it('opts owned transports into channels and disposes replacements and unmounts w
   }
   await render(<StrictMode><Harness /></StrictMode>);
   const constructor = vi.mocked(HttpWebSocketTransport);
-  expect(constructor).toHaveBeenLastCalledWith('http://localhost/u/alice/', { sessionChannels: true });
+  expect(constructor).toHaveBeenLastCalledWith('http://localhost/u/alice/', expect.objectContaining({ sessionChannels: true, fetch: expect.any(Function), webSocketFactory: expect.any(Function) }));
   const first = constructor.mock.results.at(-1)!.value as HttpWebSocketTransport;
   expect(first.dispose).not.toHaveBeenCalled();
   await act(async () => changeScope('bob'));

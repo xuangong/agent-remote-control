@@ -1,3 +1,4 @@
+import { workspaceFetch } from './workspace-access.js';
 import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './components/HostPairing.js';
@@ -21,7 +22,7 @@ export class DirectoryError extends Error {
 }
 export class SessionDirectoryClient {
   readonly cachedPages = new Map<string, SessionCatalogPage>();
-  constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis), private readonly hostId = 'local') {}
+  constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = workspaceFetch, private readonly hostId = 'local') {}
   private async request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const response = await this.fetcher(new URL(`v1/remote/${this.hostId === 'local' ? '' : `hosts/${encodeURIComponent(this.hostId)}/`}${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), body === undefined ? { signal } : {
       signal,
@@ -61,7 +62,7 @@ export class RemoteHostClient implements HostPairingService {
   invitation?: PairingInvitation;
   constructor(private readonly baseUrl: string) {}
   private async request<T>(path: string, method = 'GET', requestBody?: unknown, timeoutMs?: number): Promise<T> {
-    const response = await fetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    const response = await workspaceFetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
     const body = await response.json();
     if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);

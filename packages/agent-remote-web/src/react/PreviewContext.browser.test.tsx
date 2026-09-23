@@ -290,3 +290,16 @@ it('waits for the registered preview data tunnel before returning it for opening
     expect(client.open).not.toHaveBeenCalled();
   } finally { await unmount(container); vi.useRealTimers(); }
 });
+
+it('keeps its child editor mounted while the preview Host is still being restored', async () => {
+  const client = previewClient(vi.fn(async () => 'entry'));
+  const child = <textarea defaultValue="unsent" />;
+  const container = await render(<PreviewProvider enabled={false} client={client} hostId="" canManage={false}>{child}</PreviewProvider>);
+  const editor = container.querySelector('textarea')!;
+  editor.value = 'still editing';
+  expect(client.snapshot).not.toHaveBeenCalled();
+  await rerender(container, <PreviewProvider client={client} hostId="one" canManage>{child}</PreviewProvider>);
+  expect(container.querySelector('textarea')).toBe(editor);
+  expect(editor.value).toBe('still editing');
+  expect(client.snapshot).toHaveBeenCalled();
+});

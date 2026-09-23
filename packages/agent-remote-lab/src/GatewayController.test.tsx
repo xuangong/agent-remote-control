@@ -1,7 +1,9 @@
 import { act, useState } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from './test/setup.js';
 import { GatewayController } from './GatewayController.js';
+import { rememberWorkspaceAccess, forgetWorkspaceAccess } from './workspace-access.js';
+beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('offers gateway login without loading private controllers when the grant is missing', async () => {
@@ -10,13 +12,13 @@ it('offers gateway login without loading private controllers when the grant is m
   expect(view.querySelector('a')?.getAttribute('href')).toBe('/auth/login');
   expect(view.textContent).not.toContain('Private controller');
 });
-it('uses a user-scoped controller URL and retires the controller at grant expiry', async () => {
+it('keeps the user-scoped controller mounted while renewing an expired grant', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 5000 })));
   const view = await render(<GatewayController>{baseUrl => <p>{baseUrl}</p>}</GatewayController>);
   expect(view.textContent).toContain(window.location.origin + '/u/' + 'a'.repeat(64) + '/');
   await act(async () => { await vi.advanceTimersByTimeAsync(5001); });
-  expect(view.querySelector('a')?.textContent).toBe('Sign in through gateway');
+  expect(view.textContent).toContain(window.location.origin + '/u/' + 'a'.repeat(64) + '/');
 });
 
 it('renews access while retaining the mounted private controller', async () => {
@@ -43,7 +45,7 @@ it('renews access while retaining the mounted private controller', async () => {
   expect(requests.some(({ url, init }) => url === '/auth/refresh' && init?.method === 'POST' && init.body === '{}')).toBe(true);
 });
 
-it('bounds failed refresh retries by the current authorization expiry', async () => {
+it('retains the visible workspace and retries after temporary renewal failures', async () => {
   vi.useFakeTimers();
   let attempts = 0;
   vi.stubGlobal('fetch', async (url: string) => {
@@ -56,17 +58,17 @@ it('bounds failed refresh retries by the current authorization expiry', async ()
   expect(view.textContent).toContain('Private controller');
   expect(attempts).toBeGreaterThan(0);
   await act(async () => { await vi.advanceTimersByTimeAsync(3001); });
-  expect(view.textContent).not.toContain('Private controller');
+  expect(view.textContent).toContain('Private controller');
   const expiredAttempts = attempts;
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
-  expect(attempts).toBe(expiredAttempts);
+  expect(attempts).toBeGreaterThan(expiredAttempts);
 });
 
 it('clears private UI immediately when refresh is denied', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('fetch', async (url: string) => url === '/auth/status'
     ? Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 5000, refreshAfterMs: 1000 })
-    : Response.json({}, { status: 401 }));
+    : Response.json({}, { status: 403 }));
   const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
   expect(view.textContent).not.toContain('Private controller');
@@ -86,20 +88,20 @@ it('logs out through the relay and removes the private controller', async () => 
   expect(view.textContent).not.toContain('Private controller');
 });
 
-it('ignores a refresh response that arrives after the bounded recovery window', async () => {
+it('ignores timed-out renewal responses without removing the workspace', async () => {
   vi.useFakeTimers();
   let completeRefresh!: (response: Response) => void;
   vi.stubGlobal('fetch', async (url: string) => url === '/auth/status'
     ? Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 5000, refreshAfterMs: 1000 })
     : new Promise<Response>(resolve => { completeRefresh = resolve; }));
   const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
-  await act(async () => { await vi.advanceTimersByTimeAsync(10001); });
-  expect(view.textContent).not.toContain('Private controller');
+  await act(async () => { await vi.advanceTimersByTimeAsync(13001); });
+  expect(view.textContent).toContain('Private controller');
   await act(async () => { completeRefresh(Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 5000, refreshAfterMs: 1000 })); });
-  expect(view.textContent).not.toContain('Private controller');
+  expect(view.textContent).toContain('Private controller');
 });
 
-it('hides expired access after a long freeze and restores the same draft and side state after authoritative renewal', async () => {
+it('preserves visible access after a long freeze and restores the same draft and side state after authoritative renewal', async () => {
   vi.useFakeTimers();
   const basePath = '/u/' + 'a'.repeat(64) + '/';
   let completeRefresh!: (response: Response) => void;
@@ -118,8 +120,8 @@ it('hides expired access after a long freeze and restores the same draft and sid
   vi.setSystemTime(Date.now() + 180000);
   await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
   expect(view.querySelector('input')).toBe(input);
-  expect(input.closest('[hidden][inert]')).not.toBeNull();
-  expect(view.textContent).toContain('Restoring access');
+  expect(input.closest('[hidden], [inert]')).toBeNull();
+  expect(view.textContent).not.toContain('Opening your workspace');
   await act(async () => { completeRefresh(Response.json({ basePath, expiresAt: Date.now() + 120000, refreshAfterMs: 60000 })); });
   expect(view.querySelector('input')).toBe(input);
   expect(input.value).toBe('unsent draft');
@@ -127,7 +129,7 @@ it('hides expired access after a long freeze and restores the same draft and sid
   expect(input.closest('[hidden], [inert]')).toBeNull();
 });
 
-it('keeps an in-flight renewal alive at lease expiry while making the private controller inert', async () => {
+it('keeps the editor usable during in-flight renewal at lease expiry', async () => {
   vi.useFakeTimers();
   const basePath = '/u/' + 'a'.repeat(64) + '/';
   let completeRefresh!: (response: Response) => void;
@@ -141,7 +143,7 @@ it('keeps an in-flight renewal alive at lease expiry while making the private co
   const input = view.querySelector('input')!;
   await act(async () => { await vi.advanceTimersByTimeAsync(5001); });
   expect(signal?.aborted).toBe(false);
-  expect(input.closest('[hidden][inert]')).not.toBeNull();
+  expect(input.closest('[hidden], [inert]')).toBeNull();
   await act(async () => { completeRefresh(Response.json({ basePath, expiresAt: Date.now() + 5000, refreshAfterMs: 1000 })); });
   expect(view.querySelector('input')).toBe(input);
   expect(input.closest('[hidden], [inert]')).toBeNull();
@@ -155,8 +157,8 @@ it('clears the paused private controller if authoritative recovery is denied', a
     : new Promise<Response>(resolve => { completeRefresh = resolve; }));
   const view = await render(<GatewayController>{() => <input aria-label="Draft" />}</GatewayController>);
   await act(async () => { await vi.advanceTimersByTimeAsync(5001); });
-  expect(view.querySelector('input')?.closest('[hidden][inert]')).not.toBeNull();
-  await act(async () => { completeRefresh(Response.json({}, { status: 401 })); });
+  expect(view.querySelector('input')?.closest('[hidden], [inert]')).toBeNull();
+  await act(async () => { completeRefresh(Response.json({}, { status: 403 })); });
   expect(view.querySelector('input')).toBeNull();
   expect(view.querySelector('a')?.getAttribute('href')).toBe('/auth/login');
 });
@@ -248,4 +250,77 @@ it('shows the Gateway account identity without exposing authentication material'
   const view = await render(<GatewayController>{() => <p>Conversation</p>}</GatewayController>);
   expect(view.textContent).toContain('Alice Example');
   expect(view.querySelector('[aria-label="Gateway account"]')?.getAttribute('title')).toContain('alice@example.com');
+});
+
+
+it('renders a recent workspace before authorization and opens business access only after checking', async () => {
+  const basePath = '/u/' + 'a'.repeat(64) + '/';
+  rememberWorkspaceAccess({ basePath, expiresAt: Date.now() + 5000 });
+  let finish!: (response: Response) => void;
+  vi.stubGlobal('fetch', () => new Promise<Response>(resolve => { finish = resolve; }));
+  const view = await render(<GatewayController>{(_url, _account, ready) => <input aria-label={ready ? 'Live draft' : 'Cached draft'} defaultValue="Keep typing" />}</GatewayController>);
+  const draft = view.querySelector('input')!;
+  expect(draft.getAttribute('aria-label')).toBe('Cached draft');
+  draft.value = 'Written during checking';
+  await act(async () => finish(Response.json({ basePath, expiresAt: Date.now() + 60000 })));
+  expect(view.querySelector('input')).toBe(draft);
+  expect(draft.getAttribute('aria-label')).toBe('Live draft');
+  expect(draft.value).toBe('Written during checking');
+});
+it('automatically restores a returning browser through Gateway once using the current canonical target', async () => {
+  rememberWorkspaceAccess({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: 1 });
+  window.history.replaceState(null, '', '/?host=desk&provider=codex&session=native&token=secret');
+  const navigate = vi.fn();
+  vi.stubGlobal('fetch', async () => Response.json({}, { status: 401 }));
+  await render(<GatewayController navigate={navigate}>{() => <p>Workspace</p>}</GatewayController>);
+  expect(navigate).toHaveBeenCalledWith('/auth/login?host=desk&provider=codex&session=native');
+  await render(<GatewayController navigate={navigate}>{() => <p>Workspace</p>}</GatewayController>);
+  expect(navigate).toHaveBeenCalledTimes(1);
+});
+it('does not restore cached UI or silently sign in after explicit sign-out', async () => {
+  rememberWorkspaceAccess({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: 1 });
+  forgetWorkspaceAccess();
+  const navigate = vi.fn();
+  vi.stubGlobal('fetch', async () => Response.json({}, { status: 401 }));
+  const view = await render(<GatewayController navigate={navigate}>{() => <p>Workspace</p>}</GatewayController>);
+  expect(navigate).not.toHaveBeenCalled();
+  expect(view.querySelector('.gateway-private')).toBeNull();
+});
+it('does not silently undo sign-out if the server logout failed', async () => {
+  rememberWorkspaceAccess({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: 1 });
+  forgetWorkspaceAccess();
+  vi.stubGlobal('fetch', async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 60000 }));
+  const view = await render(<GatewayController>{() => <p>Must stay signed out</p>}</GatewayController>);
+  expect(view.querySelector('.gateway-private')).toBeNull();
+  expect(view.querySelector('a')?.getAttribute('href')).toBe('/auth/login');
+});
+it('clears the previous account display cache before showing a different confirmed account', async () => {
+  const basePath = '/u/' + 'a'.repeat(64) + '/';
+  rememberWorkspaceAccess({ basePath, expiresAt: 1 });
+  const oldKey = `agent-remote:recovery:${new URL(basePath, location.origin).href}:workspace`;
+  localStorage.setItem(oldKey, 'private history');
+  vi.stubGlobal('fetch', async () => Response.json({ basePath: '/u/' + 'b'.repeat(64) + '/', expiresAt: Date.now() + 60000 }));
+  const view = await render(<GatewayController>{url => <p>{url}</p>}</GatewayController>);
+  expect(localStorage.getItem(oldKey)).toBeNull();
+  expect(view.textContent).toContain('/u/' + 'b'.repeat(64) + '/');
+});
+it('shows only the shell after a day without confirmation, then renews the display window', async () => {
+  vi.useFakeTimers();
+  const basePath = '/u/' + 'a'.repeat(64) + '/';
+  rememberWorkspaceAccess({ basePath, expiresAt: 1 });
+  vi.setSystemTime(Date.now() + 24 * 3600000 + 1);
+  let finish!: (response: Response) => void;
+  vi.stubGlobal('fetch', () => new Promise<Response>(resolve => { finish = resolve; }));
+  const view = await render(<GatewayController>{() => <p>Private content</p>}</GatewayController>);
+  expect(view.querySelector('.gateway-workspace-shell')).not.toBeNull();
+  expect(view.textContent).not.toContain('Private content');
+  await act(async () => finish(Response.json({ basePath, expiresAt: Date.now() + 60000 })));
+  expect(view.textContent).toContain('Private content');
+});
+it('removes local content when another tab signs out', async () => {
+  vi.stubGlobal('fetch', async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 60000 }));
+  const view = await render(<GatewayController>{() => <p>Private content</p>}</GatewayController>);
+  expect(view.textContent).toContain('Private content');
+  await act(async () => { forgetWorkspaceAccess(); window.dispatchEvent(new StorageEvent('storage', { key: 'agent-remote:signed-out', newValue: '1' })); });
+  expect(view.textContent).not.toContain('Private content');
 });

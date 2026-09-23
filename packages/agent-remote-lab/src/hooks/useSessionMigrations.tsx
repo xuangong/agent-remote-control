@@ -1,3 +1,4 @@
+import { workspaceFetch } from '../workspace-access.js';
 import { useEffect, useRef, useState } from 'react';
 import { watchPageResume, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { decodeSessionChannelServerMessage, PROTOCOL_VERSION, type SessionMigration } from '@orchardworks/agent-remote-protocol';
@@ -57,7 +58,7 @@ export function useSessionMigrations(options: {
     async function refresh() {
       if (fetching || abort.signal.aborted) return; fetching = true;
       try {
-        const response = await fetch(new URL('v1/session-migrations', scope), { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(12000)]) });
+        const response = await workspaceFetch(new URL('v1/session-migrations', scope), { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(12000)]) });
         if (!response.ok) return;
         const result = await response.json();
         if (!Array.isArray(result.migrations)) return;

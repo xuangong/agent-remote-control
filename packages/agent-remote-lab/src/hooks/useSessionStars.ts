@@ -25,8 +25,9 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
     catch (error) { if (generation.current === request) setError(error instanceof Error ? error.message : 'Favorites could not be loaded.'); }
     finally { if (generation.current === request) setLoading(false); }
   }, [service, enabled]);
+  useEffect(() => { publish(empty()); }, [service]);
   useEffect(() => {
-    publish(empty()); setError(undefined); setPending(undefined); busy.current = false; setLoading(enabled);
+    setError(undefined); setPending(undefined); busy.current = false; setLoading(enabled);
     void refresh();
     const unwatch = watchPageResume(() => void refresh());
     return () => { ++generation.current; requestController.current?.abort(); unwatch(); };

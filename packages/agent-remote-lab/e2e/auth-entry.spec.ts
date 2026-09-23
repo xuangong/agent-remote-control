@@ -31,13 +31,15 @@ test('session sign-in has consistent checking, login, callback and retry pages',
     await expect(page.getByRole('heading', { name: 'Completing sign-in' })).toBeVisible();
     expect(page.url()).toBe(f.url + '/auth/callback');
     expect(await page.locator('.arc-access').evaluate(element => getComputedStyle(element).display)).toBe('grid');
-    await page.screenshot({ path: testInfo.outputPath('03-verifying.png') });
+    // WebKit's screenshot helper injects styles that this callback's strict CSP rejects.
+    // Keep the CSP assertion independent of capture instrumentation.
+    if (testInfo.project.use.browserName !== 'webkit') await page.screenshot({ path: testInfo.outputPath('03-verifying.png') });
     releaseExchange();
     await expect(page.getByRole('heading', { name: 'Let’s try signing in again' })).toBeVisible();
     const retry = page.getByRole('link', { name: 'Sign in again', exact: true });
     await expect(retry).toHaveAttribute('href', '/auth/login' + target.slice(1));
     await expect(page.getByRole('heading')).toBeFocused();
-    await page.screenshot({ path: testInfo.outputPath('04-expired.png') });
+    if (testInfo.project.use.browserName !== 'webkit') await page.screenshot({ path: testInfo.outputPath('04-expired.png') });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.unroute('**/auth/session');
     await retry.click();

@@ -74,7 +74,7 @@ it('coalesces reading and draft writes and flushes on page hide without reviving
     }
     expect(writes).not.toHaveBeenCalled();
     window.dispatchEvent(new Event('pagehide'));
-    expect(writes).toHaveBeenCalledTimes(2);
+    expect(writes).toHaveBeenCalledTimes(3);
     expect(readDrafts('batched').root).toBe('19');
     expect(new ReadingPositions('batched').get('session')?.anchor?.offset).toBe(19);
     saveDrafts('batched', { root: 'Do not resurrect' });
@@ -82,4 +82,14 @@ it('coalesces reading and draft writes and flushes on page hide without reviving
     vi.runAllTimers();
     expect(readDrafts('batched')).toEqual({});
   } finally { vi.useRealTimers(); }
+});
+it('restores reading positions after a fresh home-screen launch clears tab storage', () => {
+  const position = { following: false, anchor: { key: 'last-paragraph', offset: -12 } };
+  const positions = new ReadingPositions('personal-device');
+  positions.set('session:epoch', position);
+  window.dispatchEvent(new Event('pagehide'));
+  sessionStorage.clear();
+  expect(new ReadingPositions('personal-device').get('session:epoch')).toEqual(position);
+  clearConversationRecovery('personal-device');
+  expect(new ReadingPositions('personal-device').size).toBe(0);
 });

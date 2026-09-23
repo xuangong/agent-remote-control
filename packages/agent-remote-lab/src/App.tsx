@@ -1,3 +1,5 @@
+import { WorkspaceReady, workspaceFetch, workspaceSocket, readWorkspaceAccess } from './workspace-access.js';
+import { readWorkspaceSnapshot, saveWorkspaceSnapshot } from './workspace-cache.js';
 import { ControllerUpdates } from './components/ControllerUpdates.js';
 import { readPromptEditReservation, retainPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
 import { preparePromptDraft, savePromptDraft } from '@orchardworks/agent-remote-web/react';
@@ -20,6 +22,7 @@ import { SessionLink, SessionTransferDialog } from './components/SessionLink.js'
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -45,7 +48,7 @@ import {
   type RemoteAgentTransport,
   type RemoteSessionStatus,
 } from '@orchardworks/agent-remote-web';
-import { ReadingPositions, RecoveryScope, readLastSession, saveLastSession } from './conversation-recovery.js';
+import { ReadingPositions, RecoveryScope, recoveryGeneration, readLastSession, saveLastSession } from './conversation-recovery.js';
 import { recoverMessages } from './message-recovery.js';
 import { restoreSession } from './session-restoration.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
@@ -139,12 +142,16 @@ function AppContent({
   accountAction,
   userScoped = false,
 }: AppProps) {
+  const accessReady = useContext(WorkspaceReady);
+  const [activated, setActivated] = useState(accessReady);
+  useEffect(() => { if (accessReady) setActivated(true); }, [accessReady]);
+  const accessReadyRef = useRef(accessReady); accessReadyRef.current = accessReady;
   const shellRef = useVisualViewport();
   const askPositionRef = useRef<FloatingPosition>(null);
   const askTriggerRef = useRef<HTMLButtonElement>(null);
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
-    ?? new HttpWebSocketTransport(baseUrl, { sessionChannels: true }) as LabTransport, [baseUrl, injectedTransport]);
+    ?? new HttpWebSocketTransport(baseUrl, { sessionChannels: true, fetch: workspaceFetch, webSocketFactory: workspaceSocket }) as LabTransport, [baseUrl, injectedTransport]);
   const mountedTransport = useRef<LabTransport>();
   useEffect(() => {
     mountedTransport.current = transport;
@@ -156,7 +163,7 @@ function AppContent({
       });
     };
   }, [transport, injectedTransport]);
-  const favorites = useSessionStars(baseUrl, userScoped, transport);
+  const favorites = useSessionStars(baseUrl, userScoped && accessReady, transport);
   const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
     try {
       const target = readControllerLocation(new URLSearchParams(window.location.search));
@@ -164,17 +171,22 @@ function AppContent({
     }
     catch { return { error: 'Invalid session link.' }; }
   });
+  const [cachedState] = useState(() => {
+    const cachedAccess = readWorkspaceAccess();
+    return userScoped && cachedAccess && new URL(cachedAccess.basePath, window.location.origin).href === baseUrl
+      ? readWorkspaceSnapshot(baseUrl, requested.target) : undefined;
+  });
   const requestedHostId = requested.target?.hostId;
   const [selectedHost, setSelectedHost] = useState<RemoteHost>(() => requestedHostId
     ? { id: requestedHostId, name: 'Requested Host', online: false, providers: [], providerId: '' }
     : { id: 'local', name: 'Recorded fixture', online: true });
   const vscodeTunnelClient = useMemo(() => new HttpVscodeTunnelClient(baseUrl), [baseUrl]);
   const hostClient = useMemo(() => hostService ?? new RemoteHostClient(baseUrl), [baseUrl, hostService]);
-  const previewClient = useMemo(() => new HttpPreviewClient(baseUrl), [baseUrl]);
-  const directory = useMemo(() => injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id]);
+  const previewClient = useMemo(() => new HttpPreviewClient(baseUrl, workspaceFetch), [baseUrl]);
+  const directory = useMemo(() => !activated ? undefined : injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id, activated]);
   const [askSimple, setAskSimple] = useState(false);
   const restoredHostSelection = useRef(false);
-  const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory ? readOpenedSessions(baseUrl) : []);
+  const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory || cachedState ? readOpenedSessions(baseUrl) : []);
   const openedSessionsRef = useRef(openedSessions);
   openedSessionsRef.current = openedSessions;
   const forkStore = useMemo(() => new ForkStore(baseUrl), [baseUrl]);
@@ -229,8 +241,8 @@ function AppContent({
   const [providerName, setProviderName] = useState(initialProviderName);
   const [catalogStatus, setCatalogStatus] = useState<ProviderCatalogStatus>(initialState ? 'ready' : 'loading');
   const [catalogError, setCatalogError] = useState<string>();
-  const [state, setState] = useState<AgentReplicaState | undefined>(initialState);
-  const [status, setStatus] = useState<RemoteSessionStatus>(initialSessionStatus);
+  const [state, setState] = useState<AgentReplicaState | undefined>(initialState ?? cachedState);
+  const [status, setStatus] = useState<RemoteSessionStatus>(cachedState ? 'connecting' : initialSessionStatus);
   const [attachingAgentId, setAttachingAgentId] = useState<string>();
   const [transitioning, setTransitioning] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<SessionConnectionMessage>();
@@ -242,14 +254,14 @@ function AppContent({
   const [traceNavigation, setTraceNavigation] = useState<{ scope: string; key: string; requestId: number; view: 'workbench' | 'trace' }>();
   const traceRequestCounter = useRef(0);
   const [scanOpen, setScanOpen] = useState(false);
-  const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !initialState);
+  const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !initialState && !cachedState);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const sidebar = useSidebarWidth(inspectorOpen);
   const [headerHidden, setHeaderHidden] = useState(true);
   const [desktopContextVisible, setDesktopContextVisible] = useState(true);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
 
-  const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
+  const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
   const ask = useAskConversations(baseUrl, transport, directory, selectedHost.id, retryHosts);
   useEffect(() => {
     if (compactLayout && !contextOpen) return;
@@ -362,6 +374,7 @@ function AppContent({
   }
 
   const attach = useCallback((agentId: string, catchUpTarget?: TimelineCursor): void => {
+    if (!accessReadyRef.current) return;
     navigationGeneration.current += 1;
     setSessionNotice(undefined);
     setUncertainMutation(false);
@@ -374,7 +387,8 @@ function AppContent({
       setInspectorOpen(false);
       setActiveView('workbench');
     }
-    setState(replicas.get(agentId)?.getState());
+    setState(previous => replicas.get(agentId)?.getState().agent ? replicas.get(agentId)!.getState()
+      : previous?.agent?.id === agentId ? previous : undefined);
     setStatus('connecting');
     setAttachingAgentId(agentId);
     const replica = replicaFor(agentId);
@@ -385,7 +399,11 @@ function AppContent({
     replicaRef.current = replica;
     clientRef.current = client;
     primaryBinding.current = { baseUrl, transport, agentId };
-    const unsubscribe = replica.subscribe(() => { if (replicaRef.current === replica) setState(replica.getState()); });
+    const unsubscribe = replica.subscribe(() => {
+      if (replicaRef.current !== replica) return;
+      const next = replica.getState();
+      setState(previous => next.timeline.initialized || !previous?.timeline.initialized ? next : previous);
+    });
     unsubscribeReplicaRef.current = () => { unsubscribe(); stopMessageRecovery(); };
     client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
     client.start();
@@ -393,9 +411,9 @@ function AppContent({
   }, [baseUrl, transport, replicas, replicaFor, beginCatchUp]);
 
   useEffect(() => {
-    if (initialState) return;
+    if (initialState || !activated) return;
     void loadProviders();
-  }, [initialState, loadProviders]);
+  }, [initialState, loadProviders, activated]);
 
   useEffect(() => () => {
     providerRequestGenerationRef.current += 1;
@@ -406,7 +424,7 @@ function AppContent({
   }, []);
 
   useEffect(() => {
-    if (initialState) return;
+    if (initialState || !activated) return;
     if (requested.error) return;
     const remembered = rememberedAgent();
     const saved = openedSessionsRef.current.find(item => item.agentId === remembered);
@@ -421,7 +439,7 @@ function AppContent({
     const target = new SessionDirectoryClient(baseUrl, undefined, hostId);
     setAttachingAgentId(location.agentId ?? nativeSessionId);
     setStatus('connecting');
-    setSessionNotice({ tone: 'status', message: 'Opening the existing session. Waiting for the Host…' });
+    if (!cachedState) setSessionNotice({ tone: 'status', message: 'Opening the existing session. Waiting for the Host…' });
     const cancel = restoreSession({
       active: () => navigationGeneration.current === generation,
       open: signal => parentNativeSessionId
@@ -443,7 +461,7 @@ function AppContent({
       },
     });
     return () => { cancel(); clientRef.current?.stop(); };
-  }, [attach, baseUrl, initialState, requestedHostId]);
+  }, [attach, baseUrl, initialState, requestedHostId, activated]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -794,10 +812,32 @@ function AppContent({
     });
     return () => { remove?.(); clearTimeout(timer); };
   }, [transport, tracking.rename]);
+  const displayChanged = useRef<() => void>(() => undefined);
+  useEffect(() => displayChanged.current(), [state, addressSession, accessReady, status]);
+  const latestDisplay = useRef<{ target?: OpenedSession; state?: AgentReplicaState; allowed: boolean }>({ allowed: false });
+  latestDisplay.current = { target: addressSession, state, allowed: accessReady && status === 'ready' && !!state?.timeline.epoch };
+  useEffect(() => {
+    let dirty = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const generation = recoveryGeneration(baseUrl);
+    const save = () => {
+      const current = latestDisplay.current;
+      clearTimeout(timer); timer = undefined;
+      if (generation === recoveryGeneration(baseUrl) && dirty && current.allowed && current.target && current.state) {
+        dirty = false; saveWorkspaceSnapshot(baseUrl, current.target, current.state);
+      }
+    };
+    const onHide = () => { if (document.visibilityState === 'hidden') save(); };
+    // Coalesce streamed updates without writing on every token or delaying pagehide.
+    const mark = () => { dirty = true; timer ??= setTimeout(save, 2000); };
+    displayChanged.current = mark; mark();
+    window.addEventListener('pagehide', save); document.addEventListener('visibilitychange', onHide);
+    return () => { save(); clearTimeout(timer); window.removeEventListener('pagehide', save); document.removeEventListener('visibilitychange', onHide); };
+  }, [baseUrl]);
   const promptEditBusy = useRef(false);
   const [promptEditPending, setPromptEditPending] = useState(false);
   const promptEditReservation = useMemo<{ current: PromptEditReservation | undefined }>(() => ({ current: readPromptEditReservation(baseUrl) }), [baseUrl]);
-  const promptMigrations = useSessionMigrations({ baseUrl, enabled: userScoped, transport, current: activeOpened, loaded: openWindows,
+  const promptMigrations = useSessionMigrations({ baseUrl, enabled: userScoped && accessReady, transport, current: activeOpened, loaded: openWindows,
     blocked: () => promptEditBusy.current || transitionRef.current || activeView !== 'workbench' || supportingRailOpen,
     needsPromptRestore: migration => !promptEditBusy.current && promptEditReservation.current?.operationId === migration.id && !promptEditReservation.current.restored,
     stay: migration => {
@@ -991,6 +1031,7 @@ function AppContent({
 
   const submittedClient = clientRef.current;
   function commandClient(): RemoteSessionClient {
+    if (!accessReadyRef.current) throw new Error('Workspace access is restoring.');
     if (!submittedClient || clientRef.current !== submittedClient) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true);
     return submittedClient;
   }
@@ -1026,7 +1067,7 @@ function AppContent({
 
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
   // Retain message handlers so the composer can wait for readiness before sending.
-  const availableConversationActions = !hostOffline && status === 'ready' ? conversationActions : {
+  const availableConversationActions = accessReady && !hostOffline && status === 'ready' ? conversationActions : {
     sendMessage: conversationActions.sendMessage,
     sendMessageContent: conversationActions.sendMessageContent,
     deleteMessage: conversationActions.deleteMessage,
@@ -1034,7 +1075,7 @@ function AppContent({
 
   return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
-    {tracking.observers}
+    {accessReady ? tracking.observers : null}
     {ask.enabled && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
       observation={askEntry?.record?.target ? tracking.observations[sessionKey(askEntry.record.target)] : undefined} onOpen={() => openAsk()} />
       {askVisible ? <AskConversation positionRef={askPositionRef} triggerRef={askTriggerRef} simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
@@ -1209,7 +1250,7 @@ function AppContent({
           draftSessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
           revealEntry={traceRequest?.view === 'workbench' ? traceRequest : undefined}
-          state={forkDisplayState(state, boundFork)} sessionStatus={hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : availableConversationActions} visible={activeView === 'workbench' && primaryExpanded}
+          state={forkDisplayState(state, boundFork)} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : availableConversationActions} visible={activeView === 'workbench' && primaryExpanded}
           consoleCommands={status === 'ready' && !hostOffline && directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
           onExecuteConsoleCommand={(id, args) => state && status === 'ready' && !hostOffline ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('Wait for this session to finish synchronizing.'))}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
@@ -1255,7 +1296,7 @@ function AppContent({
         hidden={activeView !== 'trace'}
       >
         <TraceView key={traceScope} state={state} visible={activeView === 'trace'}
-          sessionTitle={activeOpened?.title} sessionStatus={hostOffline ? 'disconnected' : status}
+          sessionTitle={activeOpened?.title} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status}
           revealEntry={traceRequest?.view === 'trace' ? traceRequest : undefined}
           onShowConversation={key => inspectTimelineEntry(key, 'workbench')}
           resolveSessionLink={resolveSessionLink} onLoadOlder={!hostOffline ? conversationActions.loadOlder : undefined} />
@@ -1281,9 +1322,8 @@ function AppContent({
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {
-  return host && host.access !== 'shared'
-    ? <PreviewProvider client={client} hostId={host.id} canManage polling={polling}>{children}</PreviewProvider>
-    : children;
+  const enabled = !!host && host.access !== 'shared';
+  return <PreviewProvider client={client} hostId={host?.id ?? ''} enabled={enabled} canManage={enabled} polling={polling}>{children}</PreviewProvider>;
 }
 
 function createAgentId(): string {

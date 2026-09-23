@@ -59,7 +59,7 @@ export class ReadingPositions extends Map<string, TimelineReadingPosition> {
     this.storageKey = `${prefix}${scope}:reading`;
     flushRecoveryWrites(this.storageKey);
     try {
-      const entries: unknown = JSON.parse(sessionStorage.getItem(this.storageKey) ?? '[]');
+      const entries: unknown = JSON.parse(sessionStorage.getItem(this.storageKey) ?? localStorage.getItem(this.storageKey) ?? '[]');
       if (Array.isArray(entries)) for (const entry of entries.slice(-80)) {
         if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue;
         const value = entry[1];
@@ -74,7 +74,7 @@ export class ReadingPositions extends Map<string, TimelineReadingPosition> {
     super.delete(key);
     super.set(key, value);
     if (this.size > 80) super.delete(this.keys().next().value!);
-    queueRecoveryWrite(this.storageKey, () => JSON.stringify([...this]));
+    queueRecoveryWrite(this.storageKey, () => JSON.stringify([...this]), true);
     return this;
   }
 }

@@ -1,3 +1,4 @@
+import { workspaceFetch } from './workspace-access.js';
 import { watchPagePolling } from '@orchardworks/agent-remote-web';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
@@ -10,7 +11,7 @@ export interface VscodeTunnelService {
   stop(hostId: string): Promise<VscodeTunnelSnapshot>;
 }
 export class HttpVscodeTunnelClient implements VscodeTunnelService {
-  constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = workspaceFetch) {}
   private async request(hostId: string, action?: 'start' | 'stop') {
     const url = new URL(`v1/remote/hosts/${encodeURIComponent(hostId)}/vscode-tunnel${action ? `/${action}` : ''}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`);
     const response = await this.fetcher(url, { cache: 'no-store', signal: AbortSignal.timeout(12_000), ...(action ? {
@@ -38,10 +39,10 @@ interface TunnelContext {
 const Context = createContext<TunnelContext | undefined>(undefined);
 export const useVscodeTunnel = () => useContext(Context);
 
+const unavailableHost: RemoteHost = { id: 'local', name: '', online: false };
 export function VscodeTunnelScope({ host, service, polling = true, children }: { host?: RemoteHost; service: VscodeTunnelService; polling?: boolean; children: ReactNode }) {
-  return host && host.id !== 'local' && host.access !== 'shared'
-    ? <HostTunnelState key={host.id} host={host} service={service} polling={polling}>{children}</HostTunnelState>
-    : <Context.Provider value={undefined}>{children}</Context.Provider>;
+  const available = host && host.id !== 'local' && host.access !== 'shared';
+  return <HostTunnelState host={available ? host : unavailableHost} service={service} polling={polling}>{children}</HostTunnelState>;
 }
 
 function HostTunnelState({ host, service, polling, children }: { host: RemoteHost; service: VscodeTunnelService; polling: boolean; children: ReactNode }) {
@@ -54,9 +55,9 @@ function HostTunnelState({ host, service, polling, children }: { host: RemoteHos
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true; pending.current = undefined; setBusy(false);
-    if (!host.online) { setState(undefined); setError(undefined); setErrorCode(undefined); }
+    setState(undefined); setError(undefined); setErrorCode(undefined);
     return () => { mounted.current = false; sequence.current += 1; };
-  }, [host.online, service]);
+  }, [host.id, host.online, service]);
   const request = useCallback(async (action: 'status' | 'start' | 'stop') => {
     if (!host.online || pending.current === 'mutation' || (action === 'status' && pending.current)) return;
     pending.current = action === 'status' ? 'status' : 'mutation';
@@ -75,8 +76,8 @@ function HostTunnelState({ host, service, polling, children }: { host: RemoteHos
     }
   }, [host.id, host.online, service]);
   const refresh = useCallback(() => request('status'), [request]);
-  useEffect(() => watchPagePolling(refresh, polling ? 2_000 : 30_000), [refresh, polling]);
+  useEffect(() => host.online ? watchPagePolling(refresh, polling ? 2_000 : 30_000) : undefined, [refresh, polling, host.online]);
 
-  return <Context.Provider value={{ host, state, error, errorCode, busy, refresh,
+  return <Context.Provider value={host.id === 'local' ? undefined : { host, state, error, errorCode, busy, refresh,
     start: () => request('start'), stop: () => request('stop') }}>{children}</Context.Provider>;
 }

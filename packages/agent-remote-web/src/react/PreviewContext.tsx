@@ -26,8 +26,8 @@ const DockContext = createContext<{
 } | undefined>(undefined);
 
 
-export function PreviewProvider({ client, hostId, canManage, polling = true, children }: {
-  readonly client: HttpPreviewClient; readonly hostId: string; readonly canManage: boolean; readonly polling?: boolean; readonly children: ReactNode;
+export function PreviewProvider({ client, hostId, canManage, polling = true, enabled = true, children }: {
+  readonly client: HttpPreviewClient; readonly hostId: string; readonly canManage: boolean; readonly polling?: boolean; readonly enabled?: boolean; readonly children: ReactNode;
 }) {
   const scopeRef = useRef({ client, hostId, version: 0, request: 0 });
   if (scopeRef.current.client !== client || scopeRef.current.hostId !== hostId) {
@@ -63,6 +63,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
   }, [requests, scope.version, updateBrowsers]);
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     const request = ++scope.request;
     const controller = new AbortController();
     let timedOut = false;
@@ -94,7 +95,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
       clearTimeout(deadline);
       snapshots.delete(controller);
     }
-  }, [client, hostId, scope, snapshots]);
+  }, [client, hostId, scope, snapshots, enabled]);
 
   useEffect(() => {
     setState({ version: scope.version, registrations: [], loading: true });
@@ -108,9 +109,9 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
     };
   }, [scope, snapshots]);
   const pollingInterval = polling || currentBrowsers.length > 0 ? 5_000 : 30_000;
-  useEffect(() => watchPagePolling(refresh, pollingInterval), [refresh, pollingInterval]);
+  useEffect(() => enabled ? watchPagePolling(refresh, pollingInterval) : undefined, [refresh, pollingInterval, enabled]);
 
-  const renewalIssues = usePreviewRenewal(client, hostId, canManage, currentBrowsers, currentState.registrations, refresh);
+  const renewalIssues = usePreviewRenewal(client, hostId, canManage && enabled, currentBrowsers, currentState.registrations, refresh);
 
   const value = useMemo<PreviewContextValue>(() => ({
     registrations: currentState.registrations, pinnedNames: currentState.pinnedNames, routing: currentState.routing, canManage, loading: currentState.loading, error: currentState.error, refresh,
@@ -175,7 +176,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, chi
     },
   }), [canManage, client, currentState, hostId, refresh, scope, requests, updateBrowsers]);
 
-  return <Context.Provider value={value}><DockContext.Provider value={{ browsers: currentBrowsers, activeKey, resume: resumeBrowser, close: closeBrowser }}>
+  return <Context.Provider value={enabled ? value : undefined}><DockContext.Provider value={{ browsers: currentBrowsers, activeKey, resume: resumeBrowser, close: closeBrowser }}>
     <PreviewWorkspaceContext.Provider value={{ open: currentBrowsers.some(entry => entry.key === activeKey), setContainer, hide: minimizeBrowser }}>
     {children}
     {currentBrowsers.map(browser => {

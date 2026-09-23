@@ -1,0 +1,73 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, workspaceFetch, setWorkspaceReady } from './workspace-access.js';
+const path = '/u/' + 'a'.repeat(64) + '/';
+const access = () => ({ basePath: path, expiresAt: Date.now() + 60000, user: { id: 'alice' } });
+afterEach(() => { forgetWorkspaceAccess(); sessionStorage.clear(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+it('renews a rolling day only on confirmed access, not when reading the cache', () => {
+  vi.useFakeTimers();
+  rememberWorkspaceAccess(access());
+  vi.setSystemTime(Date.now() + 23 * 3600000);
+  expect(readWorkspaceAccess()?.basePath).toBe(path);
+  rememberWorkspaceAccess(access());
+  vi.setSystemTime(Date.now() + 23 * 3600000);
+  expect(readWorkspaceAccess()?.basePath).toBe(path);
+  vi.setSystemTime(Date.now() + 3600001);
+  expect(readWorkspaceAccess()).toBeUndefined();
+});
+it('allows one automatic sign-in per recovery episode and respects explicit sign-out', () => {
+  rememberWorkspaceAccess(access());
+  expect(claimAutomaticSignIn()).toBe(true);
+  expect(claimAutomaticSignIn()).toBe(false);
+  rememberWorkspaceAccess(access());
+  expect(claimAutomaticSignIn()).toBe(false);
+  forgetWorkspaceAccess();
+  expect(claimAutomaticSignIn()).toBe(false);
+});
+it('does not issue business reads before authorization or queue mutations', async () => {
+  const fetcher = vi.fn(async () => Response.json({ ok: true }));
+  vi.stubGlobal('fetch', fetcher);
+  setWorkspaceReady(path, false);
+  const read = workspaceFetch(new URL(path + 'v1/providers', location.origin));
+  await Promise.resolve();
+  expect(fetcher).not.toHaveBeenCalled();
+  await expect(workspaceFetch(new URL(path + 'v1/command', location.origin), { method: 'POST' })).rejects.toThrow(/access/i);
+  setWorkspaceReady(path, true);
+  await read;
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('aborts waiting reads and never releases them into another account', async () => {
+  const fetcher = vi.fn(async () => Response.json({})); vi.stubGlobal('fetch', fetcher);
+  setWorkspaceReady(path, false);
+  const abort = new AbortController();
+  const read = workspaceFetch(new URL(path + 'v1/providers', location.origin), { signal: abort.signal });
+  abort.abort();
+  await expect(read).rejects.toThrow();
+  setWorkspaceReady('/u/' + 'b'.repeat(64) + '/', true);
+  setWorkspaceReady(path, true);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it('keeps suspended sockets local and closes active sockets when authority is paused', async () => {
+  const { workspaceSocket } = await import('./workspace-access.js');
+  const sockets: Array<{ close: ReturnType<typeof vi.fn>; send: ReturnType<typeof vi.fn>; onopen?: (event: unknown) => void; readyState: number }> = [];
+  vi.stubGlobal('WebSocket', class { readyState = 1; close = vi.fn(); send = vi.fn(); constructor() { sockets.push(this); } });
+  setWorkspaceReady(path, false);
+  const socket = workspaceSocket(new URL(path + 'v1/session-channel', location.origin).href.replace('http:', 'ws:'));
+  const onclose = vi.fn(); socket.onclose = onclose;
+  await Promise.resolve(); expect(sockets).toHaveLength(0);
+  setWorkspaceReady(path, true); expect(sockets).toHaveLength(1);
+  socket.send('authorized'); expect(sockets[0]!.send).toHaveBeenCalledWith('authorized');
+  setWorkspaceReady(path, false);
+  expect(sockets[0]!.close).toHaveBeenCalledOnce(); expect(onclose).toHaveBeenCalledOnce();
+  expect(() => socket.send('stale command')).toThrow();
+  setWorkspaceReady(path, true); expect(sockets).toHaveLength(1);
+});
+it('discards suspended reads when their account is retired', async () => {
+  const { retireWorkspace } = await import('./workspace-access.js');
+  const fetcher = vi.fn(async () => Response.json({})); vi.stubGlobal('fetch', fetcher);
+  setWorkspaceReady(path, false);
+  const read = workspaceFetch(new URL(path + 'v1/providers', location.origin));
+  retireWorkspace(path);
+  await expect(read).rejects.toThrow(/retired/i);
+  setWorkspaceReady(path, true);
+  expect(fetcher).not.toHaveBeenCalled();
+});

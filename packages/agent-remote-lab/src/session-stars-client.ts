@@ -1,8 +1,9 @@
+import { workspaceFetch } from './workspace-access.js';
 import { validSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from '@orchardworks/agent-remote-hosted/session-star-schema';
 export type { SessionStar, StarIdentity, VisibleSessionStar };
 export type StarInput = Omit<SessionStar, 'starredAt'>;
 export class SessionStarsClient {
-  constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = workspaceFetch) {}
   private async request(method: string, body?: StarInput | StarIdentity, signal?: AbortSignal): Promise<VisibleSessionStar[]> {
     const response = await this.fetcher(new URL('v1/stars', this.baseUrl), { method, credentials: 'same-origin', cache: 'no-store',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),

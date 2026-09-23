@@ -1,8 +1,12 @@
 import { lazy, Suspense, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { WorkspaceShell } from './components/WorkspaceShell.js';
 import { GatewayController } from './GatewayController.js';
-const App = lazy(() => import('./App.js').then(module => ({ default: module.App })));
+import { previousWorkspacePath } from './workspace-access.js';
+const loadApp = () => import('./App.js').then(module => ({ default: module.App }));
+const appModule = previousWorkspacePath() ? loadApp() : undefined;
+const App = lazy(() => appModule ?? loadApp());
 import { trackFocusModality } from './focus-modality.js';
 import './app.css';
 import '@orchardworks/agent-remote-web/styles.css';
@@ -23,6 +27,7 @@ const fixtureAction = fixtureEndpoint ? async (
 } : undefined;
 
 const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
-createRoot(root).render(<StrictMode><Suspense fallback={<div className="lab-empty-state" role="status">Opening workspace…</div>}>{gatewayMode
-  ? <GatewayController>{(baseUrl, accountAction) => <App baseUrl={baseUrl} accountAction={accountAction} userScoped />}</GatewayController>
-  : <App fixtureAction={fixtureAction} />}</Suspense></StrictMode>);
+const shell = <WorkspaceShell />;
+createRoot(root).render(<StrictMode>{gatewayMode
+  ? <GatewayController>{(baseUrl, accountAction) => <Suspense fallback={shell}><App baseUrl={baseUrl} accountAction={accountAction} userScoped /></Suspense>}</GatewayController>
+  : <Suspense fallback={shell}><App fixtureAction={fixtureAction} /></Suspense>}</StrictMode>);

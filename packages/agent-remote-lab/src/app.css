@@ -1450,3 +1450,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   .lab-context-rail > .lab-sidebar-account > .gateway-account-identity { flex: 1 1 0; font-size: 12px; }
   .lab-context-rail > .lab-sidebar-account button { flex: 0 0 auto; min-height: 44px; padding: 6px 8px; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 12px; }
 }
+
+.gateway-recovery {
+  position: fixed; z-index: 45; top: calc(env(safe-area-inset-top) + 44px); left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 4px 10px;
+  border: 1px solid var(--obs-border); border-radius: 8px; background: var(--obs-surface); color: var(--obs-text-secondary);
+  font-size: 12px; white-space: nowrap; box-shadow: 0 2px 8px #0000000c;
+}
+.gateway-recovery button, .gateway-recovery a { min-height: 32px; padding: 4px; font-size: inherit; }
+.gateway-workspace-shell { height: 100dvh; display: grid; grid-template-rows: 42px 1fr 68px; background: var(--obs-canvas); }
+.gateway-workspace-shell > div { border-bottom: 1px solid var(--obs-border); }
+.gateway-workspace-shell > footer { margin: 8px 16px 16px; border: 1px solid var(--obs-border); border-radius: 12px; background: var(--obs-surface); }

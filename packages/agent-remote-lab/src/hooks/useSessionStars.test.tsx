@@ -63,3 +63,18 @@ it('refreshes a stale tree after conflict without replaying the requested move',
   expect(favorites.revision).toBe(2);expect(favorites.stars[0]?.folderId).toBe('work');
   expect(view.textContent).toContain('another device');expect(favorites.pending).toBeUndefined();
 });
+it('retains the visible favorites tree while authorization is being restored', async () => {
+  vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({ revision: 1, folders: [], stars: [star] });
+  let pause!: () => void;
+  let favorites!: SessionStars;
+  function Fixture() {
+    const [enabled, setEnabled] = useState(true); pause = () => setEnabled(false);
+    favorites = useSessionStars('http://localhost/u/alice/', enabled);
+    return <p>{favorites.stars.map(item => item.title).join(',')}</p>;
+  }
+  const view = await render(<Fixture />);
+  expect(view.textContent).toContain('Research');
+  await act(async () => pause());
+  expect(view.textContent).toContain('Research');
+  expect(await favorites.change({ type: 'remove-session', session: star })).toBe(false);
+});

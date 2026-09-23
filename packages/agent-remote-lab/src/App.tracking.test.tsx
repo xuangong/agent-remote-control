@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from './App.js';
@@ -12,17 +12,19 @@ const baseUrl = 'http://localhost/u/alice/';
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 
-async function fixture(target: SessionStar, activityReady = true) {
-  saveTrackedSessions(baseUrl, [target]);
+async function fixture(target: SessionStar, activityReady = true, other?: SessionStar) {
+  saveTrackedSessions(baseUrl, [target, ...(other ? [other] : [])]);
   // Remembered runtime IDs are not evidence of a live binding.
   localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...target, agentId: 'stale-agent' }]));
   vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:[]});
   vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
-  const attach = vi.spyOn(SessionDirectoryClient.prototype, target.parentNativeSessionId ? 'attachChild' : 'attach').mockResolvedValue({ agentId: 'live-agent' });
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, target.parentNativeSessionId ? 'attachChild' : 'attach').mockImplementation(async (_provider: string, id: string) => ({ agentId: other && id === other.nativeSessionId ? 'other-agent' : 'live-agent' }));
   let activity!: RemoteTransportListener;
   const contentConnections: string[] = [];
   const activityClosed = vi.fn();
+  const contentClosed = vi.fn();
+  const contentListeners = new Map<string, RemoteTransportListener>();
   const snapshot = { protocolVersion: '1.5.0' as const, type: 'agent_snapshot' as const,
     payload: { ...replicaState.agent!, id: 'live-agent', providerId: target.providerId,
       runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: target.providerId, sessionId: target.nativeSessionId } } };
@@ -42,29 +44,34 @@ async function fixture(target: SessionStar, activityReady = true) {
     connect(agentId, listener) {
       let observing = false;
       queueMicrotask(() => listener.onOpen());
-      return { close: () => { if (observing) activityClosed(agentId); }, send: message => {
+      return { close: () => { if (observing) activityClosed(agentId); else contentClosed(agentId); }, send: message => {
         if (message.type === 'negotiate') {
           listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
           if (message.observation === 'activity') {
             observing = true; activity = listener;
             if (activityReady) listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId, status: 'idle' } });
-          } else { contentConnections.push(agentId); listener.onMessage(snapshot); }
+          } else { contentConnections.push(agentId); contentListeners.set(agentId, listener); listener.onMessage({ ...snapshot, payload: { ...snapshot.payload, id: agentId, runtimeInfo: { ...snapshot.payload.runtimeInfo, sessionId: agentId === 'other-agent' ? other!.nativeSessionId : target.nativeSessionId } } }); }
         } else if (message.type === 'timeline_subscription') {
           listener.onMessage({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
         }
       } };
     },
   };
-  const container = await render(<App baseUrl={baseUrl} userScoped transport={transport}
-    directory={new SessionDirectoryClient(baseUrl)} initialState={replicaState} initialSessionStatus="ready"
-    hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Unexpected pairing'); } }} />);
-  expect(attach).toHaveBeenCalledOnce();
+  let hide!: () => void;
+  function Harness() {
+    const [visible, setVisible] = useState(true); hide = () => setVisible(false);
+    return visible ? <App baseUrl={baseUrl} userScoped transport={transport}
+      directory={new SessionDirectoryClient(baseUrl)} initialState={replicaState} initialSessionStatus="ready"
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Unexpected pairing'); } }} /> : null;
+  }
+  const container = await render(<Harness />);
+  expect(attach).toHaveBeenCalledTimes(other ? 2 : 1);
   expect(fetchTimeline).not.toHaveBeenCalled();
-  const open = async () => {
+  const open = async (title = target.title) => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-    await act(async () => container.querySelector<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(title))!.click());
   };
-  return { container, attach, open, activity, contentConnections, fetchTimeline, activityClosed };
+  return { container, attach, open, activity, contentConnections, fetchTimeline, activityClosed, contentClosed, contentListeners, hide };
 }
 
 it.each([
@@ -119,4 +126,27 @@ it('closes the tracking edge only when content reaches the fixed activity cursor
   expect(ring()?.getAttribute('data-state')).toBe('complete');
   expect(ring()?.getAttribute('aria-valuenow')).toBe('100');
   expect(f.container.textContent).toContain('Loaded tracked conversation.');
+});
+
+
+it('retains opened tracked content across switches without preconnecting unopened sessions', async () => {
+  const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
+  const f = await fixture(star, true, other);
+  expect(f.contentConnections).toEqual([]);
+  await f.open();
+  expect(f.contentConnections).toEqual(['live-agent']);
+  await f.open(other.title);
+  expect(f.contentClosed).not.toHaveBeenCalledWith('live-agent');
+  await act(async () => f.contentListeners.get('live-agent')!.onMessage({ protocolVersion: '1.5.0', type: 'agent_update',
+    payload: { ...replicaState.agent!, id: 'live-agent', status: 'running', runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: star.nativeSessionId } } }));
+  await f.open();
+  expect(f.contentConnections).toEqual(['live-agent', 'other-agent']);
+  expect(f.fetchTimeline).toHaveBeenCalledTimes(2);
+  expect(f.container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+  await act(async () => f.container.querySelector<HTMLButtonElement>(`[aria-label="Untrack ${other.title}"]`)!.click());
+  expect(f.contentClosed).toHaveBeenCalledWith('other-agent');
+  expect(f.contentClosed).not.toHaveBeenCalledWith('live-agent');
+  await act(async () => f.hide());
+  expect(f.contentClosed).toHaveBeenCalledWith('live-agent');
 });

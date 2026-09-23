@@ -1,3 +1,4 @@
+import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
 import { CachePrivacySettings } from './components/CachePrivacySettings.js';
 import { LayoutDiagnosticsSettings } from './components/LayoutDiagnosticsSettings.js';
 import { stopLayoutDiagnostics } from './layout-diagnostics.js';
@@ -53,7 +54,6 @@ import {
   type RemoteSessionStatus,
 } from '@orchardworks/agent-remote-web';
 import { ReadingPositions, RecoveryScope, recoveryGeneration, readLastSession, saveLastSession } from './conversation-recovery.js';
-import { recoverMessages } from './message-recovery.js';
 import { restoreSession } from './session-restoration.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
@@ -215,6 +215,8 @@ function AppContent({
   const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
   useEffect(() => beginCatchUp(), [baseUrl, transport, beginCatchUp]);
   const replicas = useMemo(() => new ReplicaCache(), [baseUrl, transport]);
+  const connections = useMemo(() => new ConversationConnections(transport, baseUrl), [baseUrl, transport]);
+  useEffect(() => () => connections.clear(), [connections]);
   const replicaFor = useCallback((agentId: string) => {
     return replicas.obtain(agentId);
   }, [replicas]);
@@ -385,22 +387,21 @@ function AppContent({
     setUncertainMutation(false);
     unsubscribeReplicaRef.current?.();
     unsubscribeReplicaRef.current = undefined;
-    clientRef.current?.stop();
+    clientRef.current = undefined;
     if (compactLayoutRef.current) {
       focusTimelineAfterAttachRef.current = true;
       setContextOpen(false);
       setInspectorOpen(false);
       setActiveView('workbench');
     }
-    setState(previous => replicas.get(agentId)?.getState().agent ? replicas.get(agentId)!.getState()
-      : previous?.agent?.id === agentId ? previous : undefined);
     setStatus('connecting');
     setAttachingAgentId(agentId);
-    const replica = replicaFor(agentId);
-    beginCatchUp(replica, catchUpTarget);
     const saved = openedSessionsRef.current.find(item => item.agentId === agentId);
-    const stopMessageRecovery = recoverMessages(replica, baseUrl, saved ? sessionKey(saved) : agentId, agentId);
-    const client = new RemoteSessionClient(agentId, transport, replica, { historyPageSize: 100 });
+    const lease = connections.acquire(agentId, replicaFor(agentId), saved);
+    const { client, replica } = lease;
+    beginCatchUp(replica, catchUpTarget);
+    setState(previous => replica.getState().agent ? replica.getState()
+      : previous?.agent?.id === agentId ? previous : undefined);
     replicaRef.current = replica;
     clientRef.current = client;
     primaryBinding.current = { baseUrl, transport, agentId };
@@ -409,11 +410,10 @@ function AppContent({
       const next = replica.getState();
       setState(previous => next.timeline.initialized || !previous?.timeline.initialized ? next : previous);
     });
-    unsubscribeReplicaRef.current = () => { unsubscribe(); stopMessageRecovery(); };
-    client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
-    client.start();
+    const unsubscribeStatus = client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
+    unsubscribeReplicaRef.current = () => { unsubscribe(); unsubscribeStatus(); lease.release(); };
     rememberAgent(agentId);
-  }, [baseUrl, transport, replicas, replicaFor, beginCatchUp]);
+  }, [baseUrl, transport, replicas, replicaFor, beginCatchUp, connections]);
 
   useEffect(() => {
     if (initialState || !activated) return;
@@ -425,7 +425,7 @@ function AppContent({
     navigationGeneration.current += 1;
     unsubscribeReplicaRef.current?.();
     unsubscribeReplicaRef.current = undefined;
-    clientRef.current?.stop();
+    clientRef.current = undefined;
   }, []);
 
   useEffect(() => {
@@ -437,7 +437,7 @@ function AppContent({
       : directory && saved ? { ...saved, hostId: saved.hostId ?? 'local' } : undefined;
     if (!location?.hostId || !location.providerId || !location.nativeSessionId) {
       if (!requestedHostId && remembered) attach(remembered);
-      return () => clientRef.current?.stop();
+      return () => unsubscribeReplicaRef.current?.();
     }
     const { hostId, providerId: restoredProvider, nativeSessionId, parentNativeSessionId } = location;
     const generation = navigationGeneration.current;
@@ -465,7 +465,7 @@ function AppContent({
         if (!retrying) { setAttachingAgentId(undefined); setStatus('idle'); if (compactLayoutRef.current) setContextOpen(true); }
       },
     });
-    return () => { cancel(); clientRef.current?.stop(); };
+    return () => { cancel(); unsubscribeReplicaRef.current?.(); };
   }, [attach, baseUrl, initialState, requestedHostId, activated]);
 
   useEffect(() => {
@@ -536,9 +536,10 @@ function AppContent({
     setSessionNotice({ tone: 'status', message: 'Opening the existing session. Waiting for the Host to confirm it is ready…' });
     try {
       const observation = tracking.observations[key];
-      let agentId = observation?.connection === 'ready' ? observation.agentId : undefined;
-      // Activity-only tracking already attached this session. Content transport still checks
-      // access and recovers the binding after Host reconnects; persisted IDs are never trusted here.
+      let agentId = connections.find({ ...item, hostId })?.agentId
+        ?? (observation?.connection === 'ready' ? observation.agentId : undefined);
+      // Reuse an opened content subscription, including its ongoing recovery, or a confirmed
+      // activity binding. Persisted IDs alone are never evidence of a live connection.
       if (!agentId) {
         const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
         const result = item.parentNativeSessionId
@@ -796,6 +797,7 @@ function AppContent({
   const openWindows = useMemo(() => [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [stackRoot, primaryIsBound, sideSessions]);
   useEffect(() => {
     replicas.retain([
+      ...connections.agentIds,
       ...(primaryBinding.current?.agentId ? [primaryBinding.current.agentId] : []),
       ...sideSessions.map(session => session.agentId),
       ...(askVisible && askEntry?.record?.target ? [askEntry.record.target.agentId] : []),
@@ -804,7 +806,7 @@ function AppContent({
   });
   const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
     liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, askEntry?.record?.target, askEntry?.attached, askVisible]);
-  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions);
+  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const remove = transport.onSessionTitle?.(session => {
@@ -1078,7 +1080,7 @@ function AppContent({
     deleteMessage: conversationActions.deleteMessage,
   };
 
-  return <VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {accessReady ? tracking.observers : null}
     {ask.enabled && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
@@ -1324,7 +1326,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope>;
+  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

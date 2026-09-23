@@ -1,3 +1,4 @@
+import type { ConversationConnections } from '../conversation-connections.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
@@ -10,9 +11,10 @@ const noOpenSessions: readonly OpenedSession[] = [];
 export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string; visible: boolean }
 const noAuxiliarySessions: readonly AuxiliarySession[] = [];
 
-export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions) {
+export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
+  useEffect(() => { connections?.retainTracked(enabled ? sessions : []); }, [connections, sessions, enabled]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
   const observations = observationState.scope === baseUrl && observationState.transport === transport ? observationState.values : {};
   const setObservations = useCallback((update: (values: Record<string, SessionObservation>) => Record<string, SessionObservation>) => {

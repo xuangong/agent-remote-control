@@ -1,3 +1,4 @@
+import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { AgentReplica, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
@@ -87,4 +88,35 @@ it('displays cached content before reconnecting and resumes a reopened side wind
   await act(async () => finishHistory(previousPage));
   expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(false);
   expect(f.fetchTimeline.mock.calls[1]?.slice(0, 3)).toEqual(['side', 'after', { epoch: 'epoch-side', seq: 1 }]);
+});
+
+
+it('reuses a tracked subscription after its side window unmounts and releases it after untracking', async () => {
+  const f = fixture();
+  const connections = new ConversationConnections(f.transport);
+  const session = { agentId: 'side', providerId: 'recorded', nativeSessionId: 'side', title: 'Side' };
+  connections.retainTracked([session]);
+  const store = new ForkStore('side-retained');
+  let show!: (value: boolean) => void;
+  function Harness() {
+    const [open, setOpen] = useState(true); show = setOpen;
+    return <ConversationConnectionScope.Provider value={connections}>{open ? <SideConversation
+      session={session} transport={f.transport} store={store} onClose={() => {}} onOpenSource={() => {}} onOpenFork={() => {}}
+      onFork={async () => { throw new Error('Unexpected fork'); }} /> : null}</ConversationConnectionScope.Provider>;
+  }
+  try {
+    const container = await render(<Harness />);
+    expect(f.connect).toHaveBeenCalledOnce();
+    await act(async () => show(false));
+    expect(f.closes).toEqual([]);
+    await act(async () => show(true));
+    expect(f.connect).toHaveBeenCalledOnce();
+    expect(f.fetchTimeline).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('Conversation side');
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
+    await act(async () => connections.retainTracked([]));
+    expect(f.closes).toEqual([]);
+    await act(async () => show(false));
+    expect(f.closes).toEqual(['side']);
+  } finally { await act(async () => connections.clear()); }
 });

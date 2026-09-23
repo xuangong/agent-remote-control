@@ -361,11 +361,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
       await security.record(grant.subject, 'signed_in', 'allowed');
       const response = json(200, { ...browserState(exchange.grant), ...(pending.returnPath ? { returnPath: pending.returnPath } : {}), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
       response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
+      if (exchange.browserCookie) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${exchange.browserCookie}; ${cookieFlags}; Max-Age=31536000`);
       response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login')}=; ${cookieFlags}; Max-Age=0`);
       return response;
     }
     if (url.pathname === '/auth/status' && request.method === 'GET') {
-      const grant = await authorize(request); return grant instanceof Response ? grant : json(200, browserState(grant));
+      const grant = await authorize(request); if (grant instanceof Response) return grant;
+      const response = json(200, browserState(grant));
+      const browser = await sessions.browserCookie(request);
+      if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${browser}; ${cookieFlags}; Max-Age=31536000`);
+      return response;
     }
     if (['/auth/refresh', '/auth/logout'].includes(url.pathname) && request.method === 'POST') {
       if (!originAllowed(request)) return json(403, {error:'Origin is not allowed.'});
@@ -377,7 +382,11 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     if (url.pathname === '/auth/refresh' && request.method === 'POST') {
       if (!originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
-      const grant = await authorize(request, true); return grant instanceof Response ? grant : json(200, browserState(grant));
+      const grant = await authorize(request, true); if (grant instanceof Response) return grant;
+      const response = json(200, browserState(grant));
+      const browser = await sessions.browserCookie(request);
+      if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${browser}; ${cookieFlags}; Max-Age=31536000`);
+      return response;
     }
     if (url.pathname === '/auth/logout' && request.method === 'POST') {
       if (!originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });

@@ -186,3 +186,22 @@ The script owns its temporary processes and free ports and enforces an outer
 deadline. Its synthetic fixture credentials must never be used in production.
 Native sandbox effectiveness and provider-specific cancellation on the actual
 workstation remain a separate acceptance step from protocol regression.
+
+### Signed-in browser inventory
+
+The hosted Security panel groups repeated sign-ins using a server-signed,
+HttpOnly, host-only browser cookie. This identifier grants no access and is
+separate from the session credential. It survives sign-out and rolls its one-year
+expiry on authenticated status/refresh responses. Grouping is scoped to the
+account; browser names, operating systems, and network addresses are not identity.
+Clearing site data, private browsing, and separate browser profiles can create
+separate entries. Legacy sessions are linked only when their existing credential
+or a verified browser cookie identifies them, never by matching a label.
+
+The inventory shows browsers active within the last seven days, with the current
+browser first and other browsers ordered by latest activity. Each row can expand
+the latest observation per UTC day within that rolling window. These are activity
+observations from retained sign-ins, not a complete login audit. Session expiration
+and sign-out can remove their history. The seven-day filter does not expire access.
+Signing out a row revokes all credentials in that account's browser group, including
+older credentials; signing out all browsers also covers entries outside the window.

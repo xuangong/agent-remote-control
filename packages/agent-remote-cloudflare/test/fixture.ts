@@ -104,11 +104,12 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
     const ticket = sign('arc-relay+jwt', { iss: issuer, aud: origin, sub: subject, nonce, iat, exp: iat + 900, jti: randomUUID(), continuation: subject, sessionExpiresAt: Date.now() + 3_600_000 });
     return { ticket, loginCookie };
   }
-  async function login(subject: string) {
+  async function login(subject: string, browserCookie = '') {
     const { ticket, loginCookie } = await beginLogin(subject);
-    const response = await json('/auth/session', loginCookie, { ticket }); expect(response.status, await response.clone().text()).toBe(200);
+    const response = await json('/auth/session', [loginCookie, browserCookie].filter(Boolean).join('; '), { ticket }); expect(response.status, await response.clone().text()).toBe(200);
     const cookie = response.headers.getSetCookie().find(value => value.startsWith('__Host-arc_session='))!.split(';')[0]!;
-    return { cookie, ticket, loginCookie, ...await response.json() as { basePath: string } };
+    const browser = response.headers.getSetCookie().find(value => value.startsWith('__Host-arc_browser='))?.split(';')[0];
+    return { cookie, browserCookie: browser, ticket, loginCookie, ...await response.json() as { basePath: string } };
   }
   async function upgradeResponse(path: string, headers: Record<string, string>, requestOrigin = origin) {
     const response = await requestAt(requestOrigin, path, { headers: { ...headers, upgrade: 'websocket' } });

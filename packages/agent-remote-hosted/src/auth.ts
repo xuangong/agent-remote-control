@@ -48,7 +48,7 @@ export function authenticateGatewayRequest(request: Request, options: GatewayAut
   return verifyGatewayGrant(token, options);
 }
 
-export function gatewayCookieName(origin: string, kind: 'session' | 'login'): string {
+export function gatewayCookieName(origin: string, kind: 'session' | 'login' | 'browser'): string {
   return `${origin.startsWith('https:') ? '__Host-' : ''}arc_${kind}`;
 }
 export function readGatewayCookie(request: Request, name: string): string | undefined {

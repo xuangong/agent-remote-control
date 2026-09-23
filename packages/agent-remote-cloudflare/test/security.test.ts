@@ -141,3 +141,26 @@ it('shares one per-user stream allowance across different Host owners and releas
   const released = event(sockets[0]!, 'close'); sockets[0]!.close(); await released;
   const next = await f.upgrade(paths[1]!, { origin, cookie: bob.cookie }); await event(next, 'message');
 }, 30000);
+
+it('persists browser grouping across sign-ins and restart, and revokes every credential in the browser', async () => {
+  const f = await fixture();
+  const first = await f.login('alice');
+  expect(first.browserCookie).toMatch(/^__Host-arc_browser=/);
+  const second = await f.login('alice', first.browserCookie);
+  const otherDevice = await f.login('alice');
+  const list = async () => (await (await f.json('/auth/sessions', second.cookie)).json() as any).sessions;
+  expect(await list()).toHaveLength(2);
+  expect((await list()).find((row: any) => row.current)).toMatchObject({ sessionCount: 2 });
+  await f.restart();
+  const rows = await list();
+  expect(rows).toHaveLength(2);
+  const grouped = rows.find((row: any) => row.current);
+  expect(grouped.activity).toHaveLength(1);
+  expect((await f.json('/auth/status', first.browserCookie!)).status).toBe(401);
+  const status = await f.json('/auth/status', second.cookie);
+  expect(status.headers.getSetCookie().some(cookie => cookie.startsWith(second.browserCookie!) && cookie.includes('HttpOnly') && cookie.includes('Secure'))).toBe(true);
+  expect(await (await f.json('/auth/sessions/revoke', otherDevice.cookie, { id: grouped.id })).json()).toEqual({ ok: true, current: false });
+  expect((await f.json('/auth/status', first.cookie)).status).toBe(401);
+  expect((await f.json('/auth/status', second.cookie)).status).toBe(401);
+  expect((await f.json('/auth/status', otherDevice.cookie)).status).toBe(200);
+}, 30000);

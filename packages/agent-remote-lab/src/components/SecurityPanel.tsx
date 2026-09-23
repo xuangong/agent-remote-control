@@ -51,7 +51,7 @@ export function SecurityPanel({ onClose, onSignedOut }: { onClose(): void; onSig
       <header className="gateway-security-header"><button type="button" disabled={busy} onClick={onClose}>Back to conversation</button><h1 id="security-title" ref={heading} tabIndex={-1}>Security</h1></header>
       <section aria-labelledby="browser-sessions-title">
         <div className="gateway-security-heading"><h2 id="browser-sessions-title">Signed-in browsers</h2><button type="button" disabled={busy} onClick={() => setAttempt(value => value + 1)}>Refresh</button></div>
-        <p>Signing out closes that browser’s remote access. Hosts stay paired and work may continue.</p>
+        <p>Browsers active in the last 7 days. Repeated sign-ins from the same browser appear together. If you see an unfamiliar browser, sign it out.</p>
         {failure ? <p role="alert">{failure}</p> : null}
         {notice ? <p role="status">{notice}</p> : null}
         {!sessions && !failure ? <p role="status">Loading signed-in browsers…</p> : null}
@@ -59,9 +59,11 @@ export function SecurityPanel({ onClose, onSignedOut }: { onClose(): void; onSig
         <ul className="gateway-security-list">{sessions?.sessions.map(session => <li key={session.id}>
           <div><strong>{session.label}</strong>{session.current ? <span className="gateway-security-current">This browser</span> : null}
             <p>Last active <time dateTime={session.lastSeenAt ? new Date(session.lastSeenAt).toISOString() : undefined}>{time(session.lastSeenAt)}</time></p>
-            <p>Signed in {time(session.createdAt)} · Expires {time(session.expiresAt)}</p></div>
+            <p>Browser {session.id.replace(/^browser:/, '').slice(0, 8)}{session.sessionCount && session.sessionCount > 1 ? ` · ${session.sessionCount} sign-ins` : ''}</p>
+            {session.activity?.length ? <details><summary>Activity in the last 7 days</summary><ul>{session.activity.map(at => <li key={at}><time dateTime={new Date(at).toISOString()}>{time(at)}</time></li>)}</ul><p>Latest activity per UTC day.</p></details> : null}</div>
           <button type="button" disabled={busy} aria-label={session.current ? undefined : `Sign out ${session.label}`} onClick={() => setConfirmation(session)}>{session.current ? 'Sign out this browser' : 'Sign out browser'}</button>
         </li>)}</ul>
+        <p>Signing out a browser revokes all its sign-ins. Hosts stay paired. Sign out all browsers also includes browsers inactive for more than 7 days.</p>
         {sessions?.sessions.length ? <button type="button" disabled={busy} onClick={() => setConfirmation('all')}>Sign out all browsers</button> : null}
         {confirmation ? <div className="gateway-security-confirmation" role="group" aria-label="Confirm browser sign-out">
           <p>{confirmation === 'all' ? 'Sign out every browser, including this one?' : `Sign out ${confirmation.label}${confirmation.current ? ' (this browser)' : ''}?`}</p>

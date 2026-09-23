@@ -61,3 +61,13 @@ it('does not render malformed management rows and can retry loading', async () =
   await act(async () => button(view, 'Refresh').click());
   expect(button(view, 'Sign out this browser')).toBeDefined();
 });
+
+it('shows one browser row with grouped sign-ins and expandable seven-day activity', async () => {
+  const grouped = { ...other, id: 'browser:device-id', sessionCount: 3, activity: [now, now - 86400000] };
+  vi.stubGlobal('fetch', async (url: string) => url === '/auth/sessions' ? Response.json({ ...list, sessions: [current, grouped] }) : Response.json({ events: [] }));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={() => undefined} />);
+  expect(view.querySelectorAll('.gateway-security-list:first-of-type > li')).toHaveLength(2);
+  expect(view.textContent).toContain('3 sign-ins');
+  expect(view.textContent).toContain('Activity in the last 7 days');
+  expect(view.querySelectorAll('details li')).toHaveLength(2);
+});

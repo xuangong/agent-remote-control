@@ -74,6 +74,7 @@ export function startLayoutDiagnostics() {
   environment = {
     userAgent: navigator.userAgent, pixelRatio: devicePixelRatio,
     statusBarStyle: document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.getAttribute('content') ?? null,
+    viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') ?? null,
     screen: { width: screen.width, height: screen.height },
     standalone: matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
     coarsePointer: matchMedia('(pointer: coarse)').matches,

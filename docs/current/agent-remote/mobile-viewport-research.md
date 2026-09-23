@@ -290,7 +290,7 @@ expansion did not undo that mode change. The title washout and inconsistent
 launch safe area were reported after the mode change, making it the first
 variable to restore for device comparison.
 
-The entry now requests `default` again. It retains `viewport-fit=cover`, existing
+Commit `eefb098` requested `default` again. It retained `viewport-fit=cover`, existing
 safe-area padding, the sticky navigation, keyboard handling, native timeline
 anchoring and the composer bounds fix. No additional geometry compensation is
 introduced. The browser test verifies the served launch declaration; it cannot
@@ -301,3 +301,52 @@ directions and keyboard recovery after fully closing and reopening the Home
 Screen app. Compare a newly added entry if an existing installation retains its
 previous native mode. The earlier rotation shift may return with `default`;
 that requires separate diagnosis rather than restoring screen-height expansion.
+
+## Browser-owned safe areas after the default-mode device trace
+
+The 12:52 UTC recording on 2026-09-23 confirms the rotation shift with the served
+status bar declaration set to `default`. The user had removed and re-added the
+Home Screen entry, resolving the title washout and launch gap before this test.
+
+| Sample | Window / visual viewport / shell height | Root client height | Navigation top padding | Composer bottom |
+| --- | --- | --- | --- | --- |
+| Settled portrait | 812 px | 812 px | 0 px | 812 px |
+| 3858 ms, rotating into portrait | 874 px | 812 px | 62 px | 874 px |
+| 4133 ms, portrait settles | 812 px | 812 px | 0 px | 812 px |
+
+For about 275 ms, the shell grows by 62 px and the navigation adds 62 px above its
+controls. A subsequent root scroll moves the shell to -62 px at 4155 ms, then
+returns it to zero at 4164 ms. No sample reports keyboard occlusion or application
+viewport overrides. This identifies the application geometry participating in the
+visible shift; it does not reveal the native window's screen coordinates.
+
+The next device comparison changes only `viewport-fit=cover` to
+`viewport-fit=contain`. The browser now owns the safe content rectangle; the page
+does not request extension into unsafe display regions. Status bar mode, CSS
+dynamic viewport height, fixed shell, keyboard handling and existing `env()`
+padding remain unchanged. Browser-painted margins may be visible in landscape.
+No physical-screen height, fixed inset value or timed layout freeze is introduced.
+
+This follows [WebKit's viewport-fit guidance](https://webkit.org/blog/7929/designing-websites-for-iphone-x/):
+`cover` opts out of browser-provided safe-area insetting. In WebKit,
+[ViewportConfiguration](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/page/ViewportConfiguration.cpp)
+sets `avoidsUnsafeArea` when viewport-fit is not Cover. In
+[WKWebViewIOS](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/ios/WKWebViewIOS.mm),
+`_computedContentInset` and `_computedUnobscuredSafeAreaInset` normally move this
+responsibility to native insets instead of exposing another inset to page content.
+Explicit native inset overrides exist, so this is a source-supported device
+experiment, not proof of the behavior of the installed iOS version.
+
+Diagnostics now include the served viewport metadata alongside the status bar
+declaration. Browser tests check the delivered configuration, diagnostic export,
+composer bounds, safe-area fallbacks and keyboard/rotation handling. CDP inset
+overrides exercise the page's CSS fallback; they do not simulate iOS native safe
+area ownership, status bar animation or root scroll correction.
+
+Device acceptance remains pending: repeat both rotation directions, cold launch,
+keyboard opening/dismissal and foreground recovery. Verify title clarity, visible
+send controls and the absence of double bottom spacing. The viewport declaration
+also applies to ordinary browser tabs; check their landscape margins and controls.
+If the shift remains,
+record the new geometry and inspect native root movement separately before
+changing another layout variable.

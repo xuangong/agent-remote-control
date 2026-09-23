@@ -49,6 +49,7 @@ test('records shell movement from Settings and exports a private, selectable rep
   const text = await output.inputValue();
   const report = JSON.parse(text);
   expect(report.environment.standalone).toBe(true);
+  expect(report.environment.viewportMeta).toBe(await page.locator('meta[name="viewport"]').getAttribute('content'));
   expect(text).not.toContain('PRIVATE SESSION TITLE');
   expect(text).not.toContain('recorded-session');
   expect(text).not.toContain('session-stars.html');

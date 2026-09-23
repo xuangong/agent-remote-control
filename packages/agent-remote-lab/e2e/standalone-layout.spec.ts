@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-test('serves the non-overlay Home Screen status bar configuration', async ({ page }) => {
+test('serves browser-owned safe areas with the non-overlay Home Screen status bar', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'default');
-  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=contain/);
 });
 
 test('reserves the notch once above navigation and keeps controls inside each rotated safe area', async ({ page, browserName }, info) => {

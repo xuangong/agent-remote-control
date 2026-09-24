@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { executeCommand, type CliEnvironment, type OutputFormat, type ParsedInvocation } from './commands.js';
@@ -129,7 +130,9 @@ function processIo(): DebuggerIo {
 }
 
 function helpText(): string {
-  return `Usage: bdb <command> [options]
+  return `Usage: ardb <command> [options]
+
+Agent Remote Debugger: inspect and exercise the Session View protocol and state.
 
 Commands:
   provider list
@@ -153,6 +156,12 @@ Connection: --relay <url> uses AGENT_REMOTE_URL, BORGEE_REMOTE_URL or http://127
 Common options: --relay <url> --origin <url> --timeout <milliseconds> --format <text|json|jsonl> --json --jsonl`;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+function isProcessEntry(): boolean {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); }
+  catch { return false; }
+}
+
+if (isProcessEntry()) {
   void runCli(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }

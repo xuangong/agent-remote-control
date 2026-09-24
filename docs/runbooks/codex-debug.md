@@ -1,6 +1,6 @@
 # Codex installation and debugging
 
-The independent Agent Host manages a separate `codex app-server` process for each open root session tree. DSH uses its installed Host plugin; Codex uses JSON-RPC over the CLI's stdin/stdout. Both feed the same Provider SDK, Relay, browser Timeline, and `bdb` debugger.
+The independent Agent Host manages a separate `codex app-server` process for each open root session tree. DSH uses its installed Host plugin; Codex uses JSON-RPC over the CLI's stdin/stdout. Both feed the same Provider SDK, Relay, browser Timeline, and `ardb` debugger.
 
 ## Install and launch
 
@@ -53,9 +53,9 @@ The managed daemon appends startup, runtime, and native Codex diagnostics to `~/
 Use the public Agent ID shown in the workbench header:
 
 ```bash
-pnpm bdb inspect AGENT_ID --json
-pnpm bdb timeline AGENT_ID --tail 20 --json
-pnpm bdb protocol trace AGENT_ID --jsonl --until idle --timeout 15000
+pnpm ardb inspect AGENT_ID --json
+pnpm ardb timeline AGENT_ID --tail 20 --json
+pnpm ardb protocol trace AGENT_ID --jsonl --until idle --timeout 15000
 ```
 
 For non-default ports, add `--relay http://127.0.0.1:6013 --origin http://127.0.0.1:6284`.
@@ -64,7 +64,7 @@ For non-default ports, add `--relay http://127.0.0.1:6013 --origin http://127.0.
 - A missing working directory: historical sessions can reference removed worktrees. The launcher reports the missing directory explicitly. Restore that workspace or choose an existing directory for the new session; the Provider does not silently change projects. A raw `spawn ... codex ENOENT` can also mean the requested working directory is absent even when the executable exists.
 - Authentication or model errors: use the same native Codex home to configure/login, then retry deliberately. The workbench retains the native failure.
 - Process exit: the Provider fails the observation stream and includes a bounded stderr tail in diagnostics. Other local Codex processes remain running.
-- Native image-view and generated-image resources are supported; general filesystem reads and remote image URL fetching are unavailable. Native logs stay native; public Trace shows normalized events and `bdb protocol trace` shows public Remote frames.
+- Native image-view and generated-image resources are supported; general filesystem reads and remote image URL fetching are unavailable. Native logs stay native; public Trace shows normalized events and `ardb protocol trace` shows public Remote frames.
 
 The implementation follows the process and history approach used by Paseo's `codex-app-server-agent.ts` and `codex/app-server-transport.ts`. Runtime code has no dependency on a Paseo checkout.
 
@@ -79,11 +79,11 @@ AGENT_REMOTE_TEST_RELAY_PORT=6014 AGENT_REMOTE_TEST_WEB_PORT=6285 \
 pnpm test:e2e e2e/codex.spec.ts --timeout=180000
 ```
 
-The browser regression runs the real app-server against a local model-response fixture and covers questions, consecutive turns, and paginated history on desktop and mobile. It does not require a model API key. Use a live conversation and `bdb` to verify the configured model gateway separately.
+The browser regression runs the real app-server against a local model-response fixture and covers questions, consecutive turns, and paginated history on desktop and mobile. It does not require a model API key. Use a live conversation and `ardb` to verify the configured model gateway separately.
 
 ## Tool output
 
-Expand a completed command row to inspect its combined output, exit code, and duration. Failed commands retain their output too. `pnpm bdb timeline AGENT_ID --all --json` exposes the same `item.result`. Results appear when the native tool item completes; incremental command output is not currently streamed. Long output is a bounded preview with an explicit truncation notice.
+Expand a completed command row to inspect its combined output, exit code, and duration. Failed commands retain their output too. `pnpm ardb timeline AGENT_ID --all --json` exposes the same `item.result`. Results appear when the native tool item completes; incremental command output is not currently streamed. Long output is a bounded preview with an explicit truncation notice.
 
 New sessions use Codex paginated history to preserve tool output across process restarts. Imported legacy sessions may lack historical command records in `thread/read`; create a new session when validating durable tool results.
 
@@ -110,7 +110,7 @@ While Codex is Working, type a correction and press Enter. The input should be a
 
 Use the real local Provider with the pinned Codex executable and a configured model endpoint. Ask the parent to create two native subagents with distinct tasks and wait for them. Check that the child rows appear before either child page is opened, remain in creation order as their statuses change, and navigate to distinct transcripts. Return to the parent and confirm its draft is retained. A child that forbids native direct input must show a disabled composer rather than silently creating a new session.
 
-The existing debugger can inspect relationships and child activity without a new protocol: `pnpm bdb inspect <parent-agent-id> --relay <relay-url> --json` includes `agent.runtimeInfo.childSessions`. Once a child is attached in the console, use its Remote Agent ID with `inspect`, `timeline`, `observe`, `interaction list`, and `interaction respond`. These target the child's ordinary session wire. Do not use `session resume` as a substitute for attaching a still-running native child.
+The existing debugger can inspect relationships and child activity without a new protocol: `pnpm ardb inspect <parent-agent-id> --relay <relay-url> --json` includes `agent.runtimeInfo.childSessions`. Once a child is attached in the console, use its Remote Agent ID with `inspect`, `timeline`, `observe`, `interaction list`, and `interaction respond`. These target the child's ordinary session wire. Do not use `session resume` as a substitute for attaching a still-running native child.
 
 Repeat with a child awaiting a native question or approval before opening its chat; its parent row must indicate waiting, and the child must show the actual pending request. Closing or switching a browser view must not terminate the native task. Historical creation metadata and live control availability are distinct; native instances outside the held app-server are not assumed controllable.
 

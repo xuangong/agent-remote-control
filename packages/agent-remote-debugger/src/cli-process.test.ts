@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -80,7 +80,7 @@ beforeAll(async () => {
   ({ AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-remote-web/headless'));
   server = createRecordedValidationServer();
   relayUrl = (await server.http.listen(0, '127.0.0.1')).url;
-  temporaryDirectory = await mkdtemp(join(tmpdir(), 'borgee-bdb-process-'));
+  temporaryDirectory = await mkdtemp(join(tmpdir(), 'ardb-process-'));
 }, setupTimeoutMs);
 
 afterAll(async () => {
@@ -90,20 +90,33 @@ afterAll(async () => {
   expect(children.size).toBe(0);
 });
 
-describe('built bdb against the recorded Relay', () => {
+describe('built ardb against the recorded Relay', () => {
+  it.skipIf(process.platform === 'win32')('runs the installed ardb entry through a package binary symlink', async () => {
+    const manifest = JSON.parse(await readFile(join(repositoryDirectory, 'packages/agent-remote-debugger/package.json'), 'utf8')) as { bin: Record<string, string> };
+    expect(manifest.bin).toEqual({ ardb: './dist/cli.js' });
+    const entry = join(temporaryDirectory, 'ardb');
+    await symlink(join(repositoryDirectory, 'packages/agent-remote-debugger', manifest.bin.ardb!), entry);
+    const result = spawnSync(process.execPath, [entry, '--help'], { encoding: 'utf8', timeout: childTimeoutMs });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('Usage: ardb <command>');
+    expect(result.stdout).toContain('Session View protocol and state');
+  });
+
   it('lists the recorded Provider, creates a Session, and emits a ready baseline', async () => {
-    const help = await runBdb(['--help']);
+    const help = await runArdb(['--help']);
     expect(help.exitCode, help.stderr).toBe(0);
+    expect(help.stdout.toString('utf8')).toContain('Usage: ardb <command>');
     expect(help.stdout.toString('utf8')).toContain('protocol trace');
 
-    const providers = await runBdb(['provider', 'list', '--json']);
+    const providers = await runArdb(['provider', 'list', '--json']);
     expect(providers.exitCode).toBe(0);
     expect(parseJson(providers.stdout)).toContainEqual({
       providerId: 'recorded',
       displayName: 'Recorded semantic Provider',
     });
 
-    const created = await runBdb([
+    const created = await runArdb([
       'session', 'create', 'process-baseline', '--provider', 'recorded',
       '--provider-session-id', 'process-provider-baseline', '--json',
     ]);
@@ -117,7 +130,7 @@ describe('built bdb against the recorded Relay', () => {
       },
     });
 
-    const observed = await runBdb(['observe', 'process-baseline', '--jsonl', '--until', 'idle']);
+    const observed = await runArdb(['observe', 'process-baseline', '--jsonl', '--until', 'idle']);
     expect(observed.exitCode, observed.stderr).toBe(0);
     const records = parseJsonLines(observed.stdout);
     expectBaselineGroupOrder(records);
@@ -153,7 +166,7 @@ describe('built bdb against the recorded Relay', () => {
       await observer.stop();
     }
 
-    const fresh = await runBdb(['observe', agentId, '--jsonl', '--until', 'interaction']);
+    const fresh = await runArdb(['observe', agentId, '--jsonl', '--until', 'interaction']);
     expect(fresh.exitCode, fresh.stderr).toBe(0);
     const messages = parseJsonLines(fresh.stdout)
       .filter(isTimelineRecord)
@@ -186,17 +199,17 @@ describe('built bdb against the recorded Relay', () => {
     } finally {
       await observer.stop();
     }
-    const canceled = await runBdb(['cancel', agentId, '--json']);
+    const canceled = await runArdb(['cancel', agentId, '--json']);
     expect(canceled.exitCode, canceled.stderr).toBe(0);
     expect(parseJson(canceled.stdout)).toMatchObject({ payload: { command: 'cancel' } });
-    expect((await runBdb(['wait', agentId, '--for', 'idle', '--json'])).exitCode).toBe(0);
+    expect((await runArdb(['wait', agentId, '--for', 'idle', '--json'])).exitCode).toBe(0);
 
     await fixtureAction(agentId, 'advance');
-    const interaction = await runBdb(['wait', agentId, '--for', 'interaction', '--json']);
+    const interaction = await runArdb(['wait', agentId, '--for', 'interaction', '--json']);
     expect(interaction.exitCode, interaction.stderr).toBe(0);
 
     await fixtureAction(agentId, 'fail');
-    const failed = await runBdb(['wait', agentId, '--for', 'failed', '--json']);
+    const failed = await runArdb(['wait', agentId, '--for', 'failed', '--json']);
     expect(failed.exitCode, failed.stderr).toBe(0);
   });
 
@@ -255,14 +268,14 @@ describe('built bdb against the recorded Relay', () => {
       ['recorded-tool-deny', { kind: 'tool_approval', decision: 'deny' }, ''],
     ];
     for (const [requestId, response, nextRequestId] of responses) {
-      const resolved = await runBdb([
+      const resolved = await runArdb([
         'interaction', 'respond', agentId, requestId, '--response-file', '-', '--json',
       ], `${JSON.stringify(response)}\n`);
       expect(resolved.exitCode, resolved.stderr).toBe(0);
       expect(parseJson(resolved.stdout)).toMatchObject({
         type: 'command_acknowledged', payload: { agentId, command: 'interaction_response' },
       });
-      const listed = await runBdb(['interaction', 'list', agentId, '--json']);
+      const listed = await runArdb(['interaction', 'list', agentId, '--json']);
       expect(listed.exitCode, listed.stderr).toBe(0);
       const pending = parseJson(listed.stdout) as Array<{ requestId: string }>;
       if (nextRequestId) expect(pending.map(({ requestId: id }) => id)).toContain(nextRequestId);
@@ -273,7 +286,7 @@ describe('built bdb against the recorded Relay', () => {
   it('returns exact resource bytes, public trace records, and terminal resource errors', async () => {
     const agentId = 'process-resources';
     await createAgent(agentId);
-    const inspected = await runBdb(['inspect', agentId, '--json']);
+    const inspected = await runArdb(['inspect', agentId, '--json']);
     expect(inspected.exitCode, inspected.stderr).toBe(0);
     const state = parseJson(inspected.stdout) as ReplicaJson;
     const availableId = resourceIdFor(state, 'artifacts/lab-proof.txt');
@@ -281,12 +294,12 @@ describe('built bdb against the recorded Relay', () => {
     const unavailableId = resourceIdFor(state, 'artifacts/missing.txt');
     const output = join(temporaryDirectory, 'lab-proof.txt');
 
-    const available = await runBdb(['resource', 'get', agentId, availableId, '--output', output, '--json']);
+    const available = await runArdb(['resource', 'get', agentId, availableId, '--output', output, '--json']);
     expect(available.exitCode, available.stderr).toBe(0);
     expect(await readFile(output)).toEqual(Buffer.from('BORgee Agent Remote durable resource\n'));
     expect(parseJson(available.stdout)).toMatchObject({ resourceId: availableId, byteLength: 37 });
 
-    const streamed = await runBdb(['resource', 'get', agentId, availableId, '--output', '-']);
+    const streamed = await runArdb(['resource', 'get', agentId, availableId, '--output', '-']);
     expect(streamed.exitCode, streamed.stderr).toBe(0);
     expect(streamed.stdout).toEqual(Buffer.from('BORgee Agent Remote durable resource\n'));
     expect(JSON.parse(streamed.stderr)).toMatchObject({ resourceId: availableId, byteLength: 37, output: '-' });
@@ -298,7 +311,7 @@ describe('built bdb against the recorded Relay', () => {
     await expect(access(failedOutput)).rejects.toThrow();
     await expect(access(unavailableOutput)).rejects.toThrow();
 
-    const traced = await runBdb(['protocol', 'trace', agentId, '--jsonl', '--until', 'idle']);
+    const traced = await runArdb(['protocol', 'trace', agentId, '--jsonl', '--until', 'idle']);
     expect(traced.exitCode, traced.stderr).toBe(0);
     const trace = parseJsonLines(traced.stdout) as Array<Record<string, unknown>>;
     const snapshot = trace.find(({ messageType, channel }) => messageType === 'agent_snapshot' && channel === 'http');
@@ -392,7 +405,7 @@ describe('built bdb against the recorded Relay', () => {
     await Promise.race([
       stdinReady,
       stdin.result.then((result) => {
-        throw new Error(`bdb exited before reading stdin: ${result.exitCode} ${result.stderr}`);
+        throw new Error(`ardb exited before reading stdin: ${result.exitCode} ${result.stderr}`);
       }),
     ]);
     stdin.interrupt();
@@ -430,7 +443,7 @@ describe('built bdb against the recorded Relay', () => {
     const observer = startJsonlBdb(['observe', agentId, '--jsonl']);
     try {
       await observer.waitFor((record) => record.kind === 'checkpoint');
-      const sent = await runBdb(['send', agentId, 'shared convergence', '--json']);
+      const sent = await runArdb(['send', agentId, 'shared convergence', '--json']);
       expect(sent.exitCode, sent.stderr).toBe(0);
       await observer.waitFor((record) => {
         const item = record.entry as { item?: { type?: string; text?: string } } | undefined;
@@ -440,7 +453,7 @@ describe('built bdb against the recorded Relay', () => {
       });
       await waitForReplica(replica, () => replica.getState().timeline.entries.some(({ item }) =>
         item.type === 'assistant_message' && item.text === 'Recorded reply: shared convergence'));
-      const inspected = await runBdb(['inspect', agentId, '--json']);
+      const inspected = await runArdb(['inspect', agentId, '--json']);
       expect(inspected.exitCode, inspected.stderr).toBe(0);
       expect(stableReplicaProjection(parseJson(inspected.stdout))).toEqual(
         stableReplicaProjection(replica.getState()),
@@ -453,7 +466,7 @@ describe('built bdb against the recorded Relay', () => {
   });
 });
 
-async function runBdb(arguments_: readonly string[], stdin?: string, targetRelay = relayUrl): Promise<ChildResult> {
+async function runArdb(arguments_: readonly string[], stdin?: string, targetRelay = relayUrl): Promise<ChildResult> {
   return startBdb(arguments_, stdin, targetRelay).result;
 }
 
@@ -490,11 +503,11 @@ function startBdb(
       didClose = true;
       clearTimeout(timer);
       if (timedOut) {
-        reject(new Error(`bdb exceeded ${childTimeoutMs}ms: ${arguments_.join(' ')}`));
+        reject(new Error(`ardb exceeded ${childTimeoutMs}ms: ${arguments_.join(' ')}`));
       } else if (close.spawnError) {
         reject(close.spawnError);
       } else if (close.signal) {
-        reject(new Error(`bdb closed from signal ${close.signal}`));
+        reject(new Error(`ardb closed from signal ${close.signal}`));
       } else {
         resolve({ exitCode: close.exitCode ?? -1, stdout: Buffer.concat(stdout), stderr });
       }
@@ -588,7 +601,7 @@ function expectBaselineGroupOrder(records: readonly unknown[]): void {
 }
 
 async function createAgent(agentId: string, targetRelay = relayUrl): Promise<void> {
-  const result = await runBdb([
+  const result = await runArdb([
     'session', 'create', agentId, '--provider', 'recorded',
     '--provider-session-id', `${agentId}-provider`, '--json',
   ], undefined, targetRelay);
@@ -624,7 +637,7 @@ async function expectProcessError(
   stdin?: string,
   targetRelay = relayUrl,
 ): Promise<void> {
-  const result = await runBdb(arguments_, stdin, targetRelay);
+  const result = await runArdb(arguments_, stdin, targetRelay);
   expect(result.exitCode, result.stderr).toBe(exitCode);
   expect(JSON.parse(result.stderr)).toMatchObject({ error: { code } });
 }
@@ -679,7 +692,7 @@ function startJsonlBdb(arguments_: readonly string[], targetRelay = relayUrl): {
     waiters.clear();
   };
   void closed.then(() => {
-    rejectJsonlWaiters(new Error(`bdb observer closed before the requested record: ${stderr}`));
+    rejectJsonlWaiters(new Error(`ardb observer closed before the requested record: ${stderr}`));
   });
   const watchdog = setTimeout(() => { void terminateAndWait(child); }, childTimeoutMs);
   void closed.then(() => clearTimeout(watchdog));
@@ -695,7 +708,7 @@ function startJsonlBdb(arguments_: readonly string[], targetRelay = relayUrl): {
           timer: setTimeout(() => {
             waiters.delete(waiter);
             clearTimeout(waiter.timer);
-            reject(new Error('Timed out waiting for bdb JSONL record.'));
+            reject(new Error('Timed out waiting for ardb JSONL record.'));
           }, childTimeoutMs),
         };
         waiters.add(waiter);

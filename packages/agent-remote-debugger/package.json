@@ -1,5 +1,6 @@
 {
   "name": "@orchardworks/agent-remote-debugger",
+  "description": "Session View debugging through the shared Agent Remote protocol and client.",
   "version": "0.1.0",
   "private": false,
   "publishConfig": {
@@ -7,7 +8,7 @@
   },
   "type": "module",
   "bin": {
-    "bdb": "./dist/cli.js"
+    "ardb": "./dist/cli.js"
   },
   "files": [
     "dist"

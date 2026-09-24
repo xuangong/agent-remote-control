@@ -213,7 +213,7 @@ function json(output: string): unknown {
   return JSON.parse(output.trim().split('\n').at(-1) ?? '');
 }
 
-describe('bdb command surface', () => {
+describe('ardb command surface', () => {
   it('submits typed forms using their capability without printing private answers', async () => {
     const h = harness();
     h.transport.snapshot.payload.capabilities = { ...h.transport.snapshot.payload.capabilities, interactions: { ...h.transport.snapshot.payload.capabilities.interactions, form: true, question: false } };
@@ -462,6 +462,8 @@ describe('bdb command surface', () => {
     h.interrupt();
     expect(await running).toBe(130);
     expect(await runCli(['--help'], h.io, h.environment)).toBe(0);
+    expect(h.stdout()).toContain('Usage: ardb <command>');
+    expect(h.stdout()).toContain('Session View protocol and state');
     expect(h.stdout()).toContain('protocol trace');
   });
 

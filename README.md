@@ -149,7 +149,7 @@ Test scripts enforce per-test and outer process deadlines. Browser tests use sep
 | `agent-remote-protocol` | Public schemas, codecs, versioned uplink envelopes, and contract fixtures. |
 | `agent-remote-relay` | Session execution, ordered public state, transport, and uplink clients. |
 | `agent-remote-web` | Browser transport, recovery, replica, and reusable React DOM rendering. |
-| `agent-remote-debugger` | Terminal operations over the public protocol. |
+| `agent-remote-debugger` | Headless Session View protocol/state debugging and scripted regression through `ardb`. |
 | `agent-remote-dsh` | Native catalog, shared-session setup, and independent DSH Host bundle. |
 | `@orchardworks/agent-remote-lab` | Workbench, local server, pairing broker, directory, and validation fixtures. |
 
@@ -159,17 +159,17 @@ See the [product design](docs/blueprint/agent-remote-observation.md), [architect
 
 ## Terminal debugger
 
-The `bdb` CLI is included in `packages/agent-remote-debugger`. It uses the same public HTTP/WebSocket protocol as the browser, including sessions attached through a paired DSH Host.
+The `ardb` (Agent Remote Debugger) CLI is included in `packages/agent-remote-debugger`. It uses the same public HTTP/WebSocket protocol as the browser, including sessions attached through a paired DSH Host. It is the headless Session View, supporting protocol/state debugging and scripted non-rendering regression; session management, diagnostics and security in the surrounding product support that core view. See the [command and capability guide](packages/agent-remote-debugger/README.md).
 
 ```bash
-pnpm bdb provider list --json
-pnpm bdb inspect SESSION_ID --json
-pnpm bdb timeline SESSION_ID --tail 20 --json
-pnpm bdb send SESSION_ID "Hello" --json
-pnpm bdb protocol trace SESSION_ID --jsonl --until idle --timeout 10000
+pnpm ardb provider list --json
+pnpm ardb inspect AGENT_ID --json
+pnpm ardb timeline AGENT_ID --tail 20 --json
+pnpm ardb send AGENT_ID "Hello" --json
+pnpm ardb protocol trace AGENT_ID --jsonl --until idle --timeout 10000
 ```
 
-Use the public session ID shown by the workbench. `--relay` and `--origin` override the standalone defaults `http://127.0.0.1:5910` and `http://127.0.0.1:6175`. Environment settings are `AGENT_REMOTE_URL` and `AGENT_REMOTE_ORIGIN`; the older `BORGEE_REMOTE_URL` and `BORGEE_REMOTE_ORIGIN` aliases remain accepted. `bdb --help` lists creation, resume, observation, steer, cancel, planning, interaction, resource, and wait commands.
+Use the public Relay Agent ID, which is distinct from the native CLI session ID. `--relay` and `--origin` override the standalone defaults `http://127.0.0.1:5910` and `http://127.0.0.1:6175`. Environment settings are `AGENT_REMOTE_URL` and `AGENT_REMOTE_ORIGIN`; the older `BORGEE_REMOTE_URL` and `BORGEE_REMOTE_ORIGIN` aliases remain accepted. `ardb --help` lists creation, resume, observation, steer, cancel, planning, interaction, resource, and wait commands.
 
 The live Codex process tests require `codex-cli 0.148.0`. Set `BORGEE_CODEX_TEST_EXECUTABLE` to an executable from an isolated installation of that exact version when the default `codex` executable differs. This does not require changing a global Codex installation.
 

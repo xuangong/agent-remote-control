@@ -82,7 +82,7 @@ Run `pnpm test:setup` for bounded helper and CLI workflow tests. The CLI workflo
 
 ## Tool output protocol compatibility
 
-The current checkout uses unshipped public protocol `1.5.0`, including tool results and Provider commands. After updating the repository, rerun the guided setup to rebuild and reinstall the DSH Host bundle, and use a Relay and workbench from the same version. Existing processes keep their loaded version until restarted. Expand a tool row in the workbench, or inspect `item.result` with `pnpm bdb timeline AGENT_ID --all --json`, to view the native result body. DSH output is retained as emitted; exit codes embedded in text are not inferred as structured metadata.
+The current checkout uses unshipped public protocol `1.5.0`, including tool results and Provider commands. After updating the repository, rerun the guided setup to rebuild and reinstall the DSH Host bundle, and use a Relay and workbench from the same version. Existing processes keep their loaded version until restarted. Expand a tool row in the workbench, or inspect `item.result` with `pnpm ardb timeline AGENT_ID --all --json`, to view the native result body. DSH output is retained as emitted; exit codes embedded in text are not inferred as structured metadata.
 
 ## Chat session controls
 

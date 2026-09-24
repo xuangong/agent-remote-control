@@ -74,9 +74,9 @@ Resource reads and mid-turn steering/queueing remain unsupported. Nested agent o
 Inspect the public Agent ID from the workbench header:
 
 ```bash
-pnpm bdb inspect AGENT_ID --json
-pnpm bdb timeline AGENT_ID --tail 20 --json
-pnpm bdb protocol trace AGENT_ID --jsonl --until idle --timeout 15000
+pnpm ardb inspect AGENT_ID --json
+pnpm ardb timeline AGENT_ID --tail 20 --json
+pnpm ardb protocol trace AGENT_ID --jsonl --until idle --timeout 15000
 ```
 
 For custom ports, pass the matching `--relay` and `--origin` flags. The daemon log is `agent-host.log` under `AGENT_HOST_STATE_DIR`, or `~/.agent-remote-control/agent-host` by default. The active log and three numbered archives retain at most 5 MiB each after successful cleanup. Owned lines are redacted before their 64 KiB limit, allowing at most one bounded line of overshoot until the next owned write or one-second pass. Inherited output has no finite instantaneous overshoot bound; cleanup retains only the latest 5 MiB from an oversized active file. Inherited bytes appended after the retained tail is captured and before the active inode is truncated can also be lost even when archive creation succeeds.

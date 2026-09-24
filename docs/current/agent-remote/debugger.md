@@ -1,8 +1,12 @@
-# Debugger — Terminal Public-Wire Projection
+# ARDB — Agent Remote Debugger
 
 ## Role
 
-`@orchardworks/agent-remote-debugger` is a terminal presentation adapter that drives and observes an Agent Remote Relay through the shared headless client rather than becoming another protocol implementation (`packages/agent-remote-debugger/src/runtime.ts:65-173`).
+`ardb` is the headless form of Session View and its debugger. Session View is the central interaction surface of Agent Remote Control. Sidebar navigation, session management, diagnostics and security are supporting product functions around that view.
+
+The package is `@orchardworks/agent-remote-debugger`; invoke `ardb` or `pnpm ardb` from the repository. See the [command and capability guide](../../../packages/agent-remote-debugger/README.md) for current commands and gaps.
+
+The current implementation drives and observes the same public protocol and reconstructed state as the product's Session View through the shared headless client. Its commands and structured output support scripted regression of non-rendering Session View/Server behavior, including synchronization, recovery and correlated operations. A unified scenario runner is not implemented. Browser-only logic and rendering require separate browser tests. It does not render the view or host a debugging website yet. Visual serving, scenario execution and recording replay are future extensions. Native interpretation belongs in adapters, and the debugger does not implement a second synchronization algorithm.
 
 ## Boundary
 
@@ -55,7 +59,7 @@ flowchart LR
 - The protocol trace observes validated public messages with direction and channel, forwards preflight validation diagnostics without fabricating a protocol record, and replaces available resource content with a byte-length and digest marker (`packages/agent-remote-debugger/src/commands.ts:273-301`, `packages/agent-remote-debugger/src/runtime.ts:83-110`, `packages/agent-remote-debugger/src/runtime.ts:176-188`, `packages/agent-remote-debugger/src/runtime.ts:323-334`).
 - JSON and JSONL writers use stdout only for requested data, while structured errors and resource metadata use stderr; binary stdout requires explicit `--output -`, and file resources replace their destination only after a complete temporary write (`packages/agent-remote-debugger/src/output.ts:18-76`, `packages/agent-remote-debugger/src/commands.ts:229-255`, `packages/agent-remote-debugger/src/commands.ts:441-467`).
 
-## Non-Goals
+## Current Boundaries
 
 - The debugger does not connect directly to DSH, Codex, or another Provider runtime; its runtime imports public protocol values and the Web headless boundary, while Provider-specific attachment access remains in the DSH Provider runtime (`packages/agent-remote-debugger/src/runtime.ts:1-13`, `packages/agent-provider-dsh/src/live-session.ts:174-177`).
 - The debugger does not retain Provider-native events, logs, or a separate Timeline reducer; trace observes transport-decoded public messages and record projection subscribes to the shared Replica (`packages/agent-remote-debugger/src/runtime.ts:145-148`, `packages/agent-remote-debugger/src/records.ts:29-69`).

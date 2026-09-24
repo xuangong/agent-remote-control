@@ -16,8 +16,12 @@ import { usePendingSend } from './usePendingSend.js';
 
 export interface AgentComposerProps {
   compact?: boolean;
-  /** Prevent editing in recordings while preserving the recorded capabilities. */
+  /** Prevent editing while preserving capabilities and the current draft. */
   readOnly?: boolean;
+  readOnlyLabel?: string;
+  readOnlyNotice?: ReactNode;
+  /** Retain ownership controls while hiding the preserved draft. */
+  readOnlyCollapsed?: boolean;
   state?: AgentReplicaState;
   sessionControls?: ReactNode;
   renderSessionSettingError?(error: unknown): ReactNode;
@@ -63,7 +67,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
-export function AgentComposer({ readOnly: forcedReadOnly = false, compact = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, compact = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
@@ -102,6 +106,8 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
     onTextChange: value => { currentDraft.text = value; onDraftChange?.(value); refresh(count => count + 1); } });
   const hasImages = richEnabled && imageDraft.hasImages;
   const hasContent = richEnabled ? draftHasContent(imageDraft.parts) : Boolean(text.trim());
+  const ownershipReadOnly = forcedReadOnly && Boolean(readOnlyNotice);
+  const hideDraft = ownershipReadOnly && (readOnlyCollapsed || (!hasContent && !attachments && !currentDraft.selectedSkill));
   const imageSendReady = !hasImages || imageDraft.ready;
   const isCommand = !hasImages && text.trimStart().startsWith('/');
   const nativeCommandsEnabled = !readOnly && capabilities?.commands === true;
@@ -135,6 +141,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
       invalid() {
         const current = latest.current;
         if (current.state?.agent?.id !== originalAgent || current.text !== submitted || (hasImages && current.imageDraft.parts !== parts)) return 'Not sent: the draft or session changed.';
+        if (current.state?.sessionControl?.access === 'checking') return undefined;
         if (current.readOnly || current.terminal || current.state?.agent?.runtimeInfo.connection?.state === 'unavailable') return 'Not sent: this session is unavailable.';
         if (!current.ready && !current.canWait) return 'Not sent: this session is disconnected.';
         if (hasImages && current.imageDraft.parts.some(part => part.type === 'image' && ['failed', 'unavailable'].includes(current.imageDraft.images[part.imageId]?.status ?? 'unavailable'))) return 'Not sent: check your images.';
@@ -142,7 +149,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
       },
       ready() {
         const current = latest.current;
-        return current.ready && (!hasImages || current.imageDraft.parts.every(part => part.type === 'text' || current.imageDraft.images[part.imageId]?.status === 'ready'));
+        return !current.readOnly && current.ready && (!hasImages || current.imageDraft.parts.every(part => part.type === 'text' || current.imageDraft.images[part.imageId]?.status === 'ready'));
       },
       send() { void latest.current.run('send', true); },
     });
@@ -170,6 +177,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
     if (showCommands) inputRef.current?.parentElement?.querySelector(`#${controlId}-command-${commandIndex}`)?.scrollIntoView?.({ block: 'nearest' });
   }, [commandIndex, showCommands]);
   useLayoutEffect(() => {
+    if (readOnly) focusRequested.current = undefined;
     const input = inputRef.current;
     if (!input) { if (focusRequested.current === agentId && !pending && visible) { focusRequested.current = undefined; editorRef.current?.focus(); } return; }
     input.style.height = 'auto';
@@ -178,7 +186,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
       focusRequested.current = undefined;
       if (!input.closest('[hidden]')) input.focus({ preventScroll: true });
     }
-  }, [agentId, text, pending]);
+  }, [agentId, text, pending, readOnly, hideDraft]);
 
   function chooseCommand(command: AgentCommand): void {
     if (busy || !ready || (readOnly && !consoleCommands.some((local) => local.id === command.id))) return;
@@ -333,8 +341,9 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
     void run('send');
   }
 
-  return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy} data-send-state={waiting.pending?.phase}>
+  return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy} data-send-state={waiting.pending?.phase} data-control-readonly={ownershipReadOnly || undefined}>
     <div className="agent-composer-input">
+    {forcedReadOnly ? readOnlyNotice : null}
     {showCommands ? <div className="agent-command-menu">
       {directory.status === 'loading' && nativeCommandsEnabled ? <p role="status">Loading native commands…</p> : null}
       {directory.status === 'failed' && nativeCommandsEnabled ? <><p role="alert">{directory.error}</p><button type="button" data-testid="retry-commands" onClick={directory.retry}>Retry</button></> : null}
@@ -347,6 +356,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
             : command.kind !== 'command' ? <small className="agent-command-kind">{command.kind === 'skill' ? 'Skill' : 'Prompt'}</small> : null}
         </button>)}</div>}
     </div> : null}
+    <div className="agent-composer-draft" hidden={hideDraft}>
     {attachments}
     {selectedSkill ? <div className="agent-composer-attachments" aria-label="Selected skill">
       <span className="agent-skill-tag">
@@ -354,7 +364,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
           if (onInspectCommand) onInspectCommand(selectedSkill);
           else { currentDraft.inspectedSkill = selectedSkill; refresh((value) => value + 1); }
         }}><span aria-hidden="true">⌘</span> <span>{selectedSkill.name}</span></button>
-        <button type="button" aria-label={`Remove skill ${selectedSkill.name}`} disabled={busy} onClick={() => { currentDraft.selectedSkill = undefined; refresh((value) => value + 1); focusInput(); }}>×</button>
+        <button type="button" aria-label={`Remove skill ${selectedSkill.name}`} disabled={busy || readOnly} onClick={() => { currentDraft.selectedSkill = undefined; refresh((value) => value + 1); focusInput(); }}>×</button>
       </span>
       {nativeBusy ? <span className="agent-composer-note">This Provider can invoke skills when the current turn finishes.</span> : null}
     </div> : null}
@@ -373,22 +383,24 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
       onKeyDown={handleKeyDown}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
-      disabled={!state?.agent || readOnly || busy}
-      placeholder={forcedReadOnly ? 'This recording is read-only.' : readOnly ? readOnlyHint : state?.agent ? 'Message…' : 'Open or attach to an Agent first.'}
+      disabled={!ownershipReadOnly && (!state?.agent || readOnly || busy)}
+      readOnly={ownershipReadOnly}
+      placeholder={ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? 'This recording is read-only.' : readOnly ? readOnlyHint : state?.agent ? 'Message…' : 'Open or attach to an Agent first.'}
       aria-describedby={`${controlId}-hint`}
       aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
     />}
     </div>
+    </div>
     <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly ? '' : ' agent-visually-hidden'}`}>{readOnly ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
-    <div className="agent-composer-actions">
+    {!ownershipReadOnly ? <div className="agent-composer-actions">
       <div className="agent-composer-secondary-controls">
         {richEnabled ? <><button type="button" aria-label="Add images" disabled={!state?.agent || readOnly || busy} onClick={() => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); }}>Image</button>
           <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(imageDraft.addFiles(files)); }} /></> : null}
         <button hidden={compact} type="button" aria-label="Open chat commands" disabled={!ready || busy || (readOnly && consoleCommands.length === 0)} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); focusInput(); }}>/</button>
         {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={!ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent)} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}
       </div>
-      {state?.agent && !compact ? <AgentSessionSettings key={agentId} state={state} disabled={disabled || forcedReadOnly} view={currentDraft.view} busy={busy}
+      {state?.agent && !compact ? <AgentSessionSettings key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
         onSelect={onSetSessionSetting} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : null}
@@ -398,20 +410,20 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, compact = fals
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
         onInterrupt={() => void run('cancel')} /> : null}
       <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={`${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage !== true || (!onSendMessage && !onSendMessageContent))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
+    </div> : null}
       {waiting.pending ? <div className="agent-composer-send-status" data-testid="pending-send" data-state={waiting.pending.phase}>
         <span role="status" title={waiting.pending.reason}>{waiting.pending.phase === 'waiting' ? <>Waiting to send · <span aria-live="off">{waiting.pending.seconds}s</span></> : waiting.pending.reason ?? 'Not sent'}</span>
         {waiting.pending.phase === 'warning' ? <button type="button" aria-label="Retry pending send" onClick={waiting.retry}>Retry</button> : null}
         <button type="button" aria-label="Cancel pending send" onClick={waiting.cancel}>Cancel</button>
       </div> : null}
-    </div>
     {richEnabled && imageDraft.storageError ? <div className="agent-composer-note agent-draft-storage-status" role="status">
       <span>{imageDraft.storageError}</span>
       <button type="button" onClick={imageDraft.retryStorage} disabled={imageDraft.storageBusy} aria-label="Retry draft storage">Retry</button>
     </div> : null}
     {richEnabled && imageDraft.error ? <p className="agent-composer-note" role="alert">{imageDraft.error}</p> : null}
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
-    {runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
-      : !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
+    {!ownershipReadOnly && runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
+      : !ownershipReadOnly && !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
     {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}

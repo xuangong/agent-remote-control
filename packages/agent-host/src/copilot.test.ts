@@ -22,8 +22,10 @@ describe('Copilot registration executable preflight', () => {
   }, 15000);
   it('runs a JavaScript CLI entry with the selected profile and environment before advertising', async () => {
     const previous = process.env.COPILOT_HOME;
-    const executable = await entry("if (process.argv[2] !== '--version' || process.env.COPILOT_HOME !== '/selected-profile' || process.env.COPILOT_HOST_TEST !== 'yes') process.exit(1); console.log('GitHub Copilot CLI 1.0.83');");
-    const registration = await createCopilotHostRegistration({ executable, copilotHome: '/selected-profile', env: { COPILOT_HOST_TEST: 'yes' },
+    const directory = await mkdtemp(join(tmpdir(), 'copilot-profile-')); temporary.push(directory);
+    const copilotHome = join(directory, 'selected-profile');
+    const executable = await entry(`if (process.argv[2] !== '--version' || process.env.COPILOT_HOME !== ${JSON.stringify(copilotHome)} || process.env.COPILOT_HOST_TEST !== 'yes') process.exit(1); console.log('GitHub Copilot CLI 1.0.83');`);
+    const registration = await createCopilotHostRegistration({ executable, copilotHome, env: { COPILOT_HOST_TEST: 'yes' },
       workspaces: [{ id: 'work', name: 'Work', path: '/work' }] });
     try {
       expect(registration.adapter.descriptor.providerId).toBe('copilot');

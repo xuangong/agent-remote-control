@@ -702,3 +702,17 @@ it('authorizes source references before quota reservation and binds create ident
   expect(calls).toHaveLength(1);
   expect((await create('side-native'))?.status).toBe(409);
 });
+
+it('forwards explicit native takeover and public ownership errors through a previously opened binding',async()=>{
+  const {broker,native}=await restoredFixture();
+  const owner={kind:'native_cli',generation:'54f9039d-d511-4a28-a373-8b5b53f63963'};
+  const calls:unknown[]=[];
+  native.onMessage(data=>{
+    const message=JSON.parse(data);if(message.type!=='rpc_request')return;
+    calls.push(JSON.parse(message.body));
+    native.send(JSON.stringify({uplinkVersion:2,type:'rpc_response',requestId:message.requestId,status:409,body:JSON.stringify({code:'native_session_owned',nativeOwner:{...owner,token:'private'}})}));
+  });
+  const response=await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/attach',{method:'POST',body:JSON.stringify({providerId:'codex',nativeSessionId:'native-session',takeOver:owner.generation})}));
+  expect(response?.status).toBe(409);expect(await response!.json()).toMatchObject({code:'native_session_owned',nativeOwner:owner});
+  expect(calls).toEqual([expect.objectContaining({takeOver:owner.generation})]);
+},10000);

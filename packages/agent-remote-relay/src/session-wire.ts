@@ -1,3 +1,5 @@
+import { isSessionMutation } from '@orchardworks/agent-remote-protocol';
+import { SessionControlError, type SessionControlRegistry, type SessionControlLease } from './session-control.js';
 import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import { InputImageError, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
 import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions, AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
@@ -55,6 +57,7 @@ export type SessionWireFailure =
   | { kind: 'manager_event_delivery'; error: Error };
 
 export interface SessionWireOptions {
+  sessionControls?: SessionControlRegistry;
   imageScope?: () => string;
   authorize?: (action: 'read_resource' | 'resolve_resource' | 'image_upload' | 'send_message') => boolean | Promise<boolean>;
   executeOperation?: SessionWireOperationExecutor;
@@ -71,6 +74,7 @@ export interface SessionWireOperation {
 
 export interface SessionWireOperationWork<T> {
   readonly validate?: () => Promise<void> | void;
+  readonly beforeDispatch?: () => void;
   readonly dispatch: () => Promise<T>;
 }
 
@@ -84,11 +88,12 @@ export function createSessionWire(
   options: SessionWireOptions = {},
 ): SessionWire {
   const maxBufferedManagerEvents = options.maxBufferedManagerEvents ?? 1_024;
-  const executeOperation: SessionWireOperationExecutor = options.executeOperation
-    ?? (async (_agent, _operation, work) => { await work.validate?.(); return work.dispatch(); });
+  const runOperation: SessionWireOperationExecutor = options.executeOperation
+    ?? (async (_agent, _operation, work) => { await work.validate?.(); work.beforeDispatch?.(); return work.dispatch(); });
   if (!Number.isSafeInteger(maxBufferedManagerEvents) || maxBufferedManagerEvents < 1) {
     throw new RangeError('maxBufferedManagerEvents must be a positive safe integer.');
   }
+  let control: SessionControlLease | undefined;
   let activityOnly = false;
   let lastActivity: AgentStatus | undefined;
   let negotiated = false;
@@ -163,12 +168,21 @@ export function createSessionWire(
         const boundAgent = requireBoundAgent();
         const snapshot = boundAgent.snapshot();
         const cursor = activityOnly ? boundAgent.timelineCursor?.() : undefined;
-        sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated' });
+        sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', ...(options.sessionControls ? { sessionControl: true as const } : {}) });
+        if (!activityOnly && options.sessionControls) {
+          control = options.sessionControls.attach(boundAgent.agentId, state => {
+            if (!closed) {
+              try { sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: state }); }
+              catch (error) { failSession({ kind: 'manager_event_delivery', error: error instanceof Error ? error : new Error('Control state delivery failed.') }); }
+            }
+          });
+        }
         if (closed) return;
         if (activityOnly) sendActivity(snapshot, cursor);
         else sendMessage(snapshot);
         if (closed) return;
         negotiated = true;
+        if (control) sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: control.state() });
         drainManagerEvents(queuedDuringSnapshotHandoff);
         bufferingSnapshotHandoff = false;
         return;
@@ -196,8 +210,25 @@ export function createSessionWire(
       sendMessage(protocolError('agent_identity_mismatch', 'Client message identifies a different Agent.', true, requestId));
       return;
     }
+    const assertControl = () => { if (isSessionMutation(message)) control?.assert(message.controlToken); };
+    const executeOperation: SessionWireOperationExecutor = (agent, operation, work) => runOperation(agent, operation, {
+      ...work,
+      beforeDispatch: () => { assertControl(); work.beforeDispatch?.(); },
+      dispatch: () => { assertControl(); return work.dispatch(); },
+    });
     try {
+      assertControl();
       switch (message.type) {
+        case 'session_control_request': {
+          if (options.authorize && !await options.authorize('send_message')) {
+            sendMessage(protocolError('forbidden', 'This connection may observe but cannot control the session.', true, requestId));
+            return;
+          }
+          if (!control) throw new SessionControlError('session_control_unavailable', 'Session control requires an updated Controller.');
+          const state = control.request(message.payload.action, message.payload.revision, message.payload.resumeToken, message.payload.retainOnDisconnect, message.payload.clientKind);
+          sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { ...state, requestId: message.payload.requestId } });
+          return;
+        }
         case 'list_commands': {
           if (!boundAgent.listCommands) throw new UnsupportedSessionCommandError('list_commands');
           const commands = await boundAgent.listCommands();
@@ -232,6 +263,7 @@ export function createSessionWire(
           const snapshot = boundAgent.snapshot();
           if (!snapshot.payload.capabilities.sendMessage || !snapshot.payload.capabilities.imageInput) throw new UnsupportedSessionCommandError('image_upload');
           const scope = options.imageScope?.();
+          assertControl();
           let receipt: ImageUploadReceipt;
           if (message.type === 'image_upload_begin' && boundAgent.beginImageUpload) receipt = await boundAgent.beginImageUpload(message.payload, scope);
           else if (message.type === 'image_upload_chunk' && boundAgent.chunkImageUpload) receipt = await boundAgent.chunkImageUpload(message.payload, scope);
@@ -372,6 +404,10 @@ export function createSessionWire(
           return;
       }
     } catch (error) {
+      if (error instanceof SessionControlError) {
+        sendMessage(protocolError(error.code, error.message, true, requestId));
+        return;
+      }
       if (error instanceof AgentBusyError) {
         sendMessage(protocolError('agent_busy', error.message, true, requestId));
         return;
@@ -450,6 +486,7 @@ export function createSessionWire(
   }
 
   function closeSession(): void {
+    control?.close();
     if (closed) return;
     closed = true;
     const release = unsubscribe;
@@ -627,7 +664,7 @@ function isOperationExecutionError(error: unknown): error is Error & { code: str
     && 'code' in error
     && typeof error.code === 'string'
     && ['invalid_operation_id', 'invalid_operation_intent', 'operation_cache_closed', 'operation_capacity_exceeded',
-      'operation_conflict', 'operation_outcome_unknown', 'operation_rejected', 'operation_result_too_large', 'invalid_image_input'].includes(error.code);
+      'session_read_only', 'operation_conflict', 'operation_outcome_unknown', 'operation_rejected', 'operation_result_too_large', 'invalid_image_input'].includes(error.code);
 }
 
 class UnsupportedSessionCommandError extends Error {

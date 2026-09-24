@@ -37,7 +37,7 @@ export class ConversationConnections {
     if (!connection) {
       const key = session ? sessionKey(session) : undefined;
       connection = { agentId, key, replica, viewers: 0,
-        client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100 }),
+        client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web' }),
         stopRecovery: this.recoveryScope ? recoverMessages(replica, this.recoveryScope, key ?? agentId, agentId) : () => {},
       };
       this.connections.set(agentId, connection);
@@ -54,6 +54,28 @@ export class ConversationConnections {
       acquired.viewers -= 1;
       this.collect(acquired);
     } };
+  }
+
+  async takeControlAfterNativeResume(agentId: string): Promise<void> {
+    const connection = this.connections.get(agentId);
+    if (!connection) return;
+    await new Promise<void>((resolve, reject) => {
+      let status = '', settled = false;
+      let unwatchStatus = () => {}, unwatchReplica = () => {};
+      const finish = (error?: Error) => {
+        if (settled) return; settled = true;
+        clearTimeout(timer); unwatchStatus(); unwatchReplica();
+        error ? reject(error) : resolve();
+      };
+      const check = () => queueMicrotask(() => {
+        if (this.connections.get(agentId) !== connection) finish(new Error('The session view closed before control was acquired.'));
+        else if (status === 'ready' && !connection.replica.getState().sessionControl?.nativeOwner) finish();
+      });
+      const timer = setTimeout(() => finish(new Error('Native resume has not synchronized yet. Check the session before retrying.')), 15000);
+      unwatchStatus = connection.client.subscribeStatus(value => {status = value; check();});
+      unwatchReplica = connection.replica.subscribe(check);
+    });
+    await connection.client.takeControl();
   }
 
   clear(): void {

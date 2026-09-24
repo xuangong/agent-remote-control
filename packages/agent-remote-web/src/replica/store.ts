@@ -33,6 +33,10 @@ export class AgentReplica {
   private readonly historyListeners = new Set<(epoch: string, direction: HistoryPage['payload']['direction']) => void>();
   private readonly outbox = new MessageOutbox();
 
+  setSessionControl(control: AgentReplicaState['sessionControl']): void {
+    this.replace({ ...this.state, sessionControl: control });
+  }
+
   getState(): AgentReplicaState {
     return this.state;
   }

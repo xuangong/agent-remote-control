@@ -1,13 +1,14 @@
 import type { SessionEvent } from '@github/copilot-sdk';
 import type { AgentCapabilities, AgentChildSession, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { Channel } from './channel.js';
+import {isNativeInteraction} from './interaction-mapping.js';
 import { Projector, record } from './projector.js';
 import type { CopilotAgentSession } from './session.js';
 /** A child is a view over its parent's native task and event journal, never a resumed root. */
 export class CopilotChildSession implements AgentSession {
   readonly capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: true, cancel: true, readResource: false, interactions: {question: false, planApproval: false, toolApproval: false} };
   private readonly stream = new Channel<ProviderStreamItem>();
-  private readonly projector = new Projector();
+  private readonly projector: Projector;
   private readonly seen = new Set<string>();
   private buffered: SessionEvent[] | undefined = [];
   private closed = false;
@@ -17,7 +18,9 @@ export class CopilotChildSession implements AgentSession {
   private taskRevision = 0;
   private lastTaskTerminal?: string;
   private deferredTask?: {info: AgentChildSession; expectedGeneration: number; nativeStatus?: string};
-  constructor(private readonly parent: CopilotAgentSession, private readonly info: AgentChildSession, private readonly onDispose: () => void) {}
+  constructor(private readonly parent: CopilotAgentSession, private readonly info: AgentChildSession, private readonly onDispose: () => void) {
+    this.projector = new Projector(parent.cwd);
+  }
   async initialize(): Promise<void> {
     let cursor: string | undefined;
     const history: SessionEvent[] = [];
@@ -44,7 +47,7 @@ export class CopilotChildSession implements AgentSession {
     if (this.buffered) this.buffered.push(event); else this.project(event, delivery);
   }
   private project(event: SessionEvent, delivery: 'history' | 'live') {
-    if (this.closed || this.seen.has(event.id)) return; this.seen.add(event.id);
+    if (this.closed || this.seen.has(event.id) || isNativeInteraction(event)) return; this.seen.add(event.id);
     for (const projected of this.projector.projectAll(event, delivery)) this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
   }
   updateTask(info: AgentChildSession, expectedGeneration?: number, nativeStatus?: string): void {

@@ -51,8 +51,18 @@ describe('image input over real session WebSocket', () => {
         });
         socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate', ...(activity ? { observation: 'activity' } : {}) }));
         await next(message => message.type === 'negotiated');
+        let controlToken: string | undefined;
+        if (!activity) {
+          const state = await next(message => message.type === 'session_control');
+          if (state.type !== 'session_control') throw new Error('Missing control state');
+          socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: {
+            agentId, requestId: 'take-control', action: 'take_over', revision: state.payload.revision,
+          } }));
+          const granted = await next(message => message.type === 'protocol_error' || (message.type === 'session_control' && message.payload.requestId === 'take-control'));
+          if (granted.type === 'session_control') controlToken = granted.payload.token;
+        }
         return { socket, async request(type: string, payload: Record<string, unknown> = {}) {
-          const requestId = randomUUID(); socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type, payload: { agentId, requestId, ...payload } }));
+          const requestId = randomUUID(); socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type, ...(['resource_resolve_request', 'resource_request'].includes(type) || !controlToken ? {} : { controlToken }), payload: { agentId, requestId, ...payload } }));
           return next(message => message.type === 'protocol_error' || ('payload' in message && 'requestId' in message.payload && message.payload.requestId === requestId));
         } };
       }
@@ -83,8 +93,8 @@ describe('image input over real session WebSocket', () => {
       const differentOwner = await connect('a', 'other');
       expect(await differentOwner.request('resource_resolve_request', { locator: `input-image:${attachmentId}` })).toMatchObject({ payload: { binding: { status: 'unavailable' } } });
       const reader = await connect('a', 'reader');
-      expect(await reader.request('image_upload_begin', declaration)).toMatchObject({ type: 'protocol_error', payload: { code: 'forbidden' } });
-      expect(await reader.request('send_message', { operationId: randomUUID(), content })).toMatchObject({ type: 'protocol_error', payload: { code: 'forbidden' } });
+      expect(await reader.request('image_upload_begin', declaration)).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
+      expect(await reader.request('send_message', { operationId: randomUUID(), content })).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
       const activity = await connect('a', 'owner', true);
       expect(await activity.request('image_upload_begin', declaration)).toMatchObject({ type: 'protocol_error', payload: { code: 'activity_only' } });
       expect(sent).toHaveLength(1);

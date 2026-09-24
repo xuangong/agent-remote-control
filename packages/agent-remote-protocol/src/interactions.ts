@@ -154,7 +154,7 @@ export type AgentInteractionResponse = Static<typeof AgentInteractionResponse>;
 
 export const InteractionResponseMessage = Strict({
   protocolVersion: ProtocolVersionSchema,
-  type: Type.Literal('interaction_response'),
+  type: Type.Literal('interaction_response'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Strict({
     agentId: NonEmptyString,
     requestId: NonEmptyString,

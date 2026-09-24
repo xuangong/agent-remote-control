@@ -19,6 +19,7 @@ export interface OperationDescriptor {
 
 export interface OperationWork<T> {
   readonly validate?: () => Promise<void> | void;
+  readonly beforeDispatch?: () => void;
   readonly dispatch: () => Promise<T>;
   readonly maximumResultBytes?: number;
 }
@@ -135,6 +136,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
   ): Promise<T> {
     try {
       await work.validate?.();
+      work.beforeDispatch?.();
     } catch (error) {
       settle(key, fingerprint, reservedBytes, {
         state: 'rejected', errorCode: safeErrorCode(error), bytes: entryBytes(key, 0), settledAt: validNow(now),

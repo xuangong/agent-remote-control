@@ -14,10 +14,22 @@ it('copies a native resume command and identifies the Host computer', async () =
   expect(container.textContent).toContain('Copied');
 });
 
+it('copies the Copilot resume command using its Host profile', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText}});
+  const id = '01a0ba06-321d-7600-9141-a1ad0779fc9f';
+  const container = await render(<NativeSessionCommand providerId="copilot" nativeSessionId={id} />);
+  expect(container.textContent).toContain('Copilot profile');
+  await act(async () => container.querySelector('button')!.click());
+  expect(writeText).toHaveBeenCalledWith(`agent-remote-controller copilot resume ${id}`);
+  expect(container.textContent).not.toContain('socket');
+});
+
 it.each([
   ['claude', '01a0ba06-321d-7600-9141-a1ad0779fc9f'],
   ['codex', '$(touch /tmp/unsafe)'],
   ['codex', '--help'],
+  ['copilot', '$(touch /tmp/unsafe)'],
 ])('does not suggest commands for unsupported or untrusted identities', async (providerId, nativeSessionId) => {
   const container = await render(<NativeSessionCommand providerId={providerId} nativeSessionId={nativeSessionId} />);
   expect(container.textContent).toBe('');

@@ -35,7 +35,7 @@ export async function runReplayCommand(invocation: ParsedInvocation, io: Debugge
       onBrowserEvent: emit,
       async onLiveReady(live) {
         if (invocation.format !== 'jsonl') return;
-        observer = await createDebuggerRuntime(live.agentId, { relayUrl: live.url, origin: live.url, signal });
+        observer = await createDebuggerRuntime(live.agentId, { observeOnly: true, relayUrl: live.url, origin: live.url, signal });
         try { await observer.ready(timeout); } catch (error) { observer.close(); observer = undefined; throw error; }
         liveAgentId = live.agentId;
         emit({ kind: 'recording_start', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: liveAgentId });

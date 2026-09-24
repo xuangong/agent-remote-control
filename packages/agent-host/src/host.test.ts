@@ -437,10 +437,18 @@ describe('Agent Host runtime', () => {
       broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('lost', 'agent_snapshot')).toBeDefined();
 
-      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'send_message', payload: {
+      const claim = async (streamId: string, resumeToken?: string): Promise<string> => {
+        const initial = broker.streamMessage(streamId, 'session_control')!.payload as {revision: string};
+        broker.sendStream(streamId, {protocolVersion: '1.5.0', type: 'session_control_request', payload: {agentId: 'agent', requestId: 'claim-'+streamId, action: 'acquire', revision: initial.revision, resumeToken}});
+        await expect.poll(() => broker.streamMessage(streamId, 'session_control', 'claim-'+streamId)).toBeDefined();
+        return (broker.streamMessage(streamId, 'session_control', 'claim-'+streamId)!.payload as {token: string}).token;
+      };
+      const firstToken = await claim('lost');
+      expect(typeof firstToken).toBe('string');
+      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'send_message', controlToken: firstToken, payload: {
         requestId: 'send-lost', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'interaction_response', payload: {
+      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'interaction_response', controlToken: firstToken, payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-lost',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -459,10 +467,11 @@ describe('Agent Host runtime', () => {
       await expect.poll(() => broker.streamOpened('retry')).toBe(true);
       broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('retry', 'agent_snapshot')).toBeDefined();
-      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', payload: {
+      const retryToken = await claim('retry', firstToken);
+      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', controlToken: retryToken, payload: {
         requestId: 'send-retry', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'interaction_response', payload: {
+      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'interaction_response', controlToken: retryToken, payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-retry',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -471,7 +480,7 @@ describe('Agent Host runtime', () => {
       expect(session?.sentMessages).toEqual(['Run once.']);
       expect(session?.interactionResponses).toHaveLength(1);
 
-      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', payload: {
+      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', controlToken: retryToken, payload: {
         requestId: 'capacity', operationId: operationId('capacity-send'), agentId: 'agent', text: 'Do not dispatch.',
       } });
       await expect.poll(() => broker.streamMessage('retry', 'protocol_error', 'capacity')).toMatchObject({

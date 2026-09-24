@@ -578,3 +578,33 @@ it('captures the content cursor with the activity change, without sending conten
   expect(output).toHaveLength(count);
   wire.close();
 });
+
+it('fences an operation if control changes while asynchronous validation is pending', async () => {
+  const { SessionControlRegistry } = await import('./session-control.js');
+  const registry = new SessionControlRegistry();
+  const { agent } = fakeAgent();
+  let finish!: () => void;
+  const validation = new Promise<void>(resolve => { finish = resolve; });
+  agent.validateMessageContent = () => validation;
+  const dispatch = vi.fn(async () => {});
+  agent.sendMessageContent = dispatch;
+  const aMessages: any[] = [], bMessages: any[] = [];
+  const a = createSessionWire(agent, json => aMessages.push(JSON.parse(json)), { sessionControls: registry });
+  const b = createSessionWire(agent, json => bMessages.push(JSON.parse(json)), { sessionControls: registry });
+  const latest = (messages: any[]) => messages.filter(message => message.type === 'session_control').at(-1).payload;
+  const request = (revision: string) => JSON.stringify({ protocolVersion: '1.5.0', type: 'session_control_request', payload: {
+    agentId: 'agent-1', requestId: 'claim', action: 'take_over', revision,
+  } });
+  try {
+    await a.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+    await b.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+    await a.receive(request(latest(aMessages).revision));
+    const pending = a.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message', controlToken: latest(aMessages).token,
+      payload: { agentId: 'agent-1', requestId: 'send', operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', content: [{ type: 'text', text: 'late' }] },
+    }));
+    await b.receive(request(latest(bMessages).revision));
+    finish(); await pending;
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(aMessages.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send', code: 'session_read_only' } });
+  } finally { a.close(); b.close(); registry.close(); }
+});

@@ -149,7 +149,7 @@ describe('socket-free plugin uplink host', () => {
       f.receive({ type: 'stream_open', streamId });
       f.receive({ type: 'stream_message', streamId, message: negotiate });
     }
-    await vi.waitFor(() => expect(f.sent.filter((v: any) => v.type === 'stream_message')).toHaveLength(4));
+    await vi.waitFor(() => expect(f.sent.filter((v: any) => v.type === 'stream_message')).toHaveLength(6));
     const snapshots = f.sent.filter((v: any) => v.type === 'stream_message')
       .map((v: any) => JSON.parse(v.message)).filter((v: any) => v.type === 'agent_snapshot');
     expect(snapshots).toHaveLength(2);
@@ -172,14 +172,15 @@ describe('socket-free plugin uplink host', () => {
     const f = await fixture();
     f.receive({ type: 'stream_open', streamId: 'one' });
     f.receive({ type: 'stream_message', streamId: 'one', message: negotiate });
-    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message',
+    const controlToken = await takeControl(f, 'one');
+    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message', controlToken,
       payload: { requestId: 'hold', operationId: '00000000-0000-4000-8000-000000000002', agentId: 'agent-one', text: 'hold' } }) });
     f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'timeline_request',
       payload: { requestId: 'history-after-send', agentId: 'agent-one', direction: 'tail', limit: 10 } }) });
     f.receive({ type: 'stream_open', streamId: 'two' });
     f.receive({ type: 'stream_message', streamId: 'two', message: negotiate });
     await vi.waitFor(() => expect(f.commands).toEqual(['hold']));
-    expect(f.sent.filter((v: any) => v.streamId === 'two' && v.type === 'stream_message')).toHaveLength(2);
+    expect(f.sent.filter((v: any) => v.streamId === 'two' && v.type === 'stream_message')).toHaveLength(3);
     expect(f.sent.some((v: any) => v.message?.includes('history-after-send'))).toBe(false);
     f.finish();
     await vi.waitFor(() => expect(f.sent.some((v: any) => v.message?.includes('history-after-send'))).toBe(true));
@@ -199,7 +200,8 @@ describe('socket-free plugin uplink host', () => {
     const f = await fixture();
     f.receive({ type: 'stream_open', streamId: 'one' });
     f.receive({ type: 'stream_message', streamId: 'one', message: negotiate });
-    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message',
+    const controlToken = await takeControl(f, 'one');
+    f.receive({ type: 'stream_message', streamId: 'one', message: JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message', controlToken,
       payload: { requestId: 'old-command', operationId: '00000000-0000-4000-8000-000000000003', agentId: 'agent-one', text: 'hold' } }) });
     await vi.waitFor(() => expect(f.commands).toEqual(['hold']));
     f.receive({ type: 'stream_close', streamId: 'one', code: 1000, reason: 'Reattach' });
@@ -221,3 +223,13 @@ describe('socket-free plugin uplink host', () => {
     expect(f.failures).toEqual([]);
   });
 });
+
+async function takeControl(f: Awaited<ReturnType<typeof fixture>>, streamId: string): Promise<string> {
+  const control = () => f.sent.filter((value: any) => value.type === 'stream_message' && value.streamId === streamId)
+    .map((value: any) => JSON.parse(value.message)).filter((value: any) => value.type === 'session_control').at(-1)?.payload;
+  await vi.waitFor(() => expect(control()).toBeDefined());
+  f.receive({ type: 'stream_message', streamId, message: JSON.stringify({ protocolVersion: '1.5.0', type: 'session_control_request',
+    payload: { agentId: 'agent-one', requestId: 'take-control', action: 'take_over', revision: control().revision } }) });
+  await vi.waitFor(() => expect(control()?.access).toBe('control'));
+  return control().token;
+}

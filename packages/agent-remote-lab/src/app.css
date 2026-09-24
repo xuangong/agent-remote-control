@@ -1501,3 +1501,24 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-cache-confirmation footer { padding: 0 16px 16px; }
 .lab-cache-confirmation footer button { min-height: 44px; }
 .lab-cache-confirmation > [role="alert"] { padding: 0 16px 16px; color: var(--obs-danger); }
+
+/* Ownership belongs to the composer, including when its draft is collapsed. */
+.lab-session-control { padding: 6px; color: var(--obs-text-secondary); font-size: 12px; line-height: 1.5; }
+.lab-session-control-row { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+.lab-session-control-owner { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; font-weight: 500; }
+.lab-session-control-icon { flex: 0 0 16px; }
+.lab-session-control-owner > span:last-child { overflow-wrap: anywhere; }
+.lab-session-control-row button { flex: 0 0 auto; min-height: 36px; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+.lab-session-control-description, .lab-session-control-error { margin: 3px 0 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.lab-session-control[data-native] .lab-session-control-description { color: var(--obs-warning); }
+.lab-session-control[aria-busy="true"] .lab-session-control-description { color: var(--obs-text-secondary); }
+.lab-session-control-error { color: var(--obs-danger); }
+.lab-composer-dock .agent-composer[data-control-readonly] .agent-composer-draft:not([hidden]) { margin-top: 4px; border-top: 1px solid var(--obs-border); padding-top: 5px; }
+.lab-composer-dock .agent-composer[data-control-readonly] :is(textarea, .agent-composer-editor) { max-height: 96px; overflow-y: auto; color: var(--obs-text-secondary); opacity: 1; cursor: text; }
+.lab-composer-dock:has(.agent-composer[data-control-readonly])[data-collapsed] { padding-block: 4px calc(6px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom))); }
+@media (max-width: 760px) {
+  .lab-session-control-row { gap: 8px; min-height: 44px; }
+  .lab-session-control-row button { min-height: 44px; }
+}
+
+:is(.lab-shell, .lab-session-view) .lab-composer-dock[data-collapsed]:has(.agent-composer[data-control-readonly]) .lab-composer-toggle { bottom: calc(100% - 1px); }

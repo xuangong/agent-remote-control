@@ -1,3 +1,4 @@
+import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from './workspace-access.js';
 import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
@@ -18,7 +19,7 @@ export interface WorkspaceFolderPage { path: string; parentPath: string | null; 
 export interface CreateSessionOptions { editNativeSessionId?: string; editTurnId?: string; editMessageId?: string; sourceNativeSessionId?: string; workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
 export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string; createdAt?: string }
 export class DirectoryError extends Error {
-  constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string) { super(message); }
+  constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
 export class SessionDirectoryClient {
   readonly cachedPages = new Map<string, SessionCatalogPage>();
@@ -29,7 +30,7 @@ export class SessionDirectoryClient {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined);
+    if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined, data.nativeOwner);
     return data as T;
   }
   rename(providerId: string, nativeSessionId: string, title: string, operationId: string): Promise<{ title: string }> {
@@ -50,7 +51,7 @@ export class SessionDirectoryClient {
     if (options.hidden) query.set('hidden', '1');
     return this.request(`workspace-folders?${query}`, undefined, signal);
   }
-  attach(providerId: string, nativeSessionId: string, signal?: AbortSignal): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('attach', { providerId, nativeSessionId }, signal); }
+  attach(providerId: string, nativeSessionId: string, signal?: AbortSignal, takeOver?: string): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('attach', { providerId, nativeSessionId, ...(takeOver ? {takeOver} : {}) }, signal); }
   createFolder(providerId: string, parentPath: string, name: string, signal?: AbortSignal): Promise<{ path: string }> {
     return this.request('workspace-folders/create', { providerId, parentPath, name }, signal);
   }

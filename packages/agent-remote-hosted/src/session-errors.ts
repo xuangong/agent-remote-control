@@ -1,3 +1,4 @@
+import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 /** Public attach failures use fixed copy rather than arbitrary native error text. */
 const sessionErrors: Readonly<Record<string, string>> = {
   native_file_limit: 'The shared Codex daemon reached its file descriptor limit. Review active work before restarting it on the Host computer.',
@@ -5,6 +6,11 @@ const sessionErrors: Readonly<Record<string, string>> = {
   native_resume_timeout: 'The native runtime did not finish resuming the session before its deadline. Check the Controller log, then reopen the session.',
   native_history_timeout: 'The native runtime did not finish reading session history before its deadline. Check the Controller log, then reopen the session.',
   native_request_timeout: 'The native runtime did not answer a request before its deadline. Check the Controller log and try again.',
+  native_session_owned: 'This session is controlled by another native client. Take control to interrupt it and resume here.',
+  native_session_released: 'This session was handed to the native CLI. Take control to reopen it here.',
+  native_owner_changed: 'Native ownership changed. Refresh the session before taking control again.',
+  native_owner_busy: 'Native ownership is changing. Wait briefly, then check the session.',
+  native_handoff_unknown: 'Native release was not confirmed. No new writer was started. Check the Controller log before retrying.',
   session_in_use: 'This session is in use by another native client. Close that client, then reopen the session.',
   local_execution_policy: 'The Controller workspace policy does not allow this session. Check its local workspace settings.',
   session_unavailable: 'The native session is unavailable. Refresh the session list and check whether it is still available in the native client.',
@@ -17,10 +23,13 @@ const sessionErrors: Readonly<Record<string, string>> = {
   workspace_unavailable: 'The session workspace is unavailable to the Controller. Check its local workspace settings.',
 };
 
-export function sessionAttachFailure(body: string): { code: string; error: string } {
-  let code: unknown;
-  try { code = JSON.parse(body)?.code; } catch { /* Older Hosts may return a non-JSON failure. */ }
-  if (typeof code === 'string' && Object.hasOwn(sessionErrors, code)) return { code, error: sessionErrors[code]! };
+export function sessionAttachFailure(body: string): { code: string; error: string; nativeOwner?: NativeSessionOwner } {
+  let code: unknown, owner: unknown;
+  try { const value = JSON.parse(body); code = value?.code; owner = value?.nativeOwner; } catch { /* Older Hosts may return a non-JSON failure. */ }
+  const candidate = owner as Partial<NativeSessionOwner> | undefined;
+  const nativeOwner = candidate && (candidate.kind === 'native_cli' || candidate.kind === 'controller') && typeof candidate.generation === 'string' && /^[a-f\d-]{36}$/i.test(candidate.generation)
+    ? {kind: candidate.kind, generation: candidate.generation} : undefined;
+  if (typeof code === 'string' && Object.hasOwn(sessionErrors, code)) return { code, error: sessionErrors[code]!, ...(['native_session_owned','native_session_released','native_owner_changed'].includes(code) && nativeOwner ? {nativeOwner} : {}) };
   return { code: 'session_attach_failed', error: sessionErrors.session_attach_failed! };
 }
 

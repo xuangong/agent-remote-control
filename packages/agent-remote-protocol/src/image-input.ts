@@ -31,16 +31,16 @@ export const ImageUploadReceipt = Strict({ uploadId: Id, offset: Type.Integer({ 
 });
 export type ImageUploadReceipt = Static<typeof ImageUploadReceipt>;
 const UploadIdentity = { requestId: Id, agentId: Id, uploadId: Id };
-export const ImageUploadBeginRequest = Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('image_upload_begin'),
+export const ImageUploadBeginRequest = Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('image_upload_begin'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Strict({ ...UploadIdentity, sha256: Digest, byteLength: Type.Integer({ minimum: 1, maximum: 10485760 }), mediaType: ImageMediaType }),
 });
 export type ImageUploadBeginRequest = Static<typeof ImageUploadBeginRequest>;
-export const ImageUploadChunkRequest = Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('image_upload_chunk'),
+export const ImageUploadChunkRequest = Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('image_upload_chunk'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Strict({ ...UploadIdentity, offset: Type.Integer({ minimum: 0, maximum: 10485760 }),
     contentBase64: Type.String({ minLength: 4, maxLength: 43692, pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$' }) }),
 });
 export type ImageUploadChunkRequest = Static<typeof ImageUploadChunkRequest>;
-export const ImageUploadFinishRequest = Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('image_upload_finish'), payload: Strict(UploadIdentity) });
+export const ImageUploadFinishRequest = Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('image_upload_finish'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), payload: Strict(UploadIdentity) });
 export type ImageUploadFinishRequest = Static<typeof ImageUploadFinishRequest>;
 export const ImageUploadResult = Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('image_upload_result'),
   payload: Strict({ requestId: Id, agentId: Id, ...ImageUploadReceipt.properties }),

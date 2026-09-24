@@ -102,6 +102,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     reconcileIdleSession: directory.reconcileIdleSession?.bind(directory),
     canReleaseSession: directory.canReleaseSession?.bind(directory),
     sessionReleased: directory.sessionReleased?.bind(directory),
+    setSessionHandoffHandler: directory.setSessionHandoffHandler?.bind(directory),
     async list() {
       const entries = await directory.list();
       return (await Promise.all(entries.map(async entry => {
@@ -122,9 +123,9 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       if (input.editNativeSessionId) await checkSource(input.editNativeSessionId);
       return directory.create({ ...input, cwd });
     },
-    async open(nativeSessionId) {
+    async open(nativeSessionId, options) {
       await checkSource(nativeSessionId);
-      return protect(await directory.open(nativeSessionId));
+      return protect(await directory.open(nativeSessionId, options));
     },
     ...(directory.openChild ? { async openChild(parent: string, child: string) { return protect(await directory.openChild!(parent, child)); } } : {}),
     close: directory.close.bind(directory),

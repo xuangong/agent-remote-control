@@ -1,3 +1,4 @@
+import { NativeSessionTakeoverScope, SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
@@ -23,6 +24,7 @@ import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 import type { TraceEntryRequest } from '../trace-model.js';
 
 export interface LabWorkbenchActions {
+  takeControl?(): Promise<void>;
   editPrompt?(entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry): Promise<void>;
   loadOlder?(): void | Promise<void>;
   retryMessage?(id: string): Promise<void>;
@@ -41,9 +43,12 @@ export interface LabWorkbenchActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
-export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftBinding, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { readOnly?: boolean; draftBinding?: DraftBinding; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function LabWorkbench({ readOnly: recordingReadOnly = false, compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftBinding, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { readOnly?: boolean; draftBinding?: DraftBinding; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+  const nativeTakeControl = useContext(NativeSessionTakeoverScope);
+  const controlReadOnly = !!nativeTakeover || state?.sessionControl !== undefined && state.sessionControl.access !== 'control';
+  const readOnly = recordingReadOnly || controlReadOnly;
   const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id);
-  const actions: LabWorkbenchActions = readOnly ? {} : sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
+  const actions: LabWorkbenchActions = readOnly ? { loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
   const readingPositions = recoveryPositions ?? localPositions;
@@ -82,7 +87,8 @@ export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry
     ?? (recoveryNoticeDue ? runtimeNotice ?? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
     runtimeError ? 'error' : 'info');
   const activity = sessionActivity(state);
-  const activityLabel = agentFailure ? 'Agent failed'
+  const activityLabel = state?.sessionControl?.nativeOwner ? (state.sessionControl.nativeOwner.kind === 'native_cli' ? 'Native CLI has control' : 'Native control transferred')
+    : agentFailure ? 'Agent failed'
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
     : sessionStatus === 'connecting' ? 'Opening session'
@@ -108,12 +114,12 @@ export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span>
     </header>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
-    <WorkbenchTimeline readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
+    <WorkbenchTimeline nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       agentFailure={agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
       questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} />
-    <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent} data-collapsed={composerHidden || undefined}>
+    <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover} data-collapsed={composerHidden || undefined}>
       <div hidden={composerHidden}>
         {composerContext}
         {composerNotice}
@@ -127,10 +133,13 @@ export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry
             <path d={composerHidden ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'} />
           </svg>
         </button>
-        <div id={composerId} className="lab-composer-body" hidden={composerHidden}>
+        <div id={composerId} className="lab-composer-body" hidden={composerHidden && !controlReadOnly}>
           <DraftComposer binding={draftBinding}
             compact={compact}
             readOnly={readOnly}
+            readOnlyCollapsed={composerHidden}
+            readOnlyLabel={controlReadOnly && !recordingReadOnly ? 'Read only' : undefined}
+            readOnlyNotice={nativeTakeover ?? (!recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={state.sessionControl.nativeOwner && nativeTakeControl && state.agent ? options => nativeTakeControl(state.agent!.id, state.sessionControl!.nativeOwner!.generation, options) : suppliedActions.takeControl} /> : undefined)}
             consoleCommands={!readOnly && sessionStatus === 'ready' ? consoleCommands : []}
             onExecuteConsoleCommand={!readOnly && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
             sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
@@ -143,7 +152,7 @@ export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry
             onUploadImage={visible ? actions.uploadImage : undefined}
             draft={messageDraft}
             onDraftChange={onMessageDraftChange}
-            disabled={readOnly || sessionStatus !== 'ready'}
+            disabled={sessionStatus !== 'ready'}
             disabledLabel={activityLabel}
             recovering={!readOnly && !runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
             onSendMessage={readOnly ? undefined : suppliedFeedbackActions.sendMessage}
@@ -195,11 +204,11 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): { 
   return { actions: reportedActions, reauthenticate: failure?.reauthenticate === true && failure.title !== 'Change session setting' };
 }
 
-const WorkbenchTimeline = memo(function WorkbenchTimeline({ readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
+const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
   questionDrafts, onQuestionDraftChange }: Pick<Parameters<typeof LabWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
     readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; agentFailure?: string;
-    connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean;
+    connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
   const display = useContext(TimelineDisplay);
   const contentRevision = useMemo(() => ({}), [state, display, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
@@ -237,13 +246,14 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ readOnly, state, ses
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
               interactionsReadOnly={readOnly}
+              interactionsWaitingForConnection={!readOnly && sessionStatus !== 'ready'}
               interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
               onResourceRequest={actions.requestResource}
               onResourceResolve={actions.resolveResource}
               questionDrafts={questionDrafts}
               onQuestionDraftChange={onQuestionDraftChange}
             />
-          </> : isAttaching ? <div className="lab-empty-state">
+          </> : nativeTakeover ? null : isAttaching ? <div className="lab-empty-state">
             <span className="lab-empty-icon" aria-hidden="true">↗</span>
             <h3>{sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} {attachingAgentId}</h3>
             <p>The Timeline will appear when the Agent Snapshot is available.</p>

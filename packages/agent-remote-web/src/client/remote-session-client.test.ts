@@ -1535,3 +1535,51 @@ it('loads historical rows before an empty recent page and keeps the live cursor 
   transport.emit(live(1, 'Next'));
   client.stop();
 });
+
+it('waits for initial control settlement after history, and attaches proof only to mutations', async () => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica, { requireSessionControl: true });
+  const statuses: string[] = [];
+  client.subscribeStatus(status => statuses.push(status));
+  try {
+    client.start(); transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+    transport.emit(snapshot());
+    const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
+    if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
+    transport.emit({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: subscription.payload });
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'one', access: 'read_only', available: true } });
+    const acquire = transport.sent.find(message => message.type === 'session_control_request')!;
+    if (acquire.type !== 'session_control_request') throw new Error('Missing acquisition');
+    transport.resolveTimeline(page('tail', [])); await transport.settle();
+    expect(statuses.at(-1)).toBe('catching_up');
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'two', access: 'control', available: false, token: 'private-control-proof', requestId: acquire.payload.requestId } });
+    await transport.settle();
+    expect(statuses.at(-1)).toBe('ready');
+    expect(JSON.stringify(replica.getState())).not.toContain('private-control-proof');
+    const pending = client.cancel();
+    const outgoing = transport.sent.at(-1)!;
+    expect(outgoing).toMatchObject({ type: 'cancel', controlToken: 'private-control-proof' });
+    if (outgoing.type !== 'cancel') throw new Error('Missing cancel');
+    transport.emit({ protocolVersion: '1.5.0', type: 'command_acknowledged', payload: { agentId: 'agent-one', requestId: outgoing.payload.requestId, command: 'cancel' } });
+    await pending;
+  } finally { client.stop(); }
+});
+
+it('does not claim control for observers or silently write through an old Controller', async () => {
+  for (const supported of [true, false]) {
+    const transport = new FakeTransport();
+    const replica = new AgentReplica();
+    const client = new RemoteSessionClient('agent-one', transport, replica, { observeOnly: true, requireSessionControl: true });
+    try {
+      client.start(); transport.open();
+      transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', ...(supported ? { sessionControl: true } : {}) });
+      if (supported) transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'one', access: 'read_only', available: true } });
+      expect(transport.sent.some(message => message.type === 'session_control_request')).toBe(false);
+      await expect(client.sendMessage('not sent')).rejects.toMatchObject({ code: 'session_read_only' });
+      expect(transport.sent.some(message => message.type === 'send_message')).toBe(false);
+      expect(replica.getState().sessionControl?.access).toBe(supported ? 'read_only' : 'unsupported');
+    } finally { client.stop(); }
+  }
+});

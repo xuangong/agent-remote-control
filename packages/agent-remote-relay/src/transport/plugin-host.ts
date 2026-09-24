@@ -90,6 +90,7 @@ export function createAgentRemotePluginHost(
     const wire = createSessionWire(() => relay.requireAgent(options.agentId), (message) => {
       if (streams.get(streamId) === stream) emit({ uplinkVersion: UPLINK_VERSION, type: 'stream_message', streamId, message });
     }, {
+      sessionControls: relay.sessionControls,
       authorize: () => true,
       onFailure: () => closeStream(streamId, 1011, 'Plugin session delivery failed.'),
     });

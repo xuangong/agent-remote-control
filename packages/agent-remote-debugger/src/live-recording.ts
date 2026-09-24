@@ -31,7 +31,7 @@ export class LiveRecording {
     const abort = this.abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error('Recording connection timed out.')), 10000);
     try {
-      this.runtime = await createDebuggerRuntime(this.agentId, { relayUrl: this.url(), origin: this.url(), signal: abort.signal });
+      this.runtime = await createDebuggerRuntime(this.agentId, { observeOnly: true, relayUrl: this.url(), origin: this.url(), signal: abort.signal });
       await this.runtime.ready(10000);
       abort.signal.throwIfAborted();
       this.state.phase = 'recording'; this.state.startedAt = new Date().toISOString();

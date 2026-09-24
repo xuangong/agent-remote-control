@@ -77,7 +77,7 @@ export function SessionTransferDialog({ session, onOpen, onClose }: {
           <button type="button" className="lab-session-copy-link" onClick={() => void copyLink()}>{copied ? 'Copied' : 'Copy link'}</button>
           <p className="lab-session-transfer-note">Uses the receiving device’s sign-in. Access stays unchanged.</p>
           <details className="lab-session-transfer-details"><summary>Session link</summary><label className="agent-visually-hidden" htmlFor="session-transfer-url">Session URL</label><input id="session-transfer-url" readOnly value={url} onFocus={event => event.currentTarget.select()} /></details>
-          {session.providerId === 'codex' ? <details className="lab-session-transfer-details"><summary>Resume locally</summary><NativeSessionCommand providerId={session.providerId} nativeSessionId={session.nativeSessionId} /></details> : null}
+          {['codex', 'copilot'].includes(session.providerId) ? <details className="lab-session-transfer-details"><summary>Resume locally</summary><NativeSessionCommand providerId={session.providerId} nativeSessionId={session.nativeSessionId} /></details> : null}
           {['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) ? <p className="lab-control-note">This address is local to this computer. Use a site reachable from both devices.</p> : null}
         </> : <>
           {scanning && !opening ? <SessionScanner onRead={text => void receive(text)} /> : opening ? <div className="lab-session-scan-result" role="status">Opening session…</div> : <button type="button" onClick={() => { setFailure(undefined); setScanning(true); }}>Scan again</button>}

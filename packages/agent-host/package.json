@@ -1,6 +1,6 @@
 {
   "name": "@orchardworks/agent-remote-controller",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "private": true,
   "type": "module",
   "bin": {

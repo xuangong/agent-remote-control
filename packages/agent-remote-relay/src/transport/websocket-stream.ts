@@ -150,6 +150,7 @@ export function attachAgentRemoteWebSocketStream(
     const wire = createSessionWire(() => relay.requireAgent(agentId), json => {
       if (socket.readyState === WebSocket.OPEN) socket.send(json);
     }, {
+      sessionControls: relay.sessionControls,
       imageScope: () => principal.subject,
       authorize: async action => {
         try { return await options.authorizer!.authorize({ principal, agentId, action, request }); }

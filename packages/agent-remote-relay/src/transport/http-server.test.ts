@@ -273,7 +273,7 @@ describe('Agent Remote WebSocket transport', () => {
     expect(requireAgent).not.toHaveBeenCalled();
     expect(subscribe).not.toHaveBeenCalled();
 
-    const negotiated = collectMessages(socket, 2);
+    const negotiated = collectMessages(socket, 3);
     socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     const messages = (await negotiated).map((json) => decodeServerMessage(json));
 
@@ -282,6 +282,7 @@ describe('Agent Remote WebSocket transport', () => {
     expect(messages).toMatchObject([
       { status: 'ok', value: { type: 'negotiated' } },
       { status: 'ok', value: { type: 'agent_snapshot', payload: { id: 'agent-unnegotiated' } } },
+      { status: 'ok', value: { type: 'session_control', payload: { access: 'read_only' } } },
     ]);
     socket.close();
   });
@@ -307,7 +308,7 @@ describe('Agent Remote WebSocket transport', () => {
     await relay.createAgent(createRequest('agent-protected', 'provider-session-protected'));
     const readResource = vi.spyOn(relay.requireAgent('agent-protected'), 'readResource');
     const socket = await openSocket(`${url.replace('http:', 'ws:')}/v1/sessions/agent-protected/events`);
-    const negotiated = collectMessages(socket, 2);
+    const negotiated = collectMessages(socket, 3);
     socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     await negotiated;
 
@@ -368,7 +369,7 @@ describe('Agent Remote WebSocket transport', () => {
     await relay.createAgent(createRequest('agent-live', 'provider-session-live'));
     const socket = await openSocket(`${url.replace('http:', 'ws:')}/v1/sessions/agent-live/events`);
 
-    const negotiated = collectMessages(socket, 2);
+    const negotiated = collectMessages(socket, 3);
     socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     await negotiated;
 
@@ -413,7 +414,7 @@ describe('Agent Remote WebSocket transport', () => {
     const { provider, relay, url } = await start();
     await relay.createAgent(createRequest('agent-interaction', 'provider-session-interaction'));
     const socket = await openSocket(`${url.replace('http:', 'ws:')}/v1/sessions/agent-interaction/events`);
-    const negotiated = collectMessages(socket, 2);
+    const negotiated = collectMessages(socket, 3);
     socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
     await negotiated;
 
@@ -467,6 +468,7 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
     const accepted = first.client.respondToInteraction(request.requestId, response);
 
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    await second.client.takeControl();
     await expect(second.client.respondToInteraction(request.requestId, response))
       .rejects.toMatchObject({ code: 'stale_interaction' });
     expect(first.observations.filter((event) => event.direction === 'outbound'
@@ -530,6 +532,7 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
       .rejects.toMatchObject({ code: 'command_failed' });
     expect(first.replica.getState().pendingInteractions).toEqual([request]);
     expect(first.replica.getState().timeline.entries).toEqual([]);
+    await second.client.takeControl();
     const retried = second.client.respondToInteraction(request.requestId, response);
     await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
     expect(context.session.interactionResponses).toEqual([{ requestId: request.requestId, response }]);

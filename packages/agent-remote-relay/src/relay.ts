@@ -1,3 +1,4 @@
+import { SessionControlRegistry } from './session-control.js';
 import type { InputImageStore } from './resources/input-image-store.js';
 import { randomUUID } from 'node:crypto';
 
@@ -14,6 +15,7 @@ import { ProviderRegistry } from './provider-registry.js';
 import { InMemoryResourceStore, type ResourceStore } from './resources/resource-store.js';
 
 export interface AgentRemoteRelay {
+  readonly sessionControls?: SessionControlRegistry;
   listProviders(): readonly AgentProviderDescriptor[];
   createAgent(request: CreateAgentRequest): Promise<AgentSessionResponse>;
   resumeAgent(request: ResumeAgentRequest): Promise<AgentSessionResponse>;
@@ -51,6 +53,7 @@ export class RelayClosedError extends Error {
 }
 
 class AgentRemoteRelayImplementation implements AgentRemoteRelay {
+  readonly sessionControls = new SessionControlRegistry();
   private readonly providers: ProviderRegistry;
   private readonly agents = new Map<string, AgentManager>();
   private readonly reservations = new Set<string>();
@@ -165,6 +168,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.sessionControls.close();
     const managers = [...this.agents.values()];
     this.agents.clear();
     await Promise.all(managers.map((manager) => manager.close()));

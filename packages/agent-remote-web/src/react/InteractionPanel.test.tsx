@@ -109,3 +109,15 @@ it('displays a recorded external action without an actionable external link', as
   expect(container.querySelector('a[href]')).toBeNull();
   expect(container.querySelector('button')?.matches(':disabled')).toBe(true);
 });
+
+it('preserves an unsubmitted answer across a connection interruption', async () => {
+ const respond = vi.fn().mockResolvedValue(undefined);
+ const container = await render(<InteractionPanel request={request} onResponse={respond} />);
+ await type(container.querySelector<HTMLInputElement>('input[name="runtime-custom"]')!, 'Keep this answer');
+ await rerender(container, <InteractionPanel request={request} waitingForConnection />);
+ expect(container.querySelector<HTMLInputElement>('input[name="runtime-custom"]')?.value).toBe('Keep this answer');
+ expect(container.querySelector('input')?.matches(':disabled')).toBe(true);
+ await rerender(container, <InteractionPanel request={request} onResponse={respond} />);
+ expect(container.querySelector<HTMLInputElement>('input[name="runtime-custom"]')?.value).toBe('Keep this answer');
+ expect(respond).not.toHaveBeenCalled();
+});

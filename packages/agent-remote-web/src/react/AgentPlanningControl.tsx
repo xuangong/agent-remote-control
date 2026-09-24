@@ -53,6 +53,7 @@ export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: Ag
     </div>
     <p className="agent-composer-note" role="status">{!supported ? 'Planning is not supported by this session.'
       : !planning ? 'Waiting for Provider planning state.'
+      : state.sessionControl && state.sessionControl.access !== 'control' ? 'Read only. Take control to change planning mode.'
       : recoveryMessage ?? (pending ? 'Waiting for Provider confirmation.'
       : !canChange ? 'Planning can change only while connected and idle, with no pending interactions.'
       : 'Provider confirmed. Changes apply to the next message.')}</p>

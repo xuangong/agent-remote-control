@@ -365,6 +365,7 @@ class CommandContext {
       operationTimeoutMs: this.remainingTimeout(),
       signal: this.signal,
       protocolObserver,
+      observeOnly: !['send', 'steer', 'cancel', 'settings set', 'planning', 'interaction respond'].includes(this.invocation.path.join(' ')),
       preflightDiagnosticObserver,
     }), true, (lateRuntime) => lateRuntime.close());
     try {

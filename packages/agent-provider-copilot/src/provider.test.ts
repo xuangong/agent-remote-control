@@ -19,7 +19,7 @@ beforeEach(() => {
     tasks: {list: vi.fn(async () => ({tasks: []})), sendMessage: vi.fn(async () => ({sent: true})), cancel: vi.fn(async () => ({cancelled: true}))},
     eventLog: {read: vi.fn(async () => ({events: [], cursor: 'end', hasMore: false}))}
   }};
-  mock.client = {rpc: {skills: {getDiscoveryPaths: vi.fn(async () => ({paths: [{path: '/native/project/skills'}]}))}}, start: vi.fn(async () => {}), stop: vi.fn(async () => []), forceStop: vi.fn(async () => {}), createSession: vi.fn(async (config: unknown) => {mock.config = config; return mock.native;}), resumeSession: vi.fn(async (_id: string, config: unknown) => {mock.config = config; return mock.native;}), listSessions: vi.fn(async () => [])};
+  mock.client = {rpc: {sessions: {checkInUse: vi.fn(async () => ({inUse: []})), close: vi.fn(async () => ({}))}, skills: {getDiscoveryPaths: vi.fn(async () => ({paths: [{path: '/native/project/skills'}]}))}}, start: vi.fn(async () => {}), stop: vi.fn(async () => []), forceStop: vi.fn(async () => {}), createSession: vi.fn(async (config: unknown) => {mock.config = config; return mock.native;}), resumeSession: vi.fn(async (_id: string, config: unknown) => {mock.config = config; return mock.native;}), listSessions: vi.fn(async () => [])};
 });
 async function open() { const provider = new CopilotAgentProvider({executable: '/test/copilot'}); return {provider, session: await provider.createSession({sessionId: 'public', cwd: process.cwd()})}; }
 async function collect(session: {observe(): AsyncIterable<ProviderStreamItem>}) { const values: ProviderStreamItem[] = []; const done = (async () => {for await (const value of session.observe()) values.push(value);})(); return {values, done}; }
@@ -313,4 +313,141 @@ it('does not infer idle activity from persisted Copilot metadata', async () => {
     expect(mock.client.resumeSession).not.toHaveBeenCalled();
     expect(mock.native.rpc.metadata.isProcessing).not.toHaveBeenCalled();
   } finally { await provider.dispose(); }
+});
+
+it('publishes native reasoning effort and applies only supported selections', async () => {
+ mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-a', reasoningEffort: 'medium'});
+ mock.native.rpc.model.list.mockResolvedValue({list: [{id: 'model-a', name: 'A', capabilities: {supports: {reasoning_effort: ['low', 'medium', 'high'], vision: true}, limits: {vision: {max_prompt_images: 1, max_prompt_image_size: 3145728, supported_media_types: ['image/png']}}}}]});
+ mock.native.rpc.model.setReasoningEffort = vi.fn(async () => {mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-a', reasoningEffort: 'high'}); return {reasoningEffort: 'high'};});
+ const {provider, session} = await open();
+ try {
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'reasoning_effort', value: 'medium', options: [{value: 'low', label: 'low'}, {value: 'medium', label: 'medium'}, {value: 'high', label: 'high'}]}));
+  expect(session.capabilities.imageInput).toMatchObject({mediaTypes: ['image/png'], maxImages: 1, maxImageBytes: 3145728});
+  await session.setSessionSetting('reasoning_effort', 'high');
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'reasoning_effort', value: 'high'}));
+  await expect(session.setSessionSetting('reasoning_effort', 'extreme')).rejects.toThrow();
+ } finally {await provider.dispose();}
+}, 10000);
+it('publishes native planning mode and completes identity-bound plan approval', async () => {
+ let mode = 'plan'; mock.native.rpc.mode = {get: vi.fn(async () => mode), set: vi.fn(async (p: any) => {mode = p.mode;})};
+ const {provider, session} = await open(); const seen = await collect(session);
+ try {
+  expect(session.capabilities.planning).toBe(true); expect((await session.runtimeInfo()).planning).toEqual({active: true});
+  await session.setPlanning!(false); expect((await session.runtimeInfo()).planning).toEqual({active: false});
+  const data = {requestId: 'plan', summary: 'Plan', planContent: 'Build it', actions: ['exit_only', 'interactive', 'autopilot'], recommendedAction: 'interactive'};
+  mock.handler(event('exit_plan_mode.requested', data)); const reply = mock.config.onExitPlanModeRequest(data);
+  await new Promise(r => setImmediate(r));
+  expect(seen.values).toContainEqual(expect.objectContaining({event: expect.objectContaining({type: 'interaction_requested', request: {kind: 'plan_approval', requestId: 'plan', plan: 'Build it', allowedActions: ['approve', 'approve_and_resume', 'reject']}})}));
+  await session.respondToInteraction('plan', {kind: 'plan_approval', action: 'approve_and_resume'});
+  expect(await reply).toEqual({approved: true, selectedAction: 'interactive'});
+ } finally {await provider.dispose(); await seen.done;}
+}, 10000);
+it('loads native todos and publishes serialized refreshes including a cleared list', async () => {
+ let rows: any[] = [{id: '1', title: 'Implement', status: 'in_progress'}, {id: '2', title: 'Verify', status: 'done'}];
+ mock.native.rpc.plan = {readSqlTodos: vi.fn(async () => ({rows}))};
+ const {provider, session} = await open(); const seen = await collect(session);
+ try {
+  await new Promise(r => setImmediate(r));
+  expect(seen.values).toContainEqual(expect.objectContaining({event: expect.objectContaining({type: 'timeline', item: {type: 'todo', items: [{id: '1', text: 'Implement', completed: false, status: 'in_progress'}, {id: '2', text: 'Verify', completed: true, status: 'completed'}]}})}));
+  rows = []; mock.handler(event('session.todos_changed', {})); await new Promise(r => setImmediate(r));
+  expect(seen.values).toContainEqual(expect.objectContaining({event: expect.objectContaining({type: 'timeline', item: {type: 'todo', items: []}})}));
+ } finally {await provider.dispose(); await seen.done;}
+}, 10000);
+
+it('maps native elicitation to validated forms and external actions', async () => {
+ const {provider, session} = await open(); const seen = await collect(session);
+ try {
+  const payload = {message: 'Preferences', mode: 'form', elicitationSource: 'test-mcp', requestedSchema: {type: 'object', required: ['name'], properties: {name: {type: 'string', minLength: 2}, secret: {type: 'string', writeOnly: true}}}};
+  mock.handler(event('elicitation.requested', {requestId: 'form', ...payload}));
+  const result = mock.config.onElicitationRequest(payload); await Promise.resolve();
+  await expect(session.respondToInteraction('form', {kind: 'form', action: 'submit', values: {name: 'x'}})).rejects.toThrow();
+  await session.respondToInteraction('form', {kind: 'form', action: 'submit', values: {name: 'Alice', secret: 'private-value'}});
+  expect(await result).toEqual({action: 'accept', content: {name: 'Alice', secret: 'private-value'}});
+  const url = {message: 'Sign in', mode: 'url', url: 'https://example.com/auth', elicitationSource: 'test-mcp'};
+  mock.handler(event('elicitation.requested', {requestId: 'url', ...url})); const external = mock.config.onElicitationRequest(url); await Promise.resolve();
+  await session.respondToInteraction('url', {kind: 'external_action', action: 'completed'}); expect(await external).toEqual({action: 'accept'});
+ } finally {await provider.dispose(); await seen.done;}
+ expect(JSON.stringify(seen.values)).not.toContain('private-value');
+ expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'interaction_requested')).toHaveLength(2);
+}, 10000);
+
+it('keeps completed child approvals in the parent history that owns live interactions', async () => {
+ mock.history = [event('permission.requested', {requestId: 'child-r', permissionRequest: {kind: 'shell', toolCallId: 't'}}, {agentId: 'child'}), event('permission.completed', {requestId: 'child-r', result: {kind: 'approved'}}, {agentId: 'child'})];
+ const {provider, session} = await open(); const seen = await collect(session); await provider.dispose(); await seen.done;
+ expect(seen.values).toContainEqual(expect.objectContaining({delivery: 'history', event: expect.objectContaining({type: 'timeline', item: expect.objectContaining({type: 'interaction', request: expect.objectContaining({requestId: 'child-r'})})})}));
+ expect(seen.values.some(v => v.type === 'observation' && v.event.type === 'interaction_requested')).toBe(false);
+}, 10000);
+it('invalidates canceled plan callbacks without inventing a user rejection', async () => {
+ const {provider, session} = await open(); const seen = await collect(session);
+ const payload = {summary: 'Plan', planContent: 'Build', actions: ['interactive'], recommendedAction: 'interactive'};
+ mock.handler(event('exit_plan_mode.requested', {...payload, requestId: 'plan-cancel'}));
+ const reply = mock.config.onExitPlanModeRequest(payload); const rejected = expect(reply).rejects.toThrow('canceled');
+ await session.cancel(); await rejected; await provider.dispose(); await seen.done;
+ expect(seen.values).toContainEqual(expect.objectContaining({event: {type: 'interaction_invalidated', provider: 'copilot', requestId: 'plan-cancel', reason: expect.any(String)}}));
+ expect(seen.values.some(v => v.type === 'observation' && v.event.type === 'interaction_resolved' && v.event.requestId === 'plan-cancel')).toBe(false);
+}, 10000);
+
+it('publishes an overlapping completed approval once without leaving a pending prompt', async () => {
+ const requested = event('permission.requested', {requestId: 'overlap', permissionRequest: {kind: 'shell'}});
+ const completed = event('permission.completed', {requestId: 'overlap', result: {kind: 'approved'}});
+ mock.native.getEvents.mockImplementation(async () => {mock.handler(requested); return [requested, completed];});
+ const {provider, session} = await open(); const seen = await collect(session);
+ expect((await session.runtimeInfo()).status).toBe('idle');
+ await provider.dispose(); await seen.done;
+ expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'interaction')).toHaveLength(1);
+ expect(seen.values.some(v => v.type === 'observation' && v.event.type.startsWith('interaction_'))).toBe(false);
+}, 10000);
+
+it('exposes acknowledged native tool permissions without an unsupported allow-all getter', async () => {
+ mock.native.rpc.permissions.setApproveAll = vi.fn(async () => ({success: true}));
+ const {provider, session} = await open();
+ try {
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'tool_approval_mode', category: 'permissions', value: 'ask'}));
+  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: true});
+  await session.setSessionSetting('tool_approval_mode', 'allow');
+  expect(mock.native.rpc.permissions.setApproveAll).toHaveBeenLastCalledWith({enabled: true});
+  expect((await session.runtimeInfo()).settings?.find(s => s.id === 'tool_approval_mode')?.value).toBe('allow');
+  mock.handler(event('session.permissions_changed', {allowAllPermissions: false}));
+  expect((await session.runtimeInfo()).settings?.find(s => s.id === 'tool_approval_mode')?.value).toBe(null);
+ } finally {await provider.dispose();}
+}, 10000);
+it('does not claim a tool policy after an unconfirmed change', async () => {
+ mock.native.rpc.permissions.setApproveAll = vi.fn(async () => ({success: true}));
+ const {provider, session} = await open();
+ try {
+  mock.native.rpc.permissions.setApproveAll.mockRejectedValueOnce(new Error('Permission change timed out'));
+  await expect(session.setSessionSetting('tool_approval_mode', 'allow')).rejects.toThrow('timed out');
+  expect((await session.runtimeInfo()).settings?.find(s => s.id === 'tool_approval_mode')?.value).toBe(null);
+ } finally {await provider.dispose();}
+}, 10000);
+it('probes restored permission support without resetting or guessing restored policy', async () => {
+ mock.native.rpc.permissions.configure = vi.fn(async () => ({success: true}));
+ const provider = new CopilotAgentProvider({executable: '/test/copilot'});
+ try {
+  const session = await provider.resumeSession({providerId: 'copilot', sessionId: 'restored', opaque: JSON.stringify({cwd: process.cwd()})});
+  expect(mock.native.rpc.permissions.configure).toHaveBeenCalledWith({});
+  expect((await session.runtimeInfo()).settings?.find(s => s.id === 'tool_approval_mode')?.value).toBe(null);
+ } finally {await provider.dispose();}
+}, 10000);
+it('keeps an interactive session-scope decision when native completion arrives before the RPC result', async () => {
+ const {provider, session} = await open(); const seen = await collect(session);
+ mock.handler(event('permission.requested', {requestId: 'read-session', permissionRequest: {kind: 'read', path: '/workspace/file'}, promptRequest: {kind: 'read', path: '/workspace/file'}}));
+ mock.native.rpc.permissions.handlePendingPermissionRequest.mockImplementation(async (params: unknown) => {
+  expect(params).toEqual({requestId: 'read-session', result: {kind: 'approve-for-session', approval: {kind: 'read'}}});
+  mock.handler(event('permission.completed', {requestId: 'read-session', result: {kind: 'approved'}}));
+  return {success: true};
+ });
+ try { await session.respondToInteraction('read-session', {kind: 'tool_approval', decision: 'allow', scope: 'session'}); }
+ finally {await provider.dispose(); await seen.done;}
+ const resolved = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event] : []);
+ expect(resolved).toHaveLength(1); expect(resolved[0]).toMatchObject({response: {kind: 'tool_approval', decision: 'allow', scope: 'session'}});
+}, 10000);
+
+it('refuses to resume a native session held outside the managed Controller', async () => {
+  mock.client.rpc.sessions.checkInUse.mockResolvedValue({inUse:['busy']});
+  const provider = new CopilotAgentProvider({executable:'/test/copilot'});
+  try {
+    await expect(provider.resumeSession({providerId:'copilot',sessionId:'busy',opaque:'{}'})).rejects.toThrow('unmanaged native client');
+    expect(mock.client.resumeSession).not.toHaveBeenCalled();
+  } finally {await provider.dispose();}
 });

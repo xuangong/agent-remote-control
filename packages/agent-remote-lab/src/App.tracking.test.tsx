@@ -46,11 +46,14 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
       queueMicrotask(() => listener.onOpen());
       return { close: () => { if (observing) activityClosed(agentId); else contentClosed(agentId); }, send: message => {
         if (message.type === 'negotiate') {
-          listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated' });
+          listener.onMessage({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+          if (message.observation !== 'activity') listener.onMessage({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
           if (message.observation === 'activity') {
             observing = true; activity = listener;
             if (activityReady) listener.onMessage({ protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId, status: 'idle' } });
           } else { contentConnections.push(agentId); contentListeners.set(agentId, listener); listener.onMessage({ ...snapshot, payload: { ...snapshot.payload, id: agentId, runtimeInfo: { ...snapshot.payload.runtimeInfo, sessionId: agentId === 'other-agent' ? other!.nativeSessionId : target.nativeSessionId } } }); }
+        } else if (message.type === 'session_control_request') {
+          listener.onMessage({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
         } else if (message.type === 'timeline_subscription') {
           listener.onMessage({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
         }

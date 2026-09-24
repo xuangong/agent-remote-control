@@ -16,6 +16,7 @@
         "packages/agent-host/README.md",
         "packages/agent-host/package.json",
         "packages/agent-host/src",
+        "packages/agent-host/tests",
         "packages/agent-host/tsconfig.json",
         "packages/agent-platform/README.md",
         "packages/agent-platform/package.json",
@@ -115,7 +116,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:2b657ac741da2ea3fc65be2af8b33dd12e5b225a8753c7ecb637709acc1506c9"
+      "digest": "sha256:25579111787352308452ef101d61f83b4864aec198c926b14a0d62f3921a3f05"
     }
   },
   "providers": [

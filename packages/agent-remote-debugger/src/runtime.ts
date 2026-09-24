@@ -28,6 +28,7 @@ export interface ProgressCheckpoint {
 }
 
 export interface DebuggerRuntimeOptions {
+  readonly observeOnly?: boolean;
   readonly relayUrl?: string;
   readonly origin?: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
@@ -106,7 +107,7 @@ export async function createDebuggerRuntime(agentId: string, options: DebuggerRu
   } finally {
     unsubscribePreflightDiagnostic();
   }
-  const client = new RemoteSessionClient(agentId, transport, replica, { operationTimeoutMs: options.operationTimeoutMs });
+  const client = new RemoteSessionClient(agentId, transport, replica, { operationTimeoutMs: options.operationTimeoutMs, observeOnly: options.observeOnly, retainControlOnDisconnect: false, clientKind: 'headless' });
   let status: RemoteSessionStatus = 'idle';
   let closed = false;
   const cancelWaits = new Set<() => void>();

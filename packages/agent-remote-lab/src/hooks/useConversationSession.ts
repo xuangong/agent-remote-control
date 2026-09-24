@@ -37,6 +37,7 @@ export function useConversationSession(session: OpenedSession, transport: Remote
   };
   const actions: LabWorkbenchActions = accessReady && active && status === 'ready' && !pending ? {
     ...messageActions,
+    takeControl: () => active.takeControl(),
     uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
     retryMessage: async id => { await active.retryMessage(id); },
     loadOlder: () => active.loadOlder(), cancel: async () => { await active.cancel(); },

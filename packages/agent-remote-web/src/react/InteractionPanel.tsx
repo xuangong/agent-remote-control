@@ -14,22 +14,23 @@ import { ToolApprovalCard } from './interactions/ToolApprovalCard.js';
 export interface InteractionPanelProps {
   readonly request: AgentInteractionRequest;
   readonly readOnly?: boolean;
+  readonly waitingForConnection?: boolean;
   readonly onResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
   readonly questionDraft?: QuestionDraft;
   readonly onQuestionDraftChange?: (draft: QuestionDraft) => void;
 }
 
 export function InteractionPanel(props: InteractionPanelProps) {
-  return props.readOnly ? <fieldset className="agent-interaction-lock" disabled><InteractionContent {...props} /></fieldset> : <InteractionContent {...props} />;
+  return <fieldset className="agent-interaction-lock" disabled={props.readOnly || props.waitingForConnection || !props.onResponse}><InteractionContent {...props} />{props.waitingForConnection && !props.readOnly ? <p role="status">Waiting for connection to respond.</p> : null}</fieldset>;
 }
 
-function InteractionContent({ request, onResponse, questionDraft, onQuestionDraftChange, readOnly = false }: InteractionPanelProps) {
+function InteractionContent({ request, onResponse, questionDraft, onQuestionDraftChange, readOnly = false, waitingForConnection = false }: InteractionPanelProps) {
   const [failure, setFailure] = useState<string | undefined>();
   const [pending, setPending] = useState(false);
   const inFlight = useRef(false);
 
   async function respond(response: AgentInteractionResponse): Promise<void> {
-    if (readOnly || !onResponse || inFlight.current) return;
+    if (readOnly || waitingForConnection || !onResponse || inFlight.current) return;
     inFlight.current = true;
     setFailure(undefined);
     setPending(true);
@@ -43,10 +44,10 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
   }
 
   if (request.kind === 'form') {
-    return <FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly ? undefined : onResponse ? failure : 'Interaction unavailable. Reconnect to respond.'} />;
+    return <FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly || waitingForConnection ? undefined : onResponse ? failure : 'Interaction unavailable. Reconnect to respond.'} />;
   }
 
-  if (!onResponse && !readOnly) {
+  if (!onResponse && !readOnly && !waitingForConnection) {
     return <section className="agent-interaction agent-interaction-unavailable" role="status">
       <strong>Interaction unavailable</strong>
       <p>The host cannot respond to this {interactionKindLabel(request.kind)} request.</p>

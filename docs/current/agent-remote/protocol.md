@@ -243,3 +243,54 @@ Fixtures cover capability registration, strict route/method/body scope, owner
 and CSRF authorization, old-Controller rejection, uplink replacement during a
 job, persistence failures, and browser polling without mutation replay. Deploy
 updated strict-schema Server participants before capability-advertising Hosts.
+
+## Exclusive session interaction control
+
+The common session wire advertises `negotiated.sessionControl: true`. This is a
+Relay/Controller authority boundary, separate from normalized Agent state and
+native process ownership. It applies uniformly to stdio adapters; it does not
+implement native CLI handoff or restart the provider process.
+
+Each content connection receives `session_control` with `agentId`, `revision`,
+`access` (`control` or `read_only`), and `available`. Only controlling connections
+receive the private `token`. `session_control_request` uses an explicit `action`
+(`acquire` or `take_over`), the last observed `revision`, and an optional
+`resumeToken`. A racing takeover with an outdated revision is rejected. Acquire
+never replaces another owner. The initial open may acquire an unowned session;
+subsequent broadcasts never automatically take over a session.
+
+Remote clients identify themselves with optional `clientKind` (`web`, `headless`,
+or `unknown`) when acquiring control. The Relay retains this kind for the owner
+generation and broadcasts it as `ownerKind`; joining with a resume proof cannot
+relabel the owner. Missing identification is `unknown`, and an unowned session
+has no `ownerKind`. This is presentation metadata, not authentication or evidence
+of native CLI ownership. A headless ARDB client shares the Controller-owned
+process just as a web page does. Native CLI release requires separate verified
+Controller lifecycle capabilities and cannot be requested by changing this label.
+
+All session mutations carry the current top-level `controlToken`: message send,
+steer, cancel, planning, settings, native commands, interaction responses, and
+image uploads. The wire checks the connection and proof before processing and
+again immediately before native dispatch, after asynchronous validation. Stale
+requests return `session_read_only` without reaching the provider. Already
+admitted operations may settle normally; their acknowledgement does not grant
+control back to the old page. Reads and observation remain available.
+
+Control proofs stay in page memory, shared only by session views using the same
+transport. Reconnect can resume the same authority, but a revoked or expired
+proof cannot reacquire control. Disconnected browser ownership is reserved for
+30 seconds; expiry leaves observers read-only until a deliberate takeover.
+Activity subscriptions and ARDB recording/observation do not acquire control.
+Short-lived headless commands set `retainOnDisconnect: false` to release their
+control when they close. Neither expiry nor takeover cancels an Agent task.
+
+The product fails closed with a Controller update notice if the Host does not
+advertise this capability. Legacy mutation frames without a control proof are
+rejected by updated Hosts. Control proofs are excluded from protocol traces and
+recording exports; replay does not restore live authority.
+
+### Native stdio handoff
+
+`session_control.nativeOwner` optionally contains `{kind: "native_cli" | "controller", generation}`. It is set only by the Host, never by browser `clientKind`. While present the session is read-only and remote control acquisition is rejected. It describes native ownership, not normalized Agent activity. Clearing it after native resume makes existing content clients reconnect and resynchronize. The requester then explicitly acquires browser interaction control.
+
+A directory attach may return HTTP 409 `native_session_owned` / `native_session_released` with this public owner identity. An explicit attach with `takeOver: generation` interrupts that exact managed native owner. Ordinary attach, Track and reconnect never supply it. Stale generations, incomplete shutdown, and unmanaged native clients fail without starting a replacement writer. Loopback management addresses and tokens are never part of this contract.

@@ -1,3 +1,4 @@
+import { SessionControlRequest, SessionControlMessage } from './session-control.js';
 import { MessagePart, ImageUploadBeginRequest, ImageUploadChunkRequest, ImageUploadFinishRequest, ImageUploadResult } from './image-input.js';
 import { type Static, Type } from '@sinclair/typebox';
 
@@ -39,6 +40,7 @@ export type NegotiateRequest = Static<typeof NegotiateRequest>;
 export const NegotiateResponse = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('negotiated'),
+  sessionControl: Type.Optional(Type.Literal(true)),
 });
 export type NegotiateResponse = Static<typeof NegotiateResponse>;
 
@@ -57,7 +59,7 @@ export type ProviderListResponse = Static<typeof ProviderListResponse>;
 
 export const SendMessageRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
-  type: Type.Literal('send_message'),
+  type: Type.Literal('send_message'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Type.Union([
     Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, text: Type.String(), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
     Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, content: Type.Array(MessagePart, { minItems: 1, maxItems: 1024 }), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
@@ -68,28 +70,28 @@ export type AgentMessageOptions = Pick<SendMessageRequest['payload'], 'delivery'
 
 export const SteerRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
-  type: Type.Literal('steer'),
+  type: Type.Literal('steer'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, text: Type.String() }),
 });
 export type SteerRequest = Static<typeof SteerRequest>;
 
 export const CancelRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
-  type: Type.Literal('cancel'),
+  type: Type.Literal('cancel'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString }),
 });
 export type CancelRequest = Static<typeof CancelRequest>;
 
 export const SetPlanningRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
-  type: Type.Literal('set_planning'),
+  type: Type.Literal('set_planning'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, active: Type.Boolean() }),
 });
 export type SetPlanningRequest = Static<typeof SetPlanningRequest>;
 
 export const SetSessionSettingRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
-  type: Type.Literal('set_session_setting'),
+  type: Type.Literal('set_session_setting'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   payload: Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, settingId: NonEmptyString, value: NonEmptyString }),
 });
 export type SetSessionSettingRequest = Static<typeof SetSessionSettingRequest>;
@@ -215,6 +217,7 @@ export const IncompatibleProtocolVersionErrorMessage = Strict({
 export type IncompatibleProtocolVersionErrorMessage = Static<typeof IncompatibleProtocolVersionErrorMessage>;
 
 export const ClientMessage = Type.Union([
+  SessionControlRequest,
   ImageUploadBeginRequest, ImageUploadChunkRequest, ImageUploadFinishRequest,
   ListCommandsRequest,
   ExecuteCommandRequest,
@@ -235,6 +238,7 @@ export const ClientMessage = Type.Union([
 export type ClientMessage = Static<typeof ClientMessage>;
 
 export const ServerMessage = Type.Union([
+  SessionControlMessage,
   ImageUploadResult,
   CommandListResponse,
   CommandResultResponse,

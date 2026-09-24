@@ -77,3 +77,23 @@ describe('Copilot Host directory', () => {
     expect(native.disposed()).toBe(true);
   });
 });
+
+it('hands a running Controller session to CLI and fences automatic recovery', async () => {
+  const {mkdtemp,rm}=await import('node:fs/promises'); const {tmpdir}=await import('node:os'); const {join}=await import('node:path');
+  const {acquireNativeSession,inspectNativeOwner}=await import('./native-session-owner.js');
+  const root=await mkdtemp(join(tmpdir(),'arc-directory-owner-')); let releases=0;
+  const directory=createCopilotSessionDirectory({listSessions:async()=>[], createSession:async()=>nativeSession('native').session,
+    resumeSession:async()=>nativeSession('native').session, async releaseSession(){releases++;}},[],{root});
+  let cli:Awaited<ReturnType<typeof acquireNativeSession>>|undefined;
+  try {
+    const session=await directory.open('native');
+    const owner=await inspectNativeOwner({root,providerId:'copilot',sessionId:'native'});
+    cli=await acquireNativeSession({root,providerId:'copilot',sessionId:'native',kind:'native_cli',takeOver:owner!.generation});cli.activate(async()=> 'requested');
+    expect(releases).toBe(1);
+    await expect(session.sendMessage('stale')).rejects.toThrow(/control|ownership/i);
+    await expect(directory.open('native')).rejects.toMatchObject({code:'native_session_owned'});
+    await cli.release();
+    await expect(directory.open('native')).rejects.toMatchObject({code:'native_session_released'});
+    await directory.open('native',{takeOver:cli.generation});
+  }finally{await cli?.release();await directory.close();await rm(root,{recursive:true,force:true});}
+},5000);

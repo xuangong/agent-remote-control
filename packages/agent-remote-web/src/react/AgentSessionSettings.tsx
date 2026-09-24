@@ -8,6 +8,7 @@ interface Props {
   state: AgentReplicaState;
   children?: ReactNode;
   disabled: boolean;
+  readOnly?: boolean;
   view?: SessionControlView;
   busy: boolean;
   onView(view?: SessionControlView): void;
@@ -16,7 +17,7 @@ interface Props {
   renderError?(error: unknown): ReactNode;
 }
 
-export function AgentSessionSettings({ state, children, disabled, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
+export function AgentSessionSettings({ state, children, disabled, readOnly = false, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
   const layer = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLElement>();
   useEffect(() => {
@@ -40,7 +41,7 @@ export function AgentSessionSettings({ state, children, disabled, view, busy, on
   const runtimeUnavailable = settingsRecoveryMessage(runtimeConnection?.state);
   const [failure, setFailure] = useState<{ error: unknown; message: string }>();
   const inFlight = useRef(false);
-  const canChange = !disabled && runtimeConnected && !busy && agent.status === 'idle' && !agent.activeTurn
+  const canChange = !readOnly && !disabled && runtimeConnected && !busy && agent.status === 'idle' && !agent.activeTurn
     && state.pendingInteractions.length === 0 && agent.capabilities.sessionSettings === true && onSelect !== undefined;
 
   async function change(setting: AgentSessionSetting, value: string): Promise<void> {
@@ -91,7 +92,7 @@ export function AgentSessionSettings({ state, children, disabled, view, busy, on
             {setting.options.find(({ value }) => value === setting.value)?.description ? <span className="agent-composer-note">{setting.options.find(({ value }) => value === setting.value)?.description}</span> : null}
             {setting.scope === 'session_and_default' ? <span className="agent-setting-scope">Also changes the default for future sessions.</span> : null}
           </label>)}
-          {settings.some(({ category }) => category === view) ? <p className="agent-composer-note" role="status">{busy ? 'Waiting for Provider confirmation.' : runtimeUnavailable ?? (disabled ? 'Disconnected. Values are last known; reconnect to change settings.' : !canChange ? 'Settings can change only while idle with no pending interactions.' : 'Changes apply to subsequent turns.')}</p>
+          {settings.some(({ category }) => category === view) ? <p className="agent-composer-note" role="status">{readOnly ? 'Read only. Take control to change session settings.' : busy ? 'Waiting for Provider confirmation.' : runtimeUnavailable ?? (disabled ? 'Disconnected. Values are last known; reconnect to change settings.' : !canChange ? 'Settings can change only while idle with no pending interactions.' : 'Changes apply to subsequent turns.')}</p>
             : <p className="agent-composer-note">This Provider does not expose these session settings.</p>}
         </>}
       {failure && !recovery ? <p role="alert" className="agent-composer-note">{failure.message}</p> : null}

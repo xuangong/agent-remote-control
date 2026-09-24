@@ -113,6 +113,7 @@ export function createRemoteHostPluginHost(
       stream.wire = createSessionWire(lease.agent, message => {
         if (streams.get(streamId) === stream) emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_message', streamId, message });
       }, {
+        sessionControls: relay.sessionControls,
         authorize: () => true,
         ...(options.imageScope ? { imageScope: options.imageScope } : {}),
         ...(options.executeOperation ? { executeOperation: options.executeOperation } : {}),

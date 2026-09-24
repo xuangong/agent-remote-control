@@ -74,7 +74,7 @@ function clientActions(client: RemoteSessionClient): LabWorkbenchActions {
 async function withForkClient(transport: RemoteAgentTransport, record: SessionFork, use: (client: RemoteSessionClient) => Promise<void>, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
   if (!record.target) throw new Error('The fork has not been created.');
-  const client = new RemoteSessionClient(record.target.agentId, transport, new AgentReplica());
+  const client = new RemoteSessionClient(record.target.agentId, transport, new AgentReplica(), { clientKind: 'web' });
   let unsubscribe: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;

@@ -142,3 +142,19 @@ it('retains a classified file limit without replaying an uncertain mutation', as
     expect(dispatch).toHaveBeenCalledTimes(1);
   } finally { await cache.close(); }
 });
+
+it('classifies control revoked during validation as not dispatched, including retry', async () => {
+  const cache = createOperationCache();
+  let finish!: () => void;
+  const validation = new Promise<void>(resolve => { finish = resolve; });
+  let owner = true;
+  const dispatch = vi.fn(async () => ({ accepted: true }));
+  try {
+    const operation = cache.execute(descriptor(), { validate: () => validation,
+      beforeDispatch: () => { if (!owner) throw Object.assign(new Error('Read only'), { code: 'session_read_only' }); }, dispatch });
+    owner = false; finish();
+    await expect(operation).rejects.toMatchObject({ code: 'session_read_only' });
+    await expect(cache.execute(descriptor(), { dispatch })).rejects.toMatchObject({ code: 'session_read_only' });
+    expect(dispatch).not.toHaveBeenCalled();
+  } finally { await cache.close(); }
+});

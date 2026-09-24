@@ -1,3 +1,4 @@
+import {NativeSessionOwnerError, type NativeOwnerIdentity} from './native-session-owner.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
 import { createControllerUpdater } from './controller-update.js';
@@ -38,7 +39,8 @@ export interface AgentHostDirectory {
   workspaces(): Promise<readonly AgentHostWorkspace[]> | readonly AgentHostWorkspace[];
   models?(): Promise<unknown> | unknown;
   create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string; sourceNativeSessionId?: string; editNativeSessionId?: string; editTurnId?: string; editMessageId?: string }): Promise<string>;
-  open(nativeSessionId: string): Promise<AgentSession>;
+  setSessionHandoffHandler?(handler: (nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>): void;
+  open(nativeSessionId: string, options?: { takeOver?: string }): Promise<AgentSession>;
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close(): Promise<void> | void;
 }
@@ -242,6 +244,21 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   let closed = false;
   let closePromise: Promise<void> | undefined;
 
+  function nativeFamily(providerId: string, nativeSessionId: string): Binding[] {
+    const ids = new Set([nativeSessionId]);
+    const family: Binding[] = [];
+    for (;;) {
+      const found = [...bindingsByAgent.values()].filter(binding => binding.providerId === providerId && !family.includes(binding)
+        && (binding.nativeSessionId === nativeSessionId || binding.parentNativeSessionId && ids.has(binding.parentNativeSessionId)));
+      if (!found.length) return family;
+      for (const binding of found) {family.push(binding); ids.add(binding.nativeSessionId);}
+    }
+  }
+  for (const {directory} of registrations.values()) directory.setSessionHandoffHandler?.(async (nativeSessionId, next) => {
+    const family = nativeFamily(directory.providerId, nativeSessionId);
+    for (const binding of family) relay.sessionControls?.setNativeOwner(binding.agentId, next);
+    for (const binding of family.reverse()) await relay.closeAgent(binding.agentId);
+  });
   function tracked<T>(operation: Promise<T>): Promise<T> {
     pending.add(operation);
     void operation.finally(() => pending.delete(operation)).catch(() => undefined);
@@ -340,7 +357,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return { agent, release() { if (released) return; released = true; release(); parent?.release(); } };
     } catch (error) { release(); parent?.release(); throw error; }
   }
-  async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string): Promise<Binding> {
+  async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string): Promise<Binding> {
     const key = JSON.stringify([providerId, nativeSessionId]);
     const existing = bindingsByNative.get(key);
     if (existing) {
@@ -371,7 +388,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             if (!parent) throw new Error('Native parent session is unavailable.');
           }
         }
-        const session = parentNativeSessionId === undefined ? await source.open(nativeSessionId)
+        const session = parentNativeSessionId === undefined ? await source.open(nativeSessionId, takeOver ? { takeOver } : undefined)
           : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
           : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
         if (closed) {
@@ -391,6 +408,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         if (response.payload.sessionId !== nativeSessionId) throw new Error('Provider returned a different native session identity.');
         const binding = { agentId: proposedAgentId, providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
         bindingsByNative.set(key, binding); bindingsByAgent.set(proposedAgentId, binding);
+        for (const relative of nativeFamily(providerId, nativeSessionId)) relay.sessionControls?.setNativeOwner(relative.agentId, undefined);
         watch(binding);
         if (existing) lifecycle('session_idle_restored', binding);
         return binding;
@@ -546,11 +564,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           const providerId = string(payload.providerId, 'providerId');
           const nativeSessionId = string(payload.nativeSessionId, 'nativeSessionId');
           const parent = url.pathname === '/remote/child/attach' ? string(payload.parentNativeSessionId, 'parentNativeSessionId') : undefined;
-          return json(200, publicBinding(await tracked(project(providerId, request.sessionId, nativeSessionId, parent))));
+          const takeOver = payload.takeOver === undefined ? undefined : string(payload.takeOver, 'takeOver');
+          if (takeOver && (parent || !/^[a-f\d-]{36}$/i.test(takeOver))) throw new HostRequestError(400, 'invalid_request', 'A native owner generation is required for takeover.');
+          return json(200, publicBinding(await tracked(project(providerId, request.sessionId, nativeSessionId, parent, takeOver))));
         }
       }
       throw new HostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
     } catch (error) {
+      if (error instanceof NativeSessionOwnerError) return json(409, {error: error.message, code: error.code, ...(error.owner ? {nativeOwner: error.owner} : {})});
       if (error instanceof AgentRuntimeError) return json(503, { error: error.message, code: error.code });
       if (error instanceof AgentSessionInUseError) return json(409, { error: error.message, code: 'session_in_use' });
       if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });

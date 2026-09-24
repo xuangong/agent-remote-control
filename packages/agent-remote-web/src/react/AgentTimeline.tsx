@@ -40,6 +40,7 @@ export interface AgentTimelineProps {
   readonly onLoadOlder?: () => void | Promise<void>;
   readonly onInteractionResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
   readonly interactionDisabled?: boolean;
+  readonly interactionsWaitingForConnection?: boolean;
   readonly interactionsReadOnly?: boolean;
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
   readonly onResourceResolve?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
@@ -63,6 +64,7 @@ export function AgentTimeline({
   onOpenChildSession,
   onInteractionResponse,
   interactionDisabled = false,
+  interactionsWaitingForConnection = false,
   interactionsReadOnly = false,
   onResourceRequest,
   onResourceResolve,
@@ -153,6 +155,7 @@ export function AgentTimeline({
         key={JSON.stringify([state.agent?.id, request.requestId])}
       ><InteractionPanel
           readOnly={interactionsReadOnly}
+          waitingForConnection={interactionsWaitingForConnection}
           request={request}
           onResponse={onInteractionResponse}
           questionDraft={questionDrafts?.[request.requestId]}

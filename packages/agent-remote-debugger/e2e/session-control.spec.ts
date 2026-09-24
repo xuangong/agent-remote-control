@@ -1,0 +1,62 @@
+import { expect, test } from '@playwright/test';
+import { fixture, reply } from '../../agent-provider-copilot/tests/native-fixture.js';
+import { createDebuggerServer } from '../dist/server.js';
+
+test('two mobile pages transfer control while the same Copilot task keeps running', async ({ browser }, info) => {
+  test.setTimeout(45_000);
+  let finishTurn: (() => void) | undefined;
+  const f = await fixture((body, response, index) => {
+    if (index === 1) finishTurn = () => { if (!response.writableEnded && !response.destroyed) reply(response, body, 'HANDOFF_TASK_FINISHED'); };
+    else reply(response, body, 'SUCCESSOR_MESSAGE_FINISHED');
+  });
+  const server = await createDebuggerServer({ adapter: f.provider, config: { cwd: f.cwd, model: 'gpt-4.1' } });
+  const firstContext = await browser.newContext({ viewport: { width: 402, height: 874 } });
+  const secondContext = await browser.newContext({ viewport: { width: 402, height: 874 } });
+  try {
+    const a = await firstContext.newPage();
+    const b = await secondContext.newPage();
+    const errors: string[] = [];
+    for (const page of [a, b]) page.on('pageerror', error => errors.push(error.message));
+    await a.goto(server.url);
+    const aInput = a.getByRole('textbox', { name: 'Message', exact: true });
+    await expect(aInput).toBeEditable();
+    await aInput.fill('Keep running during a page handoff.');
+    await a.getByRole('button', { name: 'Send message', exact: true }).click();
+    await expect.poll(() => Boolean(finishTurn)).toBe(true);
+    await aInput.fill('Preserve this unsent draft');
+    await b.goto(server.url);
+    const bInput = b.getByRole('textbox', { name: 'Message', exact: true });
+    await expect(b.getByText('Read only', { exact: true })).toBeVisible();
+    await expect(b.locator('[data-testid="prompt-input"]')).toBeHidden();
+    await expect(b.getByRole('button', {name:'Send message', exact:true})).toHaveCount(0);
+    await b.getByRole('region', { name: 'Live provider controls' }).getByRole('button', { name: 'Take control', exact: true }).click();
+    await expect(bInput).toBeEditable();
+    await expect(b.getByRole('button', { name: 'Take control', exact: true })).toHaveCount(0);
+    await expect(b.locator('.lab-session-control')).toHaveCount(0);
+    await expect(aInput).not.toBeEditable();
+    await expect(aInput).toContainText('Preserve this unsent draft');
+    await expect(a.getByText('Read only', { exact: true })).toBeVisible();
+    await expect(a.getByTestId('session-permissions-button')).toHaveCount(0);
+    await a.getByRole('button', {name:'Hide message input', exact:true}).click();
+    await expect(a.getByRole('button', {name:'Take control', exact:true})).toBeVisible();
+    await expect(aInput).toBeHidden();
+    const collapsedToggle = await a.getByRole('button', {name:'Show message input', exact:true}).boundingBox();
+    const collapsedComposer = await a.getByRole('region', {name:'Live provider controls'}).boundingBox();
+    expect(collapsedToggle!.y + collapsedToggle!.height).toBeLessThanOrEqual(collapsedComposer!.y + 1);
+    await a.screenshot({path:info.outputPath('collapsed-read-only.png'),fullPage:true});
+    await a.getByRole('button', {name:'Show message input', exact:true}).click();
+    await expect(aInput).toBeVisible();
+    finishTurn!();
+    for (const page of [a, b]) await expect(page.getByText('HANDOFF_TASK_FINISHED', { exact: true })).toBeVisible();
+    await bInput.fill('Continue from the new controlling page.');
+    await b.getByRole('button', { name: 'Send message', exact: true }).click();
+    for (const page of [a, b]) await expect(page.getByText('SUCCESSOR_MESSAGE_FINISHED', { exact: true })).toBeVisible();
+    expect(f.requests).toHaveLength(2);
+    expect(await a.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const bottom = await a.getByRole('region', {name:'Live provider controls'}).boundingBox();
+    expect(bottom!.y + bottom!.height).toBeLessThanOrEqual(874);
+    await a.screenshot({ path: info.outputPath('read-only-mobile.png'), fullPage: true });
+    await b.screenshot({ path: info.outputPath('controlling-mobile.png'), fullPage: true });
+    expect(errors).toEqual([]);
+  } finally { finishTurn?.(); await firstContext.close().catch(()=>undefined); await secondContext.close().catch(()=>undefined); await server.close(); await f.close(); }
+});

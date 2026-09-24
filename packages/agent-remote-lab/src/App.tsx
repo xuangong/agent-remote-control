@@ -1,3 +1,5 @@
+import {NativeSessionTakeoverScope, SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
+import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
 import { CachePrivacySettings } from './components/CachePrivacySettings.js';
 import { LayoutDiagnosticsSettings } from './components/LayoutDiagnosticsSettings.js';
@@ -253,10 +255,11 @@ function AppContent({
   const [status, setStatus] = useState<RemoteSessionStatus>(cachedState ? 'connecting' : initialSessionStatus);
   const [attachingAgentId, setAttachingAgentId] = useState<string>();
   const [transitioning, setTransitioning] = useState(false);
+  const [nativeTakeover, setNativeTakeover] = useState<{item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & {hostId?: string}; owner: NativeSessionOwner}>();
   const [sessionNotice, setSessionNotice] = useState<SessionConnectionMessage>();
   const [failure, setFailure] = useState<string | undefined>(requested.error);
   useFeedbackToast('Session operation', failure);
-  useFeedbackToast('Session connection', sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
+  useFeedbackToast('Session connection', nativeTakeover ? undefined : sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
   useFeedbackToast('Provider catalog', catalogError);
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [traceNavigation, setTraceNavigation] = useState<{ scope: string; key: string; requestId: number; view: 'workbench' | 'trace' }>();
@@ -463,7 +466,7 @@ function AppContent({
       failed: (error, retrying) => {
         setFailure(undefined);
         setSessionNotice(sessionConnectionFailure(error, retrying));
-        if (!retrying) { setAttachingAgentId(undefined); setStatus('idle'); if (compactLayoutRef.current) setContextOpen(true); }
+        if (!retrying) { setAttachingAgentId(undefined); setStatus('idle'); if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({item: {hostId, providerId: restoredProvider, nativeSessionId, title: 'Session'}, owner: error.nativeOwner}); else if (compactLayoutRef.current) setContextOpen(true); }
       },
     });
     return () => { cancel(); unsubscribeReplicaRef.current?.(); };
@@ -492,9 +495,9 @@ function AppContent({
       setInspectorOpen(false);
       return;
     }
-    if (state?.agent || attachingAgentId) setContextOpen(false);
+    if (state?.agent || attachingAgentId || nativeTakeover) setContextOpen(false);
     else setContextOpen(true);
-  }, [attachingAgentId, compactLayout, state?.agent?.id]);
+  }, [attachingAgentId, compactLayout, state?.agent?.id, nativeTakeover]);
 
   useEffect(() => {
     if (!compactLayout || contextOpen || inspectorOpen || !focusTimelineAfterAttachRef.current) return;
@@ -514,13 +517,13 @@ function AppContent({
     setOpenedSessions(next);
   }
 
-  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }): Promise<boolean> {
+  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void): Promise<boolean> {
     if (!directory || transitionRef.current) return false;
     const hostId = item.hostId ?? selectedHost.id;
     const key = sessionKey({ ...item, hostId });
     const visible = stackPath.find(entry => sessionKey(entry) === key);
     // Existing windows keep their connections; live tracking can also supply a confirmed binding.
-    if (visible && (visible.agentId !== activeAgentId || status === 'ready')) {
+    if (!takeOver && !onRestoring && visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner && (visible.agentId !== activeAgentId || status === 'ready')) {
       const observation = tracking.observations[key];
       beginCatchUp(replicaFor(visible.agentId), observation?.connection === 'ready' && observation.agentId === visible.agentId ? observation.cursor : undefined);
       setSideFocus(key);
@@ -530,6 +533,7 @@ function AppContent({
       return true;
     }
     const generation = navigationGeneration.current;
+    if (!takeOver && !onRestoring) setNativeTakeover(undefined);
     transitionRef.current = true;
     setTransitioning(true);
     setActiveView('workbench');
@@ -541,11 +545,11 @@ function AppContent({
         ?? (observation?.connection === 'ready' ? observation.agentId : undefined);
       // Reuse an opened content subscription, including its ongoing recovery, or a confirmed
       // activity binding. Persisted IDs alone are never evidence of a live connection.
-      if (!agentId) {
+      if (!agentId || takeOver || onRestoring || replicaFor(agentId).getState().sessionControl?.nativeOwner) {
         const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
         const result = item.parentNativeSessionId
           ? await target.attachChild(item.providerId, item.parentNativeSessionId, item.nativeSessionId)
-          : await target.attach(item.providerId, item.nativeSessionId);
+          : await target.attach(item.providerId, item.nativeSessionId, undefined, takeOver);
         agentId = result.agentId;
       }
       if (navigationGeneration.current !== generation) return false;
@@ -555,9 +559,21 @@ function AppContent({
       setProviderName(providerConnectionName(hostId, item.providerId));
       setSideFocus(undefined);
       attach(agentId, observation?.connection === 'ready' && observation.agentId === agentId ? observation.cursor : undefined);
+      if (takeOver || onRestoring) {
+        onRestoring?.();
+        await connections.takeControlAfterNativeResume(agentId);
+        setNativeTakeover(undefined);
+      }
       return true;
     } catch (error) {
-      if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false));
+      if (navigationGeneration.current === generation) {
+        setSessionNotice(sessionConnectionFailure(error, false));
+        if (error instanceof DirectoryError && error.nativeOwner) {
+          setNativeTakeover({item: {...item, hostId}, owner: error.nativeOwner});
+          if (compactLayoutRef.current) setContextOpen(false);
+        }
+      }
+      if (takeOver || onRestoring) throw error;
       return false;
     }
     finally { transitionRef.current = false; setTransitioning(false); }
@@ -1057,6 +1073,7 @@ function AppContent({
   }
 
   const clientActions: AppActions = actions ?? {
+    takeControl: () => commandClient().takeControl(),
     ...(userScoped && activeOpened && activeOpened.providerId === 'codex' && !activeOpened.parentNativeSessionId && !boundFork && !promptEditPending ? { editPrompt } : {}),
     loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
     sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
@@ -1093,7 +1110,16 @@ function AppContent({
     deleteMessage: conversationActions.deleteMessage,
   };
 
-  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  async function takeNativeControl(agentId: string, generation: string, options?: TakeControlOptions): Promise<void> {
+    const item = openedSessionsRef.current.find(entry => entry.agentId === agentId);
+    if (!item || !accessReadyRef.current) throw new Error('Reopen this session from the Host list before taking control.');
+    const target = new SessionDirectoryClient(baseUrl, undefined, item.hostId ?? 'local');
+    const result = await target.attach(item.providerId, item.nativeSessionId, AbortSignal.timeout(20000), options?.checkOnly ? undefined : generation);
+    options?.onRestoring?.();
+    await connections.takeControlAfterNativeResume(result.agentId);
+  }
+
+  return <NativeSessionTakeoverScope.Provider value={takeNativeControl}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {accessReady ? tracking.observers : null}
     {ask.enabled && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
@@ -1244,7 +1270,7 @@ function AppContent({
         onStopReader={clientActions.stopReader}
       /> : null}
       </div>
-      {sessionNotice && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} /> : null}
+      {sessionNotice && !nativeTakeover && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} /> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       </div>
       {compactLayout && sessionPanel !== 'new' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button></footer> : null}
@@ -1253,7 +1279,7 @@ function AppContent({
     <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
       <section
         ref={workbenchPanelRef}
-        className={(sessionNotice && !(compactLayout && contextOpen)) || promptMigrations.notice ? 'lab-workbench-with-notice' : undefined}
+        className={(sessionNotice && !nativeTakeover && !(compactLayout && contextOpen)) || promptMigrations.notice ? 'lab-workbench-with-notice' : undefined}
         id="lab-workbench"
         data-testid="workbench"
         role="tabpanel"
@@ -1261,7 +1287,7 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench'}
       >
-        {sessionNotice && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
+        {sessionNotice && !nativeTakeover && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
         {promptMigrations.notice}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
@@ -1274,6 +1300,12 @@ function AppContent({
           state={forkDisplayState(state, boundFork)} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : availableConversationActions} visible={activeView === 'workbench' && primaryExpanded}
           consoleCommands={status === 'ready' && !hostOffline && directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
           onExecuteConsoleCommand={(id, args) => state && status === 'ready' && !hostOffline ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('Wait for this session to finish synchronizing.'))}
+          nativeTakeover={nativeTakeover ? <SessionControlNotice
+            control={{access: 'read_only', available: false, nativeOwner: nativeTakeover.owner}}
+            connected={accessReady && !hostOffline && !transitioning}
+            onTakeControl={async options => {
+              await openSession(nativeTakeover.item, options?.checkOnly ? undefined : nativeTakeover.owner.generation, options?.onRestoring);
+            }} /> : undefined}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
           sessionManager={<>{!compactLayout && addressSession ? <StarButton session={addressSession} favorites={favorites} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
@@ -1339,7 +1371,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
+  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></NativeSessionTakeoverScope.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

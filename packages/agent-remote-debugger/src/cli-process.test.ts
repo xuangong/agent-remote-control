@@ -438,7 +438,7 @@ describe('built ardb against the recorded Relay', () => {
     });
     const replica = new AgentReplica();
     replica.applySnapshot(await transport.fetchSnapshot(agentId));
-    const webClient = new RemoteSessionClient(agentId, transport, replica, { operationTimeoutMs: 1_000 });
+    const webClient = new RemoteSessionClient(agentId, transport, replica, { operationTimeoutMs: 1_000, observeOnly: true });
     const ready = waitForReady(webClient);
     webClient.start();
     await ready;

@@ -3,7 +3,7 @@ import {createServer, type ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {CopilotAgentProvider} from '../src/provider.js';
+import {CopilotAgentProvider, type CopilotAgentProviderOptions} from '../src/provider.js';
 import {TimelineStore} from '../../agent-remote-relay/src/timeline-store.js';
 import {projectTimelineRows} from '../../agent-remote-relay/src/timeline-projector.js';
 import type {AgentSession, ProviderStreamItem} from '@orchardworks/agent-provider-sdk';
@@ -28,18 +28,18 @@ export function observe(session: AgentSession) {
  } })();
  return {items, done, timeline: () => projectTimelineRows(store.rows()), events: () => items.flatMap(i => i.type === 'observation' ? [i.event] : [])};
 }
-export async function fixture(handler: (body: ModelRequest, res: ServerResponse, index: number) => void) {
+export async function fixture(handler: (body: ModelRequest, res: ServerResponse, index: number) => void, configure?: (cwd: string) => Promise<CopilotAgentProviderOptions['nativeSessionConfig']>) {
  const home = await mkdtemp(join(tmpdir(), 'copilot-native-test-'));
  const cwd = join(home, 'workspace'); await mkdir(cwd);
- const requests: ModelRequest[] = []; const errors: unknown[] = [];
+ const requests: ModelRequest[] = []; const errors: unknown[] = []; const diagnostics: string[] = [];
  const server = createServer(async (req, res) => {
   try { const chunks = []; for await (const c of req) chunks.push(c); const body = JSON.parse(Buffer.concat(chunks).toString()); requests.push(body); handler(body, res, requests.length); }
   catch (error) { errors.push(error); res.writeHead(500); res.end('Fixture failure'); }
  });
  server.listen(0, '127.0.0.1'); await once(server, 'listening');
  const address = server.address(); if (!address || typeof address === 'string') throw new Error('No fixture port');
- const provider = new CopilotAgentProvider({useLoggedInUser: false, requestTimeoutMs: 5000, env: {COPILOT_HOME: join(home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {provider: {type: 'openai', baseUrl: `http://127.0.0.1:${address.port}`, wireApi: 'completions'}}});
- return {home, cwd, provider, requests, errors, async close() {
+ const provider = new CopilotAgentProvider({onDiagnostic: message => diagnostics.push(message), useLoggedInUser: false, requestTimeoutMs: 5000, env: {COPILOT_HOME: join(home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {...await configure?.(cwd), provider: {type: 'openai', baseUrl: `http://127.0.0.1:${address.port}`, wireApi: 'completions'}}});
+ return {home, cwd, provider, baseUrl: `http://127.0.0.1:${address.port}`, requests, errors, diagnostics, async close() {
   try { await provider.dispose(); } finally { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await rm(home, {recursive: true, force: true}); }
  }};
 }

@@ -1,3 +1,4 @@
+import { isSessionMutation, type SessionControlClientKind, type SessionControlMessage, type SessionControlState } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
   type ImageUploadResult,
@@ -32,6 +33,10 @@ import {
 export type RemoteSessionStatus = 'idle' | 'connecting' | 'catching_up' | 'ready' | 'disconnected';
 
 export interface RemoteSessionClientOptions {
+  readonly clientKind?: SessionControlClientKind;
+  readonly requireSessionControl?: boolean;
+  readonly observeOnly?: boolean;
+  readonly retainControlOnDisconnect?: boolean;
   readonly historyPageSize?: number;
   readonly connectionTimeoutMs?: number;
   readonly operationTimeoutMs?: number;
@@ -42,7 +47,7 @@ export interface RemoteSessionClientOptions {
   readonly operationId?: () => string;
 }
 
-type RemoteOperationResult = ImageUploadResult | CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
+type RemoteOperationResult = SessionControlMessage | ImageUploadResult | CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
 
 interface PendingOperation {
   readonly matches: (message: RemoteServerMessage) => message is RemoteOperationResult;
@@ -51,7 +56,20 @@ interface PendingOperation {
   readonly timeout: ReturnType<typeof setTimeout> | undefined;
 }
 
+// Memory-only proof shared by views in one page/transport, never by browser storage.
+const controlProofs = new WeakMap<RemoteAgentTransport, Map<string, string>>();
+
 export class RemoteSessionClient {
+  private control?: SessionControlState;
+  private resumeControlToken?: string;
+  private controlSupported = false;
+  private controlRequested = false;
+  private controlReady?: Promise<void>;
+  private resolveControlReady?: () => void;
+  private readonly requireSessionControl: boolean;
+  private readonly observeOnly: boolean;
+  private readonly clientKind: SessionControlClientKind;
+  private readonly retainControlOnDisconnect: boolean;
   private readonly historyPageSize: number;
   private readonly connectionTimeoutMs: number;
   private connectionDeadline?: ReturnType<typeof setTimeout>;
@@ -83,6 +101,11 @@ export class RemoteSessionClient {
     private readonly replica: AgentReplica,
     options: RemoteSessionClientOptions = {},
   ) {
+    this.observeOnly = options.observeOnly ?? false;
+    this.clientKind = options.clientKind ?? 'unknown';
+    this.retainControlOnDisconnect = options.retainControlOnDisconnect ?? true;
+    this.resumeControlToken = controlProofs.get(transport)?.get(agentId);
+    this.requireSessionControl = options.requireSessionControl ?? false;
     this.connectionTimeoutMs = options.connectionTimeoutMs ?? 20_000;
     this.historyPageSize = options.historyPageSize ?? 100;
     this.operationTimeoutMs = options.operationTimeoutMs ?? 10_000;
@@ -108,6 +131,10 @@ export class RemoteSessionClient {
       );
     }
     this.stopConnection();
+    this.control = undefined;
+    this.controlSupported = false;
+    this.controlRequested = false;
+    if (this.requireSessionControl) this.replica.setSessionControl({ access: 'checking', available: false });
     this.setStatus('connecting');
     this.armConnectionDeadline(generation);
     this.unsubscribeDiagnostic = this.transport.onDiagnostic((diagnostic) => {
@@ -139,6 +166,19 @@ export class RemoteSessionClient {
     this.statusListeners.add(listener);
     listener(this.currentStatus);
     return () => this.statusListeners.delete(listener);
+  }
+
+  async takeControl(): Promise<void> {
+    if (!this.control || !this.controlSupported) throw new RemoteOperationError('session_control_unavailable', 'Update the Controller to enable session control.', false);
+    await this.requestControl('take_over');
+  }
+
+  private requestControl(action: 'acquire' | 'take_over'): Promise<SessionControlMessage> {
+    return this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: {
+      requestId: this.createRequestId(), agentId: this.agentId, action, revision: this.control!.revision, retainOnDisconnect: this.retainControlOnDisconnect, clientKind: this.clientKind,
+      ...(action === 'acquire' && (controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken)
+        ? { resumeToken: controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken } : {}),
+    } }, 'session_control', (message): message is SessionControlMessage => message.type === 'session_control' && message.payload.agentId === this.agentId);
   }
 
   loadOlder(): Promise<void> {
@@ -357,8 +397,36 @@ export class RemoteSessionClient {
     if (generation !== this.generation) return;
     switch (message.type) {
       case 'negotiated':
+        this.controlSupported = message.sessionControl === true;
+        if (this.controlSupported) {
+          this.controlReady = new Promise(resolve => { this.resolveControlReady = resolve; });
+          this.replica.setSessionControl({ access: 'checking', available: false });
+        }
+        else if (this.requireSessionControl) this.replica.setSessionControl({ access: 'unsupported', available: false });
         this.setStatus('catching_up');
         return;
+      case 'session_control': {
+        if (message.payload.agentId !== this.agentId || !this.controlSupported) return;
+        const nativeReleased = !!this.control?.nativeOwner && !message.payload.nativeOwner;
+        this.control = message.payload;
+        if (message.payload.access === 'control' && message.payload.token) {
+          this.resumeControlToken = message.payload.token;
+          let proofs = controlProofs.get(this.transport);
+          if (!proofs) { proofs = new Map(); controlProofs.set(this.transport, proofs); }
+          proofs.set(this.agentId, message.payload.token);
+        }
+        this.replica.setSessionControl({ access: message.payload.access, available: message.payload.available, revision: message.payload.revision, ownerKind: message.payload.ownerKind, nativeOwner: message.payload.nativeOwner });
+        if (nativeReleased) { this.restartDisconnected(this.generation); return; }
+        if (message.payload.requestId) this.resolvePendingOperation(message.payload.requestId, message);
+        if (!this.controlRequested && !this.observeOnly) {
+          this.controlRequested = true;
+          const ready = this.resolveControlReady;
+          void this.requestControl('acquire').catch(() => { /* A racing takeover leaves this connection read-only. */ }).finally(ready);
+        } else if (this.observeOnly) {
+          this.resolveControlReady?.();
+        }
+        return;
+      }
       case 'provider_list':
       case 'agent_session':
       case 'timeline_page':
@@ -484,6 +552,8 @@ export class RemoteSessionClient {
           return;
         }
         if (!continuation) {
+          if (this.controlReady) await this.controlReady;
+          if (generation !== this.generation || this.recovery !== controller) return;
           this.recovery = undefined;
           this.reconnectAttempt = 0;
           clearTimeout(this.connectionDeadline);
@@ -556,6 +626,12 @@ export class RemoteSessionClient {
     correlationId = message.payload.requestId,
   ): Promise<T> {
     const requestId = correlationId;
+    if (isSessionMutation(message) && (this.controlSupported || this.requireSessionControl)) {
+      if (this.control?.access !== 'control' || !this.control.token) return this.observeRejection(Promise.reject(new RemoteOperationError(
+        'session_read_only', 'This page is read-only. Take control before operating this session.', true, requestId,
+      )));
+      message = { ...message, controlToken: this.control.token };
+    }
     if (!this.connectionOpen) return this.observeRejection(Promise.reject(new RemoteOperationError(
       'connection_not_ready', 'Not sent. Wait for the session to reconnect, then retry.', true, requestId,
     )));
@@ -648,6 +724,9 @@ export class RemoteSessionClient {
   }
 
   private stopConnection(): void {
+    this.resolveControlReady?.();
+    this.resolveControlReady = undefined;
+    this.controlReady = undefined;
     this.connectionOpen = false;
     clearTimeout(this.connectionDeadline);
     this.connectionDeadline = undefined;

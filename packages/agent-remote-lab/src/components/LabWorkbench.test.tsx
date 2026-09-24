@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
+import { SessionControlNotice } from './SessionControlNotice.js';
 import { LabWorkbench } from './LabWorkbench.js';
 
 it('offers sign-in inside the permission panel while preserving the session and draft', async () => {
@@ -262,6 +263,10 @@ it.each(['connecting', 'catching_up', 'disconnected', 'idle'] as const)('locks c
   const pendingWindow = container.querySelector('[data-window="pending"]')!;
   const readyWindow = container.querySelector('[data-window="ready"]')!;
   expect(pendingWindow.querySelector('[aria-label="Pending interactions"]')).not.toBeNull();
+  expect(pendingWindow.textContent).not.toContain('Interaction unavailable');
+  expect(pendingWindow.textContent).toContain('Waiting for connection to respond.');
+  expect(pendingWindow.querySelector('[data-action="approve"]')?.matches(':disabled')).toBe(true);
+  expect(pendingWindow.textContent).toContain('Cached approval');
   expect(pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
   expect(pendingWindow.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
   expect(pendingWindow.querySelector('fieldset')!.disabled).toBe(true);
@@ -286,4 +291,106 @@ it('keeps replay input read-only even when the recorded Agent can send and recov
   expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(true);
   expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
   expect(container.querySelector('[data-testid="prompt-input"]')?.getAttribute('placeholder')).toContain('read-only');
+});
+
+it('shows live read-only ownership, keeps the draft, and offers takeover without interrupting', async () => {
+  const takeControl = vi.fn(async () => {});
+  const cancel = vi.fn(async () => {});
+  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false, revision: 'one' } };
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" messageDraft="Keep my draft"
+    actions={{ takeControl, cancel, sendMessage: async () => {} }} />);
+  expect(container.textContent).toContain('Read only');
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  expect(input.readOnly).toBe(true);
+  expect(input.value).toBe('Keep my draft');
+  expect(input.placeholder).not.toContain('recording');
+  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+  const composer = container.querySelector('[aria-label="Live provider controls"]')!;
+  expect(composer.textContent).toContain('Read only');
+  expect(container.querySelector('.lab-workbench-heading')?.textContent).not.toContain('Take control');
+  const button = [...composer.querySelectorAll('button')].find(button => button.textContent === 'Take control')!;
+  await act(async () => button.click());
+  expect(takeControl).toHaveBeenCalledOnce();
+  expect(cancel).not.toHaveBeenCalled();
+});
+
+it('keeps the composer free of ownership notices when this page has control', async () => {
+  const state = { ...replicaState, sessionControl: { access: 'control' as const, available: false, revision: 'two' } };
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
+  expect(container.querySelector('.lab-session-control')).toBeNull();
+  expect(container.textContent).not.toContain('Take control');
+  expect(container.textContent).not.toContain('You have control');
+});
+
+it.each([
+  ['web', 'Another page has control'],
+  ['headless', 'Remote CLI has control'],
+  ['unknown', 'Another client has control'],
+  [undefined, 'Another client has control'],
+] as const)('describes a %s owner without assuming it is a native CLI', async (ownerKind, label) => {
+  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false, revision: 'one', ownerKind } };
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
+  const composer = container.querySelector('[aria-label="Live provider controls"]')!;
+  expect(composer.textContent).toContain(label);
+  expect(composer.querySelector('.lab-session-control')?.textContent).not.toContain('Interrupt');
+});
+
+it('shows immediate native takeover in the chatbox and explains the interruption', async () => {
+  const takeControl = vi.fn(async () => {});
+  const state = {...replicaState,sessionControl:{access:'read_only' as const,available:false,revision:'r',nativeOwner:{kind:'native_cli' as const,generation:'native-generation'}}};
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{takeControl}} />);
+  const composer = container.querySelector('[aria-label="Live provider controls"]')!;
+  expect(composer.textContent).toContain('Native CLI');
+  expect(composer.textContent).toContain('Interrupt & take over');
+  expect(composer.textContent).not.toContain('safe');
+  const button = [...composer.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')==='Interrupt and take control')!;
+  await act(async()=>button.click()); expect(takeControl).toHaveBeenCalledOnce();
+});
+
+it('shows takeover for a cold target without enabling the previous conversation', async () => {
+  const container = await render(<LabWorkbench sessionStatus="idle" actions={{}} nativeTakeover={<span>Target session is open in the CLI</span>} />);
+  const composer=container.querySelector('[aria-label="Live provider controls"]')!;
+  expect(composer.closest('[hidden]')).toBeNull();
+  expect(composer.textContent).toContain('Target session');
+  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+});
+
+it('keeps takeover reachable when the composer is collapsed and hides empty input chrome', async () => {
+  const state = {...replicaState, sessionControl: {access: 'read_only' as const, available: false, ownerKind: 'web' as const}};
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{takeControl: async () => {}}} />);
+  const input = container.querySelector('[data-testid="prompt-input"]')!;
+  expect(input.closest('[hidden]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide message input"]')!.click());
+  expect(container.querySelector('.lab-session-control')!.closest('[hidden]')).toBeNull();
+});
+
+it('keeps takeover drafts selectable without allowing edits', async () => {
+  const state = {...replicaState, sessionControl: {access: 'read_only' as const, available: false}};
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" messageDraft="Keep and copy this" actions={{takeControl: async () => {}}} />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  expect(input.readOnly).toBe(true);
+  expect(input.disabled).toBe(false);
+  expect(input.value).toBe('Keep and copy this');
+  expect(input.closest('[hidden]')).toBeNull();
+});
+
+it('checks uncertain native handoffs without sending another interruption and reports synchronization', async () => {
+  let finish!: () => void;
+  const calls: boolean[] = [];
+  const control = {access: 'read_only' as const, available: false, nativeOwner: {kind: 'native_cli' as const, generation: 'native-one'}};
+  const container = await render(<SessionControlNotice control={control} connected onTakeControl={async options => {
+    calls.push(options?.checkOnly === true);
+    if (!options?.checkOnly) throw Object.assign(new Error('No reply'), {code: 'native_handoff_unknown'});
+    options.onRestoring?.();
+    await new Promise<void>(resolve => {finish = resolve;});
+  }} />);
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('[role="alert"]')!.textContent).toContain('not confirmed');
+  expect(container.querySelector('button')!.textContent).toBe('Check status');
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('button')!.disabled).toBe(true);
+  expect(container.textContent).toContain('Restoring session');
+  expect(calls).toEqual([false, true]);
+  await act(async () => finish());
 });

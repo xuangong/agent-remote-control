@@ -15,13 +15,13 @@ function CopyCommand({ command, label, action }: { command: string; label: strin
 }
 
 export function NativeSessionCommand({ providerId, nativeSessionId }: { providerId: string; nativeSessionId: string }) {
-  // Codex native thread IDs are UUIDs. Never interpolate arbitrary catalog text into shell commands.
-  if (providerId !== 'codex' || !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(nativeSessionId)) return null;
+  // Native session IDs are UUIDs. Never interpolate arbitrary catalog text into shell commands.
+  if (!['codex', 'copilot'].includes(providerId) || !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(nativeSessionId)) return null;
   return <section className="lab-native-session-command" aria-label="Resume locally">
     <h3>Resume locally</h3>
-    <p>Run on the Host computer using its Controller configuration. The Controller supplies the socket automatically.</p>
+    <p>{providerId === 'codex' ? 'Run on the Host computer using its Controller configuration. The Controller supplies the socket automatically.' : 'Run on the Host computer using the same Copilot profile. The native CLI prompts if this session is already in use; concurrent clients do not share live updates.'}</p>
     <CopyCommand key={nativeSessionId} label="Terminal command" action="Copy resume command"
-      command={`agent-remote-controller codex resume ${nativeSessionId}`} />
+      command={`agent-remote-controller ${providerId} resume ${nativeSessionId}`} />
   </section>;
 }
 

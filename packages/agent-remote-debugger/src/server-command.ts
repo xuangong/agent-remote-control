@@ -58,7 +58,7 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
     server = await createDebuggerServer({ adapter, signal: startup.signal, port, persistence, config: { cwd: resolve(get('cwd') ?? process.cwd()), model: get('model'), reasoningEffort: get('reasoning-effort') }, onBrowserEvent: emit });
     const { url, agentId } = server;
     emit({ kind: 'recording_start', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId });
-    observer = await createDebuggerRuntime(agentId, { relayUrl: url, origin: url, signal: startup.signal });
+    observer = await createDebuggerRuntime(agentId, { observeOnly: true, relayUrl: url, origin: url, signal: startup.signal });
     unsubscribe = observeReplica(agentId, observer.replica, observer.client, record => emit({ ...record, source: 'relay' }));
     await observer.ready(startupTimeout);
     clearTimeout(deadline);

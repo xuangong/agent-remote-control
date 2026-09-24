@@ -1,5 +1,6 @@
 import type {
   MessagePart,
+  SessionControlClientKind,
   AgentInteractionRequest,
   AgentSnapshotPayload,
   AgentStreamMessage,
@@ -49,6 +50,8 @@ export interface OutgoingMessage {
 }
 
 export interface AgentReplicaState {
+  readonly sessionControl?: { readonly access: 'control' | 'read_only' | 'checking' | 'unsupported'; readonly available: boolean; readonly revision?: string; readonly ownerKind?: SessionControlClientKind; readonly nativeOwner?: {readonly kind: 'native_cli' | 'controller'; readonly generation: string} };
+
   readonly agent: AgentSnapshotPayload | null;
   readonly timeline: TimelineReplicaState;
   readonly pendingInteractions: readonly AgentInteractionRequest[];

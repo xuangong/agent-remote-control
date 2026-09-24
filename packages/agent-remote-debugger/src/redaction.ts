@@ -9,6 +9,9 @@ export function redactDebuggerValue(value: unknown, request?: AgentInteractionRe
     ? source.request as AgentInteractionRequest
     : request;
   const result = Object.fromEntries(Object.entries(source).map(([key, item]) => [key, redactDebuggerValue(item, context)]));
+  delete result.controlToken;
+  delete result.resumeToken;
+  if (source.type === 'session_control' && result.payload && typeof result.payload === 'object') delete (result.payload as Record<string, unknown>).token;
   if (source.sensitive === true && typeof source.fieldId === 'string' && ['text', 'number', 'boolean', 'select', 'multiselect'].includes(String(source.type))) {
     delete result.defaultValue;
   }

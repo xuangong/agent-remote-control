@@ -387,6 +387,14 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   }
 
   private observe(observation: RemoteProtocolObservation): void {
+    const message = observation.message;
+    if ('controlToken' in message || message.type === 'session_control' || message.type === 'session_control_request') {
+      const redacted = structuredClone(message);
+      if ('controlToken' in redacted) delete redacted.controlToken;
+      if (redacted.type === 'session_control') delete redacted.payload.token;
+      if (redacted.type === 'session_control_request') delete redacted.payload.resumeToken;
+      observation = { ...observation, redacted: true, message: redacted };
+    }
     if (observation.direction === 'outbound' && observation.message.type === 'interaction_response') {
       const message = observation.message;
       let response = message.payload.response;

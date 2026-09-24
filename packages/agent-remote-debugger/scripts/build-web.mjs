@@ -9,6 +9,6 @@ await build({
   bundle: true, format: 'esm', splitting: true, platform: 'browser', target: 'es2022',
   jsx: 'automatic', minify: true, sourcemap: true,
   define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.DEV': 'false' },
-  loader: { '.woff2': 'file' }, assetNames: 'assets/[name]-[hash]',
+  loader: { '.woff2': 'file', '.md': 'text' }, assetNames: 'assets/[name]-[hash]',
 });
 await copyFile(`${root}/web/index.html`, `${root}/dist/web/index.html`);

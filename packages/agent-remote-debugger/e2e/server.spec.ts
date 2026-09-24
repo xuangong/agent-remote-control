@@ -246,7 +246,7 @@ test('recorded CLI interaction replays in a read-only Session View with playback
 });
 
 
-test('records browser and AI collaboration, survives reload, exports and opens server files', async ({ page }, info) => {
+test('records browser and AI collaboration, survives reload, exports and opens server files', async ({ page, context }, info) => {
   const observer = spawn(process.execPath, [cli, 'observe', agentId, '--relay', url, '--origin', url, '--jsonl'], { stdio: 'pipe' });
   let observed = '';
   const observerExited = new Promise(resolve => observer.once('exit', resolve));
@@ -267,7 +267,33 @@ test('records browser and AI collaboration, survives reload, exports and opens s
     await expect(page.getByLabel('Recording active')).toBeVisible();
     await page.getByRole('button', { name: 'Show debug controls' }).click();
     await page.getByText('Connect an AI or CLI client', { exact: true }).click();
-    await expect(page.locator('.ardb-agent-connection code')).toContainText(`ardb observe ${agentId}`);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: url });
+    await page.getByRole('button', { name: 'Copy AI instructions', exact: true }).click();
+    await expect(page.getByText('Instructions copied.', { exact: true })).toBeVisible();
+    const instructions = await page.evaluate(() => navigator.clipboard.readText());
+    expect(instructions).toContain(`ardb observe '${agentId}' --relay '${url}' --origin '${url}' --jsonl`);
+    expect(instructions).toContain('interaction_resolved');
+    expect(instructions).toContain('interaction respond');
+    expect(instructions).toContain('ardb cancel');
+    expect(instructions).not.toMatch(/\{\{(?:AGENT_ID|RELAY|ORIGIN)\}\}/);
+    await command('send', agentId, 'approve');
+    const pending = await command('interaction', 'list', agentId);
+    const approval = instructions.match(/`(\{"kind":"tool_approval","decision":"allow","scope":"once"\})`/)![1];
+    const answerFile = join(installed, 'answer.json');
+    await writeFile(answerFile, approval);
+    await command('interaction', 'respond', agentId, pending[0].requestId, '--response-file', answerFile);
+    await expect.poll(() => observed).toContain('interaction_resolved');
+    await expect(page.getByText('Approval received', { exact: true })).toBeVisible();
+    await command('send', agentId, 'hold');
+    expect((await command('inspect', agentId)).agent.status).toBe('running');
+    await command('cancel', agentId);
+    expect((await command('inspect', agentId)).agent.status).toBe('idle');
+    await page.getByText('Read or copy manually', { exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'AI operating instructions' })).toHaveValue(instructions);
+    await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }));
+    await page.getByRole('button', { name: 'Copy AI instructions', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('Copy the instructions below manually.');
+    await expect(page.getByRole('textbox', { name: 'AI operating instructions' })).toBeVisible();
     await page.getByRole('button', { name: 'Stop recording', exact: true }).click();
     await expect(page.getByLabel('Recording active')).toHaveCount(0);
     const downloadPending = page.waitForEvent('download');

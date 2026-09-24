@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CaptureStatus } from '../src/live-recording.js';
 import { RecordingPicker, type OpenedRecording } from './recording-picker.js';
+import operationsGuide from '../docs/ai-session-operations.md';
 
 export function useLiveRecording() {
   const [status, setStatus] = useState<CaptureStatus>();
@@ -50,8 +51,21 @@ export function LiveControls({ capture, agentId, onOpen }: {
 }) {
   const { status, busy, error, change } = capture;
   const active = status?.phase === 'recording' || status?.phase === 'starting';
-  const command = `ardb observe ${agentId} --relay ${location.origin} --origin ${location.origin} --jsonl`;
-  const [copyError, setCopyError] = useState(false);
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  const instructions = operationsGuide.replace(/\{\{(AGENT_ID|RELAY|ORIGIN)\}\}/g,
+    (_, key: string) => quote(key === 'AGENT_ID' ? agentId : location.origin));
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [showInstructions, setShowInstructions] = useState(false);
+  useEffect(() => { setCopyState('idle'); }, [instructions]);
+  async function copyInstructions() {
+    try {
+      await navigator.clipboard.writeText(instructions);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+      setShowInstructions(true);
+    }
+  }
   return <section className="ardb-live-controls" aria-label="Live session recording">
     <div className="ardb-live-actions">
       <button type="button" disabled={busy || !status || status.phase === 'starting'} onClick={() => void change(active ? 'stop' : 'start')}>{busy ? 'Please wait…' : active ? 'Stop recording' : 'Record'}</button>
@@ -63,10 +77,14 @@ export function LiveControls({ capture, agentId, onOpen }: {
     {status?.phase === 'stopped' ? <p>Export before starting another recording or closing ARDB.</p> : null}
     {error || status?.error ? <p role="alert" className="ardb-file-error">{error ?? status?.error}</p> : null}
     <details className="ardb-agent-connection"><summary>Connect an AI or CLI client</summary>
-      <p>Give this command to your AI agent to watch the same session. It can use send, settings and interaction commands with the same session ID and Relay.</p>
-      <code>{command}</code>
-      <button type="button" onClick={() => { void navigator.clipboard.writeText(command).then(() => setCopyError(false), () => setCopyError(true)); }}>Copy observer command</button>
-      {copyError ? <p role="alert">Select and copy the command above.</p> : null}
+      <p>Give your AI the operating guide for this session: observe state, send messages, answer interactions, change settings and stop tasks through ARDB commands.</p>
+      <button type="button" onClick={() => void copyInstructions()}>Copy AI instructions</button>
+      {copyState === 'copied' ? <p role="status">Instructions copied.</p> : null}
+      {copyState === 'failed' ? <p role="alert">Copy the instructions below manually.</p> : null}
+      <details open={showInstructions} onToggle={event => setShowInstructions(event.currentTarget.open)}>
+        <summary>Read or copy manually</summary>
+        <textarea aria-label="AI operating instructions" readOnly value={instructions} spellCheck={false} onFocus={event => event.currentTarget.select()} />
+      </details>
     </details>
   </section>;
 }

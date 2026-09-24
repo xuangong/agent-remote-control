@@ -74,10 +74,13 @@ memory until replacement or server exit. Export before either; capture stops at 
 Starting another recording requires explicit replacement of the current recording ID,
 so stale tabs cannot accidentally replace or stop a different capture.
 
-Expand **Connect an AI or CLI client** to copy the exact `ardb observe ... --jsonl`
-command. Give it to an AI agent running on the same machine. It can listen while you
-operate the browser, inspect state and use the existing send/settings/interaction
-commands against the same Relay and public Agent ID. This is a shared protocol
+Expand **Connect an AI or CLI client** and choose **Copy AI instructions**. Paste the
+complete [operating guide](docs/ai-session-operations.md) into your AI agent. The copied
+guide includes this session's public Agent ID and Relay/Origin, explains how to read
+observation records, choose send/steer/interaction/settings/cancel commands, confirm
+outcomes and recover without duplicating writes. **Read or copy manually** provides
+the same text if clipboard access is unavailable. The AI needs ARDB and network access
+to the endpoint; copying a URL does not establish remote connectivity. This is a shared protocol
 subscription, not an extra AI account or a second native session. Existing capability,
 readiness and operation checks apply equally to browser and CLI clients.
 

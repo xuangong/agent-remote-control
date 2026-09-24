@@ -55,6 +55,7 @@
         "packages/agent-remote-cloudflare/vitest.config.ts",
         "packages/agent-remote-cloudflare/wrangler.jsonc",
         "packages/agent-remote-debugger/README.md",
+        "packages/agent-remote-debugger/docs",
         "packages/agent-remote-debugger/e2e",
         "packages/agent-remote-debugger/package.json",
         "packages/agent-remote-debugger/playwright.config.ts",
@@ -114,7 +115,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:e33e7c53614ec9ca8bc9898ac85aef183e2b7b124690129eecb3b5a82b675e1d"
+      "digest": "sha256:2b657ac741da2ea3fc65be2af8b33dd12e5b225a8753c7ecb637709acc1506c9"
     }
   },
   "providers": [

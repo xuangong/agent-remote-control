@@ -1,5 +1,5 @@
 import { RecordingPicker } from './recording-picker.js';
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
 import { LabWorkbench, type LabWorkbenchActions } from '../../agent-remote-lab/src/components/LabWorkbench.js';
 import { DebugSessionView } from './session-view.js';
@@ -11,9 +11,11 @@ const ReplaySession = memo(function ReplaySession({ state, status }: { state: Ag
 });
 const time = (milliseconds: number) => `${Math.floor(milliseconds / 60000)}:${(milliseconds / 1000 % 60).toFixed(1).padStart(4, '0')}`;
 
-export function ReplayView({ name: initialName, recording: initialRecording, liveControls, recordingActive = false, onReturnLive }: { name: string; recording: SessionRecording; liveControls?: import('react').ReactNode; recordingActive?: boolean; onReturnLive?(): void }) {
-  const [{ name, recording, revision }, setRecording] = useState({ name: initialName, recording: initialRecording, revision: 0 });
-  const player = useMemo(() => new RecordingPlayer(recording), [recording]);
+export function ReplayView({ name, recording, player, onOpen, modeControls, liveControls, recordingActive = false }: {
+  name: string; recording: SessionRecording; player: RecordingPlayer;
+  onOpen(recording: import('./recording-picker.js').OpenedRecording): void;
+  modeControls?: import('react').ReactNode; liveControls?: import('react').ReactNode; recordingActive?: boolean;
+}) {
   const [, refresh] = useState(0);
   const update = () => refresh(value => value + 1);
   useEffect(() => {
@@ -28,12 +30,11 @@ export function ReplayView({ name: initialName, recording: initialRecording, liv
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onHidden); };
   }, [player]);
   const change = (action: () => void) => { action(); update(); };
-  return <DebugSessionView liveControls={liveControls} recordingActive={recordingActive} playbackControls={
+  return <DebugSessionView modeControls={modeControls} liveControls={liveControls} recordingActive={recordingActive} playbackControls={
     <section className="ardb-playback" aria-label="Recording playback">
       <div className="ardb-recording-heading"><div className="ardb-recording-title"><strong title={name}>{name}</strong><span>Session recording · Read only</span></div>
-        <RecordingPicker onOpen={next => setRecording(current => ({ ...next, revision: current.revision + 1 }))} />
+        <RecordingPicker onOpen={onOpen} />
       </div>
-      {onReturnLive ? <button type="button" className="ardb-open" onClick={onReturnLive}>Return to live session</button> : null}
       <div className="ardb-playback-controls">
         <button type="button" className="ardb-play" aria-label={player.playing ? 'Pause recording' : 'Play recording'} onClick={() => change(() => player.playing ? player.pause() : player.play())}>{player.playing ? 'Pause' : 'Play'}</button>
         <button type="button" aria-label="Restart recording" onClick={() => change(() => { player.pause(); player.seek(0); })}>Restart</button>
@@ -47,6 +48,6 @@ export function ReplayView({ name: initialName, recording: initialRecording, liv
         aria-valuetext={`${time(player.position)} of ${time(recording.duration)}`} onChange={event => change(() => { player.pause(); player.seek(Number(event.target.value)); })} />
       {recording.warnings.length > 0 ? <details className="ardb-recording-notes"><summary>{recording.warnings.length} recording {recording.warnings.length === 1 ? 'note' : 'notes'}</summary><ul>{recording.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details> : null}
     </section>}>
-    <ReplaySession key={revision} state={player.state} status={player.status} />
+    <ReplaySession key={recording.agentId} state={player.state} status={player.status} />
   </DebugSessionView>;
 }

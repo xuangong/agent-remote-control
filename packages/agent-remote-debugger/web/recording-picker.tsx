@@ -32,7 +32,7 @@ export function RecordingPicker({ onOpen }: { onOpen(recording: OpenedRecording)
       <header><strong>Server recordings</strong><button type="button" aria-label="Close recording browser" onClick={() => dialog.current?.close()}>Close</button></header>
       <p>Browse files on the machine running ARDB.</p>
       <form onSubmit={event => { event.preventDefault(); void load(path, /\.(jsonl|ndjson)$/i.test(path)); }}>
-        <input aria-label="Server path" value={path} onChange={event => setPath(event.target.value)} placeholder="Directory or recording path" />
+        <input aria-label="Server path" disabled={busy} value={path} onChange={event => setPath(event.target.value)} placeholder="Directory or recording path" />
         <button type="submit" disabled={busy}>Go</button>
       </form>
       {error ? <p role="alert" className="ardb-file-error">{error}</p> : null}

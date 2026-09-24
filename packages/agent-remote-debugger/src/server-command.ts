@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { loadAdapter } from './load-adapter.js';
 import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { ParsedInvocation } from './commands.js';
 import type { DebuggerIo } from './output.js';
 import { DebuggerError } from './errors.js';
-import { createDebuggerServer, type DebuggerAdapter } from './server.js';
+import { createDebuggerServer } from './server.js';
 import { createDebuggerRuntime, type DebuggerRuntime } from './runtime.js';
 import { openBrowser } from './local-web.js';
 import { observeReplica } from './records.js';
@@ -16,6 +16,10 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
   if (invocation.positionals.length || invocation.format === 'json') throw usage('server accepts no positional arguments; use text or jsonl output.');
   const get = (name: string): string | undefined => { const value = invocation.options.get(name); return typeof value === 'string' ? value : undefined; };
   const provider = get('provider'); const module = get('adapter');
+  if (!provider && !module) {
+    const { runReplayCommand } = await import('./replay-command.js');
+    return runReplayCommand(invocation, io, signal);
+  }
   if (!!provider === !!module) throw usage('Select exactly one --provider codex|claude|copilot or --adapter FILE.');
   const port = Number(get('port') ?? 0);
   if (!/^\d+$/.test(get('port') ?? '0') || !Number.isInteger(port) || port < 0 || port > 65535) throw usage('--port must be between 0 and 65535.');
@@ -79,19 +83,4 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
   }
 }
 
-async function loadAdapter(provider: string | undefined, module: string | undefined, executable: string | undefined): Promise<DebuggerAdapter> {
-  if (module) {
-    let loaded: { createAdapter?: () => Promise<DebuggerAdapter> | DebuggerAdapter };
-    try { loaded = await import(pathToFileURL(resolve(module)).href); }
-    catch (error) { throw usage(`Cannot load Adapter module: ${error instanceof Error ? error.message : String(error)}`); }
-    if (typeof loaded.createAdapter !== 'function') throw usage('Adapter module must export createAdapter().');
-    const adapter = await loaded.createAdapter();
-    if (!adapter?.descriptor?.providerId || typeof adapter.createSession !== 'function' || typeof adapter.resumeSession !== 'function') throw usage('createAdapter() must return an AgentProviderAdapter.');
-    return adapter;
-  }
-  if (provider === 'codex') { const { CodexAppServerProvider } = await import('@orchardworks/agent-provider-codex'); return new CodexAppServerProvider({ executable, connectionMode: 'private' }); }
-  if (provider === 'claude') { const { ClaudeAgentProvider } = await import('./providers/claude.js'); return new ClaudeAgentProvider({ executable }); }
-  if (provider === 'copilot') { const { CopilotAgentProvider } = await import('./providers/copilot.js'); return new CopilotAgentProvider({ executable }); }
-  throw usage('Provider must be codex, claude or copilot; use --adapter for a custom provider.');
-}
 function usage(message: string) { return new DebuggerError(2, 'invalid_server_options', message, false); }

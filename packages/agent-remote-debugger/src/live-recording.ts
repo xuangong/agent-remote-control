@@ -80,7 +80,7 @@ export class LiveRecording {
   private release() { this.unsubscribe?.(); this.unsubscribe = undefined; this.abort?.abort(); this.runtime?.close(); this.runtime = undefined; }
 }
 
-async function readLocalJson(request: IncomingMessage, url: string): Promise<Record<string, unknown>> {
+export async function readLocalJson(request: IncomingMessage, url: string): Promise<Record<string, unknown>> {
   if (request.headers.origin !== url || request.headers['content-type'] !== 'application/json') throw Object.assign(new Error('A same-origin JSON request is required.'), { status: 403 });
   let body = '';
   for await (const chunk of request) {

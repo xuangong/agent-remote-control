@@ -193,3 +193,51 @@ it('bounds capture size and retains a replayable prefix while the Agent stays us
   await runtime.client.sendMessage('still usable after recorder limit');
   await expect.poll(() => JSON.stringify(runtime.replica.getState().timeline)).toContain('Recorded reply: still usable after recorder limit');
 }, 10000);
+
+it('starts live lazily on the same origin and retains one session across replay and reload', async () => {
+  const { createReplayServer } = await import('./replay-server.js');
+  const { provider } = createRecordedLabProvider();
+  let loads = 0;
+  const server = await createReplayServer({
+    assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)),
+    loadProvider: async () => { loads++; return provider; },
+  });
+  cleanups.push(() => server.close());
+  expect(await (await fetch(`${server.url}/__ardb/session`)).json()).toMatchObject({ mode: 'workspace' });
+  expect(loads).toBe(0);
+  const start = (body: unknown, origin: string | undefined = server.url) => fetch(`${server.url}/__ardb/live/start`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body),
+  });
+  const config = { provider: 'codex', cwd: process.cwd() };
+  expect((await start(config, '')).status).toBe(403);
+  expect((await start(config, 'https://foreign.invalid')).status).toBe(403);
+  expect((await start({ ...config, provider: 'unknown' })).status).toBe(400);
+  expect(loads).toBe(0);
+  const [first, second] = await Promise.all([start(config), start(config)]);
+  expect(first.status).toBe(200); expect(second.status).toBe(200);
+  const session = await first.json();
+  expect(await second.json()).toEqual(session); expect(loads).toBe(1);
+  expect((await start({ ...config, provider: 'claude' })).status).toBe(409);
+  const runtime = await createDebuggerRuntime(session.agentId, { relayUrl: server.url, origin: server.url });
+  cleanups.push(() => runtime.close()); await runtime.ready(3000);
+  await runtime.client.sendMessage('live from a replay entry point');
+  await expect.poll(() => JSON.stringify(runtime.replica.getState().timeline)).toContain('Recorded reply: live from a replay entry point');
+  expect((await (await fetch(`${server.url}/__ardb/session`)).json()).live).toEqual(session);
+  const capture = await fetch(`${server.url}/__ardb/recording/start`, { method: 'POST', headers: { Origin: server.url, 'Content-Type': 'application/json' }, body: '{}' });
+  expect((await capture.json()).phase).toBe('recording');
+  expect(loads).toBe(1);
+}, 15000);
+
+it('allows retry after failed lazy startup without replacing the entry point', async () => {
+  const { createReplayServer } = await import('./replay-server.js');
+  const { provider } = createRecordedLabProvider();
+  let loads = 0;
+  const server = await createReplayServer({ assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)),
+    loadProvider: async () => { if (++loads === 1) throw new Error('Executable unavailable'); return provider; },
+  });
+  cleanups.push(() => server.close());
+  const start = () => fetch(`${server.url}/__ardb/live/start`, { method: 'POST', headers: { Origin: server.url, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'codex', cwd: process.cwd() }) });
+  const failed = await start(); expect(failed.status).toBe(409); expect(await failed.text()).toContain('Executable unavailable');
+  expect((await (await fetch(`${server.url}/__ardb/session`)).json()).live).toBeUndefined();
+  expect((await start()).status).toBe(200); expect(loads).toBe(2);
+}, 10000);

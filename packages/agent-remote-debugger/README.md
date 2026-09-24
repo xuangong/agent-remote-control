@@ -19,16 +19,20 @@ The Relay URL resolves from `--relay`, then `AGENT_REMOTE_URL`, then `BORGEE_REM
 
 Commands target the **public Relay Agent ID**, not an arbitrary native Codex/Claude session ID. `session create` chooses a public Agent ID; `--provider-session-id` supplies the separate native identity when supported. An already attached session can be observed by its public Agent ID. `session resume` requires an exact persistence handle, not a bare native ID.
 
-Client commands expect an existing reachable Relay and appropriate access. `server` starts a local Relay and an adapter-owned native session. Neither performs hosted browser sign-in nor imports browser cookies. `--origin` supplies the WebSocket Origin; it is not an authentication credential.
+Client commands expect an existing reachable Relay and appropriate access. `server` serves the workbench; selecting Live starts a local Relay and an adapter-owned native session. Neither performs hosted browser sign-in nor imports browser cookies. `--origin` supplies the WebSocket Origin; it is not an authentication credential.
 
 ## Serve a Session View
 
 ```bash
+ardb server --open
+# Or start directly with a live session:
 ardb server --provider codex --cwd /path/to/workspace --open --jsonl
 # Or: --provider claude / --provider copilot / --adapter /path/to/adapter.mjs
 ```
 
-The first `server_ready` record prints the URL, public Agent ID, native session ID, and copyable client commands. `--port 0` (default) selects a free loopback port; `--open` opens a browser. `--timeout` is the startup deadline in milliseconds (default 30000). An optional `--executable` selects a native binary, and `--model` / `--reasoning-effort` supply creation settings. `--persistence-file handle.json` resumes through the selected Adapter; do not combine resume with creation settings.
+Without a Provider option, the server starts without a native process. In the compact top-right controls, select **Live**, choose a Provider and working directory, and click **Start live session**. The optional executable path is on the server machine. Select **Replay** to open a server recording. **Clear view** unloads the recording and clears the displayed view; it does not delete files or change native history. Select Live to display the retained session again. Both modes share one URL; switching preserves the live session, recording capture, and playback position. `ardb replay FILE` selects the initial recording but exposes the same Live controls. Starting Live never resumes or re-executes operations from that file.
+
+With a Provider option, the first `server_ready` record prints the URL, public Agent ID, native session ID, and copyable client commands. `--port 0` (default) selects a free loopback port; `--open` opens a browser. `--timeout` is the startup deadline in milliseconds (default 30000). An optional `--executable` selects a native binary, and `--model` / `--reasoning-effort` supply creation settings. `--persistence-file handle.json` resumes through the selected Adapter; do not combine resume with creation settings.
 
 The page is the actual product `LabWorkbench` and `useConversationSession`, bundled into this package. It mounts Timeline, Chatbox and their normal capability-driven controls without account, Sidebar, Host or Tunnel contexts. It calls the existing public Relay HTTP/WebSocket endpoints. Opening another tab, refreshing or reconnecting subscribes to the same owned session; it never creates a second native session.
 
@@ -58,7 +62,7 @@ A trusted local Adapter module exports `createAdapter()` returning an `AgentProv
 ## Record human and AI collaboration
 
 Start `ardb server --provider codex --open` (or another supported provider) and use
-the shared Session View normally. Expand Debug and choose **Record**, then collapse
+the shared Session View normally. Expand the top-right controls and choose **Record**, then collapse
 the floating controls to keep the view clear. **Stop recording** stops only capture;
 **Export JSONL** downloads a file compatible with `ardb replay`.
 
@@ -77,7 +81,7 @@ commands against the same Relay and public Agent ID. This is a shared protocol
 subscription, not an extra AI account or a second native session. Existing capability,
 readiness and operation checks apply equally to browser and CLI clients.
 
-The live controls also open server recordings. **Return to live session** returns to
+The live controls also open server recordings. **Live** returns to
 the same Agent; capture and external observers continue while a recording is displayed.
 The server remains loopback-only with Host/Origin checks. This does not enable remote
 network access to the machine or add hosted authentication.
@@ -92,11 +96,11 @@ ardb server --provider codex --open --jsonl > session.jsonl
 ardb replay session.jsonl --open
 ```
 
-Replay starts paused with the captured baseline. Play/pause, playback speed (0.5× to 4×), a seek slider, restart and step-to-next-event controls help locate a specific moment. Events sharing a timestamp are applied in file order as one step. Playback pauses when its tab becomes hidden. **Open recording** browses directories and JSONL/NDJSON files on the machine running ARDB. It starts in the replay file directory (or the live server workspace); enter a server path or navigate folders. It never opens a browser upload picker. A valid file replaces the current recording and starts paused; an invalid file leaves the current recording intact and shows the error. The same product Timeline and composer render recorded state; input and operation controls are read-only. Replay does not create an Adapter, Relay, native process or WebSocket, and does not retry recorded commands.
+Replay starts paused with the captured baseline. Play/pause, playback speed (0.5× to 4×), a seek slider, restart and step-to-next-event controls help locate a specific moment. Events sharing a timestamp are applied in file order as one step. Playback pauses when its tab becomes hidden. **Open recording** browses directories and JSONL/NDJSON files on the machine running ARDB. It starts in the replay file directory (or the live server workspace); enter a server path or navigate folders. It never opens a browser upload picker. A valid file replaces the current recording and starts paused; an invalid file leaves the current recording intact and shows the error. The same product Timeline and composer render recorded state; input and operation controls are read-only. Merely opening or playing a recording does not create an Adapter, Relay, native process or WebSocket, and never retries recorded commands. Explicitly selecting Live can start a new native session; an existing live connection continues while viewing Replay.
 
 This is a **Session View event recording**, not a screen video. It captures the observer's loaded Timeline, Agent/runtime settings, interactions, resource metadata and connection status, with event timing. It does not capture typing drafts, pointer movements, scroll position, every token's native timing, browser-local send receipts, unavailable older history, or network frames. Browser trace metadata is retained for inspection but ignored during playback. Resource bodies, uploaded images and sensitive fields are not embedded; missing-resource notes appear in the player and it never contacts the original Host for those resources.
 
-New server recordings include versioned `recording_start` / `recording_end` markers. `server_ready` is emitted only after the recording subscriber has captured its initial baseline. Existing `observe --jsonl` and older server JSONL files using record schema 1.1.0 remain replayable; a note reports unknown completion when there is no closing marker. An unfinished last JSON line can be discarded with a visible warning. Malformed middle lines, unsupported versions, mixed sessions and missing baselines are rejected with actionable errors. Wall-clock regressions preserve file order and produce a warning. The initial loaded baseline is presented at time zero. The first version accepts files up to 64 MiB.
+New server recordings include versioned `recording_start` / `recording_end` markers. For startup with a Provider, `server_ready` is emitted only after the recording subscriber has captured its initial baseline. With a deferred Provider and `--jsonl`, `server_ready` announces the workbench URL; after the user starts Live, `recording_start` and the baseline precede a second `server_ready` record with `mode: live`. Existing `observe --jsonl` and older server JSONL files using record schema 1.1.0 remain replayable; a note reports unknown completion when there is no closing marker. An unfinished last JSON line can be discarded with a visible warning. Malformed middle lines, unsupported versions, mixed sessions and missing baselines are rejected with actionable errors. Wall-clock regressions preserve file order and produce a warning. The initial loaded baseline is presented at time zero. The first version accepts files up to 64 MiB.
 
 To generate a repeatable demonstration from the repository:
 

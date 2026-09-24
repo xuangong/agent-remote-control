@@ -19,6 +19,8 @@ export interface DebuggerServerOptions {
   config?: Partial<AgentSessionConfig>;
   persistence?: AgentPersistenceHandle;
   port?: number;
+  /** Serve through an existing local listener, keeping the public protocol unchanged. */
+  origin?: string;
   signal?: AbortSignal;
   assetsDirectory?: string;
   onBrowserEvent?(record: Record<string, unknown>): void;
@@ -112,7 +114,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
   options.signal?.addEventListener('abort', onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
   try {
-    url = (await http.listen(options.port ?? 0)).url;
+    url = options.origin ?? (await http.listen(options.port ?? 0)).url;
     const opening = options.persistence
       ? relay.resumeAgent({ protocolVersion: PROTOCOL_VERSION, type: 'resume_agent', payload: { requestId: randomUUID(), agentId, persistence: options.persistence } })
       : relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: { requestId: randomUUID(), operationId: randomUUID(), agentId, providerId: options.adapter.descriptor.providerId, config: { ...options.config, sessionId: options.config?.sessionId ?? randomUUID() } } });
@@ -120,6 +122,6 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
     // Once ready, the command owns shutdown; startup cancellation no longer applies.
     options.signal?.removeEventListener('abort', onAbort);
     session = { agentId, providerId: result.payload.providerId, nativeSessionId: result.payload.sessionId, title: 'ARDB Session View' };
-    return { url, agentId, session, close };
+    return { url, agentId, session, close, httpServer: http.server };
   } catch (error) { await close(); throw error; }
 }

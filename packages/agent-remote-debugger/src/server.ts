@@ -1,3 +1,5 @@
+import { serveRecordingFiles } from './recording-files.js';
+import { LiveRecording, serveCapture } from './live-recording.js';
 import { randomUUID } from 'node:crypto';
 import { access, mkdtemp, rm } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -35,6 +37,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
   const relay = createAgentRemoteRelay({ providers: [owned.adapter], inputImageStore: new InputImageStore({ directory }) });
   const agentId = randomUUID();
   let url = '';
+  const capture = new LiveRecording(agentId, () => url);
   let closed: Promise<void> | undefined;
   const allowed = (request: IncomingMessage) => localRequestAllowed(request, url);
   const http = createAgentRemoteHttpServer(relay, {
@@ -60,6 +63,8 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
     if (path === '/__ardb/session' && request.method === 'GET') {
       response.writeHead(session ? 200 : 503, { 'Content-Type': 'application/json' }).end(JSON.stringify(session ?? { error: 'starting' })); return;
     }
+    if (await serveRecordingFiles(request, response, url, resolve(options.config?.cwd ?? process.cwd()))) return;
+    if (await serveCapture(request, response, url, capture)) return;
     if (path === '/__ardb/events' && request.method === 'POST') {
       if (request.headers.origin !== url || request.headers['content-type'] !== 'application/json') { response.writeHead(403).end(); return; }
       let body = '';
@@ -78,6 +83,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
           if (typeof value[key] === 'string') record[key] = value[key].slice(0, 256);
         }
         if (Number.isSafeInteger(value.dropped) && value.dropped >= 0) record.dropped = value.dropped;
+        capture.append(record);
         try { options.onBrowserEvent?.(record); } catch { /* Diagnostics cannot change a public operation. */ }
       }
       response.writeHead(204).end(); return;
@@ -91,6 +97,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
   function close(): Promise<void> {
     return closed ??= (async () => {
       options.signal?.removeEventListener('abort', onAbort);
+      capture.close();
       try { await http.close(); }
       finally {
         try { await relay.close(); }

@@ -50,6 +50,7 @@ export function parseRecording(input: string): SessionRecording {
     }
     if (record.kind === 'recording_end') {
       if (!started) fail('recording_end has no recording_start.');
+      if (record.reason === 'size_limit') warnings.add('Recording stopped at its size limit; later session changes were not captured.');
       ended = true; continue;
     }
     validateRecord(record, fail);

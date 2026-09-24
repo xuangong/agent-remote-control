@@ -44,6 +44,7 @@ ardb interaction list AGENT_ID --json
 ardb interaction respond AGENT_ID REQUEST_ID --response-file answer.json --json
 ardb cancel AGENT_ID --json
 ardb inspect AGENT_ID --json
+ardb observe AGENT_ID --jsonl
 ```
 
 Agent normalized events, interpreted by the Adapter and projected by the Relay, remain authoritative. A CLI operation is an intent; subscribed views receive its resulting state through their normal subscriptions. The debugger does not inject synthetic success into the page. Client-local pending inputs remain local until acknowledged and reconciled by the shared client.
@@ -53,6 +54,33 @@ The server emits `source: relay` Replica records and `source: browser` / `kind: 
 The server accepts only its exact loopback Host/Origin. It owns one session, so its public create/resume endpoints reject new sessions; start a separate server for another native session. SIGINT/SIGTERM gracefully stop the server and dispose its owned session and temporary images. Codex defaults to a private app-server; it does not restart or alter an existing shared daemon. Each Adapter remains responsible for terminating its native resources, including failed startup.
 
 A trusted local Adapter module exports `createAdapter()` returning an `AgentProviderAdapter`, optionally with an async `dispose()` for provider-wide resources. It is loaded only from CLI configuration. Native normalization, capabilities, history boundaries, controls and stdio ownership stay in that Adapter; ARDB does not reinterpret native messages.
+
+## Record human and AI collaboration
+
+Start `ardb server --provider codex --open` (or another supported provider) and use
+the shared Session View normally. Expand Debug and choose **Record**, then collapse
+the floating controls to keep the view clear. **Stop recording** stops only capture;
+**Export JSONL** downloads a file compatible with `ardb replay`.
+
+Capture runs in the ARDB server, starts with the current loaded baseline and includes
+subsequent session changes from every browser and CLI client. Refreshing the browser,
+closing it, or reviewing a recording does not stop capture or the Agent. A small red
+indicator remains visible while recording. The current recording is kept in server
+memory until replacement or server exit. Export before either; capture stops at 64 MiB.
+Starting another recording requires explicit replacement of the current recording ID,
+so stale tabs cannot accidentally replace or stop a different capture.
+
+Expand **Connect an AI or CLI client** to copy the exact `ardb observe ... --jsonl`
+command. Give it to an AI agent running on the same machine. It can listen while you
+operate the browser, inspect state and use the existing send/settings/interaction
+commands against the same Relay and public Agent ID. This is a shared protocol
+subscription, not an extra AI account or a second native session. Existing capability,
+readiness and operation checks apply equally to browser and CLI clients.
+
+The live controls also open server recordings. **Return to live session** returns to
+the same Agent; capture and external observers continue while a recording is displayed.
+The server remains loopback-only with Host/Origin checks. This does not enable remote
+network access to the machine or add hosted authentication.
 
 ## Record and replay
 
@@ -64,7 +92,7 @@ ardb server --provider codex --open --jsonl > session.jsonl
 ardb replay session.jsonl --open
 ```
 
-Replay starts paused with the captured baseline. Play/pause, playback speed (0.5× to 4×), a seek slider, restart and step-to-next-event controls help locate a specific moment. Events sharing a timestamp are applied in file order as one step. Playback pauses when its tab becomes hidden. **Open recording** in the toolbar loads another local JSONL file in the browser without uploading it. A valid file replaces the current recording and starts paused; an invalid file leaves the current recording intact and shows the error. The same product Timeline and composer render recorded state; input and operation controls are read-only. Replay does not create an Adapter, Relay, native process or WebSocket, and does not retry recorded commands.
+Replay starts paused with the captured baseline. Play/pause, playback speed (0.5× to 4×), a seek slider, restart and step-to-next-event controls help locate a specific moment. Events sharing a timestamp are applied in file order as one step. Playback pauses when its tab becomes hidden. **Open recording** browses directories and JSONL/NDJSON files on the machine running ARDB. It starts in the replay file directory (or the live server workspace); enter a server path or navigate folders. It never opens a browser upload picker. A valid file replaces the current recording and starts paused; an invalid file leaves the current recording intact and shows the error. The same product Timeline and composer render recorded state; input and operation controls are read-only. Replay does not create an Adapter, Relay, native process or WebSocket, and does not retry recorded commands.
 
 This is a **Session View event recording**, not a screen video. It captures the observer's loaded Timeline, Agent/runtime settings, interactions, resource metadata and connection status, with event timing. It does not capture typing drafts, pointer movements, scroll position, every token's native timing, browser-local send receipts, unavailable older history, or network frames. Browser trace metadata is retained for inspection but ignored during playback. Resource bodies, uploaded images and sensitive fields are not embedded; missing-resource notes appear in the player and it never contacts the original Host for those resources.
 

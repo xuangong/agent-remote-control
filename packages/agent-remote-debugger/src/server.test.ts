@@ -108,3 +108,88 @@ it('replays captured state on a read-only loopback server without a Relay or nat
   expect((await fetch(`${replay.url}/__ardb/recording`, { headers: { Origin: 'https://foreign.invalid' } })).status).toBe(403);
   expect(await new Promise(resolve => { get(replay.url, { headers: { Host: 'foreign.invalid' } }, response => { response.resume(); resolve(response.statusCode); }); })).toBe(403);
 }, 15000);
+
+it('records a shared session across browser reloads and exports a complete replay without stopping the Agent', async () => {
+  const { parseRecording, RecordingPlayer } = await import('./recording.js');
+  const { provider } = createRecordedLabProvider();
+  const server = await createDebuggerServer({ assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)), adapter: provider });
+  cleanups.push(() => server.close());
+  const runtime = await createDebuggerRuntime(server.agentId, { relayUrl: server.url, origin: server.url });
+  cleanups.push(() => runtime.close()); await runtime.ready(3000);
+  const endpoint = `${server.url}/__ardb/recording`;
+  const post = (action: string, body: object = {}) => fetch(`${endpoint}/${action}`, {
+    method: 'POST', headers: { Origin: server.url, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  expect(await (await fetch(endpoint)).json()).toMatchObject({ phase: 'idle' });
+  expect((await fetch(`${endpoint}/start`, { method: 'POST' })).status).toBe(403);
+  const started = await post('start'); expect(started.status).toBe(200);
+  const capture = await started.json(); expect(capture.phase).toBe('recording');
+  expect((await post('start')).status).toBe(409);
+  await runtime.client.sendMessage('human and AI share this recording');
+  await expect.poll(async () => (await (await fetch(endpoint)).json()).records).toBeGreaterThan(capture.records);
+  await fetch(`${server.url}/__ardb/session`);
+  expect(await (await fetch(endpoint)).json()).toMatchObject({ id: capture.id, phase: 'recording' });
+  expect((await post('stop', { id: 'stale' })).status).toBe(409);
+  const stopped = await post('stop', { id: capture.id }); expect(stopped.status).toBe(200);
+  expect(await stopped.json()).toMatchObject({ phase: 'stopped', id: capture.id });
+  const exported = await fetch(`${endpoint}/export?id=${capture.id}`);
+  expect(exported.headers.get('content-disposition')).toContain('.jsonl');
+  const recording = parseRecording(await exported.text());
+  const player = new RecordingPlayer(recording); player.seek(recording.duration);
+  expect(JSON.stringify(player.state.timeline)).toContain('Recorded reply: human and AI share this recording');
+  expect(recording.warnings).not.toContain('Recording completion is unknown: no closing marker was captured.');
+  await runtime.client.sendMessage('after recording');
+  await expect.poll(() => JSON.stringify(runtime.replica.getState().timeline)).toContain('Recorded reply: after recording');
+  expect(await (await fetch(`${endpoint}/export?id=${capture.id}`)).text()).not.toContain('after recording');
+  expect((await post('start')).status).toBe(409);
+  const next = await (await post('start', { previousId: capture.id })).json();
+  expect(next.phase).toBe('recording'); expect(next.id).not.toBe(capture.id);
+  expect((await fetch(`${endpoint}/export?id=${capture.id}`)).status).toBe(409);
+  expect((await fetch(endpoint, { headers: { Origin: 'https://foreign.invalid' } })).status).toBe(403);
+}, 15000);
+
+it('browses and validates recordings on the server filesystem', async () => {
+  const { mkdtemp, writeFile, mkdir, rm, truncate } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const directory = await mkdtemp(join(tmpdir(), 'ardb-files-'));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, 'recordings'));
+  await writeFile(join(directory, 'invalid.jsonl'), 'not json');
+  await writeFile(join(directory, 'notes.txt'), 'not a recording');
+  await writeFile(join(directory, '.hidden.jsonl'), 'not shown');
+  const { provider } = createRecordedLabProvider();
+  const server = await createDebuggerServer({ assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)), adapter: provider, config: { cwd: directory } });
+  cleanups.push(() => server.close());
+  const listing = await (await fetch(`${server.url}/__ardb/files`)).json();
+  expect(listing.directory).toContain('ardb-files-');
+  expect(listing.entries.map((entry: { name: string }) => entry.name)).toEqual(['recordings', 'invalid.jsonl']);
+  expect((await fetch(`${server.url}/__ardb/files?directory=${encodeURIComponent(join(directory, 'recordings'))}`)).status).toBe(200);
+  const invalid = await fetch(`${server.url}/__ardb/files/open?path=${encodeURIComponent(join(directory, 'invalid.jsonl'))}`);
+  expect(invalid.status).toBe(400); expect(await invalid.text()).toContain('line 1');
+  await truncate(join(directory, 'invalid.jsonl'), 64 * 1024 * 1024 + 1);
+  expect(await (await fetch(`${server.url}/__ardb/files/open?path=${encodeURIComponent(join(directory, 'invalid.jsonl'))}`)).text()).toContain('64 MiB');
+  expect((await fetch(`${server.url}/__ardb/files`, { headers: { Origin: 'https://foreign.invalid' } })).status).toBe(403);
+}, 10000);
+
+it('bounds capture size and retains a replayable prefix while the Agent stays usable', async () => {
+  const { LiveRecording } = await import('./live-recording.js');
+  const { parseRecording } = await import('./recording.js');
+  const { provider } = createRecordedLabProvider();
+  const server = await createDebuggerServer({ assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)), adapter: provider });
+  cleanups.push(() => server.close());
+  const capture = new LiveRecording(server.agentId, () => server.url, 65536);
+  cleanups.push(() => capture.close());
+  const started = await capture.start();
+  expect(started.phase).toBe('recording');
+  capture.append({ kind: 'browser_trace', text: 'x'.repeat(65536) });
+  expect(capture.status()).toMatchObject({ phase: 'stopped', error: expect.stringContaining('size limit') });
+  const data = capture.export(started.id!);
+  expect(Buffer.byteLength(data)).toBeLessThanOrEqual(65536);
+  expect(parseRecording(data).agentId).toBe(server.agentId);
+  expect(parseRecording(data).warnings).toContain('Recording stopped at its size limit; later session changes were not captured.');
+  const runtime = await createDebuggerRuntime(server.agentId, { relayUrl: server.url, origin: server.url });
+  cleanups.push(() => runtime.close()); await runtime.ready(3000);
+  await runtime.client.sendMessage('still usable after recorder limit');
+  await expect.poll(() => JSON.stringify(runtime.replica.getState().timeline)).toContain('Recorded reply: still usable after recorder limit');
+}, 10000);

@@ -1,3 +1,4 @@
+import { serveRecordingFiles } from './recording-files.js';
 import { access } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
@@ -6,7 +7,7 @@ import { localRequestAllowed, serveAssets } from './local-web.js';
 import type { SessionRecording } from './recording.js';
 
 /** A read-only file viewer. No provider, Relay, or control transport is instantiated. */
-export async function createReplayServer(options: { recording: SessionRecording; name: string; port?: number; assetsDirectory?: string }) {
+export async function createReplayServer(options: { recording: SessionRecording; name: string; port?: number; assetsDirectory?: string; directory?: string }) {
   const assets = resolve(options.assetsDirectory ?? fileURLToPath(new URL('./web', import.meta.url)));
   await access(join(assets, 'index.html'));
   const body = JSON.stringify(options.recording);
@@ -18,6 +19,7 @@ export async function createReplayServer(options: { recording: SessionRecording;
       response.setHeader('Referrer-Policy', 'no-referrer');
       if (!localRequestAllowed(request, url)) { response.writeHead(403).end(); return; }
       if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405).end(); return; }
+      if (await serveRecordingFiles(request, response, url, options.directory ?? process.cwd())) return;
       const path = new URL(request.url ?? '/', url).pathname;
       const data = path === '/__ardb/session' ? JSON.stringify({ mode: 'replay', name: options.name })
         : path === '/__ardb/recording' ? body : undefined;

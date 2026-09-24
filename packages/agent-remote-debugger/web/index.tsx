@@ -1,4 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { LiveControls, useLiveRecording } from './live-controls.js';
+import type { OpenedRecording } from './recording-picker.js';
+import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { LabWorkbench } from '../../agent-remote-lab/src/components/LabWorkbench.js';
@@ -13,6 +15,8 @@ import '../../agent-remote-lab/src/session-view-styles.js';
 import './shell.css';
 
 function SessionView({ session }: { session: OpenedSession }) {
+  const capture = useLiveRecording();
+  const [replay, setReplay] = useState<OpenedRecording>();
   const trace = useMemo(() => createBrowserTrace(), []);
   const transport = useMemo(() => {
     const value = new HttpWebSocketTransport(location.origin);
@@ -23,7 +27,10 @@ function SessionView({ session }: { session: OpenedSession }) {
   const { state, status, questions, setQuestions, actions } = useConversationSession(session, transport);
   useEffect(() => { trace.record({ event: 'connection', status }); }, [status, trace]);
   useEffect(() => () => trace.close(), [trace]);
-  return <DebugSessionView><LabWorkbench state={state} sessionStatus={status} attachingAgentId={session.agentId}
+  const controls = <LiveControls capture={capture} agentId={session.agentId} onOpen={replay ? undefined : setReplay} />;
+  const recordingActive = capture.status?.phase === 'recording';
+  if (replay) return <ReplayView {...replay} liveControls={controls} recordingActive={recordingActive} onReturnLive={() => setReplay(undefined)} />;
+  return <DebugSessionView liveControls={controls} recordingActive={recordingActive}><LabWorkbench state={state} sessionStatus={status} attachingAgentId={session.agentId}
     actions={actions} questionDrafts={questions} draftSessionKey={session.agentId}
     onQuestionDraftChange={(id, draft) => setQuestions(current => ({ ...current, [id]: draft }))} /></DebugSessionView>;
 }

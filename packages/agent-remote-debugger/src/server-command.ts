@@ -59,7 +59,7 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
     await observer.ready(startupTimeout);
     clearTimeout(deadline);
     emit({ kind: 'server_ready', url, agentId, providerId: adapter.descriptor.providerId, nativeSessionId: server.session.nativeSessionId,
-      commands: { inspect: `ardb inspect ${agentId} --relay ${url} --origin ${url}`, send: `ardb send ${agentId} "hello" --relay ${url} --origin ${url}` } });
+      commands: { observe: `ardb observe ${agentId} --relay ${url} --origin ${url} --jsonl`, inspect: `ardb inspect ${agentId} --relay ${url} --origin ${url}`, send: `ardb send ${agentId} "hello" --relay ${url} --origin ${url}` } });
     if (invocation.options.has('open')) {
       try { await openBrowser(url); } catch { io.stderr(`Browser could not be opened; visit ${url} manually.\n`); }
     }

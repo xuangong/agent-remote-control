@@ -1,8 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { RecordingPicker } from './recording-picker.js';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
 import { LabWorkbench, type LabWorkbenchActions } from '../../agent-remote-lab/src/components/LabWorkbench.js';
 import { DebugSessionView } from './session-view.js';
-import { parseRecording, RecordingPlayer, type SessionRecording } from '../src/recording.js';
+import { RecordingPlayer, type SessionRecording } from '../src/recording.js';
 
 const noActions: LabWorkbenchActions = {};
 const ReplaySession = memo(function ReplaySession({ state, status }: { state: AgentReplicaState; status: RemoteSessionStatus }) {
@@ -10,27 +11,8 @@ const ReplaySession = memo(function ReplaySession({ state, status }: { state: Ag
 });
 const time = (milliseconds: number) => `${Math.floor(milliseconds / 60000)}:${(milliseconds / 1000 % 60).toFixed(1).padStart(4, '0')}`;
 
-export function ReplayView({ name: initialName, recording: initialRecording }: { name: string; recording: SessionRecording }) {
+export function ReplayView({ name: initialName, recording: initialRecording, liveControls, recordingActive = false, onReturnLive }: { name: string; recording: SessionRecording; liveControls?: import('react').ReactNode; recordingActive?: boolean; onReturnLive?(): void }) {
   const [{ name, recording, revision }, setRecording] = useState({ name: initialName, recording: initialRecording, revision: 0 });
-  const [fileError, setFileError] = useState<string>();
-  const [loading, setLoading] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const selection = useRef(0);
-  async function openFile(file: File | undefined) {
-    if (!file) return;
-    const request = ++selection.current;
-    setLoading(true); setFileError(undefined);
-    try {
-      if (file.size > 64 * 1024 * 1024) throw new Error('Select a JSONL recording no larger than 64 MiB.');
-      const next = parseRecording(await file.text());
-      if (request === selection.current) {
-        setRecording(current => ({ name: file.name, recording: next, revision: current.revision + 1 }));
-      }
-    } catch (error) {
-      if (request === selection.current) setFileError(error instanceof Error ? error.message : 'Unable to open recording.');
-    } finally { if (request === selection.current) setLoading(false); }
-  }
-  useEffect(() => () => { selection.current++; }, []);
   const player = useMemo(() => new RecordingPlayer(recording), [recording]);
   const [, refresh] = useState(0);
   const update = () => refresh(value => value + 1);
@@ -46,14 +28,12 @@ export function ReplayView({ name: initialName, recording: initialRecording }: {
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onHidden); };
   }, [player]);
   const change = (action: () => void) => { action(); update(); };
-  return <DebugSessionView playbackControls={
+  return <DebugSessionView liveControls={liveControls} recordingActive={recordingActive} playbackControls={
     <section className="ardb-playback" aria-label="Recording playback">
       <div className="ardb-recording-heading"><div className="ardb-recording-title"><strong title={name}>{name}</strong><span>Session recording · Read only</span></div>
-        <button type="button" className="ardb-open" disabled={loading} onClick={() => fileInput.current?.click()}>{loading ? 'Opening…' : 'Open recording'}</button>
-        <input ref={fileInput} hidden type="file" accept=".jsonl,.ndjson,application/x-ndjson,application/jsonl" aria-label="Open recording file"
-          onChange={event => { void openFile(event.target.files?.[0]); event.target.value = ''; }} />
+        <RecordingPicker onOpen={next => setRecording(current => ({ ...next, revision: current.revision + 1 }))} />
       </div>
-      {fileError ? <p className="ardb-file-error" role="alert">{fileError}</p> : null}
+      {onReturnLive ? <button type="button" className="ardb-open" onClick={onReturnLive}>Return to live session</button> : null}
       <div className="ardb-playback-controls">
         <button type="button" className="ardb-play" aria-label={player.playing ? 'Pause recording' : 'Play recording'} onClick={() => change(() => player.playing ? player.pause() : player.play())}>{player.playing ? 'Pause' : 'Play'}</button>
         <button type="button" aria-label="Restart recording" onClick={() => change(() => { player.pause(); player.seek(0); })}>Restart</button>

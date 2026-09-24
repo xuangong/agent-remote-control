@@ -1,10 +1,12 @@
-import { act, useState } from 'react';
+import { act, useEffect, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { render } from '../test/setup.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';
-import { readTrackedSessions } from '../tracking-state.js';
+import { readTrackedSessions, saveTrackedSessions } from '../tracking-state.js';
+import { useSessionStars } from './useSessionStars.js';
+import { SessionStarsClient } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
@@ -250,4 +252,76 @@ it('renames only the matching tracked identity without restarting observation', 
   expect(tracking.sessions).toEqual([{ ...star, title: 'Renamed' }, unrelated]);
   expect(readTrackedSessions('alice')).toEqual(tracking.sessions);
   expect(start).toHaveBeenCalledTimes(2); expect(stop).not.toHaveBeenCalled();
+});
+
+it('prunes only confirmed non-favorites and preserves offline favorites and exact identities', async () => {
+  const other = { ...star, nativeSessionId: 'other' };
+  saveTrackedSessions('alice', [star, other]);
+  const transport = {} as RemoteAgentTransport;
+  let tracking!: SessionTracking;
+  let update!: (value: { scope: string; ready: boolean; stars: typeof star[] }) => void;
+  function Fixture() {
+    const [favorites, setFavorites] = useState({ scope: 'alice', ready: false, stars: [] as typeof star[] });
+    update = setFavorites;
+    tracking = useSessionTracking('alice', transport, undefined, undefined, undefined, undefined, true);
+    useEffect(() => tracking.reconcileFavorites(favorites), [favorites.scope, favorites.ready, favorites.stars]);
+    return null;
+  }
+  await render(<Fixture />);
+  expect(tracking.sessions).toEqual([star, other]);
+  await act(async () => update({ scope: 'bob', ready: true, stars: [] }));
+  expect(tracking.sessions).toEqual([star, other]);
+  await act(async () => update({ scope: 'alice', ready: true, stars: [star] }));
+  expect(tracking.sessions).toEqual([star]);
+  expect(readTrackedSessions('alice')).toEqual([star]);
+  await act(async () => update({ scope: 'alice', ready: false, stars: [] }));
+  expect(tracking.sessions).toEqual([star]);
+  await act(async () => update({ scope: 'alice', ready: true, stars: [] }));
+  expect(tracking.sessions).toEqual([]);
+  expect(readTrackedSessions('alice')).toEqual([]);
+});
+
+it('waits for a successful favorites read and removes tracking only after a confirmed deletion', async () => {
+  saveTrackedSessions('http://localhost/u/alice/', [star]);
+  const snapshot = vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockRejectedValue(new Error('Unavailable'));
+  const transport = {} as RemoteAgentTransport;
+  let tracking!: SessionTracking, favorites!: ReturnType<typeof useSessionStars>;
+  function Fixture() {
+    favorites = useSessionStars('http://localhost/u/alice/', true);
+    tracking = useSessionTracking(favorites.scope, transport, undefined, undefined, undefined, undefined, true);
+    useEffect(() => tracking.reconcileFavorites(favorites), [favorites.scope, favorites.ready, favorites.stars]);
+    return null;
+  }
+  await render(<Fixture />);
+  expect(tracking.sessions).toEqual([star]);
+  snapshot.mockResolvedValue({ revision: 1, folders: [], stars: [{ ...star, favoriteId: 's', folderId: null, order: 0, available: false, online: false }] });
+  await act(async () => favorites.refresh());
+  expect(tracking.sessions).toEqual([star]);
+  const command = vi.spyOn(SessionStarsClient.prototype, 'command').mockRejectedValue(new Error('Deletion failed'));
+  await act(async () => favorites.change({ type: 'remove-session', session: star }));
+  expect(tracking.sessions).toEqual([star]);
+  command.mockResolvedValue({ revision: 2, folders: [], stars: [] });
+  await act(async () => favorites.change({ type: 'remove-session', session: star }));
+  expect(tracking.sessions).toEqual([]);
+});
+
+it('keeps migrated tracking while favorites still names the source, then cleans up a removed fork', async () => {
+  saveTrackedSessions('alice', [star]);
+  const transport = {} as RemoteAgentTransport;
+  let tracking!: SessionTracking, refresh!: (stars: typeof star[]) => void;
+  function Fixture() {
+    const [stars, setStars] = useState([star]); refresh = setStars;
+    tracking = useSessionTracking('alice', transport, undefined, undefined, undefined, undefined, true);
+    useEffect(() => tracking.reconcileFavorites({ scope: 'alice', ready: true, stars }), [stars]);
+    return null;
+  }
+  await render(<Fixture />);
+  const from = { ...star, agentId: 'one' }, to = { ...from, nativeSessionId: 'fork', agentId: 'two' };
+  await act(async () => tracking.replace({ id: 'migration', from, to, createdAt: 1 }));
+  await act(async () => refresh([star]));
+  expect(tracking.sessions[0]?.nativeSessionId).toBe('fork');
+  await act(async () => refresh([{ ...star, nativeSessionId: 'fork' }]));
+  expect(tracking.sessions[0]?.nativeSessionId).toBe('fork');
+  await act(async () => refresh([]));
+  expect(tracking.sessions).toEqual([]);
 });

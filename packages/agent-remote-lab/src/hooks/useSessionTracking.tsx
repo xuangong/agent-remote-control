@@ -104,9 +104,40 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       return { ...value, sessions };
     });
   }
+  const reconcileFavorites = useCallback((favorites: { scope: string; ready: boolean; stars: readonly SessionStar[] }) => {
+    if (!enabled || !favorites.ready || favorites.scope !== baseUrl) return;
+    const allowed = new Set(favorites.stars.map(sessionKey));
+    // A migration can arrive before the refreshed favorites snapshot.
+    for (const favorite of favorites.stars) {
+      let key = sessionKey(favorite);
+      const visited = new Set<string>();
+      while (!visited.has(key)) {
+        visited.add(key);
+        const migration = migrations.current.values.get(key);
+        if (!migration) break;
+        key = sessionKey(migration.to);
+        allowed.add(key);
+      }
+    }
+    setSelection(previous => {
+      if (previous.scope !== baseUrl) return previous;
+      const sessions = previous.sessions.filter(session => allowed.has(sessionKey(session)));
+      if (sessions.length === previous.sessions.length) return previous;
+      try { saveTrackedSessions(baseUrl, sessions); }
+      catch { setError('Tracking changed for this page, but this browser could not save it for the next visit.'); }
+      return { ...previous, sessions };
+    });
+    setObservations(values => {
+      const next = { ...values };
+      for (const key of Object.keys(next)) {
+        if (!allowed.has(key) && !visible.current.has(key) && !auxiliaryKeys.has(key)) delete next[key];
+      }
+      return next;
+    });
+  }, [baseUrl, enabled, setObservations, auxiliaryKeys]);
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} />), [observedSessions, baseUrl, transport, update, retries]);
   useFeedbackToast('Session tracking', error);
-  return { rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
+  return { reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 

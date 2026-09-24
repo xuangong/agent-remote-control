@@ -7,6 +7,7 @@ const empty = (): FavoritesSnapshot => ({ revision: 0, folders: [], stars: [] })
 export function useSessionStars(baseUrl: string, enabled: boolean, transport?: RemoteAgentTransport) {
   const service = useMemo(() => new SessionStarsClient(baseUrl), [baseUrl]);
   const [snapshot, setSnapshot] = useState<FavoritesSnapshot>(empty);
+  const [confirmedScope, setConfirmedScope] = useState<string>();
   const [loading, setLoading] = useState(enabled);
   const [pending, setPending] = useState<string>();
   const [error, setError] = useState<string>();
@@ -14,7 +15,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
   const generation = useRef(0);
   const busy = useRef(false);
   const requestController = useRef<AbortController>();
-  const publish = (value: FavoritesSnapshot) => { latest.current = value; setSnapshot(value); };
+  const publish = (value: FavoritesSnapshot) => { latest.current = value; setSnapshot(value); setConfirmedScope(baseUrl); };
   const refresh = useCallback(async () => {
     if (!enabled || busy.current) return;
     const request = ++generation.current;
@@ -25,7 +26,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
     catch (error) { if (generation.current === request) setError(error instanceof Error ? error.message : 'Favorites could not be loaded.'); }
     finally { if (generation.current === request) setLoading(false); }
   }, [service, enabled]);
-  useEffect(() => { publish(empty()); }, [service]);
+  useEffect(() => { publish(empty()); setConfirmedScope(undefined); }, [service]);
   useEffect(() => {
     setError(undefined); setPending(undefined); busy.current = false; setLoading(enabled);
     void refresh();
@@ -72,6 +73,6 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
     await change(exists ? { type: 'remove-session', session: { hostId, providerId, nativeSessionId } } : { type: 'save-session', session: item, folderId: null });
   }
   useFeedbackToast('Favorites', error);
-  return { enabled, scope: baseUrl, ...snapshot, loading, pending, error, refresh, toggle, change };
+  return { enabled, scope: baseUrl, ready: enabled && confirmedScope === baseUrl && !loading && !pending && !error, ...snapshot, loading, pending, error, refresh, toggle, change };
 }
 export type SessionStars = ReturnType<typeof useSessionStars>;

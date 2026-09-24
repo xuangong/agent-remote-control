@@ -4,19 +4,19 @@ import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { SessionStarsClient, type SessionStar } from './session-stars-client.js';
-import { saveTrackedSessions } from './tracking-state.js';
+import { readTrackedSessions, saveTrackedSessions } from './tracking-state.js';
 import { replicaState } from './test/fixtures.js';
 import { render } from './test/setup.js';
 
 const baseUrl = 'http://localhost/u/alice/';
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
-afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
-async function fixture(target: SessionStar, activityReady = true, other?: SessionStar) {
+async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[]) {
   saveTrackedSessions(baseUrl, [target, ...(other ? [other] : [])]);
   // Remembered runtime IDs are not evidence of a live binding.
   localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...target, agentId: 'stale-agent' }]));
-  vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:[]});
+  vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:(savedFavorites ?? [target, ...(other ? [other] : [])]).map((item, order) => ({ ...item, favoriteId: item.nativeSessionId, folderId: null, order, available: true, online: true }))});
   vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
   const attach = vi.spyOn(SessionDirectoryClient.prototype, target.parentNativeSessionId ? 'attachChild' : 'attach').mockImplementation(async (_provider: string, id: string) => ({ agentId: other && id === other.nativeSessionId ? 'other-agent' : 'live-agent' }));
@@ -144,9 +144,33 @@ it('retains opened tracked content across switches without preconnecting unopene
   expect(f.fetchTimeline).toHaveBeenCalledTimes(2);
   expect(f.container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-  await act(async () => f.container.querySelector<HTMLButtonElement>(`[aria-label="Untrack ${other.title}"]`)!.click());
+  expect(f.container.querySelector('[aria-label^="Untrack "]')).toBeNull();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Close Tracked sessions"]')!.click());
+  await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-sidebar-tabs button, .lab-session-panel-actions button')].find(button => button.textContent === 'Favorites')!.click());
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Filter tracked favorites"]')!.click());
+  await act(async () => f.container.querySelector<HTMLButtonElement>(`[aria-label="Actions for ${other.title}"]`)!.click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.lab-favorite-menu button')].find(button => button.textContent === 'Untrack')!.click());
   expect(f.contentClosed).toHaveBeenCalledWith('other-agent');
   expect(f.contentClosed).not.toHaveBeenCalledWith('live-agent');
   await act(async () => f.hide());
   expect(f.contentClosed).toHaveBeenCalledWith('live-agent');
+});
+
+it('recovers a delayed fork migration before removing a tracking identity missing from favorites', async () => {
+  const fork = { ...star, nativeSessionId: 'fork' };
+  let release!: (value: Response) => void;
+  let reads = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => {
+    if (!String(url).includes('v1/session-migrations')) return Response.json({});
+    reads++;
+    if (reads === 1) return new Promise<Response>(resolve => { release = resolve; });
+    return Response.json({ migrations: [{ id: 'fork-edit', createdAt: 1,
+      from: { hostId: star.hostId, providerId: star.providerId, nativeSessionId: star.nativeSessionId, agentId: 'live-agent' }, to: { hostId: fork.hostId, providerId: fork.providerId, nativeSessionId: fork.nativeSessionId, agentId: 'fork-agent' } }] });
+  }));
+  await fixture(star, true, undefined, [fork]);
+  expect(readTrackedSessions(baseUrl).map(s => s.nativeSessionId)).toEqual(['tracked']);
+  // The initial request predates the favorite replacement and cannot authorize cleanup.
+  await act(async () => release(Response.json({ migrations: [] })));
+  expect(reads).toBeGreaterThanOrEqual(2);
+  expect(readTrackedSessions(baseUrl).map(s => s.nativeSessionId)).toEqual(['fork']);
 });

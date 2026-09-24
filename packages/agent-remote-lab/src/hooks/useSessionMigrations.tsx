@@ -21,7 +21,7 @@ export function useSessionMigrations(options: {
   const [seen, setSeen] = useState<Set<string>>(() => new Set());
   const [remaining, setRemaining] = useState(5);
   const [requested, setRequested] = useState<string>();
-  const refreshRef = useRef<() => Promise<void>>();
+  const refreshRef = useRef<() => Promise<boolean>>();
   const [previous, setPrevious] = useState<OpenedSession>();
   const [failure, setFailure] = useState<string>();
   const [following, setFollowing] = useState(false);
@@ -46,7 +46,7 @@ export function useSessionMigrations(options: {
     try { const saved: unknown = JSON.parse(conversationSessionStorage.getItem('arc:prompt-edits:' + scope) ?? '[]'); setSeen(new Set(Array.isArray(saved) ? saved.filter(value => typeof value === 'string') : [])); } catch { setSeen(new Set()); }
     if (!options.enabled) return;
     const abort = new AbortController();
-    let fetching = false;
+    let fetching: Promise<boolean> | undefined;
     let referencesTimer: ReturnType<typeof setTimeout> | undefined;
     function receive(migration: SessionMigration) {
       if (abort.signal.aborted || applied.current.has(migration.id)) return;
@@ -56,21 +56,27 @@ export function useSessionMigrations(options: {
       referencesTimer = setTimeout(() => { if (!abort.signal.aborted) latest.current.refreshReferences?.(); }, 100);
       setRecords(values => [...values, migration]);
     }
-    async function refresh() {
-      if (fetching || abort.signal.aborted) return; fetching = true;
-      try {
-        const response = await workspaceFetch(new URL('v1/session-migrations', scope), { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(12000)]) });
-        if (!response.ok) return;
-        const result = await response.json();
-        if (!Array.isArray(result.migrations)) return;
-        for (const migration of result.migrations) {
-          const decoded = decodeSessionChannelServerMessage(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_migrated', migration }));
-          if (decoded.status === 'ok' && decoded.value.type === 'session_migrated') receive(decoded.value.migration);
-        }
-      } catch { /* Existing channel delivery and the next page resume retry recovery. */ }
-      finally { fetching = false; }
+    function refresh(): Promise<boolean> {
+      if (abort.signal.aborted) return Promise.resolve(false);
+      if (fetching) return fetching;
+      fetching = (async () => {
+        try {
+          const response = await workspaceFetch(new URL('v1/session-migrations', scope), { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(12000)]) });
+          if (!response.ok) return false;
+          const result = await response.json();
+          if (!Array.isArray(result.migrations)) return false;
+          for (const migration of result.migrations) {
+            const decoded = decodeSessionChannelServerMessage(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_migrated', migration }));
+            if (decoded.status !== 'ok' || decoded.value.type !== 'session_migrated') return false;
+            receive(decoded.value.migration);
+          }
+          return !abort.signal.aborted;
+        } catch { return false; /* The channel and the next page resume retry recovery. */ }
+        finally { fetching = undefined; }
+      })();
+      return fetching;
     }
-    refreshRef.current = refresh;
+    refreshRef.current = async () => { if (fetching) await fetching; return refresh(); };
     const remove = options.transport.onSessionMigration?.(receive);
     const resume = watchPageResume(() => void refresh());
     void refresh();
@@ -112,5 +118,5 @@ export function useSessionMigrations(options: {
     }}>Stay here</button> : null}
     {!pending ? <button type="button" aria-label="Dismiss branch notice" onClick={() => setPrevious(undefined)}>×</button> : null}
   </div> : null;
-  return { notice, pending, requestFollow(id: string) { setRequested(id); void refreshRef.current?.(); } };
+  return { notice, pending, refresh: () => refreshRef.current?.() ?? Promise.resolve(false), requestFollow(id: string) { setRequested(id); void refreshRef.current?.(); } };
 }

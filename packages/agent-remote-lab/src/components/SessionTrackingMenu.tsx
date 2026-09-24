@@ -43,7 +43,6 @@ export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: 
                 event.currentTarget.parentElement?.querySelector<HTMLButtonElement>('.lab-session-row')?.focus();
                 tracking.acknowledge(key);
               }}><span aria-hidden="true" />New</button> : null}
-            <button type="button" aria-label={`Untrack ${session.title}`} onClick={() => tracking.toggle(session)}>×</button>
           </div>{value?.error ? <p className="lab-control-note" role="alert">{value.error} <button type="button" onClick={() => tracking.retry(key)}>Retry tracking</button></p> : null}</li>;
         })}</ul>
         {tracking.error ? <p className="lab-control-note" role="alert">{tracking.error}</p> : null}

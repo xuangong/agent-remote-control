@@ -6,7 +6,7 @@ import { SessionStarsClient } from '../session-stars-client.js';
 import { FavoritesList, FavoritesMenu } from '../components/SessionFavorites.js';
 import type { SessionTracking } from './useSessionTracking.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1, favoriteId: 's', folderId: null, order: 0, available: true, online: true };
-const tracking: SessionTracking = { rename: vi.fn(), replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
+const tracking: SessionTracking = { reconcileFavorites: vi.fn(), rename: vi.fn(), replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
 afterEach(() => vi.restoreAllMocks());
 it('keeps failed saves visible without pretending the favorite was saved', async () => {
   vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:[]});
@@ -32,7 +32,7 @@ it('ignores a prior account response and allows the new account to refresh', asy
   expect(favorites.loading).toBe(false);
 });
 it('shares favorites with the title menu and dismisses with Escape while restoring focus', async () => {
-  const favorites: SessionStars = { enabled: true, scope: 'alice', revision: 1, folders: [], change: vi.fn(), stars: [star], loading: false, pending: undefined, error: undefined, toggle: vi.fn(), refresh: vi.fn(async () => {}) };
+  const favorites: SessionStars = { enabled: true, ready: true, scope: 'alice', revision: 1, folders: [], change: vi.fn(), stars: [star], loading: false, pending: undefined, error: undefined, toggle: vi.fn(), refresh: vi.fn(async () => {}) };
   const open = vi.fn();
   const view = await render(<FavoritesMenu title="Current session" favorites={favorites} tracking={tracking} busy={false} onOpen={open} />);
   const trigger = view.querySelector('button')!;

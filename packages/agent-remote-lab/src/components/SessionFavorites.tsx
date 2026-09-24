@@ -22,11 +22,11 @@ export function StarButton({ session, favorites }: { session: Parameters<typeof 
     <svg width="18" height="18" viewBox="0 0 24 24" fill={selected ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.5 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.5 6.3-.9Z" /></svg>
   </button>{editing ? <FavoriteDialog key={favorites.scope} favorites={favorites} edit={{ type:'session', session:starInput(session) }} onClose={() => { setEditing(false); trigger.current?.focus({preventScroll:true}); }} /> : null}</>;
 }
-export function FavoritesList({ favorites, tracking, activeKey, busy, onOpen }: { favorites: SessionStars; tracking: SessionTracking; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
+export function FavoritesList({ favorites, tracking, trackedOnly = false, onFilterChange, activeKey, busy, onOpen }: { favorites: SessionStars; tracking: SessionTracking; trackedOnly?: boolean; onFilterChange?(trackedOnly: boolean): void; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
   return <>
     {favorites.loading ? <p className="lab-control-note" role="status">Loading favorites…</p> : null}
     {favorites.error ? <p className="lab-control-note" role="alert">{favorites.error} <button type="button" onClick={() => void favorites.refresh()}>Refresh favorites</button></p> : null}
-    <FavoriteTree key={favorites.scope} favorites={favorites} tracking={tracking} activeKey={activeKey} busy={busy} onOpen={onOpen} />
+    <FavoriteTree key={favorites.scope} favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={onFilterChange} activeKey={activeKey} busy={busy} onOpen={onOpen} />
     {tracking.error ? <p className="lab-control-note" role="alert">{tracking.error}</p> : null}
   </>;
 }

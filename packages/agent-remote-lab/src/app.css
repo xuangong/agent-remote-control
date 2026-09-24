@@ -1314,10 +1314,10 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-tracked-change[data-attention="pending"] { color: oklch(0.52 0.108 87); }
 .lab-tracked-change[data-attention="idle"] { color: var(--obs-text); }
 .lab-tracked-row { display: flex; align-items: center; gap: 6px; }
-.lab-tracked-row > button:last-child { flex: 0 0 36px; min-height: 36px; }
+.lab-tracked-row > .lab-session-row { flex: 1; min-width: 0; }
 @media (max-width: 760px) {
   .lab-title-favorites .lab-session-popover-panel { position: fixed; top: calc(56px + env(safe-area-inset-top, 0px)); left: 12px; right: 12px; width: auto; }
-  .lab-favorite-actions > button, .lab-star-button, .lab-tracked-change, .lab-tracked-row > button:last-child, .lab-session-popover-panel .lab-directory-heading > button { min-height: 44px; min-width: 44px; }
+  .lab-favorite-actions > button, .lab-star-button, .lab-tracked-change, .lab-session-popover-panel .lab-directory-heading > button { min-height: 44px; min-width: 44px; }
 }
 .gateway-account-actions > .gateway-account-identity { max-width: 140px; }
 .lab-sidebar-account { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -1395,9 +1395,13 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-sidebar-tabs .lab-sidebar-new { margin-left: auto; }
 .lab-sidebar-tabs { flex-wrap: wrap; }
 .lab-session-panel-actions button[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-favorites-filter-group { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lab-favorites-filter-group button.lab-favorites-filter { border: 1px solid var(--obs-border); border-radius: 999px; background: transparent; color: var(--obs-text-secondary); padding: 3px 9px; min-height: 28px; font-size: 11px; }
+.lab-favorites-filter-group button.lab-favorites-filter[aria-pressed="true"] { border-color: var(--obs-action); color: var(--obs-action); background: var(--obs-surface-selected); }
+@media (pointer: coarse) { .lab-favorites-filter-group button.lab-favorites-filter { min-height: 44px; } }
 .lab-favorites-section, .lab-favorites-manager { min-width: 0; max-width: 100%; }
 .lab-favorites-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0 10px; }
-.lab-favorites-toolbar > span { color: var(--obs-text-secondary); font-size: 12px; }
+.lab-favorites-count { color: var(--obs-text-secondary); font-size: 12px; }
 .lab-favorites-toolbar > button { font-size: 12px; min-height: 32px; padding: 4px 8px; border-color: transparent; background: transparent; }
 .lab-favorites-scroll { overflow: auto; max-height: min(65dvh, 700px); overscroll-behavior: contain; padding-bottom: 6px; }
 .lab-favorite-root { display: flex; align-items: center; gap: 7px; padding: 8px 6px; color: var(--obs-text-secondary); font-size: 12px; border-radius: 5px; }

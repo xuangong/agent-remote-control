@@ -233,6 +233,7 @@ function AppContent({
   const traceTabRef = useRef<HTMLButtonElement>(null);
   const sessionsTriggerRef = useRef<HTMLButtonElement>(null);
   const [contextFromSessions, setContextFromSessions] = useState(true);
+  const [trackedOnly, setTrackedOnly] = useState(false);
   const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
   const [timelineDisplay, setTimelineDisplay] = useTimelineDisplayMode();
@@ -867,6 +868,18 @@ function AppContent({
       return true;
     },
   });
+  const recoverTrackingReferences = useRef(promptMigrations.refresh);
+  recoverTrackingReferences.current = promptMigrations.refresh;
+  useEffect(() => {
+    if (!favorites.ready || !tracking.sessions.some(session => !favorites.stars.some(star => sessionKey(star) === sessionKey(session)))) return;
+    let canceled = false;
+    // Favorites and fork broadcasts can arrive in either order. Recover replacements
+    // before interpreting a missing bookmark as a removal.
+    void recoverTrackingReferences.current().then(recovered => {
+      if (recovered && !canceled) tracking.reconcileFavorites(favorites);
+    });
+    return () => { canceled = true; };
+  }, [favorites.scope, favorites.ready, favorites.stars, tracking.sessions, tracking.reconcileFavorites]);
   async function editPrompt(entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry): Promise<void> {
     const source = activeOpened; const item = entry.item; const sourceClient = clientRef.current;
     if (!source || !sourceClient || !directory || source.providerId !== 'codex' || item.type !== 'user_message' || !item.messageId || !entry.turnId) throw new Error('This prompt cannot be edited.');
@@ -1189,7 +1202,7 @@ function AppContent({
         <CachePrivacySettings />
         <LayoutDiagnosticsSettings />
       </section> : null}
-      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2></div><FavoritesList favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
+      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2></div><FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
       {directory && sessionPanel !== 'favorites' ? <HostPairing compact={compactLayout && sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {(!compactLayout && sessionPanel === 'list') || sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel />
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={compactLayout ? contextOpen : desktopContextVisible}>

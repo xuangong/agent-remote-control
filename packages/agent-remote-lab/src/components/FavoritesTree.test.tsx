@@ -6,7 +6,7 @@ import type { SessionStars } from '../hooks/useSessionStars.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 const star = { favoriteId:'s',folderId:'a',order:0,hostId:'h',providerId:'codex',nativeSessionId:'n',title:'Research',starredAt:1,available:true,online:true };
 const tracking = { sessions:[],toggle:vi.fn() } as unknown as SessionTracking;
-function fixture(): SessionStars { return {enabled:true,scope:'test',revision:1,stars:[star],folders:[{id:'a',parentId:null,title:'Work',order:0}],loading:false,pending:undefined,error:undefined,refresh:vi.fn(),toggle:vi.fn(),change:vi.fn(async()=>true)}; }
+function fixture(): SessionStars { return {enabled:true,ready:true,scope:'test',revision:1,stars:[star],folders:[{id:'a',parentId:null,title:'Work',order:0}],loading:false,pending:undefined,error:undefined,refresh:vi.fn(),toggle:vi.fn(),change:vi.fn(async()=>true)}; }
 const button = (root:ParentNode,name:string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===name)!;
 beforeEach(() => { localStorage.clear(); Object.defineProperty(HTMLDialogElement.prototype,'showModal',{configurable:true,value:function(this:HTMLDialogElement){this.setAttribute('open','');}}); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -59,4 +59,19 @@ it.each([false, true])('gates rename on Controller capability and connection: %s
  await act(async()=>view.querySelector<HTMLButtonElement>('[aria-label="Actions for Research"]')!.click());
  const rename=button(document,'Rename session…');
  if(canRename)expect(rename.disabled).toBe(true);else expect(rename).toBeUndefined();
+});
+
+it('filters tracked favorites across collapsed folders and untracks the exact session from its menu', async () => {
+  const favorites = fixture();
+  const other = { ...star, favoriteId: 'other', nativeSessionId: 'other' };
+  favorites.stars.push(other);
+  const toggle = vi.fn();
+  const tracked = { ...tracking, sessions: [star], toggle };
+  const view = await render(<FavoritesList favorites={favorites} tracking={tracked} trackedOnly busy={false} onOpen={() => {}} />);
+  expect(view.querySelectorAll('[role="treeitem"]')).toHaveLength(1);
+  expect(view.querySelector('[data-favorite-id="s"]')).not.toBeNull();
+  expect(view.querySelector('[data-favorite-id="other"]')).toBeNull();
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Actions for Research"]')!.click());
+  await act(async () => button(document, 'Untrack').click());
+  expect(toggle).toHaveBeenCalledWith(star);
 });

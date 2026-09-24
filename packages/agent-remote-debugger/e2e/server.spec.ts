@@ -169,6 +169,7 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { errors += chunk; });
   await expect.poll(() => output, { timeout: 10000 }).toContain('replay_ready');
   url = JSON.parse(output.trim()).url;
+  await page.goto('about:blank');
   const mutations: string[] = []; const failures: string[] = [];
   page.on('request', request => { if (request.method() !== 'GET') mutations.push(request.url()); });
   page.on('websocket', socket => mutations.push(socket.url()));

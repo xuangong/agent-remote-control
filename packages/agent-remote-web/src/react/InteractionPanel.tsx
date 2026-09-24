@@ -13,18 +13,23 @@ import { ToolApprovalCard } from './interactions/ToolApprovalCard.js';
 
 export interface InteractionPanelProps {
   readonly request: AgentInteractionRequest;
+  readonly readOnly?: boolean;
   readonly onResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
   readonly questionDraft?: QuestionDraft;
   readonly onQuestionDraftChange?: (draft: QuestionDraft) => void;
 }
 
-export function InteractionPanel({ request, onResponse, questionDraft, onQuestionDraftChange }: InteractionPanelProps) {
+export function InteractionPanel(props: InteractionPanelProps) {
+  return props.readOnly ? <fieldset className="agent-interaction-lock" disabled><InteractionContent {...props} /></fieldset> : <InteractionContent {...props} />;
+}
+
+function InteractionContent({ request, onResponse, questionDraft, onQuestionDraftChange, readOnly = false }: InteractionPanelProps) {
   const [failure, setFailure] = useState<string | undefined>();
   const [pending, setPending] = useState(false);
   const inFlight = useRef(false);
 
   async function respond(response: AgentInteractionResponse): Promise<void> {
-    if (!onResponse || inFlight.current) return;
+    if (readOnly || !onResponse || inFlight.current) return;
     inFlight.current = true;
     setFailure(undefined);
     setPending(true);
@@ -38,10 +43,10 @@ export function InteractionPanel({ request, onResponse, questionDraft, onQuestio
   }
 
   if (request.kind === 'form') {
-    return <FormCard request={request} onResponse={respond} pending={pending} disabled={!onResponse} failure={onResponse ? failure : 'Interaction unavailable. Reconnect to respond.'} />;
+    return <FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly ? undefined : onResponse ? failure : 'Interaction unavailable. Reconnect to respond.'} />;
   }
 
-  if (!onResponse) {
+  if (!onResponse && !readOnly) {
     return <section className="agent-interaction agent-interaction-unavailable" role="status">
       <strong>Interaction unavailable</strong>
       <p>The host cannot respond to this {interactionKindLabel(request.kind)} request.</p>
@@ -63,9 +68,9 @@ export function InteractionPanel({ request, onResponse, questionDraft, onQuestio
     case 'permission_approval':
       return <PermissionApprovalCard request={request} onResponse={respond} pending={pending} failure={failure} />;
     case 'external_action':
-      return <ExternalActionCard request={request} onResponse={respond} pending={pending} failure={failure} />;
+      return <ExternalActionCard readOnly={readOnly} request={request} onResponse={respond} pending={pending} failure={failure} />;
     case 'question':
-      return <QuestionCard request={request} onResponse={respond} pending={pending} failure={failure} draft={questionDraft} onDraftChange={onQuestionDraftChange} />;
+      return <QuestionCard readOnly={readOnly} request={request} onResponse={respond} pending={pending} failure={failure} draft={questionDraft} onDraftChange={onQuestionDraftChange} />;
     case 'plan_approval':
       return <PlanApprovalCard request={request} onResponse={respond} pending={pending} failure={failure} />;
     case 'tool_approval':

@@ -278,3 +278,12 @@ it.each(['connecting', 'catching_up', 'disconnected', 'idle'] as const)('locks c
   await act(async () => pendingWindow.querySelector<HTMLButtonElement>('[role="option"]')!.click());
   expect(fork).toHaveBeenCalledWith('console:side', '');
 });
+
+it('keeps replay input read-only even when the recorded Agent can send and recover', async () => {
+  const state = { ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, sendMessage: true },
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, connection: { state: 'reconnecting' as const } } } };
+  const container = await render(<LabWorkbench readOnly state={state} sessionStatus="disconnected" messageDraft="Recorded input" actions={{ sendMessage: async () => { throw new Error('Playback must not send'); } }} />);
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(true);
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(container.querySelector('[data-testid="prompt-input"]')?.getAttribute('placeholder')).toContain('read-only');
+});

@@ -30,6 +30,9 @@ export async function runCli(argv: readonly string[], io: DebuggerIo = processIo
     if (invocation.path[0] === 'server') {
       const { runServerCommand } = await import('./server-command.js');
       await runServerCommand(invocation, io, controller.signal);
+    } else if (invocation.path[0] === 'replay') {
+      const { runReplayCommand } = await import('./replay-command.js');
+      await runReplayCommand(invocation, io, controller.signal);
     } else await executeCommand(invocation, io, environment, controller.signal);
     return 0;
   } catch (error) {
@@ -141,6 +144,7 @@ Agent Remote Debugger: inspect and exercise the Session View protocol and state.
 Commands:
   server --provider <codex|claude|copilot> [--cwd <path>] [--executable <path>] [--port <0-65535>] [--open] [--jsonl]
   server --adapter <module-path> [--persistence-file <path>] [--port <0-65535>] [--open] [--jsonl]
+  replay <session.jsonl> [--open] [--port <0-65535>]
   provider list
   session create <agent-id> --provider <provider-id> [--provider-session-id <id>] [--cwd <path>] [--model <model>] [--reasoning-effort <effort>] [--system-prompt <text>] [--planning <on|off>]
   session resume <agent-id> --persistence-file <path|->

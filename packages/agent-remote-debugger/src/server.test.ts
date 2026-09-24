@@ -82,3 +82,29 @@ it('bounds browser diagnostic payloads and omits untrusted content', async () =>
   expect((await post(JSON.stringify(Array(65).fill({})))).status).toBe(400);
   expect((await post(JSON.stringify([{ text: 'x'.repeat(65536) }]))).status).toBe(413);
 }, 10000);
+
+it('replays captured state on a read-only loopback server without a Relay or native session', async () => {
+  const { createReplayServer } = await import('./replay-server.js');
+  const { observeReplica } = await import('./records.js');
+  const { parseRecording } = await import('./recording.js');
+  const { provider } = createRecordedLabProvider();
+  const live = await createDebuggerServer({ assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)), adapter: provider });
+  cleanups.push(() => live.close());
+  const runtime = await createDebuggerRuntime(live.agentId, { relayUrl: live.url, origin: live.url });
+  cleanups.push(() => runtime.close());
+  await runtime.ready(3000);
+  const records: string[] = [];
+  const stop = observeReplica(live.agentId, runtime.replica, runtime.client, record => records.push(JSON.stringify(record)));
+  await runtime.client.sendMessage('Recorded for replay');
+  await expect.poll(() => records.join('\n')).toContain('Recorded reply: Recorded for replay');
+  stop(); runtime.close(); await live.close();
+  const replay = await createReplayServer({ recording: parseRecording(records.join('\n')), name: 'session.jsonl', assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)) });
+  cleanups.push(() => replay.close());
+  expect(await (await fetch(replay.url)).text()).toContain('ARDB Session View');
+  expect(await (await fetch(`${replay.url}/__ardb/session`)).json()).toMatchObject({ mode: 'replay', name: 'session.jsonl' });
+  expect(await (await fetch(`${replay.url}/__ardb/recording`)).text()).toContain('Recorded reply: Recorded for replay');
+  expect((await fetch(`${replay.url}/v1/sessions`, { method: 'POST' })).status).toBe(405);
+  expect((await fetch(`${replay.url}/v1/agents/${live.agentId}`)).status).toBe(404);
+  expect((await fetch(`${replay.url}/__ardb/recording`, { headers: { Origin: 'https://foreign.invalid' } })).status).toBe(403);
+  expect(await new Promise(resolve => { get(replay.url, { headers: { Host: 'foreign.invalid' } }, response => { response.resume(); resolve(response.statusCode); }); })).toBe(403);
+}, 15000);

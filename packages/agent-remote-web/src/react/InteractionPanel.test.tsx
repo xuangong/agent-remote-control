@@ -92,3 +92,20 @@ async function type(input: HTMLInputElement | HTMLTextAreaElement, value: string
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+
+it('shows every recorded question without requiring a response callback', async () => {
+  const container = await render(<InteractionPanel request={request} readOnly />);
+  expect(container.textContent).not.toContain('Interaction unavailable');
+  const panels = Array.from(container.querySelectorAll<HTMLFieldSetElement>('[role="tabpanel"]'));
+  expect(panels).toHaveLength(3);
+  expect(panels.every(panel => !panel.hidden)).toBe(true);
+  expect(container.querySelector('input')?.matches(':disabled')).toBe(true);
+});
+
+it('displays a recorded external action without an actionable external link', async () => {
+  const container = await render(<InteractionPanel readOnly request={{ kind: 'external_action', requestId: 'login', title: 'Authorize', message: 'Open authorization', url: 'https://example.com/authorize' }} />);
+  expect(container.textContent).toContain('Open authorization');
+  expect(container.textContent).toContain('https://example.com/authorize');
+  expect(container.querySelector('a[href]')).toBeNull();
+  expect(container.querySelector('button')?.matches(':disabled')).toBe(true);
+});

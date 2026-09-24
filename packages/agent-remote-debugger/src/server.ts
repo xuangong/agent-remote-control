@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
-import { extname, join, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore } from '@orchardworks/agent-remote-relay';
 
+import { localRequestAllowed, serveAssets } from './local-web.js';
 import { ownAdapter } from './owned-adapter.js';
 
 export type DebuggerAdapter = AgentProviderAdapter & { dispose?(): Promise<void> };
@@ -35,12 +36,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
   const agentId = randomUUID();
   let url = '';
   let closed: Promise<void> | undefined;
-  const allowed = (request: IncomingMessage) => {
-    const address = request.socket.remoteAddress;
-    return !!url && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '')
-      && request.headers.host === new URL(url).host
-      && (request.headers.origin === undefined || request.headers.origin === url);
-  };
+  const allowed = (request: IncomingMessage) => localRequestAllowed(request, url);
   const http = createAgentRemoteHttpServer(relay, {
     accessPolicy: { authorize: allowed },
     websocketAuthorizer: {
@@ -90,15 +86,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
       for (const listener of publicListeners) listener.call(http.server, request, response);
       return;
     }
-    if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405).end(); return; }
-    const file = resolve(assets, `.${path === '/' ? '/index.html' : path}`);
-    if (!file.startsWith(`${assets}${sep}`)) { response.writeHead(404).end(); return; }
-    let bytes: Buffer;
-    try { bytes = await readFile(file); } catch { response.writeHead(404).end(); return; }
-    const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://127.0.0.1:*; frame-ancestors 'none'");
-    response.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream' });
-    response.end(request.method === 'HEAD' ? undefined : bytes);
+    await serveAssets(request, response, assets, path);
   }
   function close(): Promise<void> {
     return closed ??= (async () => {

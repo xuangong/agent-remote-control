@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -8,6 +7,7 @@ import type { DebuggerIo } from './output.js';
 import { DebuggerError } from './errors.js';
 import { createDebuggerServer, type DebuggerAdapter } from './server.js';
 import { createDebuggerRuntime, type DebuggerRuntime } from './runtime.js';
+import { openBrowser } from './local-web.js';
 import { observeReplica } from './records.js';
 
 export async function runServerCommand(invocation: ParsedInvocation, io: DebuggerIo, signal: AbortSignal): Promise<void> {
@@ -52,12 +52,14 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
     if (signal.aborted) return;
     transferred = true;
     server = await createDebuggerServer({ adapter, signal: startup.signal, port, persistence, config: { cwd: resolve(get('cwd') ?? process.cwd()), model: get('model'), reasoningEffort: get('reasoning-effort') }, onBrowserEvent: emit });
-    clearTimeout(deadline);
     const { url, agentId } = server;
+    emit({ kind: 'recording_start', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId });
+    observer = await createDebuggerRuntime(agentId, { relayUrl: url, origin: url, signal: startup.signal });
+    unsubscribe = observeReplica(agentId, observer.replica, observer.client, record => emit({ ...record, source: 'relay' }));
+    await observer.ready(startupTimeout);
+    clearTimeout(deadline);
     emit({ kind: 'server_ready', url, agentId, providerId: adapter.descriptor.providerId, nativeSessionId: server.session.nativeSessionId,
       commands: { inspect: `ardb inspect ${agentId} --relay ${url} --origin ${url}`, send: `ardb send ${agentId} "hello" --relay ${url} --origin ${url}` } });
-    observer = await createDebuggerRuntime(agentId, { relayUrl: url, origin: url });
-    unsubscribe = observeReplica(agentId, observer.replica, observer.client, record => emit({ ...record, source: 'relay' }));
     if (invocation.options.has('open')) {
       try { await openBrowser(url); } catch { io.stderr(`Browser could not be opened; visit ${url} manually.\n`); }
     }
@@ -69,7 +71,10 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
     clearTimeout(deadline);
     signal.removeEventListener('abort', onTerm); process.removeListener('SIGTERM', onTerm);
     unsubscribe?.(); observer?.close();
-    if (server) await server.close();
+    if (server) {
+      await server.close();
+      emit({ kind: 'recording_end', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: server.agentId });
+    }
     else if (!transferred) await adapter.dispose?.();
   }
 }
@@ -90,10 +95,3 @@ async function loadAdapter(provider: string | undefined, module: string | undefi
   throw usage('Provider must be codex, claude or copilot; use --adapter for a custom provider.');
 }
 function usage(message: string) { return new DebuggerError(2, 'invalid_server_options', message, false); }
-async function openBrowser(url: string) {
-  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url], { stdio: 'ignore', timeout: 5000 });
-    child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('Could not open browser. Open the printed URL manually.')));
-  });
-}

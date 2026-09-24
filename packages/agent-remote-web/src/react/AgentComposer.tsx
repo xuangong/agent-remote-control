@@ -16,6 +16,8 @@ import { usePendingSend } from './usePendingSend.js';
 
 export interface AgentComposerProps {
   compact?: boolean;
+  /** Prevent editing in recordings while preserving the recorded capabilities. */
+  readOnly?: boolean;
   state?: AgentReplicaState;
   sessionControls?: ReactNode;
   renderSessionSettingError?(error: unknown): ReactNode;
@@ -61,7 +63,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
-export function AgentComposer({ compact = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ readOnly: forcedReadOnly = false, compact = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
@@ -91,8 +93,8 @@ export function AgentComposer({ compact = false, state, sessionControls, renderS
   const capabilities = state?.agent?.capabilities;
   const runtimeConnection = state?.agent?.runtimeInfo.connection;
   const runtimeUnavailable = runtimeConnectionMessage(runtimeConnection?.state);
-  const ready = Boolean(state?.agent) && !disabled && runtimeUnavailable === undefined;
-  const readOnly = capabilities?.sendMessage === false;
+  const ready = Boolean(state?.agent) && !disabled && !forcedReadOnly && runtimeUnavailable === undefined;
+  const readOnly = forcedReadOnly || capabilities?.sendMessage === false;
   const terminal = state?.agent?.status === 'failed' || state?.agent?.status === 'closed';
   const canWait = recovering && Boolean(state?.agent) && !readOnly && !terminal && runtimeConnection?.state !== 'unavailable';
   const richEnabled = Boolean(capabilities?.imageInput);
@@ -372,13 +374,13 @@ export function AgentComposer({ compact = false, state, sessionControls, renderS
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
       disabled={!state?.agent || readOnly || busy}
-      placeholder={readOnly ? readOnlyHint : state?.agent ? 'Message…' : 'Open or attach to an Agent first.'}
+      placeholder={forcedReadOnly ? 'This recording is read-only.' : readOnly ? readOnlyHint : state?.agent ? 'Message…' : 'Open or attach to an Agent first.'}
       aria-describedby={`${controlId}-hint`}
       aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
     />}
     </div>
-    <p id={`${controlId}-hint`} className={`agent-composer-note${readOnly ? '' : ' agent-visually-hidden'}`}>{readOnly ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
+    <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly ? '' : ' agent-visually-hidden'}`}>{readOnly ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
     <div className="agent-composer-actions">
       <div className="agent-composer-secondary-controls">
         {richEnabled ? <><button type="button" aria-label="Add images" disabled={!state?.agent || readOnly || busy} onClick={() => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); }}>Image</button>
@@ -386,7 +388,7 @@ export function AgentComposer({ compact = false, state, sessionControls, renderS
         <button hidden={compact} type="button" aria-label="Open chat commands" disabled={!ready || busy || (readOnly && consoleCommands.length === 0)} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); focusInput(); }}>/</button>
         {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={!ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent)} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}
       </div>
-      {state?.agent && !compact ? <AgentSessionSettings key={agentId} state={state} disabled={disabled} view={currentDraft.view} busy={busy}
+      {state?.agent && !compact ? <AgentSessionSettings key={agentId} state={state} disabled={disabled || forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
         onSelect={onSetSessionSetting} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : null}

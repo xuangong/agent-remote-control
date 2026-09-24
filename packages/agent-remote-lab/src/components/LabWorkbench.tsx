@@ -40,9 +40,9 @@ export interface LabWorkbenchActions {
   executeCommand?(id: string, args: string): Promise<AgentCommandResult>;
 }
 
-export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftBinding, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { draftBinding?: DraftBinding; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry, revealEntry, state, sessionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftBinding, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, consoleCommands, onExecuteConsoleCommand }: { readOnly?: boolean; draftBinding?: DraftBinding; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id);
-  const actions = sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
+  const actions: LabWorkbenchActions = readOnly ? {} : sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
   const recoveryPositions = useContext(RecoveryScope);
   const localPositions = useMemo(() => new Map(), []);
   const readingPositions = recoveryPositions ?? localPositions;
@@ -75,9 +75,9 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
   const recoveryNoticeDue = useRecoveryNotice(
     draftSessionKey ?? attachingAgentId ?? state?.agent?.id ?? '', sessionStatus,
     runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring',
-    visible && !runtimeError,
+    visible && !readOnly && !runtimeError,
   );
-  useFeedbackToast('Session runtime', visible ? runtimeError
+  useFeedbackToast('Session runtime', visible && !readOnly ? runtimeError
     ?? (recoveryNoticeDue ? runtimeNotice ?? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
     runtimeError ? 'error' : 'info');
   const activity = sessionActivity(state);
@@ -107,7 +107,7 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span>
     </header>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
-    <WorkbenchTimeline state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
+    <WorkbenchTimeline readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       agentFailure={agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
@@ -129,22 +129,23 @@ export function LabWorkbench({ compact = false, onInspectEntry, revealEntry, sta
         <div id={composerId} className="lab-composer-body" hidden={composerHidden}>
           <DraftComposer binding={draftBinding}
             compact={compact}
-            consoleCommands={sessionStatus === 'ready' ? consoleCommands : []}
-            onExecuteConsoleCommand={sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
+            readOnly={readOnly}
+            consoleCommands={!readOnly && sessionStatus === 'ready' ? consoleCommands : []}
+            onExecuteConsoleCommand={!readOnly && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
             sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
             state={state}
             sessionKey={draftSessionKey ?? state?.agent?.id}
             draftScope={recoveryPositions?.scope}
             visible={visible}
             activityVisible={visible && !composerHidden}
-            onSendMessageContent={suppliedFeedbackActions.sendMessageContent}
+            onSendMessageContent={readOnly ? undefined : suppliedFeedbackActions.sendMessageContent}
             onUploadImage={visible ? actions.uploadImage : undefined}
             draft={messageDraft}
             onDraftChange={onMessageDraftChange}
-            disabled={sessionStatus !== 'ready'}
+            disabled={readOnly || sessionStatus !== 'ready'}
             disabledLabel={activityLabel}
-            recovering={!runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
-            onSendMessage={suppliedFeedbackActions.sendMessage}
+            recovering={!readOnly && !runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
+            onSendMessage={readOnly ? undefined : suppliedFeedbackActions.sendMessage}
             onCancel={actions.cancel}
             onSetSessionSetting={actions.setSessionSetting}
             renderSessionSettingError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="permissions" /> : undefined}
@@ -193,9 +194,9 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId?: string): { 
   return { actions: reportedActions, reauthenticate: failure?.reauthenticate === true && failure.title !== 'Change session setting' };
 }
 
-const WorkbenchTimeline = memo(function WorkbenchTimeline({ state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
+const WorkbenchTimeline = memo(function WorkbenchTimeline({ readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
-  questionDrafts, onQuestionDraftChange }: Pick<Parameters<typeof LabWorkbench>[0], 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
+  questionDrafts, onQuestionDraftChange }: Pick<Parameters<typeof LabWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
     readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; agentFailure?: string;
     connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean;
   }) {
@@ -234,6 +235,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ state, sessionStatus
               resolveSessionLink={resolveSessionLink}
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
+              interactionsReadOnly={readOnly}
               interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
               onResourceRequest={actions.requestResource}
               onResourceResolve={actions.resolveResource}

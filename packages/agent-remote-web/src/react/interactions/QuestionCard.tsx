@@ -15,12 +15,13 @@ export interface QuestionCardProps {
   readonly request: Extract<AgentInteractionRequest, { kind: 'question' }>;
   readonly onResponse: (response: Extract<AgentInteractionResponse, { kind: 'question' }>) => Promise<void>;
   readonly pending: boolean;
+  readonly readOnly?: boolean;
   readonly failure?: string;
   readonly draft?: QuestionDraft;
   readonly onDraftChange?: (draft: QuestionDraft) => void;
 }
 
-export function QuestionCard({ request, onResponse, pending, failure, draft: controlledDraft, onDraftChange }: QuestionCardProps) {
+export function QuestionCard({ request, onResponse, pending, failure, readOnly = false, draft: controlledDraft, onDraftChange }: QuestionCardProps) {
   const [localDraft, setLocalDraft] = useState<QuestionDraft>({ answers: {} });
   const [error, setError] = useState<string>();
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
@@ -64,7 +65,7 @@ export function QuestionCard({ request, onResponse, pending, failure, draft: con
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (pending) return;
+    if (pending || readOnly) return;
     const missing = request.questions.findIndex((question) => question.required && !isAnswered(draft.answers[question.questionId]));
     if (missing >= 0) {
       navigate(missing);
@@ -82,7 +83,7 @@ export function QuestionCard({ request, onResponse, pending, failure, draft: con
 
   return <form className="agent-interaction agent-question" onSubmit={submit} aria-busy={pending}>
     <header><span className="agent-item-kicker">INPUT REQUIRED</span><h3>Agent questions</h3></header>
-    <div className="agent-question-tabs" role="tablist" aria-label="Questions">
+    <div hidden={readOnly} className="agent-question-tabs" role="tablist" aria-label="Questions">
       {request.questions.map((question, index) => <button
         key={question.questionId}
         ref={(element) => { tabsRef.current[index] = element; }}
@@ -106,8 +107,8 @@ export function QuestionCard({ request, onResponse, pending, failure, draft: con
         id={`${request.requestId}-${question.questionId}-panel`}
         role="tabpanel"
         aria-labelledby={`${request.requestId}-${question.questionId}-tab`}
-        hidden={activeIndex !== index}
-        disabled={pending}
+        hidden={!readOnly && activeIndex !== index}
+        disabled={pending || readOnly}
       >
         <legend>{question.header}</legend>
         <p>{question.prompt}</p>
@@ -136,7 +137,7 @@ export function QuestionCard({ request, onResponse, pending, failure, draft: con
       </fieldset>;
     })}
     {error ?? failure ? <p className="agent-form-error" role="alert">{error ?? failure}</p> : null}
-    <div className="agent-interaction-actions">
+    <div hidden={readOnly} className="agent-interaction-actions">
       {activeIndex > 0 ? <button type="button" disabled={pending} onClick={() => navigate(activeIndex - 1)}>Previous</button> : null}
       {activeIndex < request.questions.length - 1 ? <button type="button" disabled={pending} onClick={() => navigate(activeIndex + 1)}>Next</button> : null}
       <button type="submit" disabled={pending}>{pending ? 'Submitting…' : 'Submit response'}</button>

@@ -48,17 +48,44 @@ ardb inspect AGENT_ID --json
 
 Agent normalized events, interpreted by the Adapter and projected by the Relay, remain authoritative. A CLI operation is an intent; subscribed views receive its resulting state through their normal subscriptions. The debugger does not inject synthetic success into the page. Client-local pending inputs remain local until acknowledged and reconciled by the shared client.
 
-The server emits `source: relay` Replica records and `source: browser` / `kind: browser_trace` metadata. Browser records include client identity, connection state, protocol direction/channel/type and request ID; they omit message payloads, input values and resource bytes. This diagnostic channel is best-effort, bounded to 64 queued records, and reports dropped records after delivery resumes. Page shutdown may lose its final diagnostic batch. It never changes public operation outcomes. Use `observe`, `inspect` and `protocol trace` as independent clients for state assertions and detailed redacted protocol inspection. Output may include conversation content; JSONL is a debugging artifact, not a lossless replay log.
+The server emits `source: relay` Replica records and `source: browser` / `kind: browser_trace` metadata. Browser records include client identity, connection state, protocol direction/channel/type and request ID; they omit message payloads, input values and resource bytes. This diagnostic channel is best-effort, bounded to 64 queued records, and reports dropped records after delivery resumes. Page shutdown may lose its final diagnostic batch. It never changes public operation outcomes. Use `observe`, `inspect` and `protocol trace` as independent clients for state assertions and detailed redacted protocol inspection. Output may include conversation content. `server --jsonl` can be replayed as recorded Session View state; browser metadata is not used to drive playback.
 
 The server accepts only its exact loopback Host/Origin. It owns one session, so its public create/resume endpoints reject new sessions; start a separate server for another native session. SIGINT/SIGTERM gracefully stop the server and dispose its owned session and temporary images. Codex defaults to a private app-server; it does not restart or alter an existing shared daemon. Each Adapter remains responsible for terminating its native resources, including failed startup.
 
 A trusted local Adapter module exports `createAdapter()` returning an `AgentProviderAdapter`, optionally with an async `dispose()` for provider-wide resources. It is loaded only from CLI configuration. Native normalization, capabilities, history boundaries, controls and stdio ownership stay in that Adapter; ARDB does not reinterpret native messages.
+
+## Record and replay
+
+Keep `server` running in one terminal and use independent commands or the browser to interact with it:
+
+```bash
+ardb server --provider codex --open --jsonl > session.jsonl
+# Stop with Ctrl+C after the interaction you want to share.
+ardb replay session.jsonl --open
+```
+
+Replay starts paused with the captured baseline. Play/pause, playback speed (0.5× to 4×), a seek slider, restart and step-to-next-event controls help locate a specific moment. Events sharing a timestamp are applied in file order as one step. Playback pauses when its tab becomes hidden. **Open recording** in the toolbar loads another local JSONL file in the browser without uploading it. A valid file replaces the current recording and starts paused; an invalid file leaves the current recording intact and shows the error. The same product Timeline and composer render recorded state; input and operation controls are read-only. Replay does not create an Adapter, Relay, native process or WebSocket, and does not retry recorded commands.
+
+This is a **Session View event recording**, not a screen video. It captures the observer's loaded Timeline, Agent/runtime settings, interactions, resource metadata and connection status, with event timing. It does not capture typing drafts, pointer movements, scroll position, every token's native timing, browser-local send receipts, unavailable older history, or network frames. Browser trace metadata is retained for inspection but ignored during playback. Resource bodies, uploaded images and sensitive fields are not embedded; missing-resource notes appear in the player and it never contacts the original Host for those resources.
+
+New server recordings include versioned `recording_start` / `recording_end` markers. `server_ready` is emitted only after the recording subscriber has captured its initial baseline. Existing `observe --jsonl` and older server JSONL files using record schema 1.1.0 remain replayable; a note reports unknown completion when there is no closing marker. An unfinished last JSON line can be discarded with a visible warning. Malformed middle lines, unsupported versions, mixed sessions and missing baselines are rejected with actionable errors. Wall-clock regressions preserve file order and produce a warning. The initial loaded baseline is presented at time zero. The first version accepts files up to 64 MiB.
+
+To generate a repeatable demonstration from the repository:
+
+```bash
+pnpm --filter @orchardworks/agent-remote-debugger... run build
+node packages/agent-remote-debugger/scripts/record-demo.mjs /tmp/session.jsonl
+pnpm ardb replay /tmp/session.jsonl --open
+```
+
+The script refuses to overwrite an existing file. It drives separate CLI processes through a real loopback Relay and a deterministic stdio test Agent: send a message, change reasoning effort, request and answer approval, cancel active work, then send a final message. It has bounded waits and shuts down only its own processes. This demonstrates transport and renderer behavior, not authenticated Codex/Claude/Copilot behavior. The recorder script is repository tooling; the built `replay` command and its assets are included in the debugger package.
 
 ## Current capabilities
 
 | Command | Current behavior |
 | --- | --- |
 | `server` | Owns a local Relay/session and serves the product Timeline + Chatbox; emits Replica records and browser protocol metadata. |
+| `replay <session.jsonl>` | Replays recorded state in the product Session View without connecting to an Agent. |
 | `settings list/set` | Lists native session settings or changes a declared setting through the shared client. Values are Provider-defined. |
 | `provider list` | Lists Providers exposed by the Relay. This is not Host or native session discovery. |
 | `session create` | Creates through the Relay with a Provider and optional native session ID, working directory, model, reasoning effort, system prompt and planning preference. Availability depends on the Relay and Provider. |
@@ -113,6 +140,7 @@ Use `--until idle`, `--until interaction`, or `--until failed` to make a stream 
 ardb
 |-- server --provider <codex|claude|copilot> [--open]
 |-- server --adapter <module-path> [--open]
+|-- replay <session.jsonl> [--open]
 |-- settings list <agent-id>
 |-- settings set <agent-id> <setting-id> <value>
 |-- provider list
@@ -148,7 +176,7 @@ One-shot commands support `text` or `json`; streaming commands support `text` or
 | `3` | Relay connection or authorization failed. |
 | `4` | The public protocol rejected the operation or validation failed. |
 | `5` | The requested condition or command timed out. |
-| `130` | A client command received SIGINT. `server` exits successfully after graceful SIGINT/SIGTERM cleanup. |
+| `130` | A client command received SIGINT. `server` and `replay` exit successfully after graceful SIGINT/SIGTERM cleanup. |
 
 Structured errors identify a stable code, message, and recoverability independently of the exit category.
 
@@ -164,13 +192,13 @@ A DSH image attachment is Provider-native input that the DSH adapter recognizes 
 
 The following are not implemented CLI features:
 
-- Native raw-event recording and offline recording replay. The command is `server`, not `serve`; native process/stdin/stdout handling remains owned by the selected Adapter.
+- Native raw-event recording and re-execution of recorded operations. The command is `server`, not `serve`; native process/stdin/stdout handling remains owned by the selected Adapter.
 - A unified scenario runner, test-profile format, fault-injection controls, or regression report command. Existing package tests exercise the CLI; they are not an `ardb test` user command.
 - Host pairing/catalog, native session listing, directory/child attachment or controller lifecycle management. An already bound child can be addressed by public Agent ID within its capabilities.
 - Provider command discovery/execution, CLI image input or explicit next-turn delivery. Use existing product/headless APIs where supported; slash text is not equivalent to a typed command operation.
 - Browser DOM/layout control from the CLI. The served view reports bounded protocol metadata; it does not export a lossless transport capture.
 
-JSONL can be saved for inspection, but it is not a lossless replay format: sensitive values and resource content are redacted. Real CLI integration and adapter normalization still need their own native/transport tests.
+Session-state playback preserves redaction and does not embed resource bodies. It is not a lossless network or screen recording. Real CLI integration and adapter normalization still need their own native/transport tests.
 
 ## Verification
 

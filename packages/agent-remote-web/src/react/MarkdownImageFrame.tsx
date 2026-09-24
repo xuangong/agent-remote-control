@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Ref } from 'react';
 import type { ImageDimensions } from '@orchardworks/agent-remote-protocol';
 
-export function MarkdownImageFrame({ src, alt, dimensions, failure }: {
+export function MarkdownImageFrame({ src, alt, dimensions, failure, frameRef }: {
   readonly src?: string;
   readonly alt: string;
   readonly dimensions?: ImageDimensions;
   readonly failure?: string;
+  readonly frameRef?: Ref<HTMLSpanElement>;
 }) {
   const [retainedDimensions, setRetainedDimensions] = useState(dimensions);
   const [decoded, setDecoded] = useState<{ src: string; failed: boolean }>();
@@ -15,6 +16,7 @@ export function MarkdownImageFrame({ src, alt, dimensions, failure }: {
   const reason = failure ?? (result?.failed ? 'The image could not be decoded.' : undefined);
   const state = reason ? 'failed' : src && result ? 'loaded' : 'loading';
   return <span
+    ref={frameRef}
     className={`agent-markdown-image${size ? ' agent-markdown-image-sized' : ''}`}
     data-image-state={state}
     aria-busy={state === 'loading'}

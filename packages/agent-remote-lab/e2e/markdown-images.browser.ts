@@ -13,6 +13,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     onPreviewCleanup(() => rm(workspace, { recursive: true, force: true }));
     const png = await readFile(new URL('./fixtures/markdown-wide.png', import.meta.url));
     await writeFile(join(workspace, 'wide.png'), png);
+    await writeFile(join(workspace, 'far.png'), png);
     await writeFile(join(workspace, 'broken.png'), png.subarray(0, 33));
     const css = await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
     let browserScript = '';
@@ -37,9 +38,11 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       function View() {
         const state = useSyncExternalStore(callback => replica.subscribe(callback), () => replica.getState());
         const [file, setFile] = useState('wide.png');
+        const [distant, setDistant] = useState(false);
+        window.showDistant = () => { setFile('far.png'); setDistant(true); };
         window.showBroken = () => setFile('broken.png');
         const context = useMemo(() => ({ scopeKey: state.agent.id, bindings: [], resources: state.resources, resolveResource, requestResource }), [state.resources]);
-        return <><MarkdownContent markdown={'![Layout fixture](./' + file + ')'} resourceContext={context} /><p id="after">Text below the image must stay in place.</p></>;
+        return <><div style={{ height: distant ? 6000 : 0 }} /><MarkdownContent markdown={'![Layout fixture](./' + file + ')'} resourceContext={context} /><p id="after">Text below the image must stay in place.</p></>;
       }
       const root = createRoot(document.getElementById('root'));
       client.subscribeStatus(status => { if (status === 'ready') root.render(<View />); });
@@ -98,6 +101,16 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     expect(await frame.innerText()).toContain('Image unavailable');
     expect(await frame.evaluate(node => getComputedStyle(node, '::before').animationName)).toBe('none');
     await page.screenshot({ path: join(tmpdir(), `arc-image-failed-${engine.name()}-${width}.png`) });
+    const resolvedBefore = metadata.length;
+    await page.evaluate(() => (window as any).showDistant());
+    await page.waitForTimeout(300);
+    expect(deliveries).toHaveLength(0);
+    expect(metadata).toHaveLength(resolvedBefore);
+    await frame.scrollIntoViewIfNeeded();
+    await expect.poll(() => deliveries.length).toBe(1);
+    deliveries.shift()!();
+    await page.waitForFunction(() => document.querySelector('[data-image-state="loaded"]'));
+    expect(await frame.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
     expect(errors).toEqual([]);
   });
 }

@@ -1,0 +1,178 @@
+{
+  "browser": "151.0.7922.34",
+  "runs": 3,
+  "cpuSlowdown": 4,
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "results": [
+    {
+      "count": 100,
+      "run": 0,
+      "updates": 40,
+      "elapsedMs": 3165,
+      "movements": [
+        -1892,
+        1724
+      ],
+      "taskMs": 480.447,
+      "scriptMs": 288.31600000000003,
+      "layoutMs": 39.092,
+      "styleMs": 2.106,
+      "frameP95Ms": 35.5,
+      "maxFrameMs": 52.09999999999991
+    },
+    {
+      "count": 100,
+      "run": 1,
+      "updates": 40,
+      "elapsedMs": 3221,
+      "movements": [
+        -1912,
+        1743
+      ],
+      "taskMs": 410.215,
+      "scriptMs": 239.131,
+      "layoutMs": 44.195,
+      "styleMs": 0.23900000000000002,
+      "frameP95Ms": 37,
+      "maxFrameMs": 46.19999999999982
+    },
+    {
+      "count": 100,
+      "run": 2,
+      "updates": 40,
+      "elapsedMs": 3240,
+      "movements": [
+        -1912,
+        1722
+      ],
+      "taskMs": 371.35799999999995,
+      "scriptMs": 233.78799999999998,
+      "layoutMs": 33.381,
+      "styleMs": 3.351,
+      "frameP95Ms": 35.09999999999991,
+      "maxFrameMs": 43.600000000000364
+    },
+    {
+      "count": 1000,
+      "run": 0,
+      "updates": 40,
+      "elapsedMs": 3371,
+      "movements": [
+        -1914,
+        1735
+      ],
+      "taskMs": 2398.914,
+      "scriptMs": 1675.663,
+      "layoutMs": 139.263,
+      "styleMs": 3.4949999999999997,
+      "frameP95Ms": 73.30000000000018,
+      "maxFrameMs": 98.90000000000009
+    },
+    {
+      "count": 1000,
+      "run": 1,
+      "updates": 40,
+      "elapsedMs": 3457,
+      "movements": [
+        -1920,
+        1731
+      ],
+      "taskMs": 2311.1970000000006,
+      "scriptMs": 1583.6589999999999,
+      "layoutMs": 139.606,
+      "styleMs": 3.601,
+      "frameP95Ms": 74.40000000000009,
+      "maxFrameMs": 107
+    },
+    {
+      "count": 1000,
+      "run": 2,
+      "updates": 40,
+      "elapsedMs": 3424,
+      "movements": [
+        -1922,
+        1719
+      ],
+      "taskMs": 2457.1130000000003,
+      "scriptMs": 1709.689,
+      "layoutMs": 157.28400000000002,
+      "styleMs": 0.465,
+      "frameP95Ms": 81.70000000000073,
+      "maxFrameMs": 92.90000000000009
+    },
+    {
+      "count": 3000,
+      "run": 0,
+      "updates": 40,
+      "elapsedMs": 6801,
+      "movements": [
+        -1919,
+        1747
+      ],
+      "taskMs": 6774.734,
+      "scriptMs": 4689.501,
+      "layoutMs": 460.718,
+      "styleMs": 0,
+      "frameP95Ms": 222.79999999999973,
+      "maxFrameMs": 247.5
+    },
+    {
+      "count": 3000,
+      "run": 1,
+      "updates": 40,
+      "elapsedMs": 6789,
+      "movements": [
+        -1888,
+        1740
+      ],
+      "taskMs": 6783.182,
+      "scriptMs": 4650.255,
+      "layoutMs": 459.59299999999996,
+      "styleMs": 0,
+      "frameP95Ms": 218.4000000000001,
+      "maxFrameMs": 231.30000000000018
+    },
+    {
+      "count": 3000,
+      "run": 2,
+      "updates": 40,
+      "elapsedMs": 6760,
+      "movements": [
+        -1913,
+        1755
+      ],
+      "taskMs": 6724.8460000000005,
+      "scriptMs": 4620.014,
+      "layoutMs": 438.367,
+      "styleMs": 0,
+      "frameP95Ms": 220.19999999999982,
+      "maxFrameMs": 238.39999999999964
+    }
+  ],
+  "medians": [
+    {
+      "count": 100,
+      "taskMs": 410.215,
+      "scriptMs": 239.131,
+      "frameP95Ms": 35.5,
+      "elapsedMs": 3221
+    },
+    {
+      "count": 1000,
+      "taskMs": 2398.914,
+      "scriptMs": 1675.663,
+      "frameP95Ms": 74.40000000000009,
+      "elapsedMs": 3424
+    },
+    {
+      "count": 3000,
+      "taskMs": 6774.734,
+      "scriptMs": 4650.255,
+      "frameP95Ms": 220.19999999999982,
+      "elapsedMs": 6789
+    }
+  ]
+}

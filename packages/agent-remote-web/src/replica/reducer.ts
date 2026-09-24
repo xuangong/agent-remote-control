@@ -394,7 +394,7 @@ function coalesceEntry(
   entries: readonly ProjectedTimelineEntry[],
   incoming: ProjectedTimelineEntry,
 ): ProjectedTimelineEntry[] {
-  const next = entries.map((entry) => clone(entry));
+  const next = entries.slice();
   const incomingItem = incoming.item;
   if (incomingItem.type === 'assistant_message') {
     const previous = next.at(-1);
@@ -403,15 +403,17 @@ function coalesceEntry(
       && sameContext(previous, incoming)
       && previous.item.messageId === incomingItem.messageId
     ) {
-      previous.item.text += incomingItem.text;
-      extendEntry(previous, incoming, 'assistant_merge');
+      const updated = { ...previous, item: { ...previous.item, text: previous.item.text + incomingItem.text }, collapsed: [...previous.collapsed] };
+      extendEntry(updated, incoming, 'assistant_merge');
+      next[next.length - 1] = updated;
       return next;
     }
   } else if (incomingItem.type === 'reasoning') {
     const previous = next.at(-1);
     if (previous?.item.type === 'reasoning' && sameContext(previous, incoming)) {
-      previous.item.text += incomingItem.text;
-      extendEntry(previous, incoming, 'reasoning_merge');
+      const updated = { ...previous, item: { ...previous.item, text: previous.item.text + incomingItem.text }, collapsed: [...previous.collapsed] };
+      extendEntry(updated, incoming, 'reasoning_merge');
+      next[next.length - 1] = updated;
       return next;
     }
   } else if (incomingItem.type === 'tool_call') {
@@ -421,8 +423,9 @@ function coalesceEntry(
       && entry.item.callId === incomingItem.callId
     ));
     if (existing) {
-      existing.item = clone(incomingItem);
-      extendEntry(existing, incoming, 'tool_lifecycle');
+      const updated = { ...existing, item: incomingItem, collapsed: [...existing.collapsed] };
+      extendEntry(updated, incoming, 'tool_lifecycle');
+      next[next.indexOf(existing)] = updated;
       return sortEntries(next);
     }
   } else if (incomingItem.type === 'todo') {
@@ -435,12 +438,13 @@ function coalesceEntry(
       }
     }
     if (existing) {
-      existing.item = clone(incomingItem);
-      extendEntry(existing, incoming);
+      const updated = { ...existing, item: incomingItem, collapsed: [...existing.collapsed] };
+      extendEntry(updated, incoming);
+      next[next.indexOf(existing)] = updated;
       return sortEntries(next);
     }
   }
-  next.push(clone(incoming));
+  next.push(incoming);
   return sortEntries(next);
 }
 
@@ -466,7 +470,7 @@ function mergeAuthoritative(
   const replaced = existing.filter((entry) => (
     !authoritative.some((candidate) => rangesOverlap(entry.sourceSeqRanges, candidate.sourceSeqRanges))
   ));
-  return sortEntries([...replaced.map(clone), ...authoritative.map(clone)]);
+  return sortEntries([...replaced, ...authoritative.map(clone)]);
 }
 
 function rangesOverlap(

@@ -43,7 +43,11 @@ function Fixture() {
   }, []);
   return <RecoveryScope.Provider value={positions}><div style={{ height: '100dvh' }}><LabWorkbench key={generation} state={state} sessionStatus="ready" actions={{
     sendMessage: async () => {},
-    resolveResource: async () => { await metadataReady; return binding; },
+    resolveResource: async () => {
+      document.documentElement.dataset.imageRequested = 'true';
+      await metadataReady;
+      return binding;
+    },
     requestResource: () => transfer,
   }} /></div></RecoveryScope.Provider>;
 }

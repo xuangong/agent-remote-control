@@ -217,3 +217,21 @@ test('timestamps follow the desktop breakpoint without affecting mobile titles',
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
 });
+
+test('uses one native swipe listener per timeline as history grows', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'Touch gesture');
+  await page.addInitScript(() => {
+    const add = EventTarget.prototype.addEventListener;
+    (window as any).swipeListeners = 0;
+    EventTarget.prototype.addEventListener = function (type: string, ...args: any[]) {
+      if (type === 'touchmove' && this instanceof Element && this.matches('.agent-timeline-entry, .agent-timeline-entries')) (window as any).swipeListeners++;
+      return (add as any).call(this, type, ...args);
+    };
+  });
+  await page.goto('/e2e/fixtures/timeline-time.html');
+  await expect(page.locator('.agent-timeline-entry')).toHaveCount(17);
+  expect(await page.evaluate(() => (window as any).swipeListeners)).toBe(1);
+  await page.getByRole('button', { name: 'Open Side conversation' }).click();
+  await expect(page.locator('[data-entry-key="side:codex:1:side"]')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).swipeListeners)).toBe(2);
+});

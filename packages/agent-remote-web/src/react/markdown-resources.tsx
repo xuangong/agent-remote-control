@@ -4,6 +4,7 @@ import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { FilePreviewContext } from './FilePreviewContext.js';
 import { MarkdownImageFrame } from './MarkdownImageFrame.js';
 import { canPreviewImage } from './ResourceCard.js';
+import { useNearViewport } from './useNearViewport.js';
 
 export type { MarkdownResourceContext } from './local-resource.js';
 import { cachedLocalResourceBinding, loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
@@ -61,6 +62,7 @@ export function MarkdownResourceImage({
     ? imageNode.data.localResourceLocator
     : undefined;
   const key = JSON.stringify([context?.scopeKey, locator, sourceLocator]);
+  const { ref: frameRef, near } = useNearViewport(key);
   const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string }>();
   const binding = (result?.key === key ? result.binding : undefined)
     ?? (context && locator ? cachedLocalResourceBinding(context, locator, sourceLocator) : undefined);
@@ -68,7 +70,7 @@ export function MarkdownResourceImage({
 
   useEffect(() => {
     let current = true;
-    if (!locator || !context) return () => { current = false; };
+    if (!near || !locator || !context) return () => { current = false; };
     void loadLocalResource(context, locator, sourceLocator, (resolved) => {
       if (current) setResult({ key, binding: resolved });
     }).catch((error: unknown) => {
@@ -76,7 +78,7 @@ export function MarkdownResourceImage({
         failure: error instanceof Error && error.message ? error.message : 'Image resource is unavailable.' }));
     });
     return () => { current = false; };
-  }, [context, key, locator, sourceLocator]);
+  }, [context, key, locator, sourceLocator, near]);
 
   if (!locator || !context) return <span>{alt}</span>;
   const detail = binding ? context.resources[binding.resourceId] : undefined;
@@ -86,7 +88,7 @@ export function MarkdownResourceImage({
     : detail?.status === 'failed' ? detail.message
     : binding?.status === 'unavailable' ? 'Image resource is unavailable.'
     : detail?.status === 'available' && !canPreviewImage(detail.mediaType) ? 'This resource is not a supported image.' : undefined);
-  const frame = <MarkdownImageFrame key={key} src={src} alt={alt ?? locator} failure={reason}
+  const frame = <MarkdownImageFrame key={key} frameRef={frameRef} src={src} alt={alt ?? locator} failure={reason}
     dimensions={detail?.status === 'available' ? detail.imageDimensions : undefined} />;
   return preview && !imageNode?.data?.linked ? <button type="button" className="agent-resource-image-open" aria-label={`Open image: ${alt ?? locator}`}
     onClick={() => preview.open({ locator, sourceLocator, context })}>{frame}</button> : frame;

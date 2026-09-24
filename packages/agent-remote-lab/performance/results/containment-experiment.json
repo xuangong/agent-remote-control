@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "engine": "chromium",
+      "browser": "151.0.7922.34",
+      "containment": false,
+      "count": 1000,
+      "before": {
+        "top": 27.03125,
+        "text": "The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position.",
+        "height": 316510
+      },
+      "after": {
+        "top": 27.03125,
+        "height": 316510
+      },
+      "anchorDriftPx": 0
+    },
+    {
+      "engine": "chromium",
+      "browser": "151.0.7922.34",
+      "containment": true,
+      "count": 1000,
+      "before": {
+        "top": 94.78125,
+        "text": "The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position.",
+        "height": 366800
+      },
+      "after": {
+        "top": 93.78125,
+        "height": 366800
+      },
+      "anchorDriftPx": -1
+    },
+    {
+      "engine": "webkit",
+      "browser": "26.5",
+      "containment": false,
+      "count": 1000,
+      "before": {
+        "top": 18.015625,
+        "text": "The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position.",
+        "height": 316493
+      },
+      "after": {
+        "top": 39.015625,
+        "height": 316493
+      },
+      "anchorDriftPx": 21
+    },
+    {
+      "engine": "webkit",
+      "browser": "26.5",
+      "containment": true,
+      "count": 1000,
+      "before": {
+        "top": -120.203125,
+        "text": "The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position.",
+        "height": 367416
+      },
+      "after": {
+        "top": -56.203125,
+        "height": 367416
+      },
+      "anchorDriftPx": 64
+    }
+  ]
+}

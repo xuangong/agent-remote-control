@@ -89,3 +89,47 @@ Three-run medians with Chromium 151.0.7922.34. Baseline: `f5feb3aa8fabb1b2d90f47
 | 3,000 | down | 738.7 / 159.2 | 511.6 / 15.8 | 50.5 / 37.7 |
 
 Validation for this change: 16 scroll-hook unit cases, 8 Chromium/WebKit anchor cases, 8 Markdown reading cases, 12 timestamp interaction cases, and 24 mobile viewport cases passed (68 total; 7 platform-specific cases skipped). Workspace Relay build, Web/Lab typechecks, compatibility update/check, and whitespace checks passed. Real-device iPhone acceptance remains separate.
+
+
+## Streaming long conversations
+
+The next optimization keeps unchanged projected entries by reference, copies only the entry being coalesced, and memoizes the complete conversation row. History replacement still clones authoritative incoming data. Tests freeze prior snapshots and verify assistant, reasoning, tool, todo, append, and earlier-history behavior. Renderer extensions are still evaluated by the timeline so registry changes are not hidden by row memoization. Event-only callbacks retain stable identities and invoke the latest committed handler; callbacks retained across session-scope changes, removal, or unmount are rejected. Render-time link and child resolvers remain reactive on rows that use them. The row-isolation test recreates App-like callbacks during updates and checks that an unchanged row still invokes the latest action.
+
+Timestamp gestures now share one set of native listeners per timeline, with one active reveal. Code/table scrolling, vertical gestures, selection, screen-edge navigation, and edit actions keep their existing behavior. Local Markdown images resolve/request Host resources only after approaching within 1,200px of their scroll viewport. Images share an intersection observer per scroll container; already loaded bytes and dimensions remain available when scrolling away. Browsers without IntersectionObserver keep eager loading. This does not evict resource bytes or virtualize conversation text.
+
+After building the workspace, run from `packages/agent-remote-lab`:
+
+```sh
+pnpm exec vite build --config performance/vite.config.ts
+node performance/streaming.mjs > performance/results/streaming-optimized.json
+node performance/streaming.mjs .tmp/streaming-baseline-build > performance/results/streaming-baseline.json
+```
+
+This fixture uses the real AgentReplica and LabWorkbench, excluding the surrounding App/account/transport layers. It loads 100/1,000/3,000 messages and applies 40 assistant deltas at 75ms intervals while performing real touch gestures 1,800px up and down. Three fresh-page runs use a 390 x 844 viewport and 4x CPU slowdown. The runner waits for all deltas to render and rejects gestures moving less than 1,000px. It has a five-minute outer deadline and 45-second action deadlines. The baseline build is `db7b0aa79c135dfd36f14da14df3e1b59cd81935`; the candidate is the commit containing these results on `perf/streaming-timeline`.
+
+Three-run medians with Chromium 151.0.7922.34 (milliseconds):
+
+| Loaded entries | Task before / after | Script before / after | rAF interval p95 before / after |
+| --- | ---: | ---: | ---: |
+| 100 | 410.2 / 254.3 | 239.1 / 109.7 | 35.5 / 37.6 |
+| 1,000 | 2,398.9 / 722.9 | 1,675.7 / 216.1 | 74.4 / 38.4 |
+| 3,000 | 6,774.7 / 1,824.0 | 4,650.3 / 506.6 | 220.2 / 59.1 |
+
+The 3,000-message workload uses 73.1% less cumulative main-thread task time and 89.1% less script time. Elapsed time decreases from 6,789ms to 3,349ms, close to the scheduled stream duration. These are synthetic scaling results, not iPhone frame rates or measured input latency. DOM size, layout, paint, and render-model traversal still grow with loaded history. One candidate run still recorded a 426ms maximum rAF interval; reduced work does not guarantee that every frame is smooth.
+
+The full-App static scroll runner was also repeated. At 3,000 entries, contemporary baseline / candidate median task times were 191.3 / 190.5ms upward and 171.9 / 189.0ms downward; script times were 24.3 / 18.0ms and 14.3 / 13.1ms. Downward total-task samples overlap (baseline 150.9-194.3ms, candidate 170.4-192.1ms); rAF p95 stayed around 35-37ms. These static samples preceded final event-handler identity hardening. This change primarily improves streaming work, and does not claim an additional static-scroll speedup. Raw data are `results/scroll-streaming-baseline.json` and `results/scroll-streaming-optimized.json`.
+
+### Containment experiment: not enabled
+
+`node performance/containment.mjs` compares the existing renderer with an experimental per-entry `content-visibility: auto; contain-intrinsic-size: auto 360px` rule injected before page startup. With 1,000 entries it reads the midpoint, rotates the viewport twice, and records the same paragraph's position. A three-minute outer deadline and 30-second action deadlines bound the probe. No production stylesheet uses this rule.
+
+The initial Chromium probe showed 0px drift without containment and -1px with it. WebKit 26.5 showed 21px without containment and 64px with it; estimated document height also changed from about 316,500px to 367,000px. This is an exploratory paragraph-position sample, not a complete character-anchor acceptance test. It demonstrates that enabling containment is not a proven drop-in change for this layout. Grouped containment, dynamic height estimates, selection, browser find, and restoration would need separate design and validation. The experiment remains disabled; raw results are in `results/containment-experiment.json`.
+
+### Validation
+
+- Web: 46 files / 385 tests passed, including reference preservation, row update isolation, existing-row actions, observer identity changes, cleanup, and no-observer fallback.
+- Real Relay image and browser reading-anchor tests: 12 passed across Chromium/WebKit, including distant resources staying unrequested until approached.
+- Timestamp interaction tests: 13 passed, 7 platform-specific skips; listener count stays one per timeline.
+- Markdown reading: 8 passed, 1 platform-specific skip. The delayed-image fixture first approaches the image to start its request, then reads below it before metadata arrives, matching lazy request behavior.
+- Mobile viewport: 24 passed across Chromium/WebKit, covering keyboard recovery and orientation changes.
+- Relay build, Web/Lab typechecks, compatibility metadata update/check, and whitespace checks passed. No production service, Controller, or daemon was changed.

@@ -404,3 +404,47 @@ describe('agent replica reducer', () => {
     expect(liveState.resources).toEqual({ [replacement.resourceId]: terminal });
   });
 });
+
+describe('incremental timeline identity', () => {
+  const cases: [string, ProjectedTimelineEntry['item'], ProjectedTimelineEntry['item']][] = [
+    ['assistant', { type: 'assistant_message', messageId: 'reply', text: 'First ' }, { type: 'assistant_message', messageId: 'reply', text: 'second' }],
+    ['reasoning', { type: 'reasoning', text: 'First ' }, { type: 'reasoning', text: 'second' }],
+    ['tool', { type: 'tool_call', callId: 'call', name: 'read', status: 'running', detail: { type: 'read', filePath: '/file' }, error: null },
+      { type: 'tool_call', callId: 'call', name: 'read', status: 'completed', detail: { type: 'read', filePath: '/file' }, error: null }],
+    ['todo', { type: 'todo', items: [{ text: 'Check', completed: false }] },
+      { type: 'todo', items: [{ text: 'Check', completed: true }] }],
+  ];
+  function freeze(value: unknown): void {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) return;
+    Object.freeze(value);
+    for (const child of Object.values(value)) freeze(child);
+  }
+  it.each(cases)('updates %s without copying unrelated history or mutating a prior snapshot', (_, first, second) => {
+    const old = applyHistoryPage(createReplicaState(), page('tail', [
+      entry(1, 1, { type: 'user_message', text: 'Question' }), entry(2, 2, first),
+    ])).state;
+    const original = structuredClone(old);
+    freeze(old);
+    const message = stream(3, second);
+    const updated = reduceTimelineEvent(old, message).state;
+    expect(updated.timeline.entries[0]).toBe(old.timeline.entries[0]);
+    expect(updated.timeline.entries[1]).not.toBe(old.timeline.entries[1]);
+    expect(updated.timeline.entries[1]!.seqEnd).toBe(3);
+    expect(updated.timeline.entries[1]!.sourceSeqRanges).toEqual([{ startSeq: 2, endSeq: 3 }]);
+    expect(old).toEqual(original);
+    expect(reduceTimelineEvent(updated, message).state).toBe(updated);
+    if (second.type === 'assistant_message' || second.type === 'reasoning') {
+      expect(updated.timeline.entries[1]!.item).toMatchObject({ text: 'First second' });
+    } else expect(updated.timeline.entries[1]!.item).toEqual(second);
+  });
+  it('preserves existing entries when appending messages or loading earlier history', () => {
+    const old = applyHistoryPage(createReplicaState(), page('tail', [entry(5, 5, { type: 'user_message', text: 'Question' })])).state;
+    freeze(old);
+    const appended = reduceTimelineEvent(old, stream(6, { type: 'assistant_message', text: 'Answer' })).state;
+    expect(appended.timeline.entries[0]).toBe(old.timeline.entries[0]);
+    const earlier = applyHistoryPage(appended, page('before', [entry(1, 1, { type: 'user_message', text: 'Earlier' })])).state;
+    expect(earlier.timeline.entries[1]).toBe(old.timeline.entries[0]);
+    expect(earlier.timeline.entries[2]).toBe(appended.timeline.entries[1]);
+    expect(earlier.timeline.entries.map(entry => entry.seqStart)).toEqual([1, 5, 6]);
+  });
+});

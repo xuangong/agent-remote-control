@@ -1,0 +1,111 @@
+{
+  "browser": "151.0.7922.34",
+  "runs": 3,
+  "cpuSlowdown": 4,
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "results": [
+    {
+      "count": 3000,
+      "run": 0,
+      "direction": "up",
+      "scrollBefore": -448899,
+      "scrollAfter": -450700,
+      "taskMs": 191.30700000000002,
+      "scriptMs": 24.332,
+      "layoutMs": 0,
+      "styleMs": 0,
+      "frames": 82,
+      "frameP95Ms": 35.80000000000018,
+      "maxFrameMs": 45.59999999999991
+    },
+    {
+      "count": 3000,
+      "run": 0,
+      "direction": "down",
+      "scrollBefore": -450700,
+      "scrollAfter": -448892,
+      "taskMs": 150.92600000000002,
+      "scriptMs": 8.477000000000002,
+      "layoutMs": 0,
+      "styleMs": 0,
+      "frames": 73,
+      "frameP95Ms": 36.900000000000546,
+      "maxFrameMs": 43.5
+    },
+    {
+      "count": 3000,
+      "run": 1,
+      "direction": "up",
+      "scrollBefore": -448899,
+      "scrollAfter": -450705,
+      "taskMs": 308.91599999999994,
+      "scriptMs": 23.969,
+      "layoutMs": 0,
+      "styleMs": 0,
+      "frames": 85,
+      "frameP95Ms": 35.09999999999991,
+      "maxFrameMs": 50
+    },
+    {
+      "count": 3000,
+      "run": 1,
+      "direction": "down",
+      "scrollBefore": -450705,
+      "scrollAfter": -448896,
+      "taskMs": 194.31499999999997,
+      "scriptMs": 18.879,
+      "layoutMs": 0,
+      "styleMs": 0,
+      "frames": 79,
+      "frameP95Ms": 35.900000000000546,
+      "maxFrameMs": 38.19999999999982
+    },
+    {
+      "count": 3000,
+      "run": 2,
+      "direction": "up",
+      "scrollBefore": -448899,
+      "scrollAfter": -450698,
+      "taskMs": 185.18,
+      "scriptMs": 25.145999999999997,
+      "layoutMs": 0,
+      "styleMs": 0,
+      "frames": 88,
+      "frameP95Ms": 34.40000000000009,
+      "maxFrameMs": 39.5
+    },
+    {
+      "count": 3000,
+      "run": 2,
+      "direction": "down",
+      "scrollBefore": -450698,
+      "scrollAfter": -448891,
+      "taskMs": 171.93399999999997,
+      "scriptMs": 14.275999999999996,
+      "layoutMs": 0,
+      "styleMs": 0,
+      "frames": 80,
+      "frameP95Ms": 35.099999999999454,
+      "maxFrameMs": 37.80000000000018
+    }
+  ],
+  "medians": [
+    {
+      "count": 3000,
+      "direction": "up",
+      "taskMs": 191.30700000000002,
+      "scriptMs": 24.332,
+      "frameP95Ms": 35.09999999999991
+    },
+    {
+      "count": 3000,
+      "direction": "down",
+      "taskMs": 171.93399999999997,
+      "scriptMs": 14.275999999999996,
+      "frameP95Ms": 35.900000000000546
+    }
+  ]
+}

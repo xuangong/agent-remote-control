@@ -43,6 +43,9 @@ test('keeps the visible paragraph steady when an earlier image in the same reply
   const timeline = page.getByTestId('timeline');
   const paragraph = page.locator('.agent-markdown p').filter({ hasText: /^Paragraph 10\./ });
   await timeline.dispatchEvent('wheel', { deltaY: -1 });
+  // Start the delayed request by reading near the image before continuing below it.
+  await page.locator('.agent-markdown-image').scrollIntoViewIfNeeded();
+  await expect(page.locator('html')).toHaveAttribute('data-image-requested', 'true');
   await paragraph.evaluate(node => {
     const viewport = node.closest('.lab-timeline-scroll')!;
     viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 4;

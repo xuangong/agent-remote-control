@@ -10,15 +10,16 @@ import type { SessionLinkResolver } from './items/ToolCallItem.js';
 import { AgentChildSessionList, type AgentChildSessionView } from './AgentChildSessionList.js';
 import { InteractionPanel } from './InteractionPanel.js';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
-import { ResourceList } from './ResourceList.js';
 import type { RendererRegistry } from './renderer-registry.js';
-import { TimelineItemRenderer } from './TimelineItemRenderer.js';
+import { ConversationEntry } from './ConversationEntry.js';
 import { createTimelineRenderModel } from './timeline-render-model.js';
-import { PreviewActions, type PreviewController } from './PreviewActions.js';
+import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
-import { TimelineEntry } from './TimelineEntry.js';
 import { TimelineDisplay, isContentOnlyItem } from './TimelineDisplay.js';
+import { useTimelineAction } from './useTimelineAction.js';
+
+const noChildren: readonly AgentChildSessionView[] = [];
 
 export type AgentTimelineState = AgentReplicaState;
 
@@ -72,6 +73,11 @@ export function AgentTimeline({
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
   const contentOnly = useContext(TimelineDisplay) === 'content';
+  const scopeKey = JSON.stringify([state.agent?.id, state.timeline.epoch]);
+  const editPrompt = useTimelineAction(scopeKey, onEditPrompt);
+  const inspectEntry = useTimelineAction(scopeKey, onInspectEntry);
+  const resolveResource = useTimelineAction(scopeKey, onResourceResolve);
+  const requestResource = useTimelineAction(scopeKey, onResourceRequest);
   const entries = useMemo(() => contentOnly ? state.timeline.entries.filter(({ item }) => isContentOnlyItem(item)) : state.timeline.entries, [contentOnly, state.timeline.entries]);
   const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
@@ -122,21 +128,17 @@ export function AgentTimeline({
     <div className="agent-timeline-entries" aria-live="polite">
       {renderModel.length === 0 && outgoing.length === 0
         ? <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
-        : renderModel.map(({ entry, key, messageGroup }) => <TimelineEntry key={key} entryKey={key}
-            onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
-            timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
-            inspected={inspectedEntryKey === key} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(key) : undefined}>
-            <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
-              resources={state.resources} resourceBindings={entry.resources}
-              resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch])}
-              onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
-            {previews && state.agent?.id && isContentOnlyItem(entry.item) ? <PreviewActions agentId={state.agent.id} itemId={key} text={previewText(entry.item)} controller={previews} /> : null}
-            {!contentOnly ? <>
-              {registry?.render(entry.item)}
-              <ResourceList bindings={entry.resources} resources={state.resources} onRequest={onResourceRequest} />
-              <AgentChildSessionList childrenFor={childrenFor} children={childrenByReply.get(key) ?? []} onOpenChildSession={onOpenChildSession} />
-            </> : null}
-          </TimelineEntry>)}
+        : renderModel.map(({ entry, key, messageGroup }) => <ConversationEntry key={key} entry={entry} entryKey={key}
+            messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
+            scopeKey={scopeKey} resources={state.resources}
+            onEditPrompt={entry.item.type === 'user_message' ? editPrompt : undefined}
+            onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}
+            resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
+            onResourceResolve={resolveResource} onResourceRequest={requestResource}
+            previews={previews} extension={!contentOnly ? registry?.render(entry.item) : undefined}
+            childSessions={!contentOnly ? childrenByReply.get(key) ?? noChildren : noChildren}
+            childrenFor={!contentOnly && childrenByReply.has(key) ? childrenFor : undefined}
+            onOpenChildSession={!contentOnly && childrenByReply.has(key) ? onOpenChildSession : undefined} />)}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
     </div>
 
@@ -155,31 +157,6 @@ export function AgentTimeline({
         /></fieldset>)}
     </aside> : null}
   </section>;
-}
-
-function previewText(item: AgentReplicaState['timeline']['entries'][number]['item']): string {
-  switch (item.type) {
-    case 'user_message':
-    case 'assistant_message':
-    case 'reasoning': return item.text;
-    case 'error': return item.message;
-    case 'tool_call': return [toolDetailText(item.detail), ...(item.result?.content.map(content => content.type === 'text' ? content.text : JSON.stringify(content.value)) ?? [])].join('\n');
-    case 'todo': return item.items.map(task => task.text).join('\n');
-    case 'interaction': return JSON.stringify(item.request);
-    case 'compaction': return '';
-  }
-}
-
-function toolDetailText(detail: Extract<AgentReplicaState['timeline']['entries'][number]['item'], { type: 'tool_call' }>['detail']): string {
-  switch (detail.type) {
-    case 'shell': return detail.command;
-    case 'read':
-    case 'edit':
-    case 'write': return detail.filePath;
-    case 'search': return detail.query;
-    case 'fetch': return detail.url;
-    case 'other': return detail.description;
-  }
 }
 
 function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onLoadOlder?: () => void | Promise<void>; loading?: boolean; error?: string }) {

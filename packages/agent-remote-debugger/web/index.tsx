@@ -2,15 +2,14 @@ import { useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { LabWorkbench } from '../../agent-remote-lab/src/components/LabWorkbench.js';
-import { ToastProvider } from '../../agent-remote-lab/src/components/Toast.js';
+import { DebugSessionView } from './session-view.js';
 import { useConversationSession } from '../../agent-remote-lab/src/hooks/useConversationSession.js';
 import type { OpenedSession } from '../../agent-remote-lab/src/directory-client.js';
 import { trackFocusModality } from '../../agent-remote-lab/src/focus-modality.js';
 import { ReplayView } from './replay.js';
 import type { SessionRecording } from '../src/recording.js';
 import { createBrowserTrace } from './browser-trace.js';
-import '@orchardworks/agent-remote-web/styles.css';
-import '../../agent-remote-lab/src/app.css';
+import '../../agent-remote-lab/src/session-view-styles.js';
 import './shell.css';
 
 function SessionView({ session }: { session: OpenedSession }) {
@@ -24,9 +23,9 @@ function SessionView({ session }: { session: OpenedSession }) {
   const { state, status, questions, setQuestions, actions } = useConversationSession(session, transport);
   useEffect(() => { trace.record({ event: 'connection', status }); }, [status, trace]);
   useEffect(() => () => trace.close(), [trace]);
-  return <ToastProvider><LabWorkbench state={state} sessionStatus={status} attachingAgentId={session.agentId}
+  return <DebugSessionView><LabWorkbench state={state} sessionStatus={status} attachingAgentId={session.agentId}
     actions={actions} questionDrafts={questions} draftSessionKey={session.agentId}
-    onQuestionDraftChange={(id, draft) => setQuestions(current => ({ ...current, [id]: draft }))} /></ToastProvider>;
+    onQuestionDraftChange={(id, draft) => setQuestions(current => ({ ...current, [id]: draft }))} /></DebugSessionView>;
 }
 
 trackFocusModality(document);

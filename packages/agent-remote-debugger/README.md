@@ -218,3 +218,16 @@ pnpm --filter @orchardworks/agent-remote-debugger... run build
 cd packages/agent-remote-debugger
 perl -e 'alarm shift; exec @ARGV' 150 pnpm exec playwright test
 ```
+
+## Session View presentation
+
+The product, live debugger and recording player share `LabWorkbench` and its
+`SessionViewFrame`, including theme scope, responsive composer, timeline scrolling,
+disclosure behavior and display modes. Both browser entries load the same stylesheet
+entry to preserve cascade order. Product navigation and account controls remain outside
+this view. Recordings use its read-only mode rather than a second renderer.
+
+Debug and playback controls float above the view without reserving layout space.
+Use the Replay/Debug toggle (or Escape inside the controls) to collapse them. Playback
+continues when collapsed. Preview, Simple and Content only use the product display
+preference, saved in local storage for the current origin.

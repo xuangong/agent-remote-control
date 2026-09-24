@@ -8,8 +8,7 @@ const loadApp = () => import('./App.js').then(module => ({ default: module.App }
 const appModule = previousWorkspacePath() ? loadApp() : undefined;
 const App = lazy(() => appModule ?? loadApp());
 import { trackFocusModality } from './focus-modality.js';
-import './app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import './session-view-styles.js';
 
 const stopTrackingFocus = trackFocusModality(document);
 if (import.meta.hot) import.meta.hot.dispose(stopTrackingFocus);

@@ -85,6 +85,48 @@ test('CLI events broadcast into the product view; page controls reach stdio; ref
   await page.screenshot({ path: info.outputPath('session-view.png'), fullPage: true });
 });
 
+test('standalone Session View keeps product presentation and display preferences', async ({ page, browser }) => {
+  const checkPresentation = async (target: typeof page) => {
+    await target.goto(url);
+    await expect(target.getByTestId('prompt-input')).toBeVisible();
+    const styles = await target.evaluate(() => {
+      const view = document.querySelector('.lab-workbench-layout')!;
+      const inspect = () => {
+        const toggle = getComputedStyle(view.querySelector('.lab-composer-toggle')!);
+        const input = getComputedStyle(view.querySelector('textarea')!);
+        const surface = getComputedStyle(view.querySelector('.agent-remote-surface')!);
+        return { position: toggle.position, width: toggle.width, height: toggle.height,
+          right: toggle.right, font: input.fontSize, border: input.borderColor,
+          ink: surface.getPropertyValue('--agent-ink').trim() };
+      };
+      const standalone = inspect();
+      const host = view.parentElement!;
+      host.classList.add('lab-shell');
+      const product = inspect();
+      host.classList.remove('lab-shell');
+      return { standalone, product };
+    });
+    expect(styles.standalone).toEqual(styles.product);
+    expect(styles.standalone).toMatchObject({ position: 'absolute', width: '28px', height: '16px', right: '12px' });
+  };
+  await checkPresentation(page);
+  await command('send', agentId, 'trace');
+  await expect(page.locator('.agent-reasoning')).toContainText('Fixture reasoning detail');
+  await page.getByRole('button', { name: 'Show debug controls' }).click();
+  await page.getByLabel('Timeline display').selectOption('simple');
+  await expect(page.locator('.agent-reasoning')).toBeVisible();
+  await expect(page.getByText('Fixture reasoning detail', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Timeline display').selectOption('content');
+  await expect(page.locator('.agent-reasoning')).toHaveCount(0);
+  await expect(page.getByText('STDIO reply: trace', { exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Show debug controls' }).click();
+  await expect(page.getByLabel('Timeline display')).toHaveValue('content');
+  await expect(page.locator('.agent-reasoning')).toHaveCount(0);
+  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try { await checkPresentation(await mobile.newPage()); } finally { await mobile.close(); }
+});
+
 test('SIGINT closes the owned stdio session cleanly', async () => {
   await command('send', agentId, 'hold');
   child.kill('SIGINT');
@@ -108,6 +150,7 @@ test('packaged built-in adapters load without private workspace dependencies', a
 
 
 test('recorded CLI interaction replays in a read-only Session View with playback controls', async ({ page }, info) => {
+  await command('send', agentId, 'trace');
   await command('send', agentId, 'replay broadcast');
   await page.goto(url);
   await page.getByTestId('prompt-input').fill('browser recorded');
@@ -134,6 +177,15 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   await expect(page.getByRole('button', { name: 'Play recording', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open recording', exact: true })).toBeVisible();
   await expect(page.getByTestId('prompt-input')).toBeDisabled();
+  const view = page.locator('.lab-workbench-layout');
+  const expandedBounds = await view.boundingBox();
+  expect(expandedBounds?.y).toBe(0);
+  expect(expandedBounds?.height).toBe(page.viewportSize()?.height);
+  await page.getByRole('button', { name: 'Hide playback controls' }).click();
+  await expect(page.getByRole('button', { name: 'Play recording', exact: true })).toBeHidden();
+  expect(await view.boundingBox()).toEqual(expandedBounds);
+  await page.getByRole('button', { name: 'Show playback controls' }).click();
+  expect(await view.boundingBox()).toEqual(expandedBounds);
   const progress = page.getByRole('slider', { name: 'Playback position' });
   const captured = await (await page.request.get(`${url}/__ardb/recording`)).json();
   const approvalAt = captured.events.find((event: { record: { kind: string } }) => event.record.kind === 'interaction_requested').at;
@@ -143,14 +195,27 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   await expect(page.getByText('STDIO reply: replay broadcast', { exact: true })).toBeVisible();
   await expect(page.getByText('STDIO reply: browser recorded', { exact: true })).toBeVisible();
   await expect(page.getByText('Approval received', { exact: true })).toBeVisible();
+  await expect(page.locator('.agent-reasoning')).toHaveCount(1);
+  await page.getByLabel('Timeline display').selectOption('content');
+  await expect(page.locator('.agent-reasoning')).toHaveCount(0);
+  await page.getByLabel('Timeline display').selectOption('preview');
+  await expect(page.locator('.agent-reasoning')).toHaveCount(1);
   await page.getByRole('button', { name: 'Restart recording' }).click();
   await expect(page.getByText('Approval received', { exact: true })).toHaveCount(0);
   await page.getByLabel('Playback speed').selectOption('4');
   await page.getByRole('button', { name: 'Play recording', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide playback controls' }).click();
   await expect(page.getByText('Approval received', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Show playback controls' }).click();
   await expect(page.getByRole('button', { name: 'Play recording', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const mobileBounds = await view.boundingBox();
+  await page.getByLabel('Timeline display').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Show playback controls' })).toBeFocused();
+  expect(await view.boundingBox()).toEqual(mobileBounds);
+  await page.getByRole('button', { name: 'Show playback controls' }).click();
   await expect(page.getByRole('button', { name: 'Open recording', exact: true })).toBeVisible();
   const original = await readFile(recording, 'utf8');
   await page.getByLabel('Open recording file').setInputFiles({ name: 'another-session.jsonl', mimeType: 'application/x-ndjson', buffer: Buffer.from(original.replaceAll('replay broadcast', 'opened from disk')) });

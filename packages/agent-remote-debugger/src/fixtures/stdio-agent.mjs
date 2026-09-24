@@ -19,6 +19,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     activeTurn = `turn-${sequence}`;
     emit({ type: 'turn_started', turnId: activeTurn });
     message('user_message', request.args[0]);
+    if (request.args[0] === 'trace') emit({ type: 'timeline', turnId: activeTurn, item: { type: 'reasoning', text: 'Fixture reasoning detail' } });
     if (request.args[0] === 'approve') {
       emit({ type: 'interaction_requested', request: { kind: 'tool_approval', requestId: 'fixture-approval', toolCallId: 'fixture-tool', toolName: 'fixture', summary: 'Fixture approval', detail: { type: 'other', description: 'Fixture action' }, allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] } });
     } else if (request.args[0] !== 'hold') {

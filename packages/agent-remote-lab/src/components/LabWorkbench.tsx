@@ -1,3 +1,4 @@
+import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
@@ -96,7 +97,7 @@ export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry
     : activity === 'waiting' ? 'Waiting for response'
     : activity === 'running' ? 'Working'
     : 'Ready';
-  return <div className={`lab-workbench-layout${compact ? ' lab-workbench-compact' : ''}${selectedCommand ? ' lab-command-details-open' : ''}`}>
+  return <SessionViewFrame className={`${compact ? ' lab-workbench-compact' : ''}${selectedCommand ? ' lab-command-details-open' : ''}`}>
     <header className="lab-workbench-heading">
       <div>
         {conversationPath}
@@ -162,7 +163,7 @@ export function LabWorkbench({ readOnly = false, compact = false, onInspectEntry
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
       resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
-  </div>;
+  </SessionViewFrame>;
 }
 
 

@@ -325,3 +325,35 @@ it('keeps migrated tracking while favorites still names the source, then cleans 
   await act(async () => refresh([]));
   expect(tracking.sessions).toEqual([]);
 });
+
+it('persists drag ordering by identity without reconnecting observers or dropping hidden sessions', async () => {
+  const second = { ...star, nativeSessionId: 'second' }, hidden = { ...star, nativeSessionId: 'hidden' };
+  saveTrackedSessions('alice', [star, hidden, second]);
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockImplementation(async (_provider, id) => ({ agentId: id }));
+  const close = vi.fn();
+  const connect = vi.fn<RemoteAgentTransport['connect']>((id, listener) => {
+    queueMicrotask(() => listener.onOpen());
+    return { close: () => close(id), send: () => {} };
+  });
+  const transport = { connect, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  let tracking!: SessionTracking;
+  function Fixture() {
+    tracking = useSessionTracking('alice', transport, sessionKey(hidden));
+    return <>{tracking.observers}</>;
+  }
+  await render(<Fixture />);
+  expect(connect).toHaveBeenCalledTimes(3);
+  const observations = tracking.observations;
+  await act(async () => tracking.reorder(sessionKey(second), sessionKey(star), 'before'));
+  expect(tracking.sessions).toEqual([second, star, hidden]);
+  expect(tracking.backgroundSessions).toEqual([second, star]);
+  expect(readTrackedSessions('alice')).toEqual([second, star, hidden]);
+  expect(tracking.observations).toBe(observations);
+  expect(connect).toHaveBeenCalledTimes(3);
+  expect(attach).toHaveBeenCalledTimes(3);
+  expect(close).not.toHaveBeenCalled();
+  await act(async () => tracking.reorder(sessionKey(second), sessionKey(star), 'after'));
+  expect(tracking.sessions).toEqual([star, second, hidden]);
+  await act(async () => tracking.reorder(sessionKey(second), 'missing', 'before'));
+  expect(tracking.sessions).toEqual([star, second, hidden]);
+});

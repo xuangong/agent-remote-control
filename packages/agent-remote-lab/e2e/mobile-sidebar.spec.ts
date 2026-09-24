@@ -143,3 +143,72 @@ test('manages tracking from the sidebar favorites filter without row close butto
   await expect(rail.locator('[data-favorite-id="other"]')).toBeVisible();
   await expect(rail.locator('[data-favorite-id="tracked"]')).toHaveCount(0);
 });
+
+test('reorders floating tracking rows without opening them, persists order, and opens the whole row', async ({ page }, info) => {
+  if (info.project.use.isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  const stars = ['first', 'second', 'third'].map((id, order) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id,
+    title: id === 'first' ? 'A long tracked session title that should fit the panel without horizontal scrolling' : id,
+    starredAt: 1, favoriteId: id, folderId: null, order, available: true, online: true }));
+  await page.addInitScript(stars => {
+    const key = `agent-remote-tracking:${location.origin}/u/alice/`;
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(stars));
+  }, stars);
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 1, folders: [], stars } }));
+  await page.route('**/v1/session-migrations', route => route.fulfill({ json: { migrations: [] } }));
+  await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: route.request().postDataJSON().nativeSessionId } }));
+  await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
+  await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
+  await page.goto('/e2e/fixtures/session-stars.html?switching=1');
+  const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
+  await trigger.click();
+  const panel = page.locator('.lab-tracking-floating .lab-session-popover-panel');
+  const rows = panel.locator('.lab-tracked-row > button');
+  const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem(`agent-remote-tracking:${location.origin}/u/alice/`)!).map((s: { nativeSessionId: string }) => s.nativeSessionId));
+  await expect(rows).toHaveCount(3);
+  const originalUrl = page.url();
+  expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  const origin = (await rows.nth(2).boundingBox())!, target = (await rows.first().boundingBox())!;
+  // Mouse sorting works anywhere on the row, including its empty trailing area.
+  await page.mouse.move(origin.x + origin.width / 2, origin.y + origin.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x + 15, target.y + 5, { steps: 8 });
+  await expect(panel.locator('[data-drop="before"]')).toHaveCount(1);
+  await page.mouse.up();
+  await expect.poll(saved).toEqual(['third', 'first', 'second']);
+  await expect(panel).toBeVisible();
+  expect(page.url()).toBe(originalUrl);
+  await rows.first().focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect.poll(saved).toEqual(['first', 'third', 'second']);
+  // Escape cancels a drag without reordering or dismissing the list.
+  const cancelFrom = (await rows.first().boundingBox())!, cancelTo = (await rows.last().boundingBox())!;
+  await page.mouse.move(cancelFrom.x + 20, cancelFrom.y + 15); await page.mouse.down();
+  await page.mouse.move(cancelTo.x + 20, cancelTo.y + cancelTo.height - 5, { steps: 8 });
+  await page.keyboard.press('Escape'); await page.mouse.up();
+  await expect.poll(saved).toEqual(['first', 'third', 'second']);
+  await expect(panel).toBeVisible();
+  if (info.project.name === 'chromium-mobile') {
+    const touchFrom = (await rows.last().locator('.lab-tracked-grip').boundingBox())!;
+    const touchTo = (await rows.first().boundingBox())!;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: touchFrom.x + touchFrom.width / 2, y: touchFrom.y + touchFrom.height / 2 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touchTo.x + 30, y: touchTo.y + 5 }] });
+    await expect(panel.locator('[data-drop="before"]')).toHaveCount(1);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(saved).toEqual(['second', 'first', 'third']);
+    await expect(panel).toBeVisible();
+    await rows.first().focus(); await page.keyboard.press('Alt+ArrowDown'); await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(saved).toEqual(['first', 'third', 'second']);
+    await cdp.detach();
+  }
+  // The fixture replaces its URL while mounting; revisit it to mount with persisted storage.
+  await page.goto('/e2e/fixtures/session-stars.html?switching=1'); await trigger.click();
+  await expect(rows.nth(1)).toContainText('third');
+  await expect(rows.nth(2)).toContainText('second');
+  await page.screenshot({ path: info.outputPath('tracked-rows.png'), animations: 'disabled' });
+  const row = (await rows.nth(1).boundingBox())!;
+  if (info.project.use.isMobile) await page.touchscreen.tap(row.x + row.width - 3, row.y + row.height / 2);
+  else await page.mouse.click(row.x + row.width - 3, row.y + row.height / 2);
+  await expect(panel).toBeHidden();
+  await expect(page).toHaveURL(/session=third/);
+});

@@ -1314,7 +1314,18 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-tracked-change[data-attention="pending"] { color: oklch(0.52 0.108 87); }
 .lab-tracked-change[data-attention="idle"] { color: var(--obs-text); }
 .lab-tracked-row { display: flex; align-items: center; gap: 6px; }
-.lab-tracked-row > .lab-session-row { flex: 1; min-width: 0; }
+.lab-tracked-row > .lab-session-row { display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 48px; width: 100%; padding: 8px; text-align: left; user-select: none; -webkit-user-select: none; }
+.lab-tracked-row .lab-tracked-description { display: flex; flex-direction: column; flex: 1; align-items: flex-start; min-width: 0; }
+.lab-tracked-list .lab-tracked-description strong, .lab-tracked-list .lab-tracked-description small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-tracked-row .lab-tracked-grip { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; align-self: stretch; min-height: 32px; color: var(--obs-text-secondary); cursor: grab; touch-action: none; -webkit-touch-callout: none; }
+.lab-tracked-row .lab-tracked-change { width: auto; }
+.lab-tracked-list { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
+.lab-tracked-list > li { display: block; min-width: 0; position: relative; }
+@media (pointer: coarse) { .lab-tracked-row .lab-tracked-grip { flex-basis: 44px; min-height: 44px; } }
+.lab-tracked-list > li[data-moving="true"] { opacity: .55; }
+.lab-tracked-list > li[data-drop]::after { content: ''; position: absolute; inset-inline: 0; height: 2px; background: var(--obs-action); border-radius: 1px; pointer-events: none; }
+.lab-tracked-list > li[data-drop="before"]::after { top: 0; }
+.lab-tracked-list > li[data-drop="after"]::after { bottom: 0; }
 @media (max-width: 760px) {
   .lab-title-favorites .lab-session-popover-panel { position: fixed; top: calc(56px + env(safe-area-inset-top, 0px)); left: 12px; right: 12px; width: auto; }
   .lab-favorite-actions > button, .lab-star-button, .lab-tracked-change, .lab-session-popover-panel .lab-directory-heading > button { min-height: 44px; min-width: 44px; }

@@ -25,8 +25,9 @@ describe('Claude Host registration', () => {
 
   it('accepts the supported executable and applies an isolated native configuration root', async () => {
     const previous = process.env.CLAUDE_CONFIG_DIR;
-    const registration = await createClaudeHostRegistration({ executable: await executable('2.1.247 (Claude Code)', '/isolated-claude'),
-      claudeHome: '/isolated-claude', workspaces: [{ id: 'work', name: 'Work', path: '/work' }] });
+    const profile = await mkdtemp(join(tmpdir(), 'claude-isolated-profile-')); roots.push(profile);
+    const registration = await createClaudeHostRegistration({ executable: await executable('2.1.247 (Claude Code)', profile),
+      claudeHome: profile, workspaces: [{ id: 'work', name: 'Work', path: '/work' }] });
     expect(registration.adapter.descriptor).toMatchObject({ providerId: 'claude', displayName: 'Claude Code' });
     expect(registration.directory.providerId).toBe('claude');
     expect(await registration.directory.workspaces()).toEqual([{ id: 'work', name: 'Work', path: '/work' }]);

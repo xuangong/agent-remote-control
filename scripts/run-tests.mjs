@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { packageManager } from './lib/package-manager.mjs';
 
 const mode = process.argv[2] ?? 'unit';
+if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
   'image-input': ['--filter', '@orchardworks/agent-remote-relay', 'exec', 'vitest', 'run', 'src/resources/input-image-store.test.ts', 'src/transport/image-input.test.ts', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
@@ -16,6 +17,7 @@ const commands = {
   'controller-updates-web': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vitest', 'run', 'src/components/ControllerUpdates.test.tsx', '--testTimeout=10000', '--hookTimeout=15000'],
   'controller-updates-relay': ['--filter', '@orchardworks/agent-remote-cloudflare', 'exec', 'vitest', 'run', 'test/controller-updates.test.ts', '--testTimeout=30000', '--hookTimeout=30000', '--maxWorkers=1'],
   cloudflare: ['--filter', '@orchardworks/agent-remote-cloudflare', 'run', 'test', '--hookTimeout=30000'],
+  claude: ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
   setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs'],
   unit: ['-r', 'run', 'test', '--hookTimeout=30000'],

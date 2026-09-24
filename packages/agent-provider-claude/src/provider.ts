@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
-import { ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
+import { ClaudeShutdownError, ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
 import { record } from './projector.js';
 
 export interface ClaudeSessionSummary {
@@ -32,13 +32,36 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       createdAt: new Date(entry.createdAt ?? entry.lastModified).toISOString(), updatedAt: new Date(entry.lastModified).toISOString(), state: 'unknown' }));
   }
 
+  async sessionWorkspace(sessionId: string): Promise<string | undefined> {
+    const session = this.sessions.get(sessionId);
+    return session ? (await session.runtimeInfo()).cwd : (await this.catalog.info(sessionId))?.cwd;
+  }
+
+  async releaseSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session) await session.release();
+  }
+
+  async cleanupFailedSession(sessionId: string): Promise<void> {
+    await this.releaseSession(sessionId);
+  }
+
+  async dispose(): Promise<void> {
+    await Promise.all([...this.sessions.values()].map(session => session.dispose()));
+  }
+
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
     const sessionId = randomUUID();
     let session: ClaudeAgentSession | undefined;
-    session = await ClaudeAgentSession.open({ ...config, sessionId, cwd: await workspace(config.cwd) },
-      { ...this.options, catalog: this.catalog, onDispose: () => {
-        if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
-      } });
+    try {
+      session = await ClaudeAgentSession.open({ ...config, sessionId, cwd: await workspace(config.cwd) },
+        { ...this.options, catalog: this.catalog, onDispose: () => {
+          if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
+        } });
+    } catch (error) {
+      if (error instanceof ClaudeShutdownError) { session = error.session; this.sessions.set(sessionId, session); }
+      throw error;
+    }
     this.sessions.set(sessionId, session);
     return session;
   }
@@ -54,13 +77,18 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       const info = await this.catalog.info(sessionId);
       if (!info) throw new Error('Claude native session is unavailable.');
       const stored = readConfig(handle.opaque);
+      const cwd = info.cwd ?? stored.cwd;
+      if (!cwd) throw new Error('Claude session workspace is unavailable.');
       const messages = await this.catalog.messages(sessionId);
-      session = await ClaudeAgentSession.open({ ...stored, sessionId, cwd: await workspace(info.cwd ?? stored.cwd) },
+      session = await ClaudeAgentSession.open({ ...stored, sessionId, cwd: await workspace(cwd) },
         { ...this.options, catalog: this.catalog, onDispose: () => {
           if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
         } }, messages, true);
       this.sessions.set(sessionId, session);
       return session;
+    } catch (error) {
+      if (error instanceof ClaudeShutdownError) { session = error.session; this.sessions.set(sessionId, session); }
+      throw error;
     } finally { this.loading.delete(sessionId); }
   }
 

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import {ClaudeNativeProcess} from './native-process.js';
+import { describe, expect, it, vi } from 'vitest';
 import { ClaudeAgentProvider } from './provider.js';
 import { Channel } from './channel.js';
 
@@ -71,4 +72,33 @@ it('resumes the selected native permission mode and retains it across a saved pl
     await resumed.setPlanning!(false);
     expect(modes).toEqual(['acceptEdits', 'plan', 'acceptEdits']);
   } finally { await resumed.dispose(); }
+});
+
+it('resolves workspace by native ID even when the catalog list omits it', async () => {
+ const provider=new ClaudeAgentProvider({catalog:{list:async()=>[],info:async id=>({sessionId:id,cwd:process.cwd()}) as any,messages:async()=>[]}});
+ expect(await provider.sessionWorkspace('11111111-1111-1111-1111-111111111111')).toBe(process.cwd());
+});
+
+it('refuses cold resume without a native or stored workspace before starting a Query', async () => {
+ const provider=new ClaudeAgentProvider({catalog:{list:async()=>[],info:async()=>({}) as any,messages:async()=>[]},query:()=>{throw new Error('Query must not start');}});
+ await expect(provider.resumeSession({providerId:'claude',sessionId:'11111111-1111-1111-1111-111111111111',opaque:'{}'})).rejects.toThrow('workspace is unavailable');
+});
+
+it('retains failed initialization until native exit can be confirmed, then allows resume', async () => {
+  const started=vi.spyOn(ClaudeNativeProcess.prototype,'started','get').mockReturnValue(true);
+  let canExit=false, failStartup=true;
+  const exit=vi.spyOn(ClaudeNativeProcess.prototype,'waitForExit').mockImplementation(async()=>{if(!canExit)throw new Error('Native shutdown deadline');});
+  const provider=new ClaudeAgentProvider({catalog:{list:async()=>[],info:async()=>({cwd:process.cwd()}) as any,messages:async()=>[],children:async()=>[]},query:()=>{
+    const events=new Channel<any>();return {[Symbol.asyncIterator]:()=>events[Symbol.asyncIterator](),initializationResult:async()=>{if(failStartup)throw new Error('Initialization failed');return {models:[]};},close:()=>events.close()} as any;
+  }});
+  const handle={providerId:'claude',sessionId:'11111111-1111-4111-8111-111111111111',opaque:'{}'};
+  try {
+    await expect(provider.resumeSession(handle)).rejects.toThrow(/shutdown/i);
+    await expect(provider.resumeSession(handle)).rejects.toThrow(/already loaded/i);
+    await expect(provider.releaseSession(handle.sessionId)).rejects.toThrow(/shutdown/i);
+    canExit=true;await provider.releaseSession(handle.sessionId);
+    failStartup=false;const reopened=await provider.resumeSession(handle);
+    expect((await reopened.runtimeInfo()).sessionId).toBe(handle.sessionId);
+    await reopened.dispose();
+  } finally {canExit=true;await provider.dispose();started.mockRestore();exit.mockRestore();}
 });

@@ -63,13 +63,13 @@ Codex and Claude remain isolated even when their native session identifiers coll
 
 ## Supported controls and diagnosis
 
-The adapter projects messages, streamed assistant text, reasoning, tool calls and results, usage, compaction, and turn outcomes through the existing public protocol. Tool permissions and `AskUserQuestion` appear as interaction cards. Approval choices are one-time decisions. Planning can be selected when creating a session and changed through native permission controls; leaving plan mode still requires native tool approval.
+The adapter projects messages, streamed assistant text, reasoning, tool calls and results, usage, compaction, and turn outcomes through the existing public protocol. Tool permissions and `AskUserQuestion` appear as interaction cards. Approval offers once, and session scope when native suggestions can be preserved as session-only rules/directories. Native safety checks may still prompt again. Planning can be selected when creating a session and changed through native permission controls; leaving plan mode still requires native tool approval.
 
-Type `/` to discover native skills using the same command menu as Codex. Select a skill, enter its arguments, and send. Discovery reloads the native skill catalog; execution rejects removed skills. Native compact is available when reported by the SDK. Model/permission menus and session-replacement commands are not advertised.
+Type `/` to discover native skills using the same command menu as Codex. Select a skill, enter its arguments, and send. Discovery reloads the native skill catalog; execution rejects removed skills. Native compact is available when reported by the SDK. Idle model/permission settings are available through shared settings controls; native session-replacement commands are not advertised.
 
 Direct native subagents appear beneath their parent reply and in **Sessions**. Open one to view its independent Timeline, then use **Sessions** to return to the parent. These views are read-only: tool approvals stay in the parent, and there are no independent child send/cancel controls. Closing a child view does not stop native work. Parent turn completion ends foreground observation; background tasks keep their native lifecycle. After resume, SDK-persisted children appear as saved history.
 
-Resource reads and mid-turn steering/queueing remain unsupported. Nested agent output is not shown as root assistant messages. Wait for the current turn or interrupt it before sending another message.
+Bounded embedded image resources are readable. Mid-turn steering/queueing remain unsupported. Nested agent output is not shown as root assistant messages. Wait for the current turn or interrupt it before sending another message.
 
 Inspect the public Agent ID from the workbench header:
 
@@ -101,3 +101,31 @@ On Node 22.23.2, add `NODE_OPTIONS=--no-experimental-webstorage` to the test pro
 The Claude native test uses an isolated configuration root and a local deterministic Messages endpoint. It verifies real process startup, streaming, tool approval/execution, persistence/resume, and interruption without contacting a live model service. The browser Host-provider test separately exercises both providers on desktop and mobile with deterministic runtime fixtures over real uplinks.
 
 The `claude-discovery.spec.ts` browser suite exercises the real Claude adapter and Host with deterministic native Query fixtures, covering skill invocation, isolated child history, read-only controls, and returning to the parent on desktop/mobile. Native CLI acceptance is tested separately against the loopback Messages service.
+
+## Managed terminal takeover and ARDB
+
+Use the same selected profile and configured executable as the Controller:
+
+```bash
+agent-remote-controller claude resume NATIVE_SESSION_ID
+# Explicitly interrupt the current managed owner and take over:
+agent-remote-controller claude resume NATIVE_SESSION_ID --take-over
+```
+
+The wrapper forwards native arguments and supports `resume --last`, but only an explicit ID participates in ownership. Claude has no public external lock probe: a directly launched native terminal or a picker/continue-selected session cannot be protected by ARC's lease. Browser-to-browser takeover only transfers connection control. Browser/CLI takeover waits for actual old-process exit; uncertain release refuses the new writer.
+
+Run an isolated live/debug/replay Session View with the existing ARDB server:
+
+```bash
+pnpm ardb server --provider claude --executable /absolute/path/to/claude \
+  --cwd /absolute/path/to/workspace --open
+```
+
+The overlay offers recording/export and replay; CLI `observe`, `send`, `cancel`, `settings list/set` and `interaction list/respond` use its Relay URL and public Agent ID. See the [normalized inventory](../current/agent-remote/claude-normalized-events.md) for native limits.
+
+For the focused native suite, build first and explicitly select the pinned executable. pnpm can resolve a different `claude` than the interactive shell:
+
+```bash
+AGENT_CLAUDE_TEST_EXECUTABLE=/absolute/path/to/claude-2.1.247 \
+NODE_OPTIONS=--no-experimental-webstorage pnpm test:claude
+```

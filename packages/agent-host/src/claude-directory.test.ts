@@ -1,5 +1,5 @@
 import type { AgentCapabilities, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
@@ -69,3 +69,45 @@ describe('Claude Host directory', () => {
     expect(native.disposed()).toBe(true);
   });
 });
+
+it('hands a running Controller session to CLI and fences automatic recovery', async () => {
+  const {mkdtemp,rm}=await import('node:fs/promises'); const {tmpdir}=await import('node:os'); const {join}=await import('node:path');
+  const {acquireNativeSession,inspectNativeOwner}=await import('./native-session-owner.js');
+  const root=await mkdtemp(join(tmpdir(),'arc-directory-owner-')); let releases=0;
+  const directory=createClaudeSessionDirectory({listSessions:async()=>[], createSession:async()=>nativeSession('native').session,
+    resumeSession:async()=>nativeSession('native').session, async releaseSession(){releases++;}},[],{root});
+  let cli:Awaited<ReturnType<typeof acquireNativeSession>>|undefined;
+  try {
+    const session=await directory.open('native');
+    const owner=await inspectNativeOwner({root,providerId:'claude',sessionId:'native'});
+    cli=await acquireNativeSession({root,providerId:'claude',sessionId:'native',kind:'native_cli',takeOver:owner!.generation});cli.activate(async()=> 'requested');
+    expect(releases).toBe(1);
+    await expect(session.sendMessage('stale')).rejects.toThrow(/control|ownership/i);
+    await expect(directory.open('native')).rejects.toMatchObject({code:'native_session_owned'});
+    await cli.release();
+    await expect(directory.open('native')).rejects.toMatchObject({code:'native_session_released'});
+    await directory.open('native',{takeOver:cli.generation});
+  }finally{await cli?.release();await directory.close();await rm(root,{recursive:true,force:true});}
+},5000);
+
+it('checks a cold Claude workspace by ID without relying on the catalog', async () => {
+  const {createHostExecutionPolicy, protectHostDirectory} = await import('./execution-policy.js');
+  const {realpath} = await import('node:fs/promises');
+  const cwd = await realpath(process.cwd());
+  const lookup = vi.fn(async () => cwd as string | undefined);
+  const resume = vi.fn(async () => nativeSession('cold', cwd).session);
+  const list = vi.fn(async () => []);
+  const source = createClaudeSessionDirectory({listSessions: list, sessionWorkspace: lookup,
+    createSession: async () => {throw new Error('unused');}, resumeSession: resume}, []);
+  const directory = protectHostDirectory(source, (await createHostExecutionPolicy({AGENT_HOST_WORKSPACE: cwd}))!);
+  try {
+    expect((await (await directory.open('cold')).runtimeInfo()).cwd).toBe(cwd);
+    expect(lookup).toHaveBeenCalledWith('cold');
+    expect(list).not.toHaveBeenCalled();
+    lookup.mockResolvedValue(undefined);
+    await expect(directory.open('missing')).rejects.toThrow(/workspace/i);
+    lookup.mockResolvedValue('/');
+    await expect(directory.open('outside')).rejects.toThrow(/workspace/i);
+    expect(resume).toHaveBeenCalledTimes(1);
+  } finally {await directory.close();}
+}, 10000);

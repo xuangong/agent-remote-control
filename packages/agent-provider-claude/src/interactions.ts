@@ -1,9 +1,10 @@
+import {claudeSessionGrant, claudeGrantDescription} from './permissions.js';
 import { randomUUID } from 'node:crypto';
-import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
+import type { CanUseTool, PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import { record, toolDetail } from './projector.js';
 
-interface Pending { responding?: boolean; request: AgentInteractionRequest; input: Record<string, unknown>; resolve(result: PermissionResult): void; cleanup(): void }
+interface Pending { grant?: PermissionUpdate[]; responding?: boolean; request: AgentInteractionRequest; input: Record<string, unknown>; resolve(result: PermissionResult): void; cleanup(): void }
 
 export class ClaudeInteractions {
   private readonly pending = new Map<string, Pending>();
@@ -21,12 +22,14 @@ export class ClaudeInteractions {
       ? { kind: 'plan_approval', requestId, plan: input.plan as string, allowedActions: ['approve_and_resume', 'reject'] }
       : name === 'AskUserQuestion' ? questions(requestId, input) : undefined;
     if (name === 'AskUserQuestion' && !request) return { behavior: 'deny', message: 'Unsupported question format.' };
+    const grant = request || options.matchedAskRule ? undefined : claudeSessionGrant(options.suggestions);
     const normalized: AgentInteractionRequest = request ?? { kind: 'tool_approval', requestId, toolCallId: options.toolUseID,
       toolName: name, summary: options.title || options.decisionReason || `Allow ${name}?`, detail: toolDetail(name, input),
-      allowedDecisions: ['allow', 'deny', 'cancel'], allowScopes: ['once'] };
+      allowedDecisions: ['allow', 'deny', 'cancel'], allowScopes: grant ? ['once', 'session'] : ['once'],
+      ...(grant ? {context:[{label:'Session approval',value:claudeGrantDescription(grant)}]} : {}) };
     return new Promise<PermissionResult>((resolve) => {
       const abort = () => this.cancel(requestId);
-      this.pending.set(requestId, { request: normalized, input, resolve, cleanup: () => options.signal.removeEventListener('abort', abort) });
+      this.pending.set(requestId, { request: normalized, input, grant, resolve, cleanup: () => options.signal.removeEventListener('abort', abort) });
       options.signal.addEventListener('abort', abort, { once: true });
       this.emit({ type: 'interaction_requested', provider: 'claude', request: normalized });
       if (options.signal.aborted) abort();
@@ -48,7 +51,7 @@ export class ClaudeInteractions {
     }
     let result: PermissionResult;
     if (response.kind === 'tool_approval') {
-      result = response.decision === 'allow' ? { behavior: 'allow', updatedInput: pending.input }
+      result = response.decision === 'allow' ? { behavior: 'allow', updatedInput: pending.input, ...(response.scope === 'session' ? {updatedPermissions: pending.grant} : {}) }
         : { behavior: 'deny', message: response.message || 'The user declined this tool.', ...(response.decision === 'cancel' ? { interrupt: true } : {}) };
     } else if (response.kind === 'question' && pending.request.kind === 'question') {
       const answers: Record<string, string> = {};

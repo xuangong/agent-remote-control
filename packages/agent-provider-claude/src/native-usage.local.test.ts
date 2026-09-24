@@ -30,7 +30,7 @@ it('normalizes real structured tool output, cumulative cost, and inline context 
     const nativeTool = frames.find((frame) => frame.type === 'user' && frame.tool_use_result !== undefined);
     expect(nativeTool).toBeDefined();
     expect(events).toContainEqual(expect.objectContaining({ type: 'timeline', item: expect.objectContaining({ callId: 'structured-write',
-      result: expect.objectContaining({ content: expect.arrayContaining([{ type: 'json', value: nativeTool.tool_use_result }]) }) }) }));
+      result: expect.objectContaining({ content: expect.arrayContaining([expect.objectContaining({ type: 'json', value: expect.objectContaining({format:'file_changes',files:[expect.objectContaining({path:nativeTool.tool_use_result.filePath,kind:'added',diff:expect.stringContaining('+NATIVE_RESULT')})]}) })]) }) }) }));
     await session.sendMessage('SECOND_TURN');
     await expect.poll(() => events.filter((event) => event.type === 'turn_completed').length).toBe(2);
     const results = frames.filter((frame) => frame.type === 'result');

@@ -1,3 +1,4 @@
+import {claudeFileChanges} from './tool-result.js';
 import { boundToolResult, type AgentUserMessagePart, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { ClaudeImageRegistry } from './images.js';
 
@@ -36,6 +37,9 @@ export class ClaudeEventProjector {
       this.seen.add(value.uuid);
     }
     const key = `message:${value.uuid ?? ++this.sequence}`;
+    if (value.type === 'system' && value.subtype === 'status' && value.status === 'compacting') {
+      return [this.item(key, {type:'compaction',status:'loading'})];
+    }
     if (value.type === 'system' && value.subtype === 'compact_boundary') {
       return [this.item(key, { type: 'compaction', status: 'completed',
         ...(record(value.compact_metadata) ? { trigger: value.compact_metadata.trigger, preTokens: value.compact_metadata.pre_tokens } : {}) })];
@@ -66,8 +70,10 @@ export class ClaudeEventProjector {
         const tool = this.tools.get(block.tool_use_id) ?? { name: 'Tool', detail: { type: 'other', description: 'Native tool result' } as const };
         const output = typeof block.content === 'string' ? block.content : Array.isArray(block.content)
           ? block.content.filter((part: unknown) => record(part) && part.type === 'text').map((part: any) => part.text).join('\n') : '';
+        const fileChanges = !block.is_error && toolResults.length === 1 ? claudeFileChanges(tool.name, value.tool_use_result) : undefined;
+        const metadata = fileChanges ?? structured;
         const result = boundToolResult({ content: [{ type: 'text', text: output },
-          ...(structured === undefined ? [] : [{ type: 'json' as const, value: structured }])] });
+          ...(metadata === undefined ? [] : [{ type: 'json' as const, value: metadata }])] });
         events.push(this.item(`${key}:tool:${block.tool_use_id}`, { type: 'tool_call', callId: block.tool_use_id, ...tool, result,
           ...(block.is_error ? { status: 'failed' as const, error: output.slice(0, 1024) || 'Tool failed' } : { status: 'completed' as const, error: null }) }));
         if (typeof block.tool_use_id === 'string' && Array.isArray(block.content)) {
@@ -128,7 +134,7 @@ export class ClaudeEventProjector {
     }
     if (value.type === 'content_block_delta' && record(value.delta)) {
       const current = blocks.find(({ index }) => index === value.index);
-      if (!current || !['text_delta', 'thinking_delta'].includes(value.delta.type)) return [];
+      if (!current || current.finalized || !['text_delta', 'thinking_delta'].includes(value.delta.type)) return [];
       return this.delta(current, value.delta.type === 'thinking_delta' ? value.delta.thinking : value.delta.text);
     }
     return [];

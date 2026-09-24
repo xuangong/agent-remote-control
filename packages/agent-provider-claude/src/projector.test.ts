@@ -83,3 +83,30 @@ it('does not assign an uncorrelated structured payload to multiple tool results'
     [{ type: 'text', text: 'first' }], [{ type: 'text', text: 'second' }],
   ]);
 });
+
+it.each(['live', 'history'] as const)('renders confirmed native file changes in %s without inventing failed diffs', delivery => {
+ const projector = new ClaudeEventProjector('session', delivery);
+ projector.project(assistant('edit-start', [{type:'tool_use', id:'edit', name:'Edit', input:{file_path:'/work/a.txt',old_string:'before',new_string:'after'}}]));
+ const result = {filePath:'/work/a.txt', structuredPatch:[{oldStart:1,oldLines:1,newStart:1,newLines:1,lines:['-before','+after']}]};
+ const value = {...envelope,type:'user',uuid:'edit-result',tool_use_result:result,message:{content:[{type:'tool_result',tool_use_id:'edit',content:'Updated file.'}]}};
+ const events = projector.project(value);
+ expect(events).toContainEqual(expect.objectContaining({delivery,event:expect.objectContaining({item:expect.objectContaining({type:'tool_call',callId:'edit',status:'completed',result:expect.objectContaining({content:expect.arrayContaining([{type:'json',value:{format:'file_changes',version:1,files:[{path:'/work/a.txt',kind:'modified',diff:'--- a/work/a.txt\n+++ b/work/a.txt\n@@ -1,1 +1,1 @@\n-before\n+after\n'}]}}])})})})}));
+ expect(projector.project(value)).toEqual([]);
+ const failed = projector.project({...value,uuid:'failed',message:{content:[{type:'tool_result',tool_use_id:'edit',is_error:true,content:'Permission denied'}]}});
+ expect(JSON.stringify(failed)).not.toContain('file_changes');
+});
+
+it('ignores text and thinking deltas delivered after the completed native block', () => {
+ const p=new ClaudeEventProjector('session');
+ p.project(stream({type:'message_start',message:{id:'msg'}}));
+ p.project(stream({type:'content_block_start',index:0,content_block:{type:'text',text:''}}));
+ p.project(assistant('final',[{type:'text',text:'Complete'}]));
+ expect(p.project(stream({type:'content_block_delta',index:0,delta:{type:'text_delta',text:'Complete'}}))).toEqual([]);
+});
+
+it('projects native compaction start and boundary completion without interpreting requesting as compacting', () => {
+ const p=new ClaudeEventProjector('session');
+ expect(p.project({...envelope,type:'system',uuid:'start',subtype:'status',status:'compacting'})).toContainEqual(expect.objectContaining({event:expect.objectContaining({item:{type:'compaction',status:'loading'}})}));
+ expect(p.project({...envelope,type:'system',uuid:'requesting',subtype:'status',status:'requesting'})).toEqual([]);
+ expect(p.project({...envelope,type:'system',uuid:'complete',subtype:'compact_boundary',compact_metadata:{trigger:'auto',pre_tokens:100}})).toContainEqual(expect.objectContaining({event:expect.objectContaining({item:{type:'compaction',status:'completed',trigger:'auto',preTokens:100}})}));
+});

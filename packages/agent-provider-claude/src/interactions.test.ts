@@ -38,3 +38,36 @@ describe('Claude native permissions', () => {
     expect(interactions.size).toBe(0);
   });
 });
+
+it('offers native suggested grants for this session without writing persistent settings', async () => {
+ const events: AgentStreamEvent[]=[];
+ const interactions=new ClaudeInteractions(event=>events.push(event));
+ const suggestions=[{type:'addRules' as const,behavior:'allow' as const,destination:'localSettings' as const,rules:[{toolName:'Bash',ruleContent:'pwd'}]}];
+ const pending=interactions.request('Bash',{command:'pwd'},{signal:new AbortController().signal,toolUseID:'grant',suggestions});
+ const event=events.find(event=>event.type==='interaction_requested');
+ if(event?.type!=='interaction_requested')throw new Error('Missing approval');
+ expect(event.request).toMatchObject({allowScopes:['once','session']});
+ suggestions[0]!.rules[0]!.ruleContent='*';
+ interactions.respond(event.request.requestId,{kind:'tool_approval',decision:'allow',scope:'session'});
+ await expect(pending).resolves.toMatchObject({behavior:'allow',updatedPermissions:[{type:'addRules',behavior:'allow',destination:'session',rules:[{toolName:'Bash',ruleContent:'pwd'}]}]});
+});
+
+it('does not widen a native mode-change suggestion into a session grant', async () => {
+ const events:AgentStreamEvent[]=[];const interactions=new ClaudeInteractions(event=>events.push(event));
+ const pending=interactions.request('Bash',{command:'pwd'},{signal:new AbortController().signal,toolUseID:'mode',suggestions:[{type:'setMode',mode:'bypassPermissions',destination:'session'}]});
+ const event=events.find(event=>event.type==='interaction_requested');if(event?.type!=='interaction_requested')throw new Error('Missing approval');
+ expect(event.request).toMatchObject({allowScopes:['once']});
+ interactions.respond(event.request.requestId,{kind:'tool_approval',decision:'allow',scope:'once'});
+ await expect(pending).resolves.toEqual({behavior:'allow',updatedInput:{command:'pwd'}});
+});
+
+it('preserves the complete native rule and directory grant and shows its scope',async()=>{
+ const events:AgentStreamEvent[]=[];const interactions=new ClaudeInteractions(event=>events.push(event));
+ const pending=interactions.request('Bash',{command:'echo ok > result'},{signal:new AbortController().signal,toolUseID:'directory',suggestions:[
+  {type:'addRules',rules:[{toolName:'Bash',ruleContent:'echo ok > result'}],behavior:'allow',destination:'localSettings'},
+  {type:'addDirectories',directories:['/work'],destination:'session'}]});
+ const event=events.find(event=>event.type==='interaction_requested');if(event?.type!=='interaction_requested')throw new Error('Missing approval');
+ expect(event.request).toMatchObject({allowScopes:['once','session'],context:expect.arrayContaining([expect.objectContaining({value:expect.stringContaining('/work')})])});
+ interactions.respond(event.request.requestId,{kind:'tool_approval',decision:'allow',scope:'session'});
+ await expect(pending).resolves.toMatchObject({updatedPermissions:[{type:'addRules',destination:'session'},{type:'addDirectories',directories:['/work'],destination:'session'}]});
+});

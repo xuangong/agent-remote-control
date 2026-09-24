@@ -17,8 +17,8 @@ const session = await provider.createSession({ sessionId: 'caller-proposal', cwd
 - Discovery and resume use official SDK catalog/history functions in a helper process. Its environment carries the same `CLAUDE_CONFIG_DIR` as the Query; the parent environment is never mutated.
 - Normal operation loads native user, project, and local settings and the Claude Code system prompt. Credentials remain in native configuration or the inherited environment.
 - Observations contain saved messages before a single history boundary, followed by live text/reasoning deltas, tool calls/results, usage, compaction, interactions, and turn outcomes.
-- Tool approval and `AskUserQuestion` callbacks await validated Remote answers. Only one-time tool approvals are advertised. Native rules that allow or deny a tool without prompting remain authoritative.
-- Cancel interrupts the current turn and retains the Query. Dispose ends input and closes the Query. Native failure requires explicitly resuming the saved session; uncertain messages are never resent automatically.
+- Tool approval and `AskUserQuestion` callbacks await validated Remote answers. One-time approval is always available. Validated native allow-rule/directory suggestions additionally offer session scope, without writing persistent settings; native path/safety checks may still request approval. Native rules that allow or deny a tool without prompting remain authoritative.
+- Cancel interrupts the current turn and retains the Query. Dispose ends input, closes the Query and waits for actual process exit before managed handoff. Native failure requires explicitly resuming the saved session; uncertain messages are never resent automatically.
 - Idle model and permission settings call public Query methods and publish confirmed state. Planning restores the selected permission mode. An actual `ExitPlanMode.plan` becomes typed plan review; approval waits for native permission confirmation before execution.
 
 ## Skills and native children
@@ -35,7 +35,7 @@ A first attachment after persistence receives canonical transcript order. An alr
 
 No direct child controls, live effort setting, steering, or follow-up queue is advertised. Native priority input can outlive the target turn and survive public interruption. MCP forms remain disabled because the pinned native client strips constraints and sensitive markers before its public callback. Nested agent messages are not inserted into the root transcript; their parent tool call/result remains visible. Tool results retain bounded text and native JSON with unambiguous tool ownership. Per-turn native tokens and Query cost increments are mapped separately from exact-model context metadata; `/context` provides actual native occupancy when available. Pending permission callbacks cannot survive Host restart. Catalog discovery describes persisted sessions, not attachment to an already-running Claude terminal process.
 
-Root sessions expose bounded native tool-result embedded PNG/JPEG/GIF/WebP images through immutable session-owned resources. Limits: 16 MiB per image, 64 MiB per session and 1,024 images. Native transcript resume reconstructs available embedded bytes; disposal revokes reads. No arbitrary paths, remote URLs, uploads or child image-resource access.
+Root sessions expose bounded native tool-result embedded PNG/JPEG/GIF/WebP images through immutable session-owned resources. Limits: 16 MiB per image, 64 MiB per session and 1,024 images. Native transcript resume reconstructs available embedded bytes; disposal revokes reads. No arbitrary paths, remote URLs or generic file uploads. Child resources remain bounded by their parent-owned projection.
 
 ## Verification
 
@@ -44,3 +44,9 @@ Run `pnpm build` before tests: the native integration suite exercises the built 
 See [Host installation and debugging](../../docs/runbooks/claude-debug.md). Native API references: [Claude Code programmatic use](https://code.claude.com/docs/en/headless) and [official Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript). The SDK package retains its own license and terms.
 
 Child transcript reconciliation uses official SDK history to backfill late parent inputs. An earlier gap replaces the projected Timeline through the existing Remote epoch replacement flow, preserving live output, message identity, and input order without an independent child Query. Previously forwarded inputs omitted by a catalog read are retained beside their native neighbors.
+
+## Managed stdio integration
+
+The Host and `agent-remote-controller claude resume <native-id> [--take-over]` share profile-scoped ownership. Browser takeover of another browser transfers only connection control; CLI/Host takeover interrupts the old managed native writer and requires confirmed process exit. Unmanaged native terminals cannot be detected through a public Claude lock API. Use an explicit native ID for coordinated handoff.
+
+Cold resume resolves cwd by native ID and refuses an unknown workspace. Successful native Write/Edit structured output uses shared file-diff rendering. Native catalog history omits that structured patch, so cold restore retains result text without inventing a diff. See the [normalized event inventory](../../docs/current/agent-remote/claude-normalized-events.md) for the full contract and validation boundaries.

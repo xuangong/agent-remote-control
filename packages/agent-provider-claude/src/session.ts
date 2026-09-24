@@ -1,3 +1,4 @@
+import {ClaudeNativeProcess} from './native-process.js';
 import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -27,8 +28,15 @@ export interface ClaudeSessionOptions {
 
 export interface ClaudeSessionConfig extends AgentSessionConfig { permissionMode?: PermissionMode }
 
+/** Retains the owned runtime when failed startup could not confirm native shutdown. */
+export class ClaudeShutdownError extends Error {
+  constructor(readonly session: ClaudeAgentSession, cause: unknown) {
+    super('Claude native shutdown is unconfirmed.', {cause});
+  }
+}
+
 export class ClaudeAgentSession implements AgentSession {
-  readonly capabilities: AgentCapabilities = { imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
+  readonly capabilities: AgentCapabilities = { sessionControl: 'exclusive', imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
     planning: true, commands: true, sessionSettings: true, interactions: { question: true, toolApproval: true, planApproval: true } };
   private readonly input = new Channel<SDKUserMessage>();
   private readonly output = new Channel<ProviderStreamItem>();
@@ -55,10 +63,13 @@ export class ClaudeAgentSession implements AgentSession {
   private disposed = false;
   private failure: Error | undefined;
   private native!: ClaudeQuery;
+  private readonly process: ClaudeNativeProcess;
+  private closing?: Promise<void>;
   private pump!: Promise<void>;
 
   private constructor(private readonly config: ClaudeSessionConfig, private readonly options: ClaudeSessionOptions,
     messages: SessionMessage[]) {
+    this.process = new ClaudeNativeProcess(options.onDiagnostic);
     this.timeout = options.requestTimeoutMs ?? 15_000;
     if (!Number.isFinite(this.timeout) || this.timeout <= 0) throw new Error('Claude request timeout must be positive.');
     this.planning = config.planning ?? false;
@@ -97,7 +108,7 @@ export class ClaudeAgentSession implements AgentSession {
         systemPrompt: config.systemPrompt ?? { type: 'preset', preset: 'claude_code' },
         ...(options.restrictedNative ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } } : {}),
         permissionMode: session.permissionMode, canUseTool: session.interactions.request,
-        stderr: options.onDiagnostic,
+        stderr: options.onDiagnostic, spawnClaudeCodeProcess: session.process.spawn,
       } });
       session.pump = session.consume();
       const initialized = await deadline(session.native.initializationResult(), session.timeout, 'Claude initialization');
@@ -106,7 +117,10 @@ export class ClaudeAgentSession implements AgentSession {
       session.status = 'idle';
       session.runtimeUpdated();
       return session;
-    } catch (error) { await session.dispose(); throw error; }
+    } catch (error) {
+      try { await session.dispose(); } catch (shutdownError) { throw new ClaudeShutdownError(session, shutdownError); }
+      throw error;
+    }
   }
 
   async *observe(): AsyncIterable<ProviderStreamItem> {
@@ -241,19 +255,32 @@ export class ClaudeAgentSession implements AgentSession {
   async runtimeInfo(): Promise<AgentRuntimeInfo> { return this.info(); }
   async readResource(locator: string) { return this.images.readResource(locator); }
   async openChildSession(nativeSessionId: string): Promise<AgentSession> { return this.children.open(nativeSessionId); }
-  async dispose(): Promise<void> {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.images.stop();
-    this.interactions.close();
-    this.status = 'closed';
-    this.input.close();
-    this.native?.close();
-    await this.children.close();
-    if (!this.failure) this.runtimeUpdated();
-    this.output.close();
-    if (this.pump) await deadline(this.pump, Math.min(this.timeout, 5000), 'Claude shutdown').catch(() => undefined);
-    this.options.onDispose?.();
+  async release(): Promise<void> {
+    await this.dispose();
+    await this.process.waitForExit(10000);
+  }
+  dispose(): Promise<void> {
+    if (this.closing) return this.closing;
+    const firstClose = !this.disposed;
+    if (firstClose) {
+      this.disposed = true;
+      this.process.requestShutdown();
+      this.images.stop();
+      this.interactions.close();
+      this.status = 'closed';
+      this.input.close();
+      this.native?.close();
+    }
+    return this.closing = (async () => {
+      await this.children.close();
+      if (firstClose) {
+        if (!this.failure) this.runtimeUpdated();
+        this.output.close();
+      }
+      if (this.process.started) await this.process.waitForExit(10000);
+      if (this.pump) await deadline(this.pump, 5000, 'Claude shutdown');
+      this.options.onDispose?.();
+    })().catch(error => { this.closing = undefined; throw error; });
   }
 
   private requireOpen(): void {

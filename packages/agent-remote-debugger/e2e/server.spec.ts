@@ -175,7 +175,14 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   page.on('websocket', socket => mutations.push(socket.url()));
   page.on('pageerror', error => failures.push(error.message));
   await page.goto(url);
-  await expect(page.getByRole('button', { name: 'Play recording', exact: true })).toBeVisible();
+  const toggle = page.getByRole('button', { name: 'Show playback controls' });
+  await expect(toggle).toBeVisible();
+  const toggleBounds = (await toggle.boundingBox())!;
+  expect(toggleBounds.width).toBe(28); expect(toggleBounds.height).toBe(28);
+  expect(toggleBounds.y).toBe(4);
+  expect(toggleBounds.x + toggleBounds.width).toBe(page.viewportSize()!.width - 4);
+  await expect(page.getByRole('button', { name: 'Play recording', exact: true })).toBeHidden();
+  await toggle.click();
   await expect(page.getByRole('button', { name: 'Open recording', exact: true })).toBeVisible();
   await expect(page.getByTestId('prompt-input')).toBeDisabled();
   const view = page.locator('.lab-workbench-layout');
@@ -276,6 +283,7 @@ test('records browser and AI collaboration, survives reload, exports and opens s
     await expect(page.getByRole('dialog', { name: 'Open server recording' })).toBeVisible();
     await page.getByRole('button', { name: 'shared-session.jsonl JSONL', exact: true }).click();
     await expect(page.getByTestId('prompt-input')).toBeDisabled();
+    await page.getByRole('button', { name: 'Show playback controls' }).click();
     const position = page.getByRole('slider', { name: 'Playback position' });
     await position.fill(await position.getAttribute('max') ?? '0');
     await expect(page.getByText('STDIO reply: AI contribution', { exact: true })).toBeVisible();
@@ -288,6 +296,7 @@ test('records browser and AI collaboration, survives reload, exports and opens s
     await page.getByRole('button', { name: 'Open recording', exact: true }).click();
     await page.getByRole('button', { name: 'shared-session.jsonl JSONL', exact: true }).click();
     await expect(page.getByLabel('Recording active')).toBeVisible();
+    await page.getByRole('button', { name: 'Show playback controls' }).click();
     await command('send', agentId, 'AI while human reviews a recording');
     await expect.poll(() => observed).toContain('AI while human reviews a recording');
     await page.getByRole('button', { name: 'Return to live session' }).click();

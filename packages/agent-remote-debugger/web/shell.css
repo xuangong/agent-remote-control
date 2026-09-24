@@ -52,3 +52,22 @@ html, body, #root { margin: 0; width: 100%; height: 100%; min-width: 0; overflow
 .ardb-file-picker ul { list-style: none; padding: 0; margin: 8px 0; }
 .ardb-file-picker li button { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; border: 0; border-radius: 4px; overflow-wrap: anywhere; }
 .ardb-file-picker li small { margin-left: auto; color: var(--obs-text-secondary); }
+
+.ardb-controls-replay { top: max(4px, env(safe-area-inset-top)); right: max(4px, env(safe-area-inset-right)); left: auto; transform: none; align-items: flex-end; max-width: calc(100vw - 8px); }
+.ardb-controls-replay .ardb-controls-toggle { position: relative; width: 28px; height: 28px; min-width: 28px; min-height: 28px; justify-content: center; padding: 4px; border-radius: 6px; }
+.ardb-controls-replay .ardb-recording-dot { position: absolute; top: 2px; right: 2px; width: 5px; height: 5px; }
+.ardb-controls-replay .ardb-controls-panel { width: 360px; border-radius: 8px; }
+.ardb-controls-replay .ardb-playback { padding: 8px 10px 4px; }
+.ardb-controls-replay .ardb-recording-heading { gap: 8px; }
+.ardb-controls-replay .ardb-recording-title { display: block; margin-bottom: 6px; }
+.ardb-controls-replay .ardb-recording-title strong { display: block; font-size: 12px; }
+.ardb-controls-replay .ardb-recording-title span { display: block; font-size: 10px; }
+.ardb-controls-replay .ardb-playback-controls { gap: 4px; }
+.ardb-controls-replay .ardb-playback-controls button, .ardb-controls-replay .ardb-playback-controls select, .ardb-controls-replay .ardb-open { min-height: 28px; padding: 4px 6px; font-size: 11px; }
+.ardb-controls-replay .ardb-playback-controls .ardb-play { min-width: 48px; }
+.ardb-controls-replay .ardb-playback-controls output { font-size: 11px; }
+.ardb-controls-replay .ardb-display-mode { padding: 6px 10px; }
+@media (pointer: coarse) {
+  .ardb-controls-replay .ardb-controls-toggle::after { content: ''; position: absolute; inset: -8px; }
+  .ardb-controls-replay .ardb-playback-controls button, .ardb-controls-replay .ardb-playback-controls select, .ardb-controls-replay .ardb-open { min-height: 40px; }
+}

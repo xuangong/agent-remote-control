@@ -213,9 +213,27 @@ importers:
 
   packages/agent-remote-debugger:
     dependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.247
+        version: 0.3.247(@anthropic-ai/sdk@0.125.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(zod@4.4.3)
+      '@github/copilot':
+        specifier: 1.0.83
+        version: 1.0.83
+      '@github/copilot-sdk':
+        specifier: 1.0.11
+        version: 1.0.11
+      '@orchardworks/agent-provider-codex':
+        specifier: workspace:*
+        version: link:../agent-provider-codex
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
+      '@orchardworks/agent-remote-relay':
+        specifier: workspace:*
+        version: link:../agent-remote-relay
       '@orchardworks/agent-remote-web':
         specifier: workspace:*
         version: link:../agent-remote-web
@@ -223,12 +241,39 @@ importers:
         specifier: ^8.21.0
         version: 8.21.1
     devDependencies:
+      '@orchardworks/agent-provider-claude':
+        specifier: workspace:*
+        version: link:../agent-provider-claude
+      '@orchardworks/agent-provider-copilot':
+        specifier: workspace:*
+        version: link:../agent-provider-copilot
+      '@orchardworks/agent-remote-lab':
+        specifier: workspace:*
+        version: link:../agent-remote-lab
+      '@playwright/test':
+        specifier: ^1.50.0
+        version: 1.62.0
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.0
+        version: 18.3.7(@types/react@18.3.31)
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.0
+        version: 18.3.1(react@18.3.1)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

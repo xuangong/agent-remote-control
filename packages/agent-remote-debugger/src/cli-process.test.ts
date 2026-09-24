@@ -76,6 +76,8 @@ beforeAll(async () => {
     expect(build.error, `${packageDirectory}: ${build.stderr}`).toBeUndefined();
     expect(build.status, `${packageDirectory}: ${build.stderr}`).toBe(0);
   }
+  const adapters = spawnSync(process.execPath, ['scripts/build-adapters.mjs'], { cwd: debuggerDirectory, encoding: 'utf8', timeout: childTimeoutMs });
+  expect(adapters.status, adapters.stderr).toBe(0);
   ({ createRecordedValidationServer } = await import('../../agent-remote-lab/src/server/recorded.js'));
   ({ AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-remote-web/headless'));
   server = createRecordedValidationServer();

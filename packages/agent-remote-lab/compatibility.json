@@ -55,9 +55,15 @@
         "packages/agent-remote-cloudflare/vitest.config.ts",
         "packages/agent-remote-cloudflare/wrangler.jsonc",
         "packages/agent-remote-debugger/README.md",
+        "packages/agent-remote-debugger/e2e",
         "packages/agent-remote-debugger/package.json",
+        "packages/agent-remote-debugger/playwright.config.ts",
+        "packages/agent-remote-debugger/scripts",
         "packages/agent-remote-debugger/src",
         "packages/agent-remote-debugger/tsconfig.json",
+        "packages/agent-remote-debugger/tsconfig.web.json",
+        "packages/agent-remote-debugger/vitest.config.ts",
+        "packages/agent-remote-debugger/web",
         "packages/agent-remote-dsh/package.json",
         "packages/agent-remote-dsh/scripts",
         "packages/agent-remote-dsh/src",
@@ -108,7 +114,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:0bcd505a33d4d89e177899f21e6851d615db82582a1483172d43682ce997fe89"
+      "digest": "sha256:23af9a2da2cb7183e3e5ebb3c3e0db148b3a2262fff722d1971db74f394cb884"
     }
   },
   "providers": [

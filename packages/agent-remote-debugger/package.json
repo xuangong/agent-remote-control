@@ -17,19 +17,35 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run --testTimeout=10000"
+    "build": "tsc && node scripts/build-adapters.mjs && node scripts/build-web.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "vitest run --testTimeout=10000",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "@orchardworks/agent-remote-web": "workspace:*",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-provider-codex": "workspace:*",
+    "@orchardworks/agent-remote-relay": "workspace:*",
+    "@anthropic-ai/claude-agent-sdk": "0.3.247",
+    "@github/copilot-sdk": "1.0.11",
+    "@github/copilot": "1.0.83"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@types/ws": "^8.18.1",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.5",
+    "@orchardworks/agent-remote-lab": "workspace:*",
+    "esbuild": "^0.28.1",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@playwright/test": "^1.50.0",
+    "@orchardworks/agent-provider-claude": "workspace:*",
+    "@orchardworks/agent-provider-copilot": "workspace:*"
   }
 }

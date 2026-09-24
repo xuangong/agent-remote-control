@@ -49,6 +49,8 @@ export async function executeCommand(
       case 'send': return await context.command('send');
       case 'steer': return await context.command('steer');
       case 'cancel': return await context.command('cancel');
+      case 'settings list': return await context.settings(false);
+      case 'settings set': return await context.settings(true);
       case 'planning': return await context.setPlanning();
       case 'wait': return await context.wait();
       case 'interaction list': return await context.listInteractions();
@@ -201,6 +203,17 @@ class CommandContext {
     const active = parsePlanning(this.invocation.positionals[1]);
     await this.withRuntime(this.agentId(), 'planning', async (runtime) => {
       this.result(await this.withinDeadline(() => runtime.client.setPlanning(active)));
+    });
+  }
+
+  async settings(write: boolean): Promise<void> {
+    this.validateOptions('relay', 'origin', 'timeout', 'format', 'json');
+    this.requireFormat('text', 'json');
+    this.requirePositionals(write ? 3 : 1);
+    await this.withRuntime(this.agentId(), write ? 'sessionSettings' : undefined, async (runtime) => {
+      this.result(write
+        ? await this.withinDeadline(() => runtime.client.setSessionSetting(this.invocation.positionals[1]!, this.invocation.positionals[2]!))
+        : runtime.replica.getState().agent?.runtimeInfo.settings ?? []);
     });
   }
 

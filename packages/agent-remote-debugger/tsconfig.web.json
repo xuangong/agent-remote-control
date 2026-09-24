@@ -1,0 +1,6 @@
+{
+  "extends": "../agent-remote-lab/tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["web/**/*.ts", "web/**/*.tsx"],
+  "exclude": ["dist"]
+}

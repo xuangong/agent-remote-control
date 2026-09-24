@@ -4,7 +4,7 @@
 
 The package name is `@orchardworks/agent-remote-debugger`; the executable is `ardb` and the repository entry is `pnpm ardb`. It is independent of `agent-remote-controller`, which runs Hosts and has no debugger subcommand.
 
-Today, `ardb` exercises Session View's public protocol and reconstructed state through the same transport, session client and Replica as the product browser. CLI and structured output replace visual presentation; the shared client remains responsible for synchronization and operation correlation. It is currently a terminal interface; a visual Session View workbench and automated scenario runner are future extensions, not existing commands. Native runtime interpretation remains in Provider adapters.
+Today, `ardb` exercises Session View's public protocol and reconstructed state through the same transport, session client and Replica as the product browser. CLI and structured output replace visual presentation; the shared client remains responsible for synchronization and operation correlation. `ardb server` also serves the product Session View against a locally owned Relay. An automated scenario-runner command remains a future extension. Native runtime interpretation remains in Provider adapters.
 
 ## Run locally
 
@@ -19,12 +19,47 @@ The Relay URL resolves from `--relay`, then `AGENT_REMOTE_URL`, then `BORGEE_REM
 
 Commands target the **public Relay Agent ID**, not an arbitrary native Codex/Claude session ID. `session create` chooses a public Agent ID; `--provider-session-id` supplies the separate native identity when supported. An already attached session can be observed by its public Agent ID. `session resume` requires an exact persistence handle, not a bare native ID.
 
-The CLI expects an existing reachable Relay and appropriate access. It does not start a Relay or CLI process, perform hosted browser sign-in, or import browser cookies. `--origin` supplies the WebSocket Origin; it is not an authentication credential.
+Client commands expect an existing reachable Relay and appropriate access. `server` starts a local Relay and an adapter-owned native session. Neither performs hosted browser sign-in nor imports browser cookies. `--origin` supplies the WebSocket Origin; it is not an authentication credential.
+
+## Serve a Session View
+
+```bash
+ardb server --provider codex --cwd /path/to/workspace --open --jsonl
+# Or: --provider claude / --provider copilot / --adapter /path/to/adapter.mjs
+```
+
+The first `server_ready` record prints the URL, public Agent ID, native session ID, and copyable client commands. `--port 0` (default) selects a free loopback port; `--open` opens a browser. `--timeout` is the startup deadline in milliseconds (default 30000). An optional `--executable` selects a native binary, and `--model` / `--reasoning-effort` supply creation settings. `--persistence-file handle.json` resumes through the selected Adapter; do not combine resume with creation settings.
+
+The page is the actual product `LabWorkbench` and `useConversationSession`, bundled into this package. It mounts Timeline, Chatbox and their normal capability-driven controls without account, Sidebar, Host or Tunnel contexts. It calls the existing public Relay HTTP/WebSocket endpoints. Opening another tab, refreshing or reconnecting subscribes to the same owned session; it never creates a second native session.
+
+Use another terminal to drive the live view (substitute the printed values):
+
+```bash
+export AGENT_REMOTE_URL=http://127.0.0.1:PORT
+export AGENT_REMOTE_ORIGIN=$AGENT_REMOTE_URL
+ardb send AGENT_ID "Explain this workspace" --wait idle --json
+ardb settings list AGENT_ID --json
+ardb settings set AGENT_ID SETTING_ID VALUE --json
+ardb interaction list AGENT_ID --json
+ardb interaction respond AGENT_ID REQUEST_ID --response-file answer.json --json
+ardb cancel AGENT_ID --json
+ardb inspect AGENT_ID --json
+```
+
+Agent normalized events, interpreted by the Adapter and projected by the Relay, remain authoritative. A CLI operation is an intent; subscribed views receive its resulting state through their normal subscriptions. The debugger does not inject synthetic success into the page. Client-local pending inputs remain local until acknowledged and reconciled by the shared client.
+
+The server emits `source: relay` Replica records and `source: browser` / `kind: browser_trace` metadata. Browser records include client identity, connection state, protocol direction/channel/type and request ID; they omit message payloads, input values and resource bytes. This diagnostic channel is best-effort, bounded to 64 queued records, and reports dropped records after delivery resumes. Page shutdown may lose its final diagnostic batch. It never changes public operation outcomes. Use `observe`, `inspect` and `protocol trace` as independent clients for state assertions and detailed redacted protocol inspection. Output may include conversation content; JSONL is a debugging artifact, not a lossless replay log.
+
+The server accepts only its exact loopback Host/Origin. It owns one session, so its public create/resume endpoints reject new sessions; start a separate server for another native session. SIGINT/SIGTERM gracefully stop the server and dispose its owned session and temporary images. Codex defaults to a private app-server; it does not restart or alter an existing shared daemon. Each Adapter remains responsible for terminating its native resources, including failed startup.
+
+A trusted local Adapter module exports `createAdapter()` returning an `AgentProviderAdapter`, optionally with an async `dispose()` for provider-wide resources. It is loaded only from CLI configuration. Native normalization, capabilities, history boundaries, controls and stdio ownership stay in that Adapter; ARDB does not reinterpret native messages.
 
 ## Current capabilities
 
 | Command | Current behavior |
 | --- | --- |
+| `server` | Owns a local Relay/session and serves the product Timeline + Chatbox; emits Replica records and browser protocol metadata. |
+| `settings list/set` | Lists native session settings or changes a declared setting through the shared client. Values are Provider-defined. |
 | `provider list` | Lists Providers exposed by the Relay. This is not Host or native session discovery. |
 | `session create` | Creates through the Relay with a Provider and optional native session ID, working directory, model, reasoning effort, system prompt and planning preference. Availability depends on the Relay and Provider. |
 | `session resume` | Restores through the Relay using an exact persistence-handle JSON file or stdin. |
@@ -76,6 +111,10 @@ Use `--until idle`, `--until interaction`, or `--until failed` to make a stream 
 
 ```text
 ardb
+|-- server --provider <codex|claude|copilot> [--open]
+|-- server --adapter <module-path> [--open]
+|-- settings list <agent-id>
+|-- settings set <agent-id> <setting-id> <value>
 |-- provider list
 |-- session create <agent-id> --provider <provider-id>
 |-- session resume <agent-id> --persistence-file <path|->
@@ -109,7 +148,7 @@ One-shot commands support `text` or `json`; streaming commands support `text` or
 | `3` | Relay connection or authorization failed. |
 | `4` | The public protocol rejected the operation or validation failed. |
 | `5` | The requested condition or command timed out. |
-| `130` | The process received SIGINT. |
+| `130` | A client command received SIGINT. `server` exits successfully after graceful SIGINT/SIGTERM cleanup. |
 
 Structured errors identify a stable code, message, and recoverability independently of the exit category.
 
@@ -125,11 +164,11 @@ A DSH image attachment is Provider-native input that the DSH adapter recognizes 
 
 The following are not implemented CLI features:
 
-- `serve`, a product-like debugging website, native process/stdin/stdout supervision, native event recording, or offline recording replay.
+- Native raw-event recording and offline recording replay. The command is `server`, not `serve`; native process/stdin/stdout handling remains owned by the selected Adapter.
 - A unified scenario runner, test-profile format, fault-injection controls, or regression report command. Existing package tests exercise the CLI; they are not an `ardb test` user command.
 - Host pairing/catalog, native session listing, directory/child attachment or controller lifecycle management. An already bound child can be addressed by public Agent ID within its capabilities.
-- Provider command discovery/execution, session-setting mutation, image input or explicit next-turn delivery. Use existing product/headless APIs where supported; slash text is not equivalent to a typed command operation.
-- Browser DOM/layout testing or collecting a browser tab's exact transport trace.
+- Provider command discovery/execution, CLI image input or explicit next-turn delivery. Use existing product/headless APIs where supported; slash text is not equivalent to a typed command operation.
+- Browser DOM/layout control from the CLI. The served view reports bounded protocol metadata; it does not export a lossless transport capture.
 
 JSONL can be saved for inspection, but it is not a lossless replay format: sensitive values and resource content are redacted. Real CLI integration and adapter normalization still need their own native/transport tests.
 
@@ -143,3 +182,11 @@ perl -e 'alarm shift; exec @ARGV' 180 pnpm exec vitest run --testTimeout=10000
 ```
 
 The built-process suite starts the recorded Relay on an ephemeral loopback port and invokes `dist/cli.js` as a fresh Node process. It covers public command acknowledgements, interaction responses, resource bytes, trace records, error categories, and concurrent Web/CLI replica convergence.
+
+The server browser suite runs the built package from a temporary installation directory with only production dependencies linked. A deterministic child process communicates over real stdin/stdout. The actual product view receives CLI messages, sends browser messages and approvals, reconnects after an offline interval and refreshes without recreating the Agent. Settings changes, rejected settings and owned-process shutdown are also checked. These tests do not claim authenticated live Codex, Claude or Copilot acceptance.
+
+```bash
+pnpm --filter @orchardworks/agent-remote-debugger... run build
+cd packages/agent-remote-debugger
+perl -e 'alarm shift; exec @ARGV' 150 pnpm exec playwright test
+```

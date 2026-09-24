@@ -12,9 +12,9 @@ export type { CliEnvironment } from './commands.js';
 
 const valueOptions = new Set([
   'relay', 'origin', 'format', 'provider', 'provider-session-id', 'cwd', 'model', 'reasoning-effort', 'system-prompt',
-  'persistence-file', 'tail', 'file', 'wait', 'for', 'response-file', 'output', 'until', 'timeout', 'planning',
+  'persistence-file', 'tail', 'file', 'wait', 'for', 'response-file', 'output', 'until', 'timeout', 'planning', 'adapter', 'executable', 'port',
 ]);
-const flagOptions = new Set(['json', 'jsonl', 'all', 'follow', 'help']);
+const flagOptions = new Set(['json', 'jsonl', 'all', 'follow', 'help', 'open']);
 
 export async function runCli(argv: readonly string[], io: DebuggerIo = processIo(), environment: CliEnvironment = {}): Promise<number> {
   const controller = new AbortController();
@@ -26,7 +26,11 @@ export async function runCli(argv: readonly string[], io: DebuggerIo = processIo
       io.stdout(`${helpText()}\n`);
       return 0;
     }
-    await executeCommand(parseInvocation(argv), io, environment, controller.signal);
+    const invocation = parseInvocation(argv);
+    if (invocation.path[0] === 'server') {
+      const { runServerCommand } = await import('./server-command.js');
+      await runServerCommand(invocation, io, controller.signal);
+    } else await executeCommand(invocation, io, environment, controller.signal);
     return 0;
   } catch (error) {
     const debuggerError = toDebuggerError(error);
@@ -68,7 +72,7 @@ function parseInvocation(argv: readonly string[]): ParsedInvocation {
 function commandPath(argv: readonly string[]): readonly string[] {
   const first = argv[0];
   if (!first || first.startsWith('-')) throw new DebuggerError(2, 'command_required', 'A command is required.', false);
-  if (first === 'provider' || first === 'session' || first === 'interaction' || first === 'resource' || first === 'protocol') {
+  if (first === 'provider' || first === 'session' || first === 'interaction' || first === 'resource' || first === 'protocol' || first === 'settings') {
     const second = argv[1];
     if (!second || second.startsWith('-')) throw new DebuggerError(2, 'subcommand_required', `A ${first} subcommand is required.`, false);
     return [first, second];
@@ -135,6 +139,8 @@ function helpText(): string {
 Agent Remote Debugger: inspect and exercise the Session View protocol and state.
 
 Commands:
+  server --provider <codex|claude|copilot> [--cwd <path>] [--executable <path>] [--port <0-65535>] [--open] [--jsonl]
+  server --adapter <module-path> [--persistence-file <path>] [--port <0-65535>] [--open] [--jsonl]
   provider list
   session create <agent-id> --provider <provider-id> [--provider-session-id <id>] [--cwd <path>] [--model <model>] [--reasoning-effort <effort>] [--system-prompt <text>] [--planning <on|off>]
   session resume <agent-id> --persistence-file <path|->
@@ -145,6 +151,8 @@ Commands:
   steer <agent-id> [message] [--file <path|->] [--wait <condition>]
   cancel <agent-id>
   planning <agent-id> <on|off>
+  settings list <agent-id>
+  settings set <agent-id> <setting-id> <value>
   wait <agent-id> --for <idle|interaction|failed>
   interaction list <agent-id>
   interaction respond <agent-id> <request-id> --response-file <path|->

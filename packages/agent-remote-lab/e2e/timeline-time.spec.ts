@@ -54,6 +54,7 @@ test('reveals local timestamps in the sender direction without changing row heig
   const assistant = page.locator('[data-entry-key="time:codex:2:assistant"]');
   const rowHeight = (await assistant.boundingBox())!.height;
   for (const [row, dx] of [[user, -120], [assistant, 120]] as const) {
+    await expect(row.locator('.agent-entry-content')).toHaveCSS('transform', 'none');
     await drag(page, row.locator('.agent-message'), dx);
     const time = row.locator('.agent-entry-time');
     await expect(time).toBeVisible();
@@ -63,6 +64,7 @@ test('reveals local timestamps in the sender direction without changing row heig
     expect(Math.abs((await assistant.boundingBox())!.height - rowHeight)).toBeLessThan(0.1);
     await page.screenshot({ path: testInfo.outputPath(dx < 0 ? 'user-time.png' : 'assistant-time.png') });
     await expect(time).toBeHidden({ timeout: 4000 });
+    await expect(row.locator('.agent-entry-content')).toHaveCSS('transform', 'none');
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

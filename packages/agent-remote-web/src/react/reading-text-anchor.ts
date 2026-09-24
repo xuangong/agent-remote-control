@@ -10,41 +10,42 @@ export function captureReadingText(entry: HTMLElement, viewport: DOMRect): Readi
   if (entry.getBoundingClientRect().top >= viewport.top) return;
   const range = entry.ownerDocument.createRange();
   if (typeof range.getClientRects !== 'function') return;
-  // Hit testing avoids measuring every preceding text node on each scroll event.
-  const nearby = anchorAtViewportTop(entry, viewport, range);
-  if (nearby) return nearby;
-  const walker = entry.ownerDocument.createTreeWalker(entry, NodeFilter.SHOW_TEXT);
+  for (const markdown of Array.from(entry.querySelectorAll<HTMLElement>('.agent-markdown'))) {
+    const bounds = markdown.getBoundingClientRect();
+    if (bounds.height <= 0 || bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) continue;
+    const block = visibleTextBlock(markdown, viewport);
+    const nearby = captureTextIn(block, entry, viewport, range);
+    if (nearby) return nearby;
+  }
+  return captureTextIn(entry, entry, viewport, range);
+}
+
+// These Markdown containers lay out their children vertically. Search only inside
+// the current message: document-wide caret hit testing scales with the whole timeline.
+const flowContainers = new Set(['UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TFOOT']);
+function visibleTextBlock(root: HTMLElement, viewport: DOMRect): HTMLElement {
+  if (!root.matches('.agent-markdown, .agent-markdown-table') && !flowContainers.has(root.tagName)) return root;
+  const children = root.children;
+  let low = 0, high = children.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (children[middle]!.getBoundingClientRect().bottom > viewport.top) high = middle;
+    else low = middle + 1;
+  }
+  const child = children[low];
+  if (!(child instanceof HTMLElement)) return root;
+  const bounds = child.getBoundingClientRect();
+  if (bounds.height <= 0 || bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) return root;
+  return visibleTextBlock(child, viewport);
+}
+
+function captureTextIn(root: HTMLElement, entry: HTMLElement, viewport: DOMRect, range: Range): ReadingTextAnchor | undefined {
+  const walker = entry.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent;
     if (!text?.trim() || !node.parentElement?.closest('.agent-markdown')) continue;
-    range.selectNodeContents(node);
-    const visible = Array.from(range.getClientRects()).find(rect => rect.width > 0 && rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom);
-    if (!visible) continue;
     const anchor = anchorForText(entry, node, viewport, range);
     if (anchor) return anchor;
-  }
-}
-
-function anchorAtViewportTop(entry: HTMLElement, viewport: DOMRect, range: Range): ReadingTextAnchor | undefined {
-  const document = entry.ownerDocument;
-  if (typeof document.caretPositionFromPoint !== 'function' && typeof document.caretRangeFromPoint !== 'function') return;
-  const bounds = entry.getBoundingClientRect();
-  const left = Math.max(0, bounds.left, viewport.left), right = Math.min(bounds.right, viewport.right);
-  if (right <= left) return;
-  const visited = new Set<Node>();
-  for (const dy of [1, 12, 24, 40]) {
-    const y = Math.max(0, viewport.top) + dy;
-    if (y >= viewport.bottom) break;
-    for (const x of [left + 1, (left + right) / 2, right - 1]) {
-      const node = typeof document.caretPositionFromPoint === 'function' ? document.caretPositionFromPoint(x, y)?.offsetNode
-        : document.caretRangeFromPoint?.(x, y)?.startContainer;
-      if (node?.nodeType !== Node.TEXT_NODE || visited.has(node)) continue;
-      visited.add(node);
-      if (entry.contains(node) && node.textContent?.trim() && node.parentElement?.closest('.agent-markdown')) {
-        const anchor = anchorForText(entry, node, viewport, range);
-        if (anchor) return anchor;
-      }
-    }
   }
 }
 

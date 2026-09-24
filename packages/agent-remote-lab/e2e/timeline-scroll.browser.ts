@@ -18,6 +18,7 @@ beforeAll(async () => {
     import { captureReadingText, readingTextTop } from '../../agent-remote-web/src/react/reading-text-anchor.ts';
     const positions = new Map();
     const count = Number(new URLSearchParams(location.search).get('count') || 1200);
+    const shape = new URLSearchParams(location.search).get('shape');
     window.readAnchor = () => positions.get('long')?.anchor;
     window.capture = () => {
       const viewport = document.querySelector('#viewport');
@@ -29,7 +30,11 @@ beforeAll(async () => {
       return <div id="viewport" ref={scroll.viewportRef} onScroll={scroll.onScroll} onWheel={scroll.onWheel}
         style={{ height: '600px', overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse', font: '16px/1.5 sans-serif' }}>
         <div ref={scroll.contentRef} style={{ flex: 'none' }}><article data-entry-key="message"><div className="agent-markdown" style={{ padding: '12px' }}>
-          {Array.from({ length: count }, (_, index) => <p data-paragraph={index} key={index}>
+          {shape === 'list' ? <blockquote><ul>{Array.from({ length: count }, (_, index) =>
+            <li data-paragraph={index} key={index}>List item {index}. {'Text that wraps into several lines. '.repeat(6)}</li>)}</ul></blockquote>
+          : shape === 'table' ? <div className="agent-markdown-table"><table><tbody>{Array.from({ length: count }, (_, index) =>
+            <tr data-paragraph={index} key={index}><td>Row {index}. {'Wrapped table text. '.repeat(8)}</td><td>Short cell</td></tr>)}</tbody></table></div>
+          : Array.from({ length: count }, (_, index) => <p data-paragraph={index} key={index}>
             Paragraph {index}. {'Readable conversation text that wraps naturally. '.repeat(5)}
             <strong>Emphasis</strong> and <code>inline code</code>. {'More text to wrap. '.repeat(5)}
           </p>)}
@@ -65,17 +70,26 @@ for (const engine of [chromium, webkit]) {
       await readParagraph(page, 1000);
       const result = await page.evaluate(() => {
         const original = Range.prototype.getClientRects;
-        let reads = 0;
+        const caret = document.caretPositionFromPoint?.bind(document);
+        const caretRange = document.caretRangeFromPoint?.bind(document);
+        let reads = 0, hitTests = 0;
+        if (caret) document.caretPositionFromPoint = (...args) => { hitTests++; return caret(...args); };
+        if (caretRange) document.caretRangeFromPoint = (...args) => { hitTests++; return caretRange(...args); };
         Range.prototype.getClientRects = function () { reads++; return original.call(this); };
         try {
           const started = performance.now();
           const anchor = (window as any).capture();
-          return { reads, duration: performance.now() - started, anchor };
-        } finally { Range.prototype.getClientRects = original; }
+          return { reads, hitTests, duration: performance.now() - started, anchor };
+        } finally {
+          Range.prototype.getClientRects = original;
+          if (caret) document.caretPositionFromPoint = caret;
+          if (caretRange) document.caretRangeFromPoint = caretRange;
+        }
       });
       console.log(engine.name(), JSON.stringify(result));
       expect(result.anchor).toBeDefined();
       expect(result.reads).toBeLessThan(80);
+      expect(result.hitTests).toBe(0);
       expect(result.anchor.top).toBeLessThan(40);
     } finally { await browser.close(); }
   });
@@ -99,7 +113,38 @@ for (const engine of [chromium, webkit]) {
     } finally { await browser.close(); }
   });
 
-  it(`falls back when hit testing is unavailable or outside the conversation (${engine.name()})`, async () => {
+  it(`searches long nested lists and tables within the message (${engine.name()})`, async () => {
+    const browser = await engine.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      page.setDefaultTimeout(10_000);
+      for (const shape of ['list', 'table']) {
+        await page.goto(url + '?shape=' + shape);
+        await readParagraph(page, 1000);
+        const result = await page.evaluate(() => {
+          const original = Element.prototype.getBoundingClientRect;
+          const textRects = Range.prototype.getClientRects;
+          let blocks = 0, characters = 0;
+          Element.prototype.getBoundingClientRect = function () { blocks++; return original.call(this); };
+          Range.prototype.getClientRects = function () { characters++; return textRects.call(this); };
+          try {
+            const anchor = (window as any).capture();
+            const node = anchor?.path.reduce((node: Node, index: number) => node.childNodes[index]!, document.querySelector('[data-entry-key]'));
+            return { anchor, paragraph: node?.parentElement?.closest('[data-paragraph]')?.getAttribute('data-paragraph'), blocks, characters };
+          }
+          finally { Element.prototype.getBoundingClientRect = original; Range.prototype.getClientRects = textRects; }
+        });
+        expect(result.anchor).toBeDefined();
+        expect(result.anchor.top).toBeLessThan(40);
+        expect(result.blocks).toBeLessThan(60);
+        expect(result.characters).toBeLessThan(80);
+        expect(result.anchor.sample).toMatch(/^(List item|Row) /);
+        expect(result.paragraph).toBe('1000');
+      }
+    } finally { await browser.close(); }
+  });
+
+  it(`ignores document hit-test APIs and preserves text selection (${engine.name()})`, async () => {
     const browser = await engine.launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });

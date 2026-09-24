@@ -48,11 +48,11 @@ After deployment, rollback must preserve this version-2 reader/writer module. A 
 
 Cache limits are soft: mounted Main/Side/Ask panes, uncertain/failed outgoing messages, and dirty or failed-to-save drafts take priority over eviction. Payload estimates are not heap measurements. Real iPhone home-screen keyboard behavior, suspension/resume, and energy impact remain device acceptance work.
 
-## Long-reply scrolling
+## Long-conversation scrolling
 
-The `e2e/timeline-scroll.browser.ts` regression renders 1,200 paragraphs with inline formatting and the production `useTimelineScroll` hook. At paragraph 1,000 in a 390px viewport, baseline `487cdfa` made 9,006 `Range.getClientRects()` calls for one `captureReadingText` operation in both Chromium and WebKit. The optimized path makes 5 calls and saves the same anchor in this fixture.
+The `e2e/timeline-scroll.browser.ts` regression renders 1,200 paragraphs with inline formatting and the production `useTimelineScroll` hook. At paragraph 1,000 in a 390px viewport, baseline `487cdfa` made 9,006 `Range.getClientRects()` calls for one `captureReadingText` operation in both Chromium and WebKit. The current path makes 5 calls and saves the same anchor in this fixture.
 
-The renderer now uses browser caret hit testing to locate text near the visible top before measuring its first visible character. Unsupported APIs, overlays, non-Markdown targets, and offscreen results fall back to the existing text walk. Hit testing does not change the user's selection. The saved anchor format and resize/restore behavior remain compatible.
+The intermediate implementation in `f5feb3a` used document-wide caret hit testing. Although that reduced geometry reads inside one long reply, full-App scroll traces showed hit-testing cost growing sharply with the number of loaded messages. The renderer now locates the visible Markdown block inside the already identified message, using binary search within vertical block containers, and measures the visible character locally. It never invokes document caret hit testing. Unrecognized layouts retain a text-walk fallback; saved anchor format, text selection, and resize/restore behavior remain compatible. Mobile entries only receive a transform while their timestamp action is revealed, avoiding an idle identity transform on every message.
 
 Run the bounded browser regressions from the repository root:
 
@@ -60,4 +60,32 @@ Run the bounded browser regressions from the repository root:
 pnpm test:preview-browser
 ```
 
-The browser suite also checks width changes, earlier content growth, unavailable/invalid hit tests, and text selection. This is a measured reduction in scroll-handler work inside long replies, not an FPS result for an entire production conversation or a real-iPhone smoothness guarantee. Large DOM paint costs and the fallback path are outside this optimization.
+The browser suite checks long paragraphs, nested lists, tables, width changes, earlier content growth, text selection, and independence from document hit-test APIs. Timestamp interaction tests verify that swipes still reveal actions and return to an untransformed state, while preserving native vertical and code scrolling.
+
+### Full-App bidirectional benchmark
+
+After building the workspace, run from `packages/agent-remote-lab`:
+
+```sh
+pnpm exec vite build --config performance/vite.config.ts
+node performance/scroll.mjs > performance/results/scroll-optimized.json
+# A separately preserved build can be measured with the same runner:
+node performance/scroll.mjs .tmp/scroll-baseline-build > performance/results/scroll-baseline.json
+```
+
+The runner uses the production App with an inert transport, 100/1,000/3,000 loaded messages, a 390 x 844 touch viewport, and 4x CPU slowdown. Each of three fresh-page runs starts halfway through the conversation, then sends real touch scroll gestures 1,800px upward and downward at 1,400px/s. It rejects gestures that move less than 1,000px. Initial hydration is outside the measurement; no other CPU-heavy test should run concurrently. A five-minute process deadline and 45-second action deadlines bound each run.
+
+Report per-direction median cumulative main-thread task and script time, and the median of each run's rAF interval p95. These are synthetic desktop Chromium comparisons, not input latency, real-iPhone FPS, or a guarantee that arbitrary history sizes remain smooth. The full history remains mounted; DOM and paint costs still grow with loaded content.
+
+Three-run medians with Chromium 151.0.7922.34. Baseline: `f5feb3aa8fabb1b2d90f4728c0a9a30440a941e5`; candidate: the implementation commit containing these results on `perf/long-timeline-scroll`. Raw samples: `results/scroll-baseline.json` and `results/scroll-optimized.json`. Values below are baseline / optimized, in milliseconds.
+
+| Loaded entries | Direction | Task time | Script time | rAF interval p95 |
+| --- | --- | ---: | ---: | ---: |
+| 100 | up | 64.9 / 29.6 | 41.9 / 15.1 | 35.4 / 35.4 |
+| 100 | down | 29.1 / 18.4 | 16.0 / 5.3 | 34.5 / 36.5 |
+| 1,000 | up | 226.1 / 72.1 | 143.6 / 12.9 | 41.8 / 40.1 |
+| 1,000 | down | 190.9 / 49.6 | 125.5 / 7.3 | 36.5 / 35.0 |
+| 3,000 | up | 909.6 / 180.0 | 685.3 / 21.7 | 106.9 / 35.0 |
+| 3,000 | down | 738.7 / 159.2 | 511.6 / 15.8 | 50.5 / 37.7 |
+
+Validation for this change: 16 scroll-hook unit cases, 8 Chromium/WebKit anchor cases, 8 Markdown reading cases, 12 timestamp interaction cases, and 24 mobile viewport cases passed (68 total; 7 platform-specific cases skipped). Workspace Relay build, Web/Lab typechecks, compatibility update/check, and whitespace checks passed. Real-device iPhone acceptance remains separate.

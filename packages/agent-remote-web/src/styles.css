@@ -695,7 +695,8 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-time-title-control, .agent-title-time { display: none; }
   .agent-time-title-mobile { display: inline; }
   .agent-timeline-entry { overflow-x: clip; }
-  .agent-entry-content { transform: translateX(var(--agent-time-offset, 0px)); transition: transform 180ms ease-out; }
+  .agent-entry-content { transition: transform 180ms ease-out; }
+  .agent-timeline-entry[data-time-revealed] > .agent-entry-content { transform: translateX(var(--agent-time-offset, 0px)); }
   .agent-timeline-entry[data-time-dragging] > .agent-entry-content { transition: none; }
   .agent-entry-time { display: flex; visibility: hidden; position: absolute; top: var(--agent-time-top); width: 108px; padding: 0 4px; box-sizing: border-box; transform: translateY(-50%); flex-direction: column; align-items: center; gap: 3px; color: var(--agent-muted); font: 11px/1.4 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
   .agent-timeline-entry[data-time-side="left"] > .agent-entry-time { left: 0; }

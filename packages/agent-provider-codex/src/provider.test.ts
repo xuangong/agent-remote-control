@@ -54,6 +54,7 @@ describe('CodexAppServerProvider contract', () => {
     expect(provider.descriptor).toEqual({ providerId: 'codex', displayName: 'Codex' });
     const session = await provider.createSession({ sessionId: 'local', cwd: '/workspace' });
     validateAgentSessionCapabilities(session);
+    expect(session.capabilities.sessionControl).toBe('exclusive');
     const iterator = session.observe()[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toEqual({
       value: { type: 'history_boundary' }, done: false,

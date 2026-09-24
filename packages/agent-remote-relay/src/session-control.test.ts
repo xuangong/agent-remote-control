@@ -101,3 +101,24 @@ it('fences all browser writers while a native CLI owns the session', () => {
   expect(updates.length).toBeGreaterThan(1);
   page.close();registry.close();
 });
+
+it('keeps shared control independent across clients and invalidates proofs only on their own close', () => {
+  const registry = new SessionControlRegistry();
+  const a = registry.attachShared('shared');
+  const b = registry.attachShared('shared');
+  try {
+    const first = a.request('acquire', a.state().revision);
+    const second = b.request('acquire', b.state().revision);
+    expect(first.access).toBe('control'); expect(second.access).toBe('control');
+    expect(first.token).not.toBe(second.token);
+    expect(a.state()).not.toHaveProperty('ownerKind');
+    b.request('take_over', b.state().revision);
+    expect(() => a.assert(first.token)).not.toThrow();
+    expect(() => b.assert(first.token)).toThrow(/read.only/i);
+    a.close();
+    expect(() => a.assert(first.token)).toThrow(/read.only/i);
+    expect(() => b.assert(second.token)).not.toThrow();
+    registry.close();
+    expect(() => b.assert(second.token)).toThrow(/read.only/i);
+  } finally {a.close(); b.close(); registry.close();}
+});

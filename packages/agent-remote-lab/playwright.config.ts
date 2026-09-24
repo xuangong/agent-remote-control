@@ -29,7 +29,7 @@ export default defineConfig({
   projects: [
     { name: 'chromium-desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'chromium-mobile', use: { ...devices['Pixel 7'] } },
-    { name: 'webkit-mobile-sidebar', testMatch: 'mobile-sidebar.spec.ts', use: { ...devices['iPhone 13'], browserName: 'webkit' } },
+    { name: 'webkit-mobile-sidebar', testMatch: ['mobile-sidebar.spec.ts', 'provider-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-mobile-viewport', testMatch: ['mobile-viewport.spec.ts', 'layout-diagnostics.spec.ts', 'standalone-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
   ],
   webServer: [

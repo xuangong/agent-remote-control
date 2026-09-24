@@ -608,3 +608,28 @@ it('fences an operation if control changes while asynchronous validation is pend
     expect(aMessages.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send', code: 'session_read_only' } });
   } finally { a.close(); b.close(); registry.close(); }
 });
+
+it('requires authorization before granting shared control and rejects mutations without its proof', async () => {
+  const {SessionControlRegistry} = await import('./session-control.js');
+  const registry = new SessionControlRegistry();
+  const {agent} = fakeAgent();
+  const snapshot = agent.snapshot(); snapshot.payload.capabilities.sessionControl = 'shared';
+  agent.snapshot = () => snapshot;
+  const cancel = vi.fn(async () => {}); agent.cancel = cancel;
+  const messages: any[] = [];
+  const wire = createSessionWire(agent, json => messages.push(JSON.parse(json)), {sessionControls: registry, authorize: () => false});
+  try {
+    await wire.receive(JSON.stringify({protocolVersion: '1.5.0', type: 'negotiate'}));
+    const control = messages.find(message => message.type === 'session_control').payload;
+    expect(control.access).toBe('read_only'); expect(control.token).toBeUndefined();
+    await wire.receive(JSON.stringify({protocolVersion: '1.5.0', type: 'session_control_request', payload: {
+      agentId: agent.agentId, requestId: 'claim', action: 'acquire', revision: control.revision,
+    }}));
+    expect(messages.at(-1)).toMatchObject({type: 'protocol_error', payload: {code: 'forbidden'}});
+    await wire.receive(JSON.stringify({protocolVersion: '1.5.0', type: 'cancel', payload: {
+      agentId: agent.agentId, requestId: 'cancel', operationId: OPERATION_ID,
+    }}));
+    expect(messages.at(-1)).toMatchObject({type: 'protocol_error', payload: {code: 'session_read_only'}});
+    expect(cancel).not.toHaveBeenCalled();
+  } finally {wire.close(); registry.close();}
+});

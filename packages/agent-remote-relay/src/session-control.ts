@@ -26,6 +26,7 @@ function denied(code: string, message: string): Error { return new SessionContro
 /** Interaction ownership never changes the lifetime of a native session. */
 export class SessionControlRegistry {
   private readonly sessions = new Map<string, Session>();
+  private readonly sharedLeases = new Set<SessionControlLease>();
   private readonly graceMs: number;
 
   constructor(options: { graceMs?: number } = {}) { this.graceMs = options.graceMs ?? 30_000; }
@@ -37,6 +38,30 @@ export class SessionControlRegistry {
     clearTimeout(session.expiry); session.expiry = undefined;
     session.owner = undefined; session.nativeOwner = nativeOwner; session.revision = randomUUID();
     for (const notify of session.listeners.values()) notify({agentId, revision: session.revision, access: 'read_only', available: !nativeOwner, ...(nativeOwner ? {nativeOwner} : {})});
+  }
+
+  /** Shared sessions authorize each connection without allocating a mutually exclusive owner. */
+  attachShared(agentId: string): SessionControlLease {
+    const revision = randomUUID();
+    let token: string | undefined;
+    let closed = false;
+    const state = (): SessionControlState => ({agentId, revision, available: !closed,
+      access: token && !closed ? 'control' : 'read_only', ...(token && !closed ? {token} : {})});
+    const lease: SessionControlLease = {
+      state,
+      request: (_action, expectedRevision) => {
+        if (closed) throw denied('session_read_only', 'This connection is closed. Reconnect before operating this session.');
+        if (expectedRevision !== revision) throw denied('session_control_changed', 'Session control changed. Review its current state and retry.');
+        token ??= randomUUID();
+        return state();
+      },
+      assert: proof => {
+        if (closed || !token || proof !== token) throw denied('session_read_only', 'This connection is read-only. Reconnect before operating this session.');
+      },
+      close: () => { closed = true; token = undefined; this.sharedLeases.delete(lease); },
+    };
+    this.sharedLeases.add(lease);
+    return lease;
   }
 
   attach(agentId: string, listener: Listener): SessionControlLease {
@@ -114,6 +139,7 @@ export class SessionControlRegistry {
   }
 
   close(): void {
+    for (const lease of this.sharedLeases) lease.close();
     for (const session of this.sessions.values()) {
       clearTimeout(session.expiry);
       session.owner = undefined;

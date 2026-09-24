@@ -39,6 +39,14 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
     // Persisted metadata does not establish activity in another CLI server.
     return (await deadline(this.client.listSessions(), this.options.requestTimeoutMs ?? 15000, 'Copilot session discovery')).map(s => ({ nativeSessionId: s.sessionId, providerId: 'copilot', title: s.summary || 'Copilot session', workspace: s.context?.workingDirectory, createdAt: s.startTime.toISOString(), updatedAt: s.modifiedTime.toISOString(), state: 'unknown' }));
   }
+  async sessionWorkspace(sessionId: string): Promise<string | undefined> {
+    if (!sessionId || /[\x00/\\]/u.test(sessionId)) throw new Error('Invalid Copilot session ID.');
+    await this.ready();
+    const opened = this.sessions.get(sessionId);
+    if (opened) return (await opened.runtimeInfo()).cwd;
+    const metadata = await deadline(this.client.getSessionMetadata(sessionId), this.options.requestTimeoutMs ?? 15000, 'Copilot session metadata');
+    return metadata?.context?.workingDirectory || undefined;
+  }
   async createSession(config: AgentSessionConfig): Promise<CopilotAgentSession> {
     const cwd = await realpath(config.cwd ?? process.cwd());
     if (!(await stat(cwd)).isDirectory()) throw new Error('Copilot workspace must be a directory.');
@@ -58,9 +66,11 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
     let stored: unknown;
     try { stored = JSON.parse(handle.opaque); } catch { throw new Error('Invalid Copilot persistence configuration.'); }
     if (!stored || typeof stored !== 'object') throw new Error('Invalid Copilot persistence configuration.');
-    const cwd = (stored as {cwd?: unknown}).cwd;
+    const storedCwd = (stored as {cwd?: unknown}).cwd;
     await this.assertSessionAvailable(handle.sessionId);
-    return this.open({ sessionId: handle.sessionId, ...(typeof cwd === 'string' ? { cwd } : {}) }, true);
+    const cwd = typeof storedCwd === 'string' && storedCwd ? storedCwd : await this.sessionWorkspace(handle.sessionId);
+    if (!cwd) throw new Error('Copilot session workspace is unavailable.');
+    return this.open({ sessionId: handle.sessionId, cwd }, true);
   }
   private async open(config: AgentSessionConfig, resume: boolean): Promise<CopilotAgentSession> {
     await this.ready();

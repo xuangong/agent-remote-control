@@ -8,6 +8,7 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 export function createCopilotSessionDirectory(
   provider: Pick<AgentProviderAdapter, 'createSession' | 'resumeSession'> & {
     listSessions(): Promise<CopilotSessionSummary[]>;
+    sessionWorkspace?(id: string): Promise<string | undefined>;
     openChildSession?(parent: string, child: string): Promise<AgentSession>;
     dispose?(): Promise<void>;
     releaseSession?(id: string): Promise<void>;
@@ -87,6 +88,7 @@ export function createCopilotSessionDirectory(
     providerId: 'copilot',
     list() { if (closed) throw new Error('Copilot directory is closed.'); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
+    ...(provider.sessionWorkspace ? {sessionWorkspace: provider.sessionWorkspace.bind(provider)} : {}),
     async create(input) {
       if (closed) throw new Error('Copilot directory is closed.');
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(({ id }) => id === input.workspaceId);

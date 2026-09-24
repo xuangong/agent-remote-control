@@ -244,12 +244,26 @@ and CSRF authorization, old-Controller rejection, uplink replacement during a
 job, persistence failures, and browser polling without mutation replay. Deploy
 updated strict-schema Server participants before capability-advertising Hosts.
 
-## Exclusive session interaction control
+## Session interaction control
 
 The common session wire advertises `negotiated.sessionControl: true`. This is a
 Relay/Controller authority boundary, separate from normalized Agent state and
-native process ownership. It applies uniformly to stdio adapters; it does not
-implement native CLI handoff or restart the provider process.
+native process ownership. The adapter's `capabilities.sessionControl` selects
+`shared` or `exclusive`; absence defaults to `exclusive`. Codex shared daemon
+sessions, including their child sessions, declare `shared`. Private Codex and
+stdio adapters retain exclusive control. The Relay must not infer this from a
+provider ID or browser-supplied options. This does not implement native CLI
+handoff or restart the provider process.
+
+Shared sessions grant an independent, connection-scoped proof to every authorized
+client. Acquiring or taking control never revokes another shared client's proof;
+closing or reconnecting one connection does not affect other writers. Shared
+connections have no exclusive `ownerKind` or native takeover notice. Proofs are
+still required for mutations and remain subject to the existing authorization
+checks. Recordings retain the normalized capability, but never restore live
+control proofs or exclusive ownership from replay.
+
+The ownership and takeover rules below apply to exclusive sessions.
 
 Each content connection receives `session_control` with `agentId`, `revision`,
 `access` (`control` or `read_only`), and `available`. Only controlling connections

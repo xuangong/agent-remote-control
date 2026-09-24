@@ -295,6 +295,7 @@ textarea {
   .lab-sidebar-content .lab-display-settings summary { padding-block: 10px; cursor: pointer; }
 }
 .lab-context-rail input, .lab-context-rail select, .lab-context-rail textarea { min-width: 0; max-width: 100%; }
+.lab-context-rail select { overflow: hidden; text-overflow: ellipsis; }
 .lab-context-rail .lab-session-list { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
 .lab-inspector-rail { display: grid; align-content: start; border-left: 1px solid var(--obs-border); }
 

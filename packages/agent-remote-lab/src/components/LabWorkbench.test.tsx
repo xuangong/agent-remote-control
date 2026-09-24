@@ -314,8 +314,8 @@ it('shows live read-only ownership, keeps the draft, and offers takeover without
   expect(cancel).not.toHaveBeenCalled();
 });
 
-it('keeps the composer free of ownership notices when this page has control', async () => {
-  const state = { ...replicaState, sessionControl: { access: 'control' as const, available: false, revision: 'two' } };
+it.each(['shared', 'exclusive'] as const)('keeps the %s composer free of ownership notices when this page has control', async mode => {
+  const state = { ...replicaState, agent: {...replicaState.agent!, capabilities: {...replicaState.agent!.capabilities, sessionControl: mode}}, sessionControl: { access: 'control' as const, available: false, revision: 'two' } };
   const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
   expect(container.querySelector('.lab-session-control')).toBeNull();
   expect(container.textContent).not.toContain('Take control');

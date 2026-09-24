@@ -11,10 +11,10 @@ const longValue = 'Workstation0123456789'.repeat(12);
 async function expectContained(drawer: Locator) {
   const layout = await drawer.evaluate(element => {
     const bounds = element.getBoundingClientRect();
-    const scrollers = [element, ...element.querySelectorAll('.lab-session-list')];
+    const scrollers = [element, ...element.querySelectorAll('.lab-sidebar-content, .lab-session-list')];
     const overflow = scrollers.filter(item => item.clientWidth > 0).map(item => {
       item.scrollLeft = 100;
-      return { extraWidth: item.scrollWidth - item.clientWidth, scrollLeft: item.scrollLeft };
+      return { class: item.className, extraWidth: item.scrollWidth - item.clientWidth, scrollLeft: item.scrollLeft };
     });
     const controls = [...element.querySelectorAll('button, select, input, textarea')].filter(item => item.getClientRects().length).map(item => {
       const rect = item.getBoundingClientRect();
@@ -22,7 +22,7 @@ async function expectContained(drawer: Locator) {
     });
     return { left: bounds.left, right: bounds.right, overflow, controls };
   });
-  for (const item of layout.overflow) { expect(item.extraWidth).toBeLessThanOrEqual(1); expect(item.scrollLeft).toBe(0); }
+  for (const item of layout.overflow) { expect(item.extraWidth, item.class).toBeLessThanOrEqual(1); expect(item.scrollLeft).toBe(0); }
   for (const item of layout.controls) {
     expect(item.left, item.label).toBeGreaterThanOrEqual(layout.left);
     expect(item.right, item.label).toBeLessThanOrEqual(layout.right);
@@ -31,7 +31,7 @@ async function expectContained(drawer: Locator) {
 
 for (const width of [320, 390, 844]) {
   test(`contains all three Browse providers at ${width}px through list, error, creation and settings`, async ({ page, request }, testInfo) => {
-    test.skip(testInfo.project.name !== 'chromium-mobile', 'Mobile drawer layout.');
+    test.skip(!['chromium-mobile', 'webkit-mobile-sidebar'].includes(testInfo.project.name), 'Mobile drawer layout.');
     await page.setViewportSize({ width, height: width === 844 ? 390 : 740 });
     const relayUrl = `http://127.0.0.1:${process.env.AGENT_REMOTE_TEST_RELAY_PORT ?? 5910}`;
     const invitation = await (await request.post(`${relayUrl}/v1/remote/pairings`, { data: {} })).json();
@@ -89,7 +89,7 @@ for (const width of [320, 390, 844]) {
         await expectContained(drawer);
         await page.screenshot({ path: testInfo.outputPath(`${provider.providerId}-settings.png`) });
         await drawer.getByRole('button', { name: 'Pair Agent Host', exact: true }).click();
-        await drawer.getByRole('button', { name: 'All sessions', exact: true }).click();
+        await drawer.getByRole('button', { name: 'Sessions', exact: true }).click();
         expect(requests).toContain(`/remote/catalog:${provider.providerId}`);
         expect(requests).toContain(`/remote/workspaces:${provider.providerId}`);
       });

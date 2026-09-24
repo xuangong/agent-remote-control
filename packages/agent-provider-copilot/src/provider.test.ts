@@ -19,7 +19,7 @@ beforeEach(() => {
     tasks: {list: vi.fn(async () => ({tasks: []})), sendMessage: vi.fn(async () => ({sent: true})), cancel: vi.fn(async () => ({cancelled: true}))},
     eventLog: {read: vi.fn(async () => ({events: [], cursor: 'end', hasMore: false}))}
   }};
-  mock.client = {rpc: {sessions: {checkInUse: vi.fn(async () => ({inUse: []})), close: vi.fn(async () => ({}))}, skills: {getDiscoveryPaths: vi.fn(async () => ({paths: [{path: '/native/project/skills'}]}))}}, start: vi.fn(async () => {}), stop: vi.fn(async () => []), forceStop: vi.fn(async () => {}), createSession: vi.fn(async (config: unknown) => {mock.config = config; return mock.native;}), resumeSession: vi.fn(async (_id: string, config: unknown) => {mock.config = config; return mock.native;}), listSessions: vi.fn(async () => [])};
+  mock.client = {rpc: {sessions: {checkInUse: vi.fn(async () => ({inUse: []})), close: vi.fn(async () => ({}))}, skills: {getDiscoveryPaths: vi.fn(async () => ({paths: [{path: '/native/project/skills'}]}))}}, start: vi.fn(async () => {}), stop: vi.fn(async () => []), forceStop: vi.fn(async () => {}), createSession: vi.fn(async (config: unknown) => {mock.config = config; return mock.native;}), resumeSession: vi.fn(async (_id: string, config: unknown) => {mock.config = config; return mock.native;}), getSessionMetadata: vi.fn(async () => undefined), listSessions: vi.fn(async () => [])};
 });
 async function open() { const provider = new CopilotAgentProvider({executable: '/test/copilot'}); return {provider, session: await provider.createSession({sessionId: 'public', cwd: process.cwd()})}; }
 async function collect(session: {observe(): AsyncIterable<ProviderStreamItem>}) { const values: ProviderStreamItem[] = []; const done = (async () => {for await (const value of session.observe()) values.push(value);})(); return {values, done}; }
@@ -451,3 +451,44 @@ it('refuses to resume a native session held outside the managed Controller', asy
     expect(mock.client.resumeSession).not.toHaveBeenCalled();
   } finally {await provider.dispose();}
 });
+
+it('restores the authoritative workspace when opening by native session ID', async () => {
+  mock.client.getSessionMetadata.mockResolvedValue({sessionId: 'cold', context: {workingDirectory: process.cwd()}});
+  const provider = new CopilotAgentProvider({executable: '/test/copilot'});
+  try {
+    const session = await provider.resumeSession({providerId: 'copilot', sessionId: 'cold', opaque: '{}'});
+    expect(mock.config.workingDirectory).toBe(process.cwd());
+    const info = await session.runtimeInfo();
+    expect(info.cwd).toBe(process.cwd());
+    expect(JSON.parse(info.persistence!.opaque).cwd).toBe(process.cwd());
+    expect(mock.client.listSessions).not.toHaveBeenCalled();
+  } finally { await provider.dispose(); }
+}, 10000);
+
+it('preserves an existing persistence workspace when metadata is unavailable', async () => {
+  const provider = new CopilotAgentProvider({executable: '/test/copilot'});
+  try {
+    const session = await provider.resumeSession({providerId: 'copilot', sessionId: 'saved', opaque: JSON.stringify({cwd: process.cwd()})});
+    expect((await session.runtimeInfo()).cwd).toBe(process.cwd());
+    expect(mock.client.getSessionMetadata).not.toHaveBeenCalled();
+  } finally {await provider.dispose();}
+}, 10000);
+it('does not open a cold native session using the Controller process directory when metadata is missing', async () => {
+  const provider = new CopilotAgentProvider({executable: '/test/copilot'});
+  try {
+    await expect(provider.resumeSession({providerId: 'copilot', sessionId: 'missing', opaque: '{}'})).rejects.toThrow(/workspace/);
+    mock.client.getSessionMetadata.mockRejectedValueOnce(new Error('Metadata unavailable'));
+    await expect(provider.resumeSession({providerId: 'copilot', sessionId: 'unreadable', opaque: '{}'})).rejects.toThrow('Metadata unavailable');
+    expect(mock.client.resumeSession).not.toHaveBeenCalled();
+    expect(mock.client.createSession).not.toHaveBeenCalled();
+  } finally {await provider.dispose();}
+}, 10000);
+
+it('reads an opened workspace before native metadata has been persisted', async () => {
+  const {provider, session} = await open();
+  try {
+    const info = await session.runtimeInfo();
+    expect(await provider.sessionWorkspace(info.sessionId!)).toBe(info.cwd);
+    expect(mock.client.getSessionMetadata).not.toHaveBeenCalled();
+  } finally {await provider.dispose();}
+}, 10000);

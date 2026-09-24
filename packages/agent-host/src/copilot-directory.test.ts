@@ -1,5 +1,5 @@
 import type { AgentCapabilities, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createCopilotSessionDirectory } from './copilot-directory.js';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
@@ -97,3 +97,25 @@ it('hands a running Controller session to CLI and fences automatic recovery', as
     await directory.open('native',{takeOver:cli.generation});
   }finally{await cli?.release();await directory.close();await rm(root,{recursive:true,force:true});}
 },5000);
+
+it('checks a cold Copilot workspace by ID without relying on the catalog', async () => {
+  const {createHostExecutionPolicy, protectHostDirectory} = await import('./execution-policy.js');
+  const {realpath} = await import('node:fs/promises');
+  const cwd = await realpath(process.cwd());
+  const lookup = vi.fn(async () => cwd as string | undefined);
+  const resume = vi.fn(async () => nativeSession('cold', cwd).session);
+  const list = vi.fn(async () => []);
+  const source = createCopilotSessionDirectory({listSessions: list, sessionWorkspace: lookup,
+    createSession: async () => {throw new Error('unused');}, resumeSession: resume}, []);
+  const directory = protectHostDirectory(source, (await createHostExecutionPolicy({AGENT_HOST_WORKSPACE: cwd}))!);
+  try {
+    expect((await (await directory.open('cold')).runtimeInfo()).cwd).toBe(cwd);
+    expect(lookup).toHaveBeenCalledWith('cold');
+    expect(list).not.toHaveBeenCalled();
+    lookup.mockResolvedValue(undefined);
+    await expect(directory.open('missing')).rejects.toThrow(/workspace/i);
+    lookup.mockResolvedValue('/');
+    await expect(directory.open('outside')).rejects.toThrow(/workspace/i);
+    expect(resume).toHaveBeenCalledTimes(1);
+  } finally {await directory.close();}
+}, 10000);

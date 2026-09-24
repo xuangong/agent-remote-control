@@ -19,9 +19,9 @@ function page(text: string, epoch = 'epoch'): HistoryPage {
     hasOlder: false, hasNewer: false, entries: [entry], error: null,
   } };
 }
-function capture() {
+function capture(sessionControl?: 'shared' | 'exclusive') {
   const replica = new AgentReplica();
-  replica.applySnapshot(snapshot); replica.applyHistory(page('first'));
+  replica.applySnapshot({...snapshot, payload: {...snapshot.payload, capabilities: {...snapshot.payload.capabilities, ...(sessionControl ? {sessionControl} : {})}}}); replica.applyHistory(page('first'));
   const records: DebuggerRecord[] = [];
   let time = 0;
   observeReplica('demo', replica, { subscribeStatus(listener: (s: RemoteSessionStatus) => void) { listener('ready'); return () => {}; } },
@@ -86,4 +86,10 @@ describe('Session View recording', () => {
     expect(player.state.resources.r).toMatchObject({ status: 'available', byteLength: 3 });
     expect(player.state.resources.r).not.toHaveProperty('contentBase64');
   });
+});
+
+it.each(['shared', 'exclusive'] as const)('preserves %s adapter control semantics through recorded snapshots', mode => {
+  const player = new RecordingPlayer(parseRecording(jsonl(capture(mode).records)));
+  expect(player.state.agent?.capabilities.sessionControl).toBe(mode);
+  expect(player.state.sessionControl).toBeUndefined();
 });

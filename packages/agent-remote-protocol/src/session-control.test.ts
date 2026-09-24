@@ -1,3 +1,5 @@
+import { Value } from '@sinclair/typebox/value';
+import { AgentCapabilities } from './snapshot.js';
 import { describe, expect, it } from 'vitest';
 import { decodeClientMessage, decodeServerMessage, PROTOCOL_VERSION } from './index.js';
 
@@ -21,4 +23,12 @@ describe('session control wire contract', () => {
     expect(decodeClientMessage(JSON.stringify({ ...request, payload: { ...request.payload, revision: '' } })).status).toBe('rejected');
     expect(decodeClientMessage(JSON.stringify({ ...request, payload: { ...request.payload, resumeToken: 'x'.repeat(257) } })).status).toBe('rejected');
   });
+});
+
+it('accepts explicit shared and exclusive adapter control semantics and rejects native transport names', () => {
+  const capabilities = {history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
+    interactions: {question: false, planApproval: false, toolApproval: false}};
+  expect(Value.Check(AgentCapabilities, capabilities)).toBe(true);
+  for (const sessionControl of ['shared', 'exclusive']) expect(Value.Check(AgentCapabilities, {...capabilities, sessionControl})).toBe(true);
+  expect(Value.Check(AgentCapabilities, {...capabilities, sessionControl: 'socket'})).toBe(false);
 });

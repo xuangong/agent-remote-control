@@ -80,7 +80,7 @@ The account Host list first sees an enrolled Host with no providers, then the re
 - `controller-state` stores the stable installation ID, device credential, pairing purpose and managed provider homes under `/data/host`.
 - `controller-workspace` stores project files under `/workspace`.
 - The process runs as UID 1000, uses `LC_ALL=C`, and sets the soft file limit to 8192. Compose sets both limits to 8192.
-- When selected for Gateway setup, Codex uses private app-server sessions and a dedicated `gateway-codex` home. Existing personal Codex configuration is never overwritten. Changes to the managed provider fields stop initialization with an actionable error; native project trust settings are preserved across restarts.
+- When selected for Gateway setup, Codex uses a shared daemon in a dedicated `gateway-codex` home. The Controller starts the managed daemon only when missing and preserves an already-running daemon. Existing personal Codex configuration is never overwritten. Changes to the managed provider fields stop initialization with an actionable error; native project trust settings are preserved across restarts.
 - The Gateway token is kept in a mode-0600 private state file and passed to native Codex through `CODEX_GATEWAY_API_KEY`. The TOML config contains only the environment-variable name.
 
 ```sh

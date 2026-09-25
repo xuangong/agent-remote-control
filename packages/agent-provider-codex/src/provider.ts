@@ -1,3 +1,4 @@
+import { CodexSessionTakeover } from './session-takeover.js';
 import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import type { AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import { readSessionHistoryPage } from './reference-history.js';
@@ -43,9 +44,11 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     displayName: 'Codex',
   };
 
+  private readonly takeover: CodexSessionTakeover;
   private readonly sessions = new Set<CodexAppServerSession>();
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
+    this.takeover = new CodexSessionTakeover(options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'), undefined, options.onDiagnostic);
     if (options.connectionMode !== undefined && !['private', 'shared'].includes(options.connectionMode)) throw new Error('Codex connection mode must be private or shared.');
     if (options.socketPath !== undefined && (options.connectionMode !== 'shared' || !isAbsolute(options.socketPath))) {
       throw new Error('Codex socket path requires shared mode and an absolute local path.');
@@ -55,6 +58,15 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     }
     if (options.connectionMode === 'shared' && options.spawn) throw new Error('Shared Codex cannot also spawn a private runtime.');
     if (process.platform === 'win32' && options.connectionMode === 'shared' && options.socketPath) throw new Error('Windows shared Codex selects its daemon through CODEX_HOME; remove the Unix socket override.');
+  }
+
+  async inspectSessionOwner(nativeSessionId: string): Promise<{generation: string} | undefined> {
+    return this.options.connectionMode === 'shared' ? this.takeover.inspect(nativeSessionId) : undefined;
+  }
+
+  async releaseSessionOwner(nativeSessionId: string, generation: string): Promise<void> {
+    if (this.options.connectionMode !== 'shared') throw new Error('Codex takeover requires a shared destination.');
+    await this.takeover.release(nativeSessionId, generation);
   }
 
   async listSessions(options: CodexSessionListOptions = {}): Promise<CodexSessionPage> {

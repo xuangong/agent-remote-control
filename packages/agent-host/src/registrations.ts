@@ -34,8 +34,10 @@ export function selectedHostProviders(env: NodeJS.ProcessEnv): HostProviderId[] 
 export async function createHostRegistrations(env: NodeJS.ProcessEnv, onDiagnostic?: (line: string) => void,
   factories: HostRegistrationFactories = defaultFactories): Promise<AgentHostProviderRegistration[]> {
   const providers = selectedHostProviders(env);
-  const connectionMode = env.AGENT_HOST_CODEX_CONNECTION ?? 'shared';
-  if (providers.includes('codex') && connectionMode !== 'private' && connectionMode !== 'shared') throw new Error('Codex connection mode must be private or shared.');
+  const configuredMode = env.AGENT_HOST_CODEX_CONNECTION ?? 'shared';
+  const connectionMode = 'shared';
+  if (providers.includes('codex') && configuredMode !== 'private' && configuredMode !== 'shared') throw new Error('Codex connection mode must be private or shared.');
+  if (providers.includes('codex') && configuredMode === 'private') onDiagnostic?.('Codex Controller sessions now use the shared daemon; AGENT_HOST_CODEX_CONNECTION=private is ignored.');
   const workspace = env.AGENT_HOST_WORKSPACE ?? env.AGENT_REMOTE_WORKSPACE ?? process.cwd();
   const common = { env: sanitizeNativeEnvironment(env), onDiagnostic, restrictedNative: env.AGENT_HOST_TRUSTED_FULL_CONTROL !== '1', workspaces: workspace ? [{ id: workspace, name: workspace, path: workspace }] : [] };
   const registrations: AgentHostProviderRegistration[] = [];
@@ -48,8 +50,8 @@ export async function createHostRegistrations(env: NodeJS.ProcessEnv, onDiagnost
       }
       registrations.push(provider === 'codex'
         ? await factories.codex({ ...common, env: nativeEnv, executable: env.AGENT_HOST_CODEX ?? env.AGENT_REMOTE_CODEX_EXECUTABLE, codexHome: env.AGENT_REMOTE_CODEX_HOME,
-          connectionMode: connectionMode as 'private' | 'shared', socketPath: env.AGENT_HOST_CODEX_SOCKET,
-          restrictedNative: connectionMode === 'shared' && (env.AGENT_HOST_CODEX_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative })
+          connectionMode, socketPath: env.AGENT_HOST_CODEX_SOCKET,
+          restrictedNative: (env.AGENT_HOST_CODEX_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative })
         : provider === 'opencode'
         ? await factories.opencode({ workspaces: common.workspaces, restrictedNative: (env.AGENT_HOST_OPENCODE_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative, onDiagnostic,
           probe: env.AGENT_HOST_PROVIDER_DISCOVERY === '1', serverUrl: env.AGENT_HOST_OPENCODE_URL, callbackConfigPath: env.AGENT_HOST_OPENCODE_CALLBACK_CONFIG, username: env.AGENT_HOST_OPENCODE_USERNAME, password: env.AGENT_HOST_OPENCODE_PASSWORD })

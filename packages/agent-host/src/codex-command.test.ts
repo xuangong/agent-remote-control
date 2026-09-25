@@ -13,10 +13,10 @@ async function fixture() {
   const environment = { AGENT_HOST_CODEX: executable, TEST_CAPTURE: capture };
   return { root, environment, captured: async () => JSON.parse(await readFile(capture, 'utf8')) };
 }
-it('runs explicit private Codex commands without injecting a shared socket', async () => {
+it('migrates legacy private commands to shared and preserves explicit endpoints', async () => {
   const f = await fixture();
-  expect(await runCodexCommand(['resume', '--last'], f.root, { ...f.environment, AGENT_HOST_CODEX_CONNECTION: 'private' })).toBe(0);
-  expect((await f.captured()).args).toEqual(['resume', '--last']);
+  expect(await runCodexCommand(['resume', '--last'], f.root, { ...f.environment, CODEX_HOME: f.root, AGENT_HOST_CODEX_CONNECTION: 'private' })).toBe(0);
+  expect((await f.captured()).args).toEqual(['--remote', `unix://${f.root}/app-server-control/app-server-control.sock`, 'resume', '--last']);
   expect(await runCodexCommand(['--remote', 'unix:///intentional.sock'], f.root, { ...f.environment, AGENT_HOST_CODEX_CONNECTION: 'private' })).toBe(0);
   expect((await f.captured()).args).toEqual(['--remote', 'unix:///intentional.sock']);
 }, 10000);
@@ -27,7 +27,7 @@ it('loads the managed Gateway key and private home from the saved opt-in for nat
   await writeFile(join(f.root, 'connection.json'), JSON.stringify({ serverUrl: 'https://relay.example', remoteKey: 'device-secret',
     environment: { AGENT_HOST_BOOTSTRAP_CODEX: '1', AGENT_HOST_CODEX: f.environment.AGENT_HOST_CODEX } }));
   expect(await runCodexCommand(['exec', 'hello'], f.root, { TEST_CAPTURE: f.environment.TEST_CAPTURE })).toBe(0);
-  expect(await f.captured()).toEqual({ args: ['exec', 'hello'], home, key: 'sk_private_gateway_key', locale: 'C' });
+  expect(await f.captured()).toEqual({ args: ['--remote', `unix://${home}/app-server-control/app-server-control.sock`, 'exec', 'hello'], home, key: 'sk_private_gateway_key', locale: 'C' });
 }, 10000);
 
 it.each([

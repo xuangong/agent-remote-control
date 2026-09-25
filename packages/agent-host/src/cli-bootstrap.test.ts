@@ -102,10 +102,10 @@ it('closes enrollment on bootstrap failure while retaining the new device creden
   expect(f.output).not.toContain(f.apiKey);
 }, 10000);
 
-it('rejects shared native state after enrolling and redacts a provisioned key from startup errors', async () => {
+it('rejects unrelated native state after enrolling and redacts a provisioned key from startup errors', async () => {
   const f = await fixture(); let child = f.start({ CODEX_HOME: join(f.root, 'user-codex') });
   expect((await once(child, 'exit'))[0]).toBe(1); expect(f.registrations).toHaveLength(1);
-  child = f.start({ CODEX_HOME: '', AGENT_HOST_CODEX_CONNECTION: 'shared' }, true);
+  child = f.start({ CODEX_HOME: '', AGENT_HOST_CODEX_CONNECTION: 'typo' }, true);
   expect((await once(child, 'exit'))[0]).toBe(1); expect(f.registrations).toHaveLength(2);
   f.failNative(); f.start({ CODEX_HOME: '', AGENT_HOST_CODEX_CONNECTION: 'private' }, true);
   await vi.waitFor(() => expect(f.output).toContain('uplink is registered'), { timeout: 5000 });

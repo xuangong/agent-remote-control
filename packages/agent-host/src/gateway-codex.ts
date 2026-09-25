@@ -9,11 +9,11 @@ export function managedCodexHome(stateDir: string, env: NodeJS.ProcessEnv): stri
   if ([env.CODEX_HOME, env.AGENT_REMOTE_CODEX_HOME].some(value => value && resolve(value) !== home)) {
     throw new Error('Gateway bootstrap requires its dedicated Codex home under AGENT_HOST_STATE_DIR; remove native home overrides.');
   }
-  if (env.AGENT_HOST_CODEX_CONNECTION && env.AGENT_HOST_CODEX_CONNECTION !== 'private') throw new Error('Gateway bootstrap requires private Codex sessions.');
+  if (env.AGENT_HOST_CODEX_CONNECTION && !['private', 'shared'].includes(env.AGENT_HOST_CODEX_CONNECTION)) throw new Error('Invalid Codex connection mode for Gateway bootstrap.');
   return home;
 }
 function environment(home: string, value: GatewayCredentials): NodeJS.ProcessEnv {
-  return { CODEX_HOME: home, AGENT_REMOTE_CODEX_HOME: home, AGENT_HOST_CODEX_CONNECTION: 'private',
+  return { CODEX_HOME: home, AGENT_REMOTE_CODEX_HOME: home, AGENT_HOST_CODEX_CONNECTION: 'shared',
     AGENT_HOST_BOOTSTRAP_CODEX: '1', LC_ALL: 'C', CODEX_GATEWAY_API_KEY: value.apiKey };
 }
 function managedConfig(value: GatewayCredentials): string {

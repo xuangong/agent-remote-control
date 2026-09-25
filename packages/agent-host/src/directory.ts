@@ -1,3 +1,5 @@
+import { AgentSessionInUseError } from '@orchardworks/agent-provider-sdk';
+import { NativeSessionOwnerError } from './native-session-owner.js';
 import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
@@ -6,7 +8,7 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
@@ -97,7 +99,7 @@ export function createCodexSessionDirectory(
       }
       return id;
     },
-    async open(nativeSessionId) {
+    async open(nativeSessionId, options) {
       if (closed) throw new Error('Codex directory is closed.');
       const existing = opened.get(nativeSessionId);
       if (existing && (await existing.session.runtimeInfo()).status !== 'closed') return existing.session;
@@ -105,8 +107,25 @@ export function createCodexSessionDirectory(
       if (grant && !provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
       const extensions = grant ? sourceSessionExtensions(grant.sourceNativeSessionId, readSource) : undefined;
       // Let native saved settings win after a Host restart; only restore Host instructions and tools.
-      const session = await provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
+      const resume = () => provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
         extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : undefined);
+      let session: AgentSession;
+      try { session = await resume(); }
+      catch (error) {
+        if (!(error instanceof AgentSessionInUseError) || !provider.releaseSessionOwner) throw error;
+        const owner = await provider.inspectSessionOwner?.(nativeSessionId);
+        if (!owner) throw error;
+        const identity = {kind: 'native_cli' as const, generation: owner.generation};
+        if (!options?.takeOver) throw new NativeSessionOwnerError('native_session_owned', 'This session is open in a private Codex client. Interrupt it and resume the same session with shared control.', identity);
+        if (options.takeOver !== owner.generation) throw new NativeSessionOwnerError('native_owner_changed', 'The Codex writer changed. Check the session before taking over again.', identity);
+        try { await provider.releaseSessionOwner(nativeSessionId, options.takeOver); }
+        catch (failure) {
+          const code = failure && typeof failure === 'object' && 'code' in failure ? failure.code : undefined;
+          throw new NativeSessionOwnerError(code === 'native_owner_changed' ? code : 'native_handoff_unknown', failure instanceof Error ? failure.message : 'Codex release was not confirmed.');
+        }
+        try { session = await resume(); }
+        catch { throw new NativeSessionOwnerError('native_handoff_unknown', 'The original Codex client was asked to stop, but shared recovery was not confirmed. Check the session before retrying.'); }
+      }
       await remember(session);
       if (extensions?.tools?.length) controllerTools.add(nativeSessionId);
       return session;

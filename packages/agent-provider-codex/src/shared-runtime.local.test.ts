@@ -104,7 +104,7 @@ stream_max_retries = 0
   try {
     await waitForDaemon();
     const provider = () => new CodexAppServerProvider({ executable, env, connectionMode: 'shared', socketPath, requestTimeoutMs: 5000 });
-    return { home, get hasPendingResponse() { return !!pendingResponse; }, releaseResponse() { pendingResponse?.(); pendingResponse = undefined; }, get daemon() { return daemon; }, sessions, provider, restartDaemon, close };
+    return { home, env, get hasPendingResponse() { return !!pendingResponse; }, releaseResponse() { pendingResponse?.(); pendingResponse = undefined; }, get daemon() { return daemon; }, sessions, provider, restartDaemon, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -321,4 +321,97 @@ it.runIf(executable)('keeps a running turn alive with no Controller subscriber d
     await until(stream, event => event.type === 'turn_completed');
     expect(f.daemon.exitCode).toBeNull();
   } finally { f.releaseResponse(); await host.close(); await f.close(); }
+}, 30000);
+
+
+it.runIf(executable && process.platform !== 'win32')('takes a private writer into shared with the same history and leaves other sessions alive', async () => {
+  const f = await fixture();
+  let privateProcess: ChildProcessWithoutNullStreams | undefined;
+  const provider = new CodexAppServerProvider({env: f.env, spawn: () => {
+    privateProcess = spawn(executable!, ['app-server'], {env: f.env, stdio: 'pipe'});
+    return privateProcess;
+  }});
+  const directory = createCodexSessionDirectory(f.provider(), []);
+  try {
+    const original = await provider.createSession({sessionId: 'original', cwd: f.home}); f.sessions.push(original);
+    const stream = original.observe()[Symbol.asyncIterator]();
+    await original.sendMessage('Private history'); await until(stream, event => event.type === 'turn_completed');
+    const id = (await original.runtimeInfo()).sessionId!;
+    const shared = await f.provider().createSession({sessionId: 'unrelated', cwd: f.home}); f.sessions.push(shared);
+    const failure: any = await directory.open(id).catch(error => error);
+    expect(failure).toMatchObject({code: 'native_session_owned', owner: {kind: 'native_cli'}});
+    expect(privateProcess!.exitCode).toBeNull(); expect(privateProcess!.signalCode).toBeNull();
+    await expect(directory.open(id, {takeOver: '00000000-0000-4000-8000-000000000000'})).rejects.toMatchObject({code: 'native_owner_changed'});
+    const resumed = await directory.open(id, {takeOver: failure.owner.generation});
+    expect(privateProcess!.exitCode !== null || privateProcess!.signalCode !== null).toBe(true);
+    expect(await resumed.runtimeInfo()).toMatchObject({sessionId: id});
+    expect(resumed.capabilities.sessionControl).toBe('shared');
+    const resumedStream = resumed.observe()[Symbol.asyncIterator]();
+    const history: ProviderStreamItem[] = [];
+    while (true) { const next = await resumedStream.next(); if (next.done || next.value.type === 'history_boundary') break; history.push(next.value); }
+    expect(JSON.stringify(history)).toContain('Private history');
+    await resumed.sendMessage('Shared continuation'); await until(resumedStream, event => event.type === 'turn_completed');
+    expect(await directory.open(id)).toBe(resumed);
+    expect(await f.provider().inspectSessionOwner(id)).toBeUndefined();
+    const otherStream = shared.observe()[Symbol.asyncIterator]();
+    await shared.sendMessage('Unrelated still works'); await until(otherStream, event => event.type === 'turn_completed');
+    expect(f.daemon.exitCode).toBeNull();
+  } finally { await directory.close(); await f.close(); if (privateProcess) await stop(privateProcess); }
+}, 30000);
+
+
+it.runIf(executable && process.platform !== 'win32')('does not offer process takeover when the private app-server owns another session', async () => {
+  const f = await fixture();
+  let child: ChildProcessWithoutNullStreams | undefined;
+  const provider = new CodexAppServerProvider({env: f.env, spawn: () => {
+    child = spawn(executable!, ['app-server'], {env: f.env, stdio: 'pipe'}); return child;
+  }});
+  const directory = createCodexSessionDirectory(f.provider(), []);
+  try {
+    const original = await provider.createSession({sessionId: 'original', cwd: f.home}); f.sessions.push(original);
+    const stream = original.observe()[Symbol.asyncIterator]();
+    await original.sendMessage('First writer'); await until(stream, event => event.type === 'turn_completed');
+    const id = (await original.runtimeInfo()).sessionId!;
+    const {createInterface} = await import('node:readline');
+    const reader = createInterface({input: child!.stdout});
+    try {
+      const second = new Promise<any>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Second native thread did not start')), 3000);
+        reader.on('line', line => {const value = JSON.parse(line); if (value.id === 900001) {clearTimeout(timer); value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);}});
+      });
+      child!.stdin.write(JSON.stringify({id: 900001, method: 'thread/start', params: {cwd: f.home}}) + '\n');
+      await second;
+    } finally { reader.close(); child!.stdout.resume(); }
+    await expect(directory.open(id)).rejects.toMatchObject({name: 'AgentSessionInUseError'});
+    expect(child!.exitCode).toBeNull(); expect(child!.signalCode).toBeNull();
+    await original.sendMessage('Both writers were preserved'); await until(stream, event => event.type === 'turn_completed');
+  } finally { await directory.close(); await f.close(); if (child) await stop(child); }
+}, 30000);
+
+it.runIf(executable && process.platform !== 'win32')('interrupts a working private session and continues only after explicit shared input', async () => {
+  const f = await fixture();
+  let child: ChildProcessWithoutNullStreams | undefined;
+  const provider = new CodexAppServerProvider({env: f.env, spawn: () => {
+    child = spawn(executable!, ['app-server'], {env: f.env, stdio: 'pipe'}); return child;
+  }});
+  const directory = createCodexSessionDirectory(f.provider(), []);
+  try {
+    const original = await provider.createSession({sessionId: 'working', cwd: f.home}); f.sessions.push(original);
+    const stream = original.observe()[Symbol.asyncIterator]();
+    await original.sendMessage('hold for controller upgrade');
+    await until(stream, event => event.type === 'turn_started');
+    const waitingUntil = Date.now() + 3000;
+    while (!f.hasPendingResponse && Date.now() < waitingUntil) await delay(10);
+    expect(f.hasPendingResponse).toBe(true);
+    const id = (await original.runtimeInfo()).sessionId!;
+    const failure: any = await directory.open(id).catch(error => error);
+    expect(failure.code).toBe('native_session_owned');
+    const resumed = await directory.open(id, {takeOver: failure.owner.generation});
+    expect(await resumed.runtimeInfo()).toMatchObject({sessionId: id, status: 'idle'});
+    f.releaseResponse();
+    const events = resumed.observe()[Symbol.asyncIterator]();
+    await resumed.sendMessage('Continue after takeover');
+    await until(events, event => event.type === 'turn_completed');
+    expect(f.daemon.exitCode).toBeNull();
+  } finally { await directory.close(); await f.close(); if (child) await stop(child); }
 }, 30000);

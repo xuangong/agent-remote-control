@@ -85,7 +85,7 @@ it.runIf(process.platform === 'win32')('stops the owned Codex process tree, incl
   }
 });
 
-it.runIf(process.platform === 'win32')('proxies private Codex literally on Windows and rejects Unix file-limit settings', async () => {
+it.runIf(process.platform === 'win32')('proxies explicit Codex endpoints on Windows and rejects Unix file-limit settings', async () => {
   const bin = await directory();
   const entry = join(bin, 'codex.cjs');
   const capture = join(bin, 'arguments.json');
@@ -93,8 +93,8 @@ it.runIf(process.platform === 'win32')('proxies private Codex literally on Windo
   const env = { ...process.env, AGENT_HOST_STATE_DIR: bin, AGENT_HOST_CODEX: entry, NATIVE_CAPTURE: capture,
     AGENT_HOST_CODEX_CONNECTION: 'private' };
   const cli = resolve('dist/cli.js');
-  await promisify(execFile)(process.execPath, [cli, 'codex', 'hello & goodbye'], { env, timeout: 5000 });
-  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['hello & goodbye']);
+  await promisify(execFile)(process.execPath, [cli, 'codex', '--remote', 'ws://127.0.0.1:12345', 'hello & goodbye'], { env, timeout: 5000 });
+  expect(JSON.parse(await readFile(capture, 'utf8'))).toEqual(['--remote', 'ws://127.0.0.1:12345', 'hello & goodbye']);
   await expect(promisify(execFile)(process.execPath, [cli, 'codex', 'daemon', 'start'], { env: { ...env, AGENT_HOST_CODEX_NOFILE: '8192' }, timeout: 5000 }))
     .rejects.toMatchObject({ stderr: expect.stringContaining('only supported on Unix') });
 });

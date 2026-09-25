@@ -1,3 +1,4 @@
+import { prepareSharedCodex } from './codex-shared-startup.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -39,7 +40,10 @@ export async function createHostProviderDiscovery(options: {
     const result = pending.then(() => { if (closed) throw new Error('Provider discovery is closed.'); return work(); });
     pending = result.catch(() => undefined); return result;
   }
-  const create = options.create ?? (async providerId => (await createHostRegistrations({ ...options.env, AGENT_HOST_PROVIDERS: providerId, AGENT_HOST_PROVIDER_DISCOVERY: '1' }, options.onDiagnostic))[0]!);
+  const create = options.create ?? (async providerId => {
+    if (providerId === 'codex') await prepareSharedCodex(options.stateDir, options.env);
+    return (await createHostRegistrations({ ...options.env, AGENT_HOST_PROVIDERS: providerId, AGENT_HOST_PROVIDER_DISCOVERY: '1' }, options.onDiagnostic))[0]!;
+  });
   function publish() { revision = randomUUID(); for (const listener of listeners) listener(); }
   async function scan() {
     const before = JSON.stringify(hostProviderIds.map(id => states.get(id)));

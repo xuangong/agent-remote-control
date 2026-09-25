@@ -113,3 +113,8 @@ it('fails before invoking daemon lifecycle if the requested limit exceeds the ha
     code: 1, stdout: '', stderr: expect.stringContaining('Daemon was not started or restarted'),
   });
 });
+
+it('uses shared resume even when the saved legacy connection mode was private', async () => {
+  const f = await fixture({ AGENT_HOST_CODEX_CONNECTION: 'private' });
+  expect(JSON.parse((await f.run(['resume', 'existing'])).stdout).args).toEqual(['--remote', `unix://${f.root}/codex home/app-server-control/app-server-control.sock`, 'resume', 'existing']);
+});

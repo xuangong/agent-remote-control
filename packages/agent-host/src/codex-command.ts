@@ -45,7 +45,7 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
   } else {
     // Explicit --remote remains available for intentional one-off connections.
     const hasRemote = options.some(arg => arg === '--remote' || arg.startsWith('--remote='));
-    const shared = !hasRemote && configured.AGENT_HOST_CODEX_CONNECTION !== 'private';
+    const shared = !hasRemote;
     // A shared server cannot infer the invoking shell's directory from the CLI process cwd.
     const sessionArgs = shared && needsShellWorkspace(args) ? ['--cd', process.cwd(), ...args] : args;
     if (shared && process.platform === 'win32') {

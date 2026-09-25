@@ -495,10 +495,23 @@ Shared mode accepts the daemon's native permissions for Codex only. It never
 starts a replacement writer or stops the daemon when a Remote connection closes.
 Shared mode defaults to accepting daemon permissions (`AGENT_HOST_CODEX_TRUST_SHARED=1`).
 An explicit `0` retains the permission rejection unless full control is enabled.
-Set `AGENT_HOST_CODEX_CONNECTION=private` for isolated sessions with native restrictions.
-Explicit saved private settings and managed Gateway private sessions remain private. Existing private CLI or desktop sessions must be
-released once before they can be opened in the shared daemon. An already-running
-Host must be restarted to apply provider configuration changes.
+Controller sessions always use shared Codex. Legacy private configurations and managed Gateway homes check/start their daemon during startup, without restarting an existing daemon. `AGENT_HOST_CODEX_AUTO_START=1` enables the same behavior for other Hosts and is set in the Docker image. The legacy `AGENT_HOST_CODEX_CONNECTION=private` setting is accepted but no longer starts isolated Controller sessions. The standalone Provider SDK still supports private runtimes for embedding and debugging.
+Existing private CLI or desktop sessions can be moved into the shared daemon from
+the chatbox with **Interrupt & take over**. The Controller first attempts normal
+resume; a native writer conflict only offers takeover when the original process
+can be identified. Confirmation is bound to that process incarnation and lock.
+The operation stops that writer and resumes the same native session ID and saved
+history. Running work can be interrupted; it is not transferred in memory or
+replayed. Already-shared sessions remain multi-client and need no takeover.
+
+Writer inspection uses `lsof` and `ps` on macOS/Linux, and Windows Restart Manager
+plus PowerShell process identity on Windows. Linux installations need `lsof` and
+`ps` available. A process that owns multiple sessions, a shared daemon, an unknown
+owner, or unavailable inspection tools retains the manual-close error. The
+Controller never kills a process tree, deletes writer locks, or restarts the shared
+daemon to complete a handoff. An unconfirmed handoff requires checking session
+state before another interruption. An already-running Host must be restarted to
+apply these changes.
 
 ## Local previews and images
 

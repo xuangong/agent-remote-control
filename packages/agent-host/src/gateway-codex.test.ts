@@ -23,7 +23,7 @@ it('configures a private managed Codex home from authenticated HTTP and restores
   try {
     const env = await configureGatewayCodex(f.root, f.connection, 'host-one');
     const home = managedCodexHome(f.root, {});
-    expect(env).toMatchObject({ CODEX_HOME: home, AGENT_REMOTE_CODEX_HOME: home, AGENT_HOST_CODEX_CONNECTION: 'private', LC_ALL: 'C', CODEX_GATEWAY_API_KEY: 'test-only-gateway-token-1234567890' });
+    expect(env).toMatchObject({ CODEX_HOME: home, AGENT_REMOTE_CODEX_HOME: home, AGENT_HOST_CODEX_CONNECTION: 'shared', LC_ALL: 'C', CODEX_GATEWAY_API_KEY: 'test-only-gateway-token-1234567890' });
     expect(f.requests).toEqual([{ url: '/v1/remote/host/bootstrap', authorization: 'Bearer device-test-key' }]);
     expect(await readFile(join(home, 'config.toml'), 'utf8')).toContain('env_key = "CODEX_GATEWAY_API_KEY"');
     expect(await readFile(join(home, 'config.toml'), 'utf8')).not.toContain('test-only-gateway-token');

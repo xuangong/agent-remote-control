@@ -48,12 +48,13 @@ function registration(): AgentHostProviderRegistration {
     async open() { throw new Error('unused'); }, async close() {} } };
 }
 
-it('keeps private native restrictions, supports the explicit local opt-out, and strips connection credentials', async () => {
+it('migrates legacy private registrations to shared and strips connection credentials', async () => {
   const seen: any[] = []; const factory = async (options: unknown) => { seen.push(options); return registration(); };
   for (const trusted of [undefined, 'true', '1']) await createHostRegistrations({ AGENT_HOST_CODEX_CONNECTION: 'private', AGENT_HOST_TRUSTED_FULL_CONTROL: trusted,
     AGENT_HOST_REMOTE_KEY: 'connection-secret', AGENT_HOST_MANAGEMENT_TOKEN: 'management-secret', OPENAI_API_KEY: 'native-auth' },
     undefined, { codex: factory, claude: factory, copilot: factory, opencode: factory });
-  expect(seen.map(options => options.restrictedNative)).toEqual([true, true, false]);
+  expect(seen.map(options => options.connectionMode)).toEqual(['shared', 'shared', 'shared']);
+  expect(seen.map(options => options.restrictedNative)).toEqual([false, false, false]);
   for (const options of seen) {
     expect(options.env.AGENT_HOST_REMOTE_KEY).toBeUndefined(); expect(options.env.AGENT_HOST_MANAGEMENT_TOKEN).toBeUndefined();
     expect(options.env.OPENAI_API_KEY).toBe('native-auth');

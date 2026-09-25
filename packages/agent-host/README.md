@@ -367,8 +367,11 @@ Host checks real paths, including symbolic links, before creating or importing
 sessions and before native input or settings mutations. Catalogs omit sessions
 outside those roots and sessions whose workspace cannot be established. Native
 permission settings are read-only to remote controllers except for trusted shared
-Codex sessions. Those sessions accept permission changes from the web and publish
-native permission updates from other clients on Windows, macOS, and Linux.
+Codex sessions and supported Claude modes. Shared Codex sessions accept permission
+changes from the web and publish native permission updates from other clients on
+Windows, macOS, and Linux. Claude exposes `default`, `acceptEdits`, `dontAsk`, and
+`plan` through its native permission setter. These controls preserve the restricted
+native sandbox and do not expose `bypassPermissions`.
 Native requirements and idle-session checks still apply; workspace admission
 remains enforced. Model controls remain available. These rules apply to the CLI. Embedders can provide the same trusted
 `executionPolicy` through `createAgentHostRuntime` or `createAgentHost`, and

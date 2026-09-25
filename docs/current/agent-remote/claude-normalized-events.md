@@ -50,6 +50,10 @@ Successful `Edit`, `MultiEdit` and `Write` structured output becomes the existin
 
 Session permission updates are native rules, not a blanket adapter allow-list. A repeated ordinary shell command is verified to prompt once. Native path/safety checks may still prompt again for a command with redirection even after a suggested session grant. Grants never write persistent user/project settings and are not promised to survive Query restart.
 
+The Host allows the adapter's supported permission modes (`default`, `acceptEdits`, `dontAsk`, `plan`) while preserving workspace admission and the restricted native sandbox. Native policy rejection remains authoritative; `bypassPermissions` is not exposed.
+
+Before the first native init event, an unspecified model selects the native catalog's `default` option when advertised. No concrete model is guessed or pinned; native init replaces the selection with the reported model.
+
 Idle model/permission changes, planning, discovered skills, interrupt, image input and bounded image resources use existing controls. Effort is selectable at creation only. Steer and next-turn delivery remain disabled: native priority input can outlive its target turn and survive interrupt. Direct children remain read-only; their approvals belong to the root Query.
 
 ## Ownership and recovery

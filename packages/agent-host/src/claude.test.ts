@@ -23,6 +23,14 @@ describe('Claude Host registration', () => {
     await expect(createClaudeHostRegistration({ executable: '/missing-agent-host-claude' })).rejects.toThrow();
   });
 
+  it('enables native permission settings with the restricted Host policy', async () => {
+    const profile = await mkdtemp(join(tmpdir(), 'claude-permissions-profile-')); roots.push(profile);
+    const registration = await createClaudeHostRegistration({ executable: await executable('2.1.247 (Claude Code)', profile),
+      claudeHome: profile, restrictedNative: true });
+    try { expect(registration.nativePermissionControl).toBe(true); }
+    finally { await registration.directory.close(); }
+  });
+
   it('accepts the supported executable and applies an isolated native configuration root', async () => {
     const previous = process.env.CLAUDE_CONFIG_DIR;
     const profile = await mkdtemp(join(tmpdir(), 'claude-isolated-profile-')); roots.push(profile);

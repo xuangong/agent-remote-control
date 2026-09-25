@@ -30,5 +30,5 @@ export async function createClaudeHostRegistration(options: ClaudeHostRegistrati
   const profile = env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? env.USERPROFILE ?? homedir(), '.claude');
   await mkdir(profile, {recursive: true});
   const ownership = {root: join(await realpath(profile), '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
-  return { adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership) };
+  return { nativePermissionControl: true, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership) };
 }

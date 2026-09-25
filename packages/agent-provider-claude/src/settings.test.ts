@@ -75,3 +75,54 @@ it('requires the native sandbox without unsandboxed fallback and resets saved el
   try { expect(launched).toMatchObject({ permissionMode: 'default', sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } }); }
   finally { await session.dispose(); }
 });
+
+
+it('changes supported native permissions while retaining the restricted sandbox', async () => {
+  const native = fixture(); let launched: any;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, {
+    restrictedNative: true, query: input => { launched = input.options; return native.factory(); },
+  });
+  try {
+    const permissions = (await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!;
+    expect(permissions.mutable).toBe(true);
+    for (const mode of ['acceptEdits', 'dontAsk', 'plan', 'default']) {
+      await session.setSessionSetting!('permissions', mode);
+      expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.value).toBe(mode);
+    }
+    expect(native.changes).toEqual(['acceptEdits', 'dontAsk', 'plan', 'default']);
+    await expect(session.setSessionSetting!('permissions', 'bypassPermissions')).rejects.toThrow(/Unavailable/);
+    expect(launched.sandbox).toEqual({ enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false });
+    native.setUpdate(async () => { throw new Error('Native permission policy rejected the change'); });
+    await expect(session.setSessionSetting!('permissions', 'acceptEdits')).rejects.toThrow(/rejected/);
+    expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.value).toBe('default');
+  } finally { await session.dispose(); }
+});
+
+it('selects the advertised native default before init without pinning a model', async () => {
+  const native = fixture(); let launched: any;
+  native.setModels([{ value: 'default', displayName: 'Default (recommended)', description: 'Native default' },
+    { value: 'sonnet', displayName: 'Sonnet', description: 'Native Sonnet' }]);
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, {
+    query: input => { launched = input.options; return native.factory(); },
+  });
+  try {
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'model', value: 'default' }));
+    expect(launched.model).toBeUndefined();
+    expect((await session.runtimeInfo()).model).toBeNull();
+    expect(JSON.parse((await session.runtimeInfo()).persistence!.opaque).model).toBeUndefined();
+    native.events.push({ type: 'system', subtype: 'init', model: 'native-resolved-model', permissionMode: 'default', uuid: 'init', session_id: 'native' });
+    await expect.poll(async () => (await session.runtimeInfo()).model).toBe('native-resolved-model');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'model', value: 'native-resolved-model' }));
+    await session.setSessionSetting!('model', 'default');
+    expect(native.changes).toEqual(['default']);
+  } finally { await session.dispose(); }
+});
+
+it('does not invent a default option when the native model catalog omits it', async () => {
+  const native = fixture();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+  try {
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'model', value: null }));
+    await expect(session.setSessionSetting!('model', 'default')).rejects.toThrow(/Unavailable/);
+  } finally { await session.dispose(); }
+});

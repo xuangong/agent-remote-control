@@ -35,9 +35,9 @@ for (const interrupted of [false, true]) it(`native priority next starts a separ
   } finally { input.close(); native.close(); await pump.catch(() => {}); await fixture.close(); }
 }, 10000);
 
-it('changes native model and restores permissions using public Query controls', async () => {
+it.each([false, true])('changes native model and permissions with restricted sandbox %s', async (restrictedNative) => {
   const fixture = await nativeFixture((_body, response) => nativeReply(response, [{ type: 'text', text: 'SETTINGS_OK' }]));
-  const session = await ClaudeAgentSession.open({ sessionId: randomUUID(), cwd: fixture.cwd, model: 'claude-sonnet-4-5-20250929' }, fixture.options);
+  const session = await ClaudeAgentSession.open({ sessionId: randomUUID(), cwd: fixture.cwd, model: 'claude-sonnet-4-5-20250929' }, { ...fixture.options, restrictedNative });
   const events: any[] = [];
   const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })();
   try {
@@ -97,5 +97,21 @@ it('returns exact plan feedback to the native tool without leaving plan mode', a
     expect(JSON.stringify(fixture.bodies[1].messages)).toContain('Keep the existing API.');
     expect((await session.runtimeInfo()).planning?.active).toBe(true);
     await expect(session.respondToInteraction(review.request.requestId, { kind: 'plan_approval', action: 'approve_and_resume' })).rejects.toThrow(/no longer active/);
+  } finally { await session.dispose(); await pump; await fixture.close(); }
+}, 10000);
+
+it('advertises the native default before the first message and then reports the resolved model', async () => {
+  const fixture = await nativeFixture((_body, response) => nativeReply(response, [{ type: 'text', text: 'DEFAULT_OK' }]));
+  const session = await ClaudeAgentSession.open({ sessionId: randomUUID(), cwd: fixture.cwd }, fixture.options);
+  const events: any[] = [];
+  const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })();
+  try {
+    const model = (await session.runtimeInfo()).settings!.find(setting => setting.id === 'model')!;
+    expect(model.options.some(option => option.value === 'default')).toBe(true);
+    expect(model.value).toBe('default');
+    await session.sendMessage('VERIFY_NATIVE_DEFAULT');
+    await expect.poll(() => events.some(event => event.type === 'turn_completed')).toBe(true);
+    expect((await session.runtimeInfo()).model).toBeTruthy();
+    expect(fixture.bodies[0].model).toBe((await session.runtimeInfo()).model?.replace(/\[1m\]$/, ''));
   } finally { await session.dispose(); await pump; await fixture.close(); }
 }, 10000);

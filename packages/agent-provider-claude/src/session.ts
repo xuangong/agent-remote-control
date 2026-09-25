@@ -243,7 +243,8 @@ export class ClaudeAgentSession implements AgentSession {
     if (!this.planning) this.resumePermissionMode = mode;
   }
   private settings(): AgentSessionSetting[] {
-    return [{ id: 'model', category: 'model', label: 'Model', value: this.config.model ?? null,
+    const model = this.config.model ?? (this.models.some(model => model.value === 'default') ? 'default' : null);
+    return [{ id: 'model', category: 'model', label: 'Model', value: model,
       options: this.models.map((model) => ({ value: model.value, label: model.displayName, description: model.description })),
       mutable: true, scope: 'session' },
     { id: 'permissions', category: 'permissions', label: 'Permissions', value: this.permissionMode,

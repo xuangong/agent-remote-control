@@ -4,7 +4,7 @@ import { PROTOCOL_VERSION, type AgentChildSession } from '@orchardworks/agent-re
 import { AgentReplica } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
-import { render } from './test/setup.js';
+import { render, unmount } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 const child: AgentChildSession = { nativeSessionId: 'native-child', title: 'Review transport', role: 'Reviewer', createdAt: '2026-09-10T00:00:00Z', status: 'idle', observation: 'live' };
@@ -199,13 +199,16 @@ it('releases view and delivery-persistence subscriptions while revisiting parent
     return () => { activeSubscriptions -= 1; unsubscribe(); };
   });
   const f = await setup(false, { live: true });
-  expect(activeSubscriptions).toBe(2);
+  const subscriptionsPerView = activeSubscriptions;
+  expect(subscriptionsPerView).toBeGreaterThan(0);
   for (let revisit = 0; revisit < 3; revisit += 1) {
     await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
-    expect(activeSubscriptions).toBe(2);
+    expect(activeSubscriptions).toBe(subscriptionsPerView);
     await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
-    expect(activeSubscriptions).toBe(2);
+    expect(activeSubscriptions).toBe(subscriptionsPerView);
   }
+  await unmount(f.container);
+  expect(activeSubscriptions).toBe(0);
 });
 
 it('offers persistence resume only for the parent and keeps child navigation on child attachment', async () => {

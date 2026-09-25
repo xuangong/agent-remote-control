@@ -9,7 +9,7 @@ import { loadCompatibilityManifest } from './compatibility.js';
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
 const implementationDigest = 'sha256:d8fdc7cc1b3b4a412e46aaacede0afa478eee509c99e48f2d684e2ede8ee5a15';
 
-const opencodeCapabilities = ['controls.queue-steer', 'events.subagent.navigation', 'controls.prompt-edit', 'events.resources', 'events.usage'];
+const opencodeCapabilities = ['controls.queue-steer', 'controls.source-references', 'controls.prompt-edit.atomicity', 'events.resources', 'events.usage', 'interactions.native-producers'];
 const copilotCapabilities = ['native.experimental-rpc', 'controls.settings', 'events.subagent.navigation', 'interactions.callback-identity', 'events.resources-usage', 'controls.immediate-input'];
 
 describe('Agent Remote compatibility manifest', () => {

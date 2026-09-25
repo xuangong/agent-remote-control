@@ -236,3 +236,34 @@ function pageSummary(page: ReturnType<typeof projectTimelinePage>) {
     hasNewer: page.payload.hasNewer,
   };
 }
+
+describe('compaction lifecycle projection', () => {
+  it('completes the nearest active compaction and preserves separate cycles and contexts', () => {
+    const store = new TimelineStore('compaction-epoch');
+    const append = (sourceKey: string, item: Parameters<TimelineStore['append']>[0]['item'], turnId = 'turn-1', providerId = 'opencode') => store.append({ providerId, sourceKey, occurredAt: 1000, turnId, item });
+    append('first-loading', { type: 'compaction', status: 'loading', trigger: 'auto', preTokens: 100 });
+    append('interleaved', { type: 'assistant_message', text: 'Summarizing' });
+    append('other-turn', { type: 'compaction', status: 'loading' }, 'turn-2');
+    append('other-provider', { type: 'compaction', status: 'completed' }, 'turn-1', 'claude');
+    append('first-completed', { type: 'compaction', status: 'completed' });
+    append('second-loading', { type: 'compaction', status: 'loading', trigger: 'manual' });
+    append('second-completed', { type: 'compaction', status: 'completed' });
+    const entries = projectTimelineRows(store.rows());
+    expect(entries).toHaveLength(5);
+    expect(entries[0]).toMatchObject({ seqStart: 1, seqEnd: 5, item: { type: 'compaction', status: 'completed', trigger: 'auto', preTokens: 100 }, sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }, { startSeq: 5, endSeq: 5 }] });
+    expect(entries[2]?.item).toMatchObject({ type: 'compaction', status: 'loading' });
+    expect(entries[4]).toMatchObject({ seqStart: 6, seqEnd: 7, item: { type: 'compaction', status: 'completed', trigger: 'manual' } });
+    const after = projectTimelinePage(store, { requestId: 'after', agentId: 'agent', direction: 'after', cursor: { epoch: store.epoch, seq: 4 }, limit: 1 });
+    expect(after.payload.entries).toEqual([entries[0]]);
+  });
+
+  it('does not merge new loading cycles or consume older cycles for repeated terminal events', () => {
+    const store = new TimelineStore('compaction-epoch');
+    for (const [index, status] of (['loading', 'loading', 'completed', 'completed'] as const).entries()) store.append({ providerId: 'opencode', sourceKey: `compaction-${index}`, occurredAt: 1000 + index, turnId: 'turn', item: { type: 'compaction', status } });
+    expect(projectTimelineRows(store.rows()).map(entry => [entry.seqStart, entry.seqEnd, entry.item])).toEqual([
+      [1, 1, { type: 'compaction', status: 'loading' }],
+      [2, 3, { type: 'compaction', status: 'completed' }],
+      [4, 4, { type: 'compaction', status: 'completed' }],
+    ]);
+  });
+});

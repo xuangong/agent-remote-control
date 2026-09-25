@@ -12,10 +12,11 @@ const requiredDegradations: Record<
 > = {
   opencode: [
     { capability: 'controls.queue-steer', status: 'degraded' },
-    { capability: 'events.subagent.navigation', status: 'degraded' },
-    { capability: 'controls.prompt-edit', status: 'degraded' },
+    { capability: 'controls.source-references', status: 'degraded' },
+    { capability: 'controls.prompt-edit.atomicity', status: 'degraded' },
     { capability: 'events.resources', status: 'degraded' },
     { capability: 'events.usage', status: 'degraded' },
+    { capability: 'interactions.native-producers', status: 'degraded' },
   ],
   copilot: [
     {capability: 'native.experimental-rpc', status: 'degraded'},

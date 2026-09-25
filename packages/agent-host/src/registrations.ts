@@ -51,7 +51,7 @@ export async function createHostRegistrations(env: NodeJS.ProcessEnv, onDiagnost
           restrictedNative: connectionMode === 'shared' && (env.AGENT_HOST_CODEX_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative })
         : provider === 'opencode'
         ? await factories.opencode({ workspaces: common.workspaces, restrictedNative: (env.AGENT_HOST_OPENCODE_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative, onDiagnostic,
-          serverUrl: env.AGENT_HOST_OPENCODE_URL, username: env.AGENT_HOST_OPENCODE_USERNAME, password: env.AGENT_HOST_OPENCODE_PASSWORD })
+          serverUrl: env.AGENT_HOST_OPENCODE_URL, callbackConfigPath: env.AGENT_HOST_OPENCODE_CALLBACK_CONFIG, username: env.AGENT_HOST_OPENCODE_USERNAME, password: env.AGENT_HOST_OPENCODE_PASSWORD })
         : provider === 'copilot'
         ? await factories.copilot({ ...common, env: nativeEnv, executable: env.AGENT_HOST_COPILOT, copilotHome: env.AGENT_HOST_COPILOT_HOME })
         : await factories.claude({ ...common, env: nativeEnv, executable: env.AGENT_HOST_CLAUDE, claudeHome: env.AGENT_HOST_CLAUDE_HOME }));

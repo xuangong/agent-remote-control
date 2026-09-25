@@ -108,9 +108,9 @@ it('registers shared OpenCode using local-only endpoint credentials and native s
   const factory = async (options: unknown) => { seen = options; return registration(); };
   expect(selectedHostProviders({ AGENT_HOST_PROVIDERS: 'opencode' })).toEqual(['opencode']);
   await createHostRegistrations({ AGENT_HOST_PROVIDERS: 'opencode', AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:4097',
-    AGENT_HOST_OPENCODE_USERNAME: 'local', AGENT_HOST_OPENCODE_PASSWORD: 'private-password' }, undefined,
+    AGENT_HOST_OPENCODE_USERNAME: 'local', AGENT_HOST_OPENCODE_PASSWORD: 'private-password', AGENT_HOST_OPENCODE_CALLBACK_CONFIG: '/private/callback.json' }, undefined,
     { codex: factory, claude: factory, copilot: factory, opencode: factory });
-  expect(seen).toMatchObject({ serverUrl: 'http://127.0.0.1:4097', username: 'local', password: 'private-password', restrictedNative: false });
+  expect(seen).toMatchObject({ serverUrl: 'http://127.0.0.1:4097', username: 'local', password: 'private-password', callbackConfigPath: '/private/callback.json', restrictedNative: false });
   expect(seen).not.toHaveProperty('env');
 }, 10000);
 

@@ -6,6 +6,13 @@ import { nativeInvocation, resolveNativeExecutable } from './platform/executable
 /** Attach to the independently running server without taking ownership of its sessions. */
 export async function runOpenCodeCommand(args: string[], stateDir: string, environment: NodeJS.ProcessEnv): Promise<number> {
   const configured = await resolveHostEnvironment(stateDir, environment);
+  if (args[0] === 'callbacks') {
+    if (args[1] !== 'setup' || args.length !== 3 || !args[2]) throw new Error('Use opencode callbacks setup <private-directory>.');
+    const { setupOpenCodeCallbacks } = await import('@orchardworks/agent-provider-opencode');
+    const paths = await setupOpenCodeCallbacks(args[2]);
+    process.stdout.write(JSON.stringify({ ...paths, instruction: 'Start the independently managed native server with OPENCODE_CONFIG set to nativeConfigPath. Set AGENT_HOST_OPENCODE_CALLBACK_CONFIG to configPath for the Controller. Use the same loopback hostname and port for AGENT_HOST_OPENCODE_URL and opencode serve. Existing servers require an explicit operator restart to load the plugin.' }, null, 2) + '\n');
+    return 0;
+  }
   const env = sanitizeNativeEnvironment(configured);
   const executable = resolveNativeExecutable(configured.AGENT_HOST_OPENCODE ?? 'opencode', 'opencode-ai/bin/opencode', env);
   let nativeArgs = args;

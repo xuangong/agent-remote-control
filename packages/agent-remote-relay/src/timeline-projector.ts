@@ -45,6 +45,8 @@ export function projectTimelineRows(rows: readonly CanonicalTimelineRow[]): Proj
     } else if (row.item.type === 'tool_call') {
       entry.item = structuredClone(row.item);
       includeCollapse(entry.collapsed, 'tool_lifecycle');
+    } else if (row.item.type === 'compaction' && entry.item.type === 'compaction') {
+      entry.item = { ...entry.item, ...row.item };
     } else if (row.item.type === 'todo') {
       entry.item = structuredClone(row.item);
     }
@@ -178,6 +180,13 @@ function findProjection(entries: readonly ProjectedTimelineEntry[], row: Canonic
       && entry.item.type === 'tool_call'
       && entry.item.callId === callId);
     return index === -1 ? undefined : index;
+  }
+  if (row.item.type === 'compaction' && row.item.status === 'completed') {
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (entry?.item.type !== 'compaction' || !sameContext(entry, row)) continue;
+      return entry.item.status === 'loading' ? index : undefined;
+    }
   }
   if (row.item.type === 'todo') {
     for (let index = entries.length - 1; index >= 0; index -= 1) {

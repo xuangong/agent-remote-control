@@ -19,7 +19,7 @@ export async function loadAdapter(provider: string | undefined, module: string |
   if (provider === 'opencode') {
     if (executable) throw usage('OpenCode connects to an existing server; configure AGENT_HOST_OPENCODE_URL instead of --executable.');
     const { OpenCodeAgentProvider } = await import('./providers/opencode.js');
-    return new OpenCodeAgentProvider({ serverUrl: process.env.AGENT_HOST_OPENCODE_URL, username: process.env.AGENT_HOST_OPENCODE_USERNAME, password: process.env.AGENT_HOST_OPENCODE_PASSWORD });
+    return new OpenCodeAgentProvider({ serverUrl: process.env.AGENT_HOST_OPENCODE_URL, callbackConfigPath: process.env.AGENT_HOST_OPENCODE_CALLBACK_CONFIG, username: process.env.AGENT_HOST_OPENCODE_USERNAME, password: process.env.AGENT_HOST_OPENCODE_PASSWORD });
   }
   throw usage('Provider must be codex, claude, copilot or opencode; use --adapter for a custom provider.');
 }

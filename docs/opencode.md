@@ -67,14 +67,18 @@ The floating Live provider selector also includes OpenCode. It uses server-side 
 
 ## Capabilities and recovery
 
-- Native history, text/reasoning, tool results, todos, compaction and usage map to normalized events. Initial history is bounded and older pages use the native server cursor. Token usage describes the latest native model step; a session-wide total cost is omitted because a partial history cannot establish it.
-- Permissions and questions are read from native pending lists and reconciled after reconnect, including requests answered by another client.
-- Image input uses bounded SDK data payloads. Resource reads are limited to adapter-owned embedded image resources, not arbitrary filesystem paths or URLs.
-- Native model/agent selections and custom commands use catalogs from the connected server. Selections apply to the next prompt; an unsent local selection is not a native persisted session setting. Reopening restores the last native message selection. Unsupported settings and delivery modes fail explicitly.
-- Native titles are updated through the same Host operation deduplication and cross-browser title broadcast path as other providers. An unchanged title is not written again.
-- Transport disconnects update connection state. Recovery reconciles native messages and pending state without replaying user input. Message/part identity prevents final snapshots from duplicating streamed output.
-- Explicit queued/steer delivery, Host callback tools and prompt editing/fork are not exposed. Native revert can affect workspace files, so it is not substituted for the product's prompt-edit semantics.
-- Child sessions can be listed/opened independently. Parent-attached child projections are not currently supplied.
+- Native history, text/reasoning, shell exit status and duration, file diffs, output images, todos and compaction map to normalized events. Initial history is bounded; older pages use native cursors. Ordinary text deltas and tool lifecycle updates preserve the Relay epoch, including after todos and answered interactions.
+- Native session token/cost aggregates are used when supplied. Otherwise tokens describe the latest useful model step; paginated history is not summed into an invented lifetime total. Context capacity comes from the native model catalog.
+- Permissions and questions are read from native pending lists and reconciled after reconnect, including requests answered by another client. Plan exit remains the native question/answer flow, not a fabricated plan-approval request.
+- Image input and output use bounded adapter resources. Native local output files are readable only for a loopback server and only through validated resource locators; remote URLs and arbitrary paths are not fetched.
+- Model, agent, model-specific variant and permission settings persist in the native session. External switch events refresh these settings. Variants keep their native meaning; they are not universally equivalent to Codex reasoning effort.
+- Native skills, custom commands and MCP prompt commands use the server catalog and refreshed documentation resources. Manual compact calls native summarization. Commands wait until the native turn and pending interactions finish. Immediate input and steer can join active native work without aborting it; a separate next-turn queue is not advertised.
+- Native titles use existing Host operation deduplication and cross-browser broadcasts. Unchanged titles are not written again.
+- Native prompt editing forks strictly before the selected user message and uses the existing favorite/Track replacement flow. It does not revert the original workspace. Active turns, pending interactions, child prompt edits and unresolved native reverts are rejected.
+- Parent runtime information includes direct native children, current observed status and native task provenance where available. Child navigation validates the native parent identity and canonical workspace before opening.
+- Transport recovery reconciles messages and pending state without replaying uncertain input. Legacy immediate/steer input retains the same native history, including during model and tool execution. Unknown admissions wait for matching native evidence and are never automatically replayed. Host callback tools and dynamic Ask/source reads require [explicit native plugin setup](opencode-callbacks.md); an unconfigured server remains usable for ordinary sessions. The newer durable runner has an independent history and cannot safely replace only the sending endpoint. Ordinary MCP callbacks do not carry trusted native session identity for Ask authorization. See [verified native boundaries](opencode-native-boundaries.md).
+
+For a repeatable live Session View, two-client observation, recording and replay workflow, see [OpenCode ARDB development](opencode-debugging.md).
 
 ## Validation
 

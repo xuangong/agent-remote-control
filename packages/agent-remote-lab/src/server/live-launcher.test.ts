@@ -152,6 +152,10 @@ describe('live DSH launcher', () => {
         },
       },
       providers: [
+        { providerId: 'opencode', native: { name: 'opencode', version: '1.18.18', revision: null },
+          sdk: { name: '@opencode-ai/sdk', version: '1.18.31' },
+          degradations: ['controls.queue-steer', 'controls.source-references', 'controls.prompt-edit.atomicity', 'events.resources', 'events.usage', 'interactions.native-producers'].map(capability => ({ capability, status: 'degraded', reason: 'Bounded shared native provider.' })),
+        },
         {
           providerId: 'dsh',
           native: {

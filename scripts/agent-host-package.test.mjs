@@ -31,6 +31,8 @@ test('packs the public Controller name with the unchanged command and npm regist
   assert.deepEqual(manifest.bin, { 'agent-remote-controller': 'dist/launcher.js' });
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
   assert.equal(manifest.dependencies['@opencode-ai/sdk'], '1.18.31');
+  const plugin = await exec('tar', ['-xOf', artifact, 'package/dist/bridge-plugin.mjs'], { timeout: 10000, maxBuffer: 2 * 1024 * 1024 });
+  assert.ok(plugin.stdout.length > 1000);
 });
 
 test('installs the tarball independently and manages a paired daemon from a path containing spaces', { timeout: 180000 }, async t => {
@@ -91,6 +93,11 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
   assert.equal(manifest.dependencies['@opencode-ai/sdk'], '1.18.31');
   assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@orchardworks/')));
+  const callbackSetup = JSON.parse((await run(['opencode', 'callbacks', 'setup', join(directory, 'private callbacks')])).stdout);
+  const nativeCallbackConfig = JSON.parse(await readFile(callbackSetup.nativeConfigPath, 'utf8'));
+  assert.equal(nativeCallbackConfig.plugin[0][1].configPath, callbackSetup.configPath);
+  assert.ok((await readFile(new URL(nativeCallbackConfig.plugin[0][0]), 'utf8')).length > 1000);
+  await assert.rejects(run(['opencode', 'callbacks', 'setup', join(directory, 'private callbacks')]));
   await assert.rejects(run(['start']), /AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required/);
   await assert.rejects(run(['start'], { AGENT_HOST_REMOTE_KEY: 'key-without-relay' }), /Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together/);
   for (const [provider, version] of [['codex', 'codex-cli 0.148.0'], ['claude', '2.1.247 (Claude Code)']]) {

@@ -650,6 +650,12 @@ importers:
       '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 24.13.3

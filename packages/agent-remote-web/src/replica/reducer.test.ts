@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { TimelineStore } from '../../../agent-remote-relay/src/timeline-store.js';
+import { projectTimelinePage } from '../../../agent-remote-relay/src/timeline-projector.js';
 import type {
   AgentInteractionRequest,
   AgentSnapshot,
@@ -411,6 +413,7 @@ describe('incremental timeline identity', () => {
     ['reasoning', { type: 'reasoning', text: 'First ' }, { type: 'reasoning', text: 'second' }],
     ['tool', { type: 'tool_call', callId: 'call', name: 'read', status: 'running', detail: { type: 'read', filePath: '/file' }, error: null },
       { type: 'tool_call', callId: 'call', name: 'read', status: 'completed', detail: { type: 'read', filePath: '/file' }, error: null }],
+    ['compaction', { type: 'compaction', status: 'loading' }, { type: 'compaction', status: 'completed' }],
     ['todo', { type: 'todo', items: [{ text: 'Check', completed: false }] },
       { type: 'todo', items: [{ text: 'Check', completed: true }] }],
   ];
@@ -447,4 +450,36 @@ describe('incremental timeline identity', () => {
     expect(earlier.timeline.entries[2]).toBe(appended.timeline.entries[1]);
     expect(earlier.timeline.entries.map(entry => entry.seqStart)).toEqual([1, 5, 6]);
   });
+});
+
+
+it('converges live and Relay history compaction lifecycles without joining independent cycles', () => {
+  const store = new TimelineStore('epoch-one');
+  let live = applyHistoryPage(createReplicaState(), page('tail', [])).state;
+  const append = (item: ProjectedTimelineEntry['item'], turnId = 'turn-one', providerId = 'opencode') => {
+    const seq = store.rows().length + 1;
+    store.append({ providerId, sourceKey: `row-${seq}`, occurredAt: 1725000000000 + seq, turnId, item });
+    const row = store.rows().at(-1)!;
+    const message = stream(seq, item);
+    message.payload.timestamp = row.timestamp;
+    message.payload.event = { type: 'timeline', providerId, turnId, item, resources: [] };
+    live = reduceTimelineEvent(live, message).state;
+    const history = applyHistoryPage(createReplicaState(), projectTimelinePage(store, { requestId: 'tail', agentId: 'agent-one', direction: 'tail', limit: 100 })).state;
+    expect(live.timeline.entries).toEqual(history.timeline.entries);
+  };
+  append({ type: 'compaction', status: 'loading', trigger: 'manual', preTokens: 100 });
+  append({ type: 'reasoning', text: 'Summarizing' });
+  append({ type: 'compaction', status: 'loading' }, 'other-turn');
+  append({ type: 'compaction', status: 'completed' }, 'turn-one', 'claude');
+  append({ type: 'compaction', status: 'completed' });
+  expect(live.timeline.entries[0]).toMatchObject({ seqStart: 1, seqEnd: 5, item: { type: 'compaction', status: 'completed', trigger: 'manual', preTokens: 100 } });
+  append({ type: 'compaction', status: 'loading', trigger: 'auto' });
+  append({ type: 'compaction', status: 'completed' });
+  expect(live.timeline.entries).toHaveLength(5);
+  expect(live.timeline.entries.at(-1)).toMatchObject({ seqStart: 6, seqEnd: 7, item: { type: 'compaction', status: 'completed', trigger: 'auto' } });
+  append({ type: 'compaction', status: 'loading' });
+  append({ type: 'compaction', status: 'loading' });
+  append({ type: 'compaction', status: 'completed' });
+  append({ type: 'compaction', status: 'completed' });
+  expect(live.timeline.entries.slice(-3).map(entry => [entry.seqStart, entry.seqEnd])).toEqual([[8, 8], [9, 10], [11, 11]]);
 });

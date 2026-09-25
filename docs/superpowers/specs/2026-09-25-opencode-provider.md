@@ -10,11 +10,17 @@ Connect to an independently running `opencode serve` over the official SDK HTTP/
 
 ## Native contract
 
-Use the deployed server's established session/message and global-event endpoints, verifying against local OpenCode 1.18.18 and a pinned SDK. Do not assume the new durable Session v2 endpoints are mounted by `serve` merely because generated types exist. Use native session identity plus canonical working directory for resume. Titles are native, idempotent and use existing Host title broadcasts.
+Use the deployed server's established session/message and global-event endpoints, verifying against local OpenCode 1.18.18 and a pinned SDK. The durable Session v2 endpoints are mounted in 1.18.18, but their execution history and model configuration are independent of legacy sessions. Native model/agent switch endpoints persist shared session metadata and are verified separately. Do not mix durable prompt execution into legacy history. Use native session identity plus canonical working directory for resume. Titles are native, idempotent and use existing Host title broadcasts.
 
 ## Observations and controls
 
 Support text, reasoning, tool states/results, todos, compaction, usage, status/errors, image inputs, permissions and questions, history and native model/agent selection where exposed. Only advertise implemented capabilities. Reject unsupported delivery or settings rather than silently changing their meaning. Initial history ends with a boundary; recovery reconciles authoritative history, runtime and pending interactions before consuming buffered live events. Stable message/part identity prevents duplicate output. Transport loss is connection state, not a terminal turn. Unknown send outcomes must never be automatically replayed.
+
+Legacy immediate/steer input must preserve the native model loop and source history during active model and tool execution. Busy or error events without a matching message identity cannot resolve an uncertain admission. Cancellation acknowledgements may only resolve the admission they cover. Do not expose a separate next-turn queue without native evidence.
+
+## Host callbacks
+
+Use an explicitly installed native plugin supplying trusted `context.sessionID`; ordinary global MCP arguments are not session authority. Expose schema-validated, bounded callbacks through authenticated loopback HTTP and a private rendezvous file. Bind and revoke per native session, support Controller restart, and advertise source references only when the plugin is available. Ask history is read dynamically from its Host-authorized source with workspace checks on every read. Never substitute a static text snapshot for this contract or implicitly restart the native server.
 
 ## Host and security
 

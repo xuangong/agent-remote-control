@@ -544,7 +544,41 @@ Shared native permissions are trusted by default, as for Codex shared. Set
 if that policy requires restricted execution, registration fails because an
 external server cannot enforce an additional Controller sandbox.
 
-The adapter is validated with OpenCode 1.18.18 and pins SDK 1.18.31. Explicit queue,
-steer, prompt editing and Host callback tools are not advertised. Settings select
-native model/agent for the next prompt. See `docs/opencode.md` in the source
-repository for detailed setup and isolated native tests.
+The adapter is validated with OpenCode 1.18.18 and pins SDK 1.18.31. Immediate
+input, steer and native prompt editing preserve the legacy native history. A
+separate next-turn queue is not advertised. Settings select the native model/agent
+for the next prompt.
+
+Host callback tools and Ask source references additionally require an explicit
+native plugin setup. With the installed Controller, create a new private directory:
+
+```sh
+agent-remote-controller opencode callbacks setup "$HOME/.agent-remote-control/opencode-callbacks"
+```
+
+Start the independently managed native server with the generated configuration:
+
+```sh
+OPENCODE_CONFIG="$HOME/.agent-remote-control/opencode-callbacks/opencode-arc.json" \
+  opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+Set `AGENT_HOST_OPENCODE_CALLBACK_CONFIG` to
+`$HOME/.agent-remote-control/opencode-callbacks/callback.json` for the Controller,
+with `AGENT_HOST_OPENCODE_URL=http://127.0.0.1:4096`. The plugin comes from the
+installed package; no source checkout is needed. This command never edits global
+OpenCode configuration or restarts a running server. Existing target directories
+are rejected without overwriting their files. Loading the plugin into an existing
+native server requires an operator-controlled restart, and OpenCode may install
+its own plugin SDK on first load.
+
+Ask is advertised after the Controller verifies the native plugin. The plugin
+supplies the trusted calling session ID; model arguments cannot select another
+session or alter the fixed source. Source grants persist across Controller
+restarts, with access checked on create, resume and every read. The loopback bridge
+credential stays in a private process rendezvous file, outside Remote messages and
+native persistence handles. One live Controller owns that rendezvous; ordinary
+shared sessions still work without the plugin.
+
+See `docs/opencode.md` and `docs/opencode-callbacks.md` in the source repository for
+detailed behavior and isolated native tests.

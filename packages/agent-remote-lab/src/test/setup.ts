@@ -31,3 +31,11 @@ export async function render(node: ReactNode): Promise<HTMLDivElement> {
   await act(async () => root.render(node));
   return container;
 }
+
+export async function unmount(container: HTMLDivElement): Promise<void> {
+  const index = mounted.findIndex(entry => entry.container === container);
+  if (index < 0) throw new Error('The test container is not mounted.');
+  const [entry] = mounted.splice(index, 1);
+  await act(async () => entry!.root.unmount());
+  container.remove();
+}

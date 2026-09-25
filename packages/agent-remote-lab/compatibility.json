@@ -120,7 +120,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:f20e62156a537b5667f0c897a7d4a41cb942d9c5b99b7650a21eb3533051ca64"
+      "digest": "sha256:c1fc99a775e9c901aec37620954a7fa35d44e37dab1edaaea3dee75a2b30fe86"
     }
   },
   "providers": [
@@ -297,27 +297,32 @@
         {
           "capability": "controls.queue-steer",
           "status": "degraded",
-          "reason": "The established shared server API is used. Explicit follow-up queue and steer delivery are unavailable; unsupported delivery is rejected rather than simulated."
+          "reason": "Legacy prompt_async supports steer and immediate input during active work; the next native step consumes it with preserved history. A separate next_turn queue is unavailable. Durable history remains independent and is never substituted."
         },
         {
-          "capability": "events.subagent.navigation",
+          "capability": "controls.source-references",
           "status": "degraded",
-          "reason": "Native child sessions can be listed and opened by identity. Parent-attached child projections and callback tool orchestration are not exposed."
+          "reason": "Dynamic Host callback tools and Ask require explicit native plugin setup and a matching live bridge heartbeat. Trusted native session identity binds source grants; ordinary shared-server MCP is insufficient."
         },
         {
-          "capability": "controls.prompt-edit",
+          "capability": "controls.prompt-edit.atomicity",
           "status": "degraded",
-          "reason": "Native revert may also change workspace files. Prompt editing, fork and source references are not exposed by this adapter."
+          "reason": "Native fork preserves source files and forks before the selected prompt. OpenCode has no compare-and-swap guard against concurrent native edits between validation and fork."
         },
         {
           "capability": "events.resources",
           "status": "degraded",
-          "reason": "Image input and bounded native image resources are supported. Arbitrary native file paths and remote resource URLs are not fetched; terminal control is unavailable."
+          "reason": "Bounded native image resources and command documentation are supported. Local output files require a loopback server; arbitrary paths, remote resource URLs and terminal control are not exposed."
         },
         {
           "capability": "events.usage",
           "status": "degraded",
-          "reason": "Tokens describe the latest native model step. Session-wide total cost is omitted because history is paginated and cannot establish a complete aggregate."
+          "reason": "Uses native session token/cost aggregates when present. Otherwise tokens describe the latest available model step; partial history does not establish lifetime totals."
+        },
+        {
+          "capability": "interactions.native-producers",
+          "status": "degraded",
+          "reason": "Native permission and question requests are normalized, including plan-exit questions. No native form, permission-grant, external-action or standalone plan-approval producer is fabricated."
         }
       ]
     }

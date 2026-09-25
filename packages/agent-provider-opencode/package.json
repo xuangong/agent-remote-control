@@ -12,13 +12,15 @@
   },
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node ../../scripts/build-opencode-plugin.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
     "@opencode-ai/sdk": "1.18.31",
-    "@orchardworks/agent-provider-sdk": "workspace:*"
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "ajv": "8.20.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

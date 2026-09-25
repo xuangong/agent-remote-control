@@ -79,7 +79,7 @@ it('persists issued credentials before registration and never overwrites them wi
 
 it('privately retains the local OpenCode endpoint and Basic credentials across restarts', async () => {
   const path = await directory();
-  const environment = { AGENT_HOST_PROVIDERS: 'opencode', AGENT_HOST_OPENCODE: '/native/opencode',
+  const environment = { AGENT_HOST_PROVIDERS: 'opencode', AGENT_HOST_OPENCODE: '/native/opencode', AGENT_HOST_OPENCODE_CALLBACK_CONFIG: '/private/callback.json',
     AGENT_HOST_OPENCODE_TRUST_SHARED: '0', AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:4097', AGENT_HOST_OPENCODE_USERNAME: 'local', AGENT_HOST_OPENCODE_PASSWORD: 'native-server-secret' };
   const config = await resolveHostConnection(path, { ...environment, AGENT_HOST_SERVER: 'https://relay.example', AGENT_HOST_REMOTE_KEY: 'device-secret' });
   await saveRegisteredConnection(path, config, Promise.resolve());

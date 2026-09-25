@@ -432,6 +432,16 @@ function coalesceEntry(
       next[next.indexOf(existing)] = updated;
       return sortEntries(next);
     }
+  } else if (incomingItem.type === 'compaction' && incomingItem.status === 'completed') {
+    for (let index = next.length - 1; index >= 0; index -= 1) {
+      const candidate = next[index];
+      if (candidate?.item.type !== 'compaction' || !sameContext(candidate, incoming)) continue;
+      if (candidate.item.status !== 'loading') break;
+      const updated = { ...candidate, item: { ...candidate.item, ...incomingItem }, collapsed: [...candidate.collapsed] };
+      extendEntry(updated, incoming);
+      next[index] = updated;
+      return sortEntries(next);
+    }
   } else if (incomingItem.type === 'todo') {
     let existing: ProjectedTimelineEntry | undefined;
     for (let index = next.length - 1; index >= 0; index -= 1) {

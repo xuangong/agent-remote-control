@@ -32,6 +32,7 @@ try {
     external: [...Object.keys(sdkDependencies), 'bufferutil', 'utf-8-validate'],
     banner: { js: 'import { createRequire as agentHostCreateRequire } from "node:module"; const require = agentHostCreateRequire(import.meta.url);' },
   });
+  await cp(join(root, 'packages/agent-provider-opencode/dist/bridge-plugin.mjs'), join(stage, 'dist/bridge-plugin.mjs'));
   await chmod(join(stage, 'dist/cli.js'), 0o755);
   await cp(join(root, 'scripts/controller-launcher.mjs'), join(stage, 'dist/launcher.js'));
   await chmod(join(stage, 'dist/launcher.js'), 0o755);

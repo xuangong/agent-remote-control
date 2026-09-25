@@ -7,16 +7,17 @@ interface SourceGrant { sourceNativeSessionId: string; systemPrompt: string; han
 
 /** Durable Host authorization, independent of browser storage and native prompt text. */
 export class SessionReferenceStore {
-  constructor(private readonly directory: string) {}
+  constructor(private readonly directory: string, private readonly providerId = 'codex') {}
   private path(id: string): string { return join(this.directory, `${createHash('sha256').update(id).digest('hex')}.json`); }
   async get(id: string): Promise<SourceGrant | undefined> {
     let value: SourceGrant;
     try { value = JSON.parse(await readFile(this.path(id), 'utf8')) as SourceGrant; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('The saved source reference could not be read.'); }
-    if (!value || typeof value.systemPrompt !== 'string' || typeof value.sourceNativeSessionId !== 'string' || !value.sourceNativeSessionId || value.handle?.sessionId !== id || value.handle.providerId !== 'codex' || typeof value.handle.opaque !== 'string') throw new Error('The saved source reference is invalid.');
+    if (!value || typeof value.systemPrompt !== 'string' || typeof value.sourceNativeSessionId !== 'string' || !value.sourceNativeSessionId || value.handle?.sessionId !== id || value.handle.providerId !== this.providerId || typeof value.handle.opaque !== 'string') throw new Error('The saved source reference is invalid.');
     return value;
   }
   async set(grant: SourceGrant): Promise<void> {
+    if (grant.handle.providerId !== this.providerId) throw new Error('Source reference provider does not match the store.');
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const path = this.path(grant.handle.sessionId), temporary = `${path}.${randomUUID()}.tmp`;
     try { await writeFile(temporary, JSON.stringify(grant), { mode: 0o600, flag: 'wx' }); await rename(temporary, path); }

@@ -1234,6 +1234,135 @@ it('keeps an accepted message awaiting its echo through slow native processing',
   } finally { f.client.stop(); vi.useRealTimers(); }
 });
 
+function userHistoryEntry(seq: number, text: string): ProjectedTimelineEntry {
+  return { ...entry(seq, seq, text), item: { type: 'user_message', text } };
+}
+
+it('silently synchronizes overdue acknowledged messages together without resending', async () => {
+  vi.useFakeTimers();
+  const f = await outgoingFixture();
+  const statuses: string[] = [];
+  const unsubscribe = f.client.subscribeStatus(status => statuses.push(status));
+  try {
+    const baseline = f.transport.timelineRequests.length;
+    for (const text of ['First', 'Second']) {
+      const sent = f.client.sendMessage(text);
+      const request = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>;
+      f.acknowledge(request.payload.requestId); await sent;
+    }
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(f.transport.timelineRequests).toHaveLength(baseline);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.transport.timelineRequests).toHaveLength(baseline + 1);
+    expect(f.transport.timelineRequests.at(-1)).toMatchObject({ direction: 'after', cursor: { epoch: 'epoch-one', seq: 0 } });
+    f.transport.resolveTimeline(page('after', [userHistoryEntry(1, 'First'), userHistoryEntry(2, 'Second')]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.replica.getState().timeline.entries).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.transport.timelineRequests).toHaveLength(baseline + 1);
+    expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(2);
+    expect(statuses).toEqual(['ready']);
+  } finally { unsubscribe(); f.client.stop(); vi.useRealTimers(); }
+});
+
+it('backs off during long native compaction without failing or replaying the accepted input', async () => {
+  vi.useFakeTimers();
+  const f = await outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const sent = f.client.sendMessage('After compaction');
+    f.acknowledge('send-one'); await sent;
+    let requests = f.transport.timelineRequests.length;
+    for (const delay of [10_000, 30_000, 60_000, 60_000]) {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(f.transport.timelineRequests).toHaveLength(requests);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(f.transport.timelineRequests).toHaveLength(++requests);
+      f.transport.resolveTimeline(page('after', []));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo', error: undefined }]);
+    }
+    expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
+    f.echo(1, 'After compaction');
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.transport.timelineRequests).toHaveLength(requests);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('does not synchronize messages that have already echoed or are still awaiting send acknowledgement', async () => {
+  vi.useFakeTimers();
+  const f = await outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const baseline = f.transport.timelineRequests.length;
+    const sent = f.client.sendMessage('Slow acceptance');
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.transport.timelineRequests).toHaveLength(baseline);
+    f.acknowledge('send-one'); await sent;
+    f.echo(1, 'Slow acceptance');
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.transport.timelineRequests).toHaveLength(baseline);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('preserves newer live projections and cursors while scanning earlier pages for a missing echo', async () => {
+  vi.useFakeTimers();
+  const f = await outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const sent = f.client.sendMessage('Missing'); f.acknowledge('send-one'); await sent;
+    f.transport.emit(live(1, 'Live ')); f.transport.emit(live(2, 'answer'));
+    await vi.advanceTimersByTimeAsync(10_000);
+    f.transport.resolveTimeline(page('after', [entry(1, 1, 'Live ')], { hasNewer: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.replica.getState().timeline.nextSeq).toBe(3);
+    expect(f.replica.getState().timeline.entries[0]?.item).toMatchObject({ text: 'Live answer' });
+    expect(f.transport.timelineRequests.at(-1)?.cursor?.seq).toBe(1);
+    f.transport.resolveTimeline(page('after', [userHistoryEntry(3, 'Missing')]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+    expect(f.replica.getState().timeline.entries.map(row => row.item.type)).toEqual(['assistant_message', 'user_message']);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it.each(['failure', 'wrong epoch', 'gap', 'history error', 'stop', 'disconnect'] as const)('keeps the message and connection intact on background sync %s', async outcome => {
+  vi.useFakeTimers();
+  const f = await outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const sent = f.client.sendMessage('Keep'); f.acknowledge('send-one'); await sent;
+    await vi.advanceTimersByTimeAsync(10_000);
+    if (outcome === 'stop') f.client.stop();
+    if (outcome === 'disconnect') { f.transport.disconnect(); f.client.stop(); }
+    if (outcome === 'failure') f.transport.rejectTimeline(new Error('Unavailable'));
+    else f.transport.resolveTimeline(page('after', [userHistoryEntry(1, 'Keep')], outcome === 'wrong epoch' ? { epoch: 'other' }
+      : outcome === 'gap' ? { gap: true } : outcome === 'history error' ? { error: 'Not available' } : {}));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ text: 'Keep', status: 'awaiting_echo' }]);
+    expect(f.replica.getState().timeline.epoch).toBe('epoch-one');
+    expect(f.replica.getState().timeline.entries).toEqual([]);
+    expect(f.transport.connections).toBe(1);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
+it('bounds each background history scan and continues from its cursor on the next check', async () => {
+  vi.useFakeTimers();
+  const f = await outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const baseline = f.transport.timelineRequests.length;
+    const sent = f.client.sendMessage('Deep history'); f.acknowledge('send-one'); await sent;
+    await vi.advanceTimersByTimeAsync(10_000);
+    for (let seq = 1; seq <= 8; seq++) {
+      f.transport.resolveTimeline(page('after', [entry(seq, seq, 'Work')], { hasNewer: true }));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(f.transport.timelineRequests).toHaveLength(baseline + 8);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(f.transport.timelineRequests.at(-1)?.cursor?.seq).toBe(8);
+    f.transport.resolveTimeline(page('after', [userHistoryEntry(9, 'Deep history')]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+  } finally { f.client.stop(); vi.useRealTimers(); }
+});
+
 it('does not erase delivery uncertainty after history replacement when a late acknowledgement arrives', async () => {
   vi.useFakeTimers();
   const f = await outgoingFixture({ requestId: () => 'send-one', operationTimeoutMs: 60_000 });

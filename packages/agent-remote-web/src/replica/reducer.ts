@@ -205,7 +205,7 @@ export function applyInteractionInvalidatedMessage(
   return applyInteractionInvalidated(state, message.payload.requestId);
 }
 
-export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage): TimelineReduction {
+export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, options?: { preserveLive?: boolean }): TimelineReduction {
   const payload = page.payload;
   if (payload.reset || payload.staleCursor || payload.gap) {
     const reset = applyTimelineReplacement(state, payload.epoch);
@@ -229,8 +229,12 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage): T
   const base = !authorityState.timeline.initialized || payload.direction === 'tail'
     ? []
     : authorityState.timeline.entries;
-  const entries = mergeAuthoritative(base, payload.entries);
-  const nextSeq = nextSequenceForPage(authorityState, page);
+  const incoming = options?.preserveLive ? payload.entries.filter(candidate => !base.some(existing =>
+    existing.seqEnd > candidate.seqEnd && rangesOverlap(existing.sourceSeqRanges, candidate.sourceSeqRanges))) : payload.entries;
+  const entries = mergeAuthoritative(base, incoming);
+  const nextSeq = options?.preserveLive
+    ? Math.max(authorityState.timeline.nextSeq, nextSequenceForPage(authorityState, page))
+    : nextSequenceForPage(authorityState, page);
   const prepared: AgentReplicaState = {
     ...authorityState,
     timeline: {

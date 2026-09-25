@@ -89,8 +89,8 @@ export class AgentReplica {
     this.replace(applyAgentSnapshot(this.state, snapshot, options));
   }
 
-  applyHistory(page: HistoryPage): TimelineReduction {
-    const result = applyHistoryPage(this.state, page);
+  applyHistory(page: HistoryPage, options?: { preserveLive?: boolean }): TimelineReduction {
+    const result = applyHistoryPage(this.state, page, options);
     this.replace(result.state);
     if (result.status === 'applied' || result.status === 'duplicate') {
       for (const listener of this.historyListeners) listener(page.payload.epoch, page.payload.direction);

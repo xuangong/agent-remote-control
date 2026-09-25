@@ -21,6 +21,7 @@ import {
 } from '@orchardworks/agent-remote-protocol';
 
 import { uploadImage, checkUploadAborted, type ImageUploadOptions, type ImageUploadRequest } from './image-upload.js';
+import { watchMessageEchoes } from './message-echo-sync.js';
 import type { AgentReplica } from '../replica/store.js';
 import type { TimelineReduction } from '../replica/types.js';
 import {
@@ -84,6 +85,7 @@ export class RemoteSessionClient {
   private readonly pendingOperations = new Map<string, Map<string, PendingOperation>>();
   private connection: RemoteConnection | undefined;
   private unsubscribeDiagnostic: (() => void) | undefined;
+  private stopMessageEchoSync?: () => void;
   private recovery: AbortController | undefined;
   private olderHistory?: { controller: AbortController; promise: Promise<void> };
   private generation = 0;
@@ -724,6 +726,8 @@ export class RemoteSessionClient {
   }
 
   private stopConnection(): void {
+    this.stopMessageEchoSync?.();
+    this.stopMessageEchoSync = undefined;
     this.resolveControlReady?.();
     this.resolveControlReady = undefined;
     this.controlReady = undefined;
@@ -750,6 +754,9 @@ export class RemoteSessionClient {
   private setStatus(status: RemoteSessionStatus): void {
     if (status === this.currentStatus) return;
     this.currentStatus = status;
+    this.stopMessageEchoSync?.();
+    this.stopMessageEchoSync = status === 'ready'
+      ? watchMessageEchoes(this.agentId, this.transport, this.replica, this.historyPageSize) : undefined;
     for (const listener of this.statusListeners) listener(status);
   }
 }

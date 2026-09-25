@@ -152,6 +152,12 @@ attachment receipt. Chunks contain at most 32 KiB decoded bytes. Begin and repea
 identical chunks are idempotent, so a disconnected client resumes from the persisted
 offset. MIME, structure, dimensions, byte length, and SHA-256 are verified by the Host.
 
+The browser sends chunks in byte order with at most eight awaiting acknowledgement
+per upload. Progress advances through contiguous validated receipts, and finish waits
+for every chunk receipt. Failure or cancellation stops new chunks and settles the
+in-flight window before retry; a new begin receipt determines the resume offset.
+Images remain queued one at a time, without resizing or recompression.
+
 `send_message` accepts exactly one of `text` or ordered `content: MessagePart[]`.
 Image parts contain an opaque `attachmentId` and a display `label`; paths and arbitrary
 URLs are not accepted. The Host resolves and pins owned images before invoking the

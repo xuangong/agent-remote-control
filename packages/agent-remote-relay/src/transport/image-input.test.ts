@@ -10,6 +10,7 @@ import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote
 import { InputImageStore } from '../resources/input-image-store.js';
 import { createAgentRemoteRelay } from '../relay.js';
 import { createAgentRemoteHttpServer } from './http-server.js';
+import { uploadImage } from '../../../agent-remote-web/src/client/image-upload.js';
 
 function provider(sent: AgentInputPart[][]): AgentProviderAdapter {
   return { descriptor: { providerId: 'vision', displayName: 'Vision' },
@@ -67,7 +68,7 @@ describe('image input over real session WebSocket', () => {
         } };
       }
       const primary = await readFile(new URL(`../resources/fixtures/${format === 'PNG' ? 'dimensions.png' : 'rotated.jpg'}`, import.meta.url));
-      const bytes = format === 'PNG' ? primary : Buffer.concat([primary, primary]);
+      const bytes = format === 'PNG' ? primary : Buffer.concat(Array.from({ length: Math.ceil(400_000 / primary.length) }, () => primary));
       const declaration = { uploadId: 'upload', sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length, mediaType: format === 'PNG' ? 'image/png' : 'image/jpeg' };
       let connection = await connect();
       expect((await connection.request('image_upload_begin', declaration)).type).toBe('image_upload_result');
@@ -76,10 +77,27 @@ describe('image input over real session WebSocket', () => {
       connection.socket.terminate(); connection = await connect();
       expect(await connection.request('image_upload_begin', declaration)).toMatchObject({ payload: { offset: 20 } });
       expect(await connection.request('image_upload_chunk', chunk)).toMatchObject({ payload: { offset: 20 } });
-      await connection.request('image_upload_chunk', { uploadId: 'upload', offset: 20, contentBase64: bytes.subarray(20).toString('base64') });
-      const complete = await connection.request('image_upload_finish', { uploadId: 'upload' });
-      if (complete.type !== 'image_upload_result' || !complete.payload.attachment) throw new Error('Missing completed receipt.');
-      const attachmentId = complete.payload.attachment.attachmentId;
+      let inFlight = 0;
+      let maximumInFlight = 0;
+      const offsets: number[] = [];
+      const attachment = await uploadImage(new Blob([new Uint8Array(bytes)], { type: declaration.mediaType }), 'upload', async request => {
+        const { type, ...payload } = request;
+        if (request.type === 'image_upload_chunk') {
+          maximumInFlight = Math.max(maximumInFlight, ++inFlight);
+          offsets.push(request.offset);
+        }
+        const response = await connection.request(type, { uploadId: 'upload', ...payload });
+        if (type === 'image_upload_chunk') {
+          // Keep receipts in transit long enough to exercise a full upload window.
+          await new Promise(resolve => setTimeout(resolve, 60));
+          inFlight--;
+        }
+        if (response.type !== 'image_upload_result') throw new Error(`Unexpected upload response: ${response.type}`);
+        return response.payload;
+      });
+      expect(offsets[0]).toBe(20);
+      expect(maximumInFlight).toBe(format === 'PNG' ? 1 : 8);
+      const { attachmentId } = attachment;
       const content = [{ type: 'text', text: 'before' }, { type: 'image', attachmentId, label: 'image #1' }, { type: 'text', text: 'after' }];
       expect((await connection.request('send_message', { operationId: randomUUID(), content })).type).toBe('command_acknowledged');
       expect(sent[0]!.map(part => part.type)).toEqual(['text', 'image', 'text']);

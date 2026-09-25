@@ -9,6 +9,8 @@ export interface ImageUploadOptions {
   onProgress?(loaded: number, total: number): void;
 }
 const digests = new WeakMap<Blob, Promise<string>>();
+const CHUNK_BYTES = 32768;
+const UPLOAD_WINDOW = 8;
 export function checkUploadAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Image upload paused.', 'AbortError');
 }
@@ -38,13 +40,44 @@ export async function uploadImage(file: Blob, uploadId: string,
   };
   let receipt = await receive({ type: 'image_upload_begin', sha256, byteLength: file.size, mediaType: file.type as ImageMediaType });
   options.onProgress?.(receipt.offset, file.size);
-  while (receipt.offset < file.size && !receipt.attachment) {
-    const offset = receipt.offset;
-    const bytes = new Uint8Array(await file.slice(offset, offset + 32768).arrayBuffer());
-    receipt = await receive({ type: 'image_upload_chunk', offset, contentBase64: btoa(String.fromCharCode(...bytes)) });
-    if (receipt.offset !== offset + bytes.length) throw new Error('The Host returned an unexpected image upload offset. Retry to resume.');
-    options.onProgress?.(receipt.offset, file.size);
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  if (!receipt.attachment) {
+    type ChunkResult = { receipt: ImageUploadReceipt } | { error: unknown };
+    const pending: Promise<ChunkResult>[] = [];
+    let failure: { error: unknown } | undefined;
+    let nextOffset = receipt.offset;
+    const assertUploading = () => {
+      checkUploadAborted(options.signal);
+      if (failure) throw failure.error;
+    };
+    try {
+      while (nextOffset < file.size || pending.length) {
+        assertUploading();
+        while (nextOffset < file.size && pending.length < UPLOAD_WINDOW) {
+          const offset = nextOffset;
+          // Read and send in order: the Host accepts only contiguous bytes.
+          const bytes = new Uint8Array(await file.slice(offset, offset + CHUNK_BYTES).arrayBuffer());
+          assertUploading();
+          pending.push(receive({ type: 'image_upload_chunk', offset, contentBase64: btoa(String.fromCharCode(...bytes)) })
+            .then<ChunkResult>(received => {
+              if (received.offset !== offset + bytes.length) throw new Error('The Host returned an unexpected image upload offset. Retry to resume.');
+              return { receipt: received };
+            }).catch((error: unknown) => {
+              failure ??= { error };
+              return { error };
+            }));
+          nextOffset += bytes.length;
+        }
+        const result = await pending.shift()!;
+        if ('error' in result) throw result.error;
+        assertUploading();
+        receipt = result.receipt;
+        options.onProgress?.(receipt.offset, file.size);
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+      }
+    } finally {
+      // Settle the old window before a queued retry starts with a fresh Host offset.
+      await Promise.all(pending);
+    }
   }
   if (!receipt.attachment) receipt = await receive({ type: 'image_upload_finish' });
   const attachment = receipt.attachment;

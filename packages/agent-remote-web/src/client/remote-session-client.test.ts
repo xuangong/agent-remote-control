@@ -1481,43 +1481,49 @@ it('does not confirm an image send from a plain-text lookalike or a missing imag
   } finally { f.client.stop(); }
 });
 
-it('correlates upload receipts and cancels an in-flight chunk without reconnecting the session', async () => {
+it('correlates upload receipts and cancels eight in-flight chunks without reconnecting the session', async () => {
   const { Blob } = await import('node:buffer');
   const { webcrypto, createHash } = await import('node:crypto');
   vi.stubGlobal('crypto', webcrypto);
   const f = await outgoingFixture();
   try {
     const abort = new AbortController();
-    const pending = f.client.uploadImage(new Blob(['image bytes'], { type: 'image/png' }) as globalThis.Blob, 'upload', { signal: abort.signal });
+    const bytes = new Uint8Array(10 * 32768);
+    const pending = f.client.uploadImage(new Blob([bytes], { type: 'image/png' }) as globalThis.Blob, 'upload', { signal: abort.signal });
     const rejected = expect(pending).rejects.toThrow('paused');
     await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_begin'));
     const begin = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'image_upload_begin' }>;
-    expect(begin.payload.sha256).toBe(createHash('sha256').update('image bytes').digest('hex'));
+    expect(begin.payload.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
     f.transport.emit({ protocolVersion: '1.5.0', type: 'image_upload_result', payload: { requestId: begin.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 0 } });
-    await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_chunk'));
-    const chunk = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'image_upload_chunk' }>;
+    await vi.waitFor(() => expect(f.transport.sent.filter(message => message.type === 'image_upload_chunk')).toHaveLength(8));
+    const chunks = f.transport.sent.filter(message => message.type === 'image_upload_chunk');
     abort.abort(); await rejected;
-    f.transport.emit({ protocolVersion: '1.5.0', type: 'image_upload_result', payload: { requestId: chunk.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 11 } });
+    for (const chunk of chunks) f.transport.emit({ protocolVersion: '1.5.0', type: 'image_upload_result', payload: { requestId: chunk.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: chunk.payload.offset + 32768 } });
     await Promise.resolve();
     expect(f.transport.sent.some(message => message.type === 'image_upload_finish')).toBe(false);
     expect(f.transport.connections).toBe(1);
   } finally { f.client.stop(); vi.unstubAllGlobals(); }
 });
 
-it('does not continue an upload on a new connection generation', async () => {
+it.each(['begin', 'chunks'] as const)('does not continue an upload on a new connection generation after disconnect during %s', async stage => {
   const { Blob } = await import('node:buffer');
   const { webcrypto } = await import('node:crypto');
   vi.stubGlobal('crypto', webcrypto);
   const f = await outgoingFixture({ scheduleReconnect: () => () => undefined });
   try {
-    const pending = f.client.uploadImage(new Blob(['bytes'], { type: 'image/png' }) as globalThis.Blob, 'upload');
+    const pending = f.client.uploadImage(new Blob([new Uint8Array(10 * 32768)], { type: 'image/png' }) as globalThis.Blob, 'upload');
     const rejected = expect(pending).rejects.toMatchObject({ code: 'connection_disconnected' });
     await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_begin'));
+    if (stage === 'chunks') {
+      const begin = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'image_upload_begin' }>;
+      f.transport.emit({ protocolVersion: '1.5.0', type: 'image_upload_result', payload: { requestId: begin.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 0 } });
+      await vi.waitFor(() => expect(f.transport.sent.filter(message => message.type === 'image_upload_chunk')).toHaveLength(8));
+    }
     f.transport.disconnect(); await rejected;
     f.client.start(); f.transport.open(); completeSubscription(f.transport);
     await Promise.resolve();
     expect(f.transport.sent.filter(message => message.type === 'image_upload_begin')).toHaveLength(1);
-    expect(f.transport.sent.some(message => message.type === 'image_upload_chunk')).toBe(false);
+    expect(f.transport.sent.filter(message => message.type === 'image_upload_chunk')).toHaveLength(stage === 'chunks' ? 8 : 0);
   } finally { f.client.stop(); vi.unstubAllGlobals(); }
 });
 

@@ -30,7 +30,7 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Waiting for session');
   await type('Draft during synchronization');
   expect(draft).toHaveBeenLastCalledWith('Draft during synchronization');
-  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
   await enter();
   expect(send).not.toHaveBeenCalled();
   await type('/side');
@@ -41,11 +41,11 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   await rerender(container, view(false));
   expect(input.placeholder).toBe('Message…');
   expect(input.value).toBe('Draft during synchronization');
-  await enter();
   expect(send).toHaveBeenCalledExactlyOnceWith('Draft during synchronization');
-  expect(input.disabled).toBe(true);
+  expect(input.disabled).toBe(false);
   await act(async () => resolve());
   expect(input.disabled).toBe(false);
+  expect(input.value).toBe('Draft during synchronization');
   await rerender(container, view(true, { ...state, agent: { ...state.agent!, capabilities: { ...state.agent!.capabilities, sendMessage: false } } }));
   expect(input.disabled).toBe(true);
   await rerender(container, view(true, createReplicaState()));
@@ -71,7 +71,7 @@ it('keeps image atoms through reconnect and sends ordered image-only content wit
   await act(async () => container.querySelector('[role="textbox"]')!.dispatchEvent(paste));
   expect(container.querySelector('[data-image-id]')?.textContent).toBe('[image #1]');
   expect(upload).not.toHaveBeenCalled();
-  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
   await rerender(container, view(false));
   expect(upload).toHaveBeenCalledTimes(1);
   expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);

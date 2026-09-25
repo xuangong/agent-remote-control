@@ -9,10 +9,11 @@ import { AgentActivityStatus } from './AgentActivityStatus.js';
 import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor.js';
 import { ImageUploadStatus } from './ImageUploadStatus.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
-import { draftHasContent } from './composer-document.js';
+import { draftHasContent, snapshotContent } from './composer-document.js';
 import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
+import { PendingSendQueue } from './PendingSendQueue.js';
 
 export interface AgentComposerProps {
   compact?: boolean;
@@ -71,7 +72,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
-  const waiting = usePendingSend(agentId, visible);
+  const waiting = usePendingSend(JSON.stringify([draftScope, agentId]), visible);
   const currentAgent = useRef(agentId);
   currentAgent.current = agentId;
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -93,14 +94,15 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
   function focusInput(): void { if (richEnabled) editorRef.current?.focus(); else inputRef.current?.focus(); }
   const { text, pending, feedback } = currentDraft;
   const operationBusy = Boolean(pending || currentDraft.settingPending || currentDraft.interruptPending);
-  const busy = operationBusy || Boolean(waiting.pending);
+  const busy = operationBusy;
   const capabilities = state?.agent?.capabilities;
   const runtimeConnection = state?.agent?.runtimeInfo.connection;
   const runtimeUnavailable = runtimeConnectionMessage(runtimeConnection?.state);
-  const ready = Boolean(state?.agent) && !disabled && !forcedReadOnly && runtimeUnavailable === undefined;
+  const controlChecking = state?.sessionControl?.access === 'checking';
+  const ready = Boolean(state?.agent) && !disabled && !forcedReadOnly && !controlChecking && runtimeUnavailable === undefined;
   const readOnly = forcedReadOnly || capabilities?.sendMessage === false;
   const terminal = state?.agent?.status === 'failed' || state?.agent?.status === 'closed';
-  const canWait = recovering && Boolean(state?.agent) && !readOnly && !terminal && runtimeConnection?.state !== 'unavailable';
+  const canWait = (recovering || disabled || controlChecking || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring') && Boolean(state?.agent) && !readOnly && !terminal && runtimeConnection?.state !== 'unavailable';
   const richEnabled = Boolean(capabilities?.imageInput);
   const imageDraft = useImageDraft({ scope: draftScope, sessionKey: agentId, text, enabled: richEnabled, active: visible && ready && !readOnly, upload: onUploadImage,
     onTextChange: value => { currentDraft.text = value; onDraftChange?.(value); refresh(count => count + 1); } });
@@ -130,29 +132,43 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
   const canInterrupt = ready && capabilities?.cancel === true && (activeTurnId !== undefined || pending === 'command')
     && state?.agent?.status !== 'failed' && state?.agent?.status !== 'closed' && !interruptRequested;
 
-  const latest = useRef({ ready, canWait, readOnly, terminal, state, text, imageDraft, run, onSendMessage, onSendMessageContent });
-  latest.current = { ready, canWait, readOnly, terminal, state, text, imageDraft, run, onSendMessage, onSendMessageContent };
+  const dispatchReady = ready && !readOnly && !terminal && !operationBusy;
+  const latest = useRef({ agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage });
+  latest.current = { agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage };
   function deferMessage(): void {
     const submitted = currentDraft.text;
-    const parts = imageDraft.parts;
-    const originalAgent = state?.agent?.id;
+    const parts = imageDraft.parts.map(part => ({ ...part }));
+    // Own the bytes independently of the editable draft and its upload lifecycle.
+    const images = Object.fromEntries(parts.flatMap(part => part.type === 'image'
+      ? [[part.imageId, { blob: imageDraft.images[part.imageId]?.blob, uploadId: crypto.randomUUID() }]] : []));
+    const containsImages = hasImages;
     currentDraft.feedback = undefined;
     waiting.start({
-      invalid() {
-        const current = latest.current;
-        if (current.state?.agent?.id !== originalAgent || current.text !== submitted || (hasImages && current.imageDraft.parts !== parts)) return 'Not sent: the draft or session changed.';
-        if (current.state?.sessionControl?.access === 'checking') return undefined;
-        if (current.readOnly || current.terminal || current.state?.agent?.runtimeInfo.connection?.state === 'unavailable') return 'Not sent: this session is unavailable.';
-        if (!current.ready && !current.canWait) return 'Not sent: this session is disconnected.';
-        if (hasImages && current.imageDraft.parts.some(part => part.type === 'image' && ['failed', 'unavailable'].includes(current.imageDraft.images[part.imageId]?.status ?? 'unavailable'))) return 'Not sent: check your images.';
-        return undefined;
-      },
+      text: containsImages ? parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join('') : submitted,
       ready() {
         const current = latest.current;
-        return !current.readOnly && current.ready && (!hasImages || current.imageDraft.parts.every(part => part.type === 'text' || current.imageDraft.images[part.imageId]?.status === 'ready'));
+        return current.agentId === agentId && current.dispatchReady && Boolean(containsImages ? current.onSendMessageContent && current.onUploadImage : current.onSendMessage);
       },
-      send() { void latest.current.run('send', true); },
+      async send(signal, dispatch) {
+        signal.throwIfAborted();
+        const upload = latest.current.onUploadImage!;
+        const attachments: Record<string, Awaited<ReturnType<UploadImage>>> = {};
+        for (const [id, image] of Object.entries(images)) {
+          if (!image.blob) throw new Error('Local image bytes are missing. Copy the message and attach the image again.');
+          attachments[id] = await upload(image.blob, image.uploadId, { signal });
+          signal.throwIfAborted();
+        }
+        const content = containsImages ? snapshotContent(parts, attachments) : undefined;
+        if (!dispatch()) return;
+        if (content) await latest.current.onSendMessageContent!(content, {
+          imageDigests: Object.fromEntries(Object.values(attachments).map(image => [image.attachmentId, image.sha256])),
+        });
+        else await latest.current.onSendMessage!(submitted.trim());
+      },
     });
+    setText('');
+    focusInput();
+    refresh(value => value + 1);
   }
 
   const sendButtonPress = useSendButtonPress(agentId, canSubmit && !readOnly && !busy, () => {
@@ -241,8 +257,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
     }
   }
 
-  async function run(kind: 'send' | 'queue' | 'cancel', resumed = false): Promise<void> {
-    if (!resumed && waiting.pending) return;
+  async function run(kind: 'send' | 'queue' | 'cancel'): Promise<void> {
     if (kind === 'cancel') {
       if (!onCancel || !canInterrupt || currentDraft.interruptPending) return;
       currentDraft.interruptPending = true;
@@ -282,9 +297,9 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
       return;
     }
     const action = onSendMessage;
-    if (kind === 'send' && !ready && canWait && !operationBusy && hasContent && capabilities?.sendMessage && (hasImages ? onSendMessageContent : action)) { deferMessage(); return; }
+    if (kind === 'send' && (!ready || waiting.items.length > 0) && (ready || canWait) && !operationBusy && hasContent && capabilities?.sendMessage && (hasImages ? onSendMessageContent : action)) { deferMessage(); return; }
     if ((hasImages ? !onSendMessageContent : !action) || currentDraft.pending || currentDraft.settingPending || !ready || !hasContent || !imageSendReady) return;
-    if (!capabilities?.sendMessage || (kind === 'queue' && !canQueue)) return;
+    if (!capabilities?.sendMessage || (kind === 'queue' && (!canQueue || waiting.items.length > 0))) return;
     const submitted = currentDraft.text;
     const submittedParts = imageDraft.parts;
     const content = hasImages ? imageDraft.snapshot() : undefined;
@@ -341,7 +356,8 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
     void run('send');
   }
 
-  return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy} data-send-state={waiting.pending?.phase} data-control-readonly={ownershipReadOnly || undefined}>
+  return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy} data-control-readonly={ownershipReadOnly || undefined}>
+    <PendingSendQueue items={waiting.items} onCancel={waiting.cancel} onRetry={waiting.retry} />
     <div className="agent-composer-input">
     {forcedReadOnly ? readOnlyNotice : null}
     {showCommands ? <div className="agent-command-menu">
@@ -398,7 +414,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
         {richEnabled ? <><button type="button" aria-label="Add images" disabled={!state?.agent || readOnly || busy} onClick={() => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); }}>Image</button>
           <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(imageDraft.addFiles(files)); }} /></> : null}
         <button hidden={compact} type="button" aria-label="Open chat commands" disabled={!ready || busy || (readOnly && consoleCommands.length === 0)} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); focusInput(); }}>/</button>
-        {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={!ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent)} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}
+        {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={waiting.items.length > 0 || !ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent)} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}
       </div>
       {state?.agent && !compact ? <AgentSessionSettings key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
@@ -406,16 +422,14 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
         onSelect={onSetSessionSetting} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : null}
       {state?.agent ? <AgentActivityStatus visible={activityVisible} state={state} disabled={disabled} disabledLabel={disabledLabel}
         commandPending={pending === 'command'}
-        interruptDisabled={Boolean(waiting.pending) || !canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
+        interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
         onInterrupt={() => void run('cancel')} /> : null}
       <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={`${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage !== true || (!onSendMessage && !onSendMessageContent))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
     </div> : null}
-      {waiting.pending ? <div className="agent-composer-send-status" data-testid="pending-send" data-state={waiting.pending.phase}>
-        <span role="status" title={waiting.pending.reason}>{waiting.pending.phase === 'waiting' ? <>Waiting to send · <span aria-live="off">{waiting.pending.seconds}s</span></> : waiting.pending.reason ?? 'Not sent'}</span>
-        {waiting.pending.phase === 'warning' ? <button type="button" aria-label="Retry pending send" onClick={waiting.retry}>Retry</button> : null}
-        <button type="button" aria-label="Cancel pending send" onClick={waiting.cancel}>Cancel</button>
-      </div> : null}
+    {waiting.items[0]?.phase === 'error' ? <p className="agent-composer-note" role="alert">
+      {waiting.items[0].reason}{waiting.items[0].dispatched ? ' Check the conversation before dismissing this message to continue the queue.' : ''}
+    </p> : null}
     {richEnabled && imageDraft.storageError ? <div className="agent-composer-note agent-draft-storage-status" role="status">
       <span>{imageDraft.storageError}</span>
       <button type="button" onClick={imageDraft.retryStorage} disabled={imageDraft.storageBusy} aria-label="Retry draft storage">Retry</button>

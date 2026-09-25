@@ -1,98 +1,102 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface PendingSend {
+  text: string;
   ready(): boolean;
-  invalid(): string | undefined;
-  send(): void;
+  send(signal: AbortSignal, dispatch: () => boolean): Promise<void>;
 }
-interface WaitingSend extends PendingSend {
+export interface WaitingSend extends PendingSend {
+  id: string;
   sessionKey: string;
-  phase: 'waiting' | 'warning';
-  seconds: number;
-  deadline?: number;
+  phase: 'waiting' | 'preparing' | 'sending' | 'error';
+  dispatched: boolean;
   reason?: string;
+  abort?: AbortController;
 }
 
-/** Only holds operations that have never crossed the transport boundary. */
+/** Automatic retries stop at the transport boundary, even when delivery is uncertain. */
 export function usePendingSend(sessionKey: string, visible: boolean) {
-  const waiting = useRef<WaitingSend>();
+  const queues = useRef(new Map<string, WaitingSend[]>());
   const pageHidden = useRef(false);
+  const mounted = useRef(true);
   const latest = useRef({ sessionKey, visible });
   latest.current = { sessionKey, visible };
   const [, refresh] = useState(0);
-  const notify = () => refresh(value => value + 1);
-  const cancel = () => { waiting.current = undefined; notify(); };
-
-  useLayoutEffect(() => () => {
-    if (waiting.current?.sessionKey === sessionKey) waiting.current = undefined;
-  }, [sessionKey]);
-
-  // Render updates carry fresh readiness, permissions and native turn state.
-  // Reinstalling the watcher preserves the original foreground deadline.
+  const notify = () => { if (mounted.current) refresh(value => value + 1); };
+  const foreground = () => mounted.current && latest.current.visible && !pageHidden.current && document.visibilityState !== 'hidden';
+  const allowed = (item: WaitingSend) => foreground() && item.sessionKey === latest.current.sessionKey && item.ready();
+  const remove = (item: WaitingSend) => {
+    const queue = queues.current.get(item.sessionKey);
+    if (queue) {
+      const index = queue.indexOf(item);
+      if (index !== -1) queue.splice(index, 1);
+      if (!queue.length) queues.current.delete(item.sessionKey);
+    }
+    notify();
+  };
+  function update(): void {
+    for (const queue of queues.current.values()) {
+      const item = queue[0];
+      if (item?.phase === 'preparing' && !allowed(item)) item.abort?.abort();
+    }
+    const item = queues.current.get(latest.current.sessionKey)?.[0];
+    if (!item || item.phase !== 'waiting' || !allowed(item)) return;
+    const abort = new AbortController();
+    item.abort = abort;
+    item.phase = 'preparing';
+    notify();
+    void Promise.resolve().then(() => item.send(abort.signal, () => {
+      if (abort.signal.aborted || !allowed(item)) return false;
+      item.dispatched = true;
+      item.phase = 'sending';
+      notify();
+      return true;
+    })).then(() => {
+      if (item.dispatched) remove(item);
+      else item.phase = 'waiting';
+    }).catch(error => {
+      if (!item.dispatched && abort.signal.aborted) item.phase = 'waiting';
+      else {
+        item.phase = 'error';
+        item.reason = error instanceof Error ? error.message : 'Message could not be sent.';
+      }
+    }).finally(() => { item.abort = undefined; notify(); });
+  }
+  const watcher = useRef(update); watcher.current = update;
+  useEffect(() => { update(); });
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const update = () => {
-      clearTimeout(timer);
-      const pending = waiting.current;
-      if (!pending || pending.sessionKey !== latest.current.sessionKey || pending.phase !== 'waiting') return;
-      if (!latest.current.visible || pageHidden.current || document.visibilityState === 'hidden') {
-        pending.deadline = undefined;
-        if (pending.seconds !== 10) { pending.seconds = 10; notify(); }
-        return;
-      }
-      pending.deadline ??= performance.now() + 10000;
-      const remaining = pending.deadline - performance.now();
-      const invalid = pending.invalid();
-      if (remaining <= 0 || invalid) {
-        pending.phase = 'warning';
-        pending.reason = invalid;
-        pending.seconds = 0;
-        notify();
-        return;
-      }
-      if (pending.ready()) {
-        waiting.current = undefined;
-        notify();
-        pending.send();
-        return;
-      }
-      const seconds = Math.ceil(remaining / 1000);
-      if (pending.seconds !== seconds) { pending.seconds = seconds; notify(); }
-      timer = setTimeout(update, Math.min(1000, remaining));
-    };
+    mounted.current = true;
+    const update = () => watcher.current();
     const hide = () => { pageHidden.current = true; update(); };
-    const show = (event: PageTransitionEvent) => {
-      pageHidden.current = false;
-      if (event.persisted && waiting.current?.phase === 'waiting') waiting.current.deadline = undefined;
-      update();
-    };
+    const show = () => { pageHidden.current = false; update(); };
     document.addEventListener('visibilitychange', update);
     window.addEventListener('pagehide', hide);
     window.addEventListener('pageshow', show);
-    update();
     return () => {
-      clearTimeout(timer);
+      mounted.current = false;
+      for (const queue of queues.current.values()) for (const item of queue) if (!item.dispatched) item.abort?.abort();
       document.removeEventListener('visibilitychange', update);
       window.removeEventListener('pagehide', hide);
       window.removeEventListener('pageshow', show);
     };
-  });
-
+  }, []);
   return {
-    pending: waiting.current?.sessionKey === sessionKey ? waiting.current : undefined,
+    items: queues.current.get(sessionKey) ?? [],
     start(action: PendingSend) {
-      if (waiting.current) return;
-      waiting.current = { ...action, sessionKey, phase: 'waiting', seconds: 10 };
+      const queue = queues.current.get(sessionKey) ?? [];
+      queue.push({ ...action, id: crypto.randomUUID(), sessionKey, phase: 'waiting', dispatched: false });
+      queues.current.set(sessionKey, queue);
       notify();
     },
-    retry() {
-      const pending = waiting.current;
-      if (!pending || pending.sessionKey !== sessionKey || pending.phase !== 'warning') return;
-      const invalid = pending.invalid();
-      if (invalid) { pending.reason = invalid; notify(); return; }
-      pending.phase = 'waiting'; pending.seconds = 10; pending.deadline = undefined; pending.reason = undefined;
-      notify();
+    retry(id: string) {
+      const item = queues.current.get(sessionKey)?.find(item => item.id === id);
+      if (!item || item.phase !== 'error' || item.dispatched) return;
+      item.phase = 'waiting'; item.reason = undefined; notify();
     },
-    cancel,
+    cancel(id: string) {
+      const item = queues.current.get(sessionKey)?.find(item => item.id === id);
+      if (!item || item.phase === 'sending') return;
+      item.abort?.abort(); remove(item);
+    },
   };
 }

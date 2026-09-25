@@ -1530,3 +1530,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-host-provider-row > input { flex: 0 0 auto; width: auto; margin-top: .25rem; }
 .lab-host-provider-row > span { display: grid; gap: .2rem; min-width: 0; overflow-wrap: anywhere; }
 .lab-host-provider-row small { font-weight: normal; opacity: .75; }
+
+/* Reserve a compact row above the input frame, beside the collapse control. */
+.lab-composer-dock:not([data-collapsed]) .lab-composer-input-shell:has(.agent-pending-queue) { padding-top: 40px; }
+.lab-composer-dock .agent-pending-queue { position: absolute; bottom: calc(100% + 1px); left: 0; right: 46px; margin: 0; }
+:is(.lab-shell, .lab-session-view) .lab-composer-dock:not([data-collapsed]) .lab-composer-input-shell:has(.agent-pending-queue) .lab-composer-toggle { bottom: calc(100% - 41px); }
+.lab-composer-dock .agent-composer .agent-pending-message button { min-height: 32px; }
+@media (pointer: coarse) {
+  .lab-composer-dock .agent-composer .agent-pending-message button { min-height: 36px; }
+}
+:is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-copy { min-width: 0; }
+:is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-dismiss { min-width: 28px; }

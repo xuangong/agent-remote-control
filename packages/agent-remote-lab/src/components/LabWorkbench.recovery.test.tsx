@@ -182,12 +182,12 @@ it('keeps an unsent message pending across recovery phases and uses the ready ac
   });
   await act(async () => view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
   const pending = () => view.container.querySelector('[data-testid="pending-send"]');
-  expect(pending()?.textContent).toContain('10s');
+  expect(pending()?.textContent).toContain('Send after recovery');
   await advance(2000);
   await view.update({ sessionStatus: 'connecting' });
   await advance(2000);
   await view.update({ sessionStatus: 'catching_up' });
-  expect(pending()?.textContent).toContain('6s');
+  expect(pending()?.textContent).toContain('Send after recovery');
   expect(staleSend).not.toHaveBeenCalled();
   await view.update({ sessionStatus: 'ready', actions: { sendMessage: send } });
   expect(send).toHaveBeenCalledExactlyOnceWith('Send after recovery');

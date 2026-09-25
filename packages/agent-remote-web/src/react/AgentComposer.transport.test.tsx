@@ -102,8 +102,8 @@ it('holds a message through a real channel reconnect and never replays an unconf
     await until(() => expect(status, JSON.stringify(replica.getState().diagnostics)).toBe('ready'));
     expect(sent).toHaveLength(1);
     expect(sent[0]!.payload.text).toBe('Across the reconnect');
-    expect(container.querySelector('[data-testid="pending-send"]')).toBeNull();
-    expect(container.querySelector('textarea')!.value).toBe('Across the reconnect');
+    expect(container.querySelector('[data-testid="pending-send"]')?.getAttribute('data-state')).toBe('error');
+    expect(container.querySelector('textarea')!.value).toBe('');
   } finally {
     await unmount(container);
     unsubscribe(); client.stop(); transport.dispose();

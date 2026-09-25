@@ -283,8 +283,9 @@ describe('App', () => {
     expect(send.disabled).toBe(false);
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
     await act(async () => send.click());
-    expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('10s');
-    expect(input.value).toBe('Wait for my connection');
+    expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('Wait for my connection');
+    expect(input.value).toBe('');
+    expect(input.disabled).toBe(false);
     expect(sendMessage).not.toHaveBeenCalled();
   });
 

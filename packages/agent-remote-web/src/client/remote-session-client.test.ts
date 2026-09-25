@@ -1718,3 +1718,46 @@ it('does not claim control for observers or silently write through an old Contro
     } finally { client.stop(); }
   }
 });
+
+it.each(['control', 'read_only'] as const)('publishes confirmed %s access only after automatic acquisition settles', async access => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica, { requireSessionControl: true });
+  try {
+    client.start(); transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+    const initial = { agentId: 'agent-one', access: 'read_only' as const, available: true, revision: 'initial' };
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: initial });
+    expect(replica.getState().sessionControl?.access).toBe('checking');
+    const request = transport.sent.find(message => message.type === 'session_control_request');
+    if (request?.type !== 'session_control_request') throw new Error('Missing control request');
+    await expect(client.sendMessage('must not dispatch')).rejects.toMatchObject({ code: 'session_read_only' });
+    expect(transport.sent.some(message => message.type === 'send_message')).toBe(false);
+    const confirmed = { ...initial, access, available: false, ...(access === 'control' ? { token: 'private-proof' } : { ownerKind: 'web' as const }) };
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: confirmed });
+    expect(replica.getState().sessionControl?.access).toBe('checking');
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { ...confirmed, requestId: request.payload.requestId } });
+    await transport.settle();
+    expect(replica.getState().sessionControl?.access).toBe(access);
+    expect(JSON.stringify(replica.getState().sessionControl)).not.toContain('private-proof');
+  } finally { client.stop(); }
+});
+
+it('reconnects an unconfirmed control handshake instead of presenting a takeover decision', async () => {
+  vi.useFakeTimers();
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica, { requireSessionControl: true, operationTimeoutMs: 20, reconnectInitialDelayMs: 10 });
+  const states: string[] = [];
+  replica.subscribe(() => { const access = replica.getState().sessionControl?.access; if (access) states.push(access); });
+  try {
+    client.start(); transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', access: 'read_only', available: true, revision: 'initial' } });
+    await vi.advanceTimersByTimeAsync(31);
+    expect(transport.connections).toBe(2);
+    expect(states).not.toContain('read_only');
+    expect(replica.getState().sessionControl?.access).toBe('checking');
+    expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
+  } finally { client.stop(); vi.useRealTimers(); }
+});

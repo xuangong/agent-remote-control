@@ -65,6 +65,7 @@ export class RemoteSessionClient {
   private resumeControlToken?: string;
   private controlSupported = false;
   private controlRequested = false;
+  private controlAcquiring = false;
   private controlReady?: Promise<void>;
   private resolveControlReady?: () => void;
   private readonly requireSessionControl: boolean;
@@ -136,6 +137,7 @@ export class RemoteSessionClient {
     this.control = undefined;
     this.controlSupported = false;
     this.controlRequested = false;
+    this.controlAcquiring = false;
     if (this.requireSessionControl) this.replica.setSessionControl({ access: 'checking', available: false });
     this.setStatus('connecting');
     this.armConnectionDeadline(generation);
@@ -395,6 +397,12 @@ export class RemoteSessionClient {
     return response.payload.result;
   }
 
+  private publishControl(): void {
+    if (!this.control) return;
+    const { access, available, revision, ownerKind, nativeOwner } = this.control;
+    this.replica.setSessionControl({ access, available, revision, ownerKind, nativeOwner });
+  }
+
   private receive(generation: number, message: RemoteServerMessage): void {
     if (generation !== this.generation) return;
     switch (message.type) {
@@ -417,13 +425,27 @@ export class RemoteSessionClient {
           if (!proofs) { proofs = new Map(); controlProofs.set(this.transport, proofs); }
           proofs.set(this.agentId, message.payload.token);
         }
-        this.replica.setSessionControl({ access: message.payload.access, available: message.payload.available, revision: message.payload.revision, ownerKind: message.payload.ownerKind, nativeOwner: message.payload.nativeOwner });
+        if (!this.controlAcquiring && (this.controlRequested || this.observeOnly)) this.publishControl();
         if (nativeReleased) { this.restartDisconnected(this.generation); return; }
         if (message.payload.requestId) this.resolvePendingOperation(message.payload.requestId, message);
         if (!this.controlRequested && !this.observeOnly) {
           this.controlRequested = true;
+          this.controlAcquiring = true;
           const ready = this.resolveControlReady;
-          void this.requestControl('acquire').catch(() => { /* A racing takeover leaves this connection read-only. */ }).finally(ready);
+          // Initial read-only state precedes automatic acquisition, including shared sessions.
+          // Publish ownership only after that handshake settles so drafts survive reconnects.
+          void this.requestControl('acquire').catch(error => {
+            if (generation !== this.generation) return;
+            if (!this.control?.nativeOwner && !(error instanceof RemoteOperationError && error.code === 'session_control_changed')) {
+              this.restartDisconnected(generation);
+            }
+          }).finally(() => {
+            if (generation === this.generation) {
+              this.controlAcquiring = false;
+              this.publishControl();
+            }
+            ready?.();
+          });
         } else if (this.observeOnly) {
           this.resolveControlReady?.();
         }

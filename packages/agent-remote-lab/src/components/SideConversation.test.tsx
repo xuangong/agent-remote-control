@@ -83,8 +83,10 @@ it('displays cached content before reconnecting and resumes a reopened side wind
   await act(async () => show(true));
   expect(container.textContent).toContain('Conversation side');
   expect(f.fetchTimeline).toHaveBeenCalledOnce();
-  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
-  expect(container.querySelector('[aria-label="Open chat commands"]')).toBeNull();
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.readOnly).toBe(false);
+  expect(container.querySelector('.lab-session-control')).toBeNull();
   let finishHistory!: (value: HistoryPage) => void;
   f.fetchTimeline.mockImplementationOnce(() => new Promise(resolve => { finishHistory = resolve; }));
   await act(async () => f.resume('side'));

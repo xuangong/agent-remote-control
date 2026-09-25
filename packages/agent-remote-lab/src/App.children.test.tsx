@@ -50,6 +50,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     connect: (agentId, listener) => {
       connections++;
       queueMicrotask(() => {
+        listener.onOpen();
         listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
         listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
         listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] });

@@ -42,15 +42,25 @@ it.each([
       transport.onProtocolMessage(event => observed.push(event));
       if (create) await transport.createAgent('agent', 'stdio-fixture', { sessionId: 'native' });
       const replica = new AgentReplica();
+      const controlStates: string[] = [];
+      replica.subscribe(() => { const access = replica.getState().sessionControl?.access; if (access) controlStates.push(access); });
       const client = new RemoteSessionClient('agent', transport, replica, { operationTimeoutMs: 2000, requireSessionControl: true, reconnectInitialDelayMs: 10, clientKind });
       let status = '';
       client.subscribeStatus(value => { status = value; });
       clients.push(client); client.start();
       await vi.waitFor(() => expect(status).toBe('ready'));
       await vi.waitFor(() => expect(['control', 'read_only']).toContain(replica.getState().sessionControl?.access));
-      return { client, replica, transport, get socket() { return sockets.find(candidate => candidate.readyState === WebSocket.OPEN) ?? socket; } };
+      return { client, replica, transport, controlStates, sockets, get socket() { return sockets.find(candidate => candidate.readyState === WebSocket.OPEN) ?? socket; } };
     }
     const a = await connect(true);
+    expect(a.controlStates).not.toContain('read_only');
+    a.controlStates.length = 0;
+    const connectionCount = a.sockets.length;
+    a.socket.terminate();
+    await vi.waitFor(() => expect(a.sockets.length).toBeGreaterThan(connectionCount));
+    await vi.waitFor(() => expect(a.replica.getState().sessionControl?.access).toBe('control'));
+    expect(a.controlStates).toContain('checking');
+    expect(a.controlStates).not.toContain('read_only');
     const samePageReplica = new AgentReplica();
     const samePage = new RemoteSessionClient('agent', a.transport, samePageReplica, { requireSessionControl: true });
     clients.push(samePage); samePage.start();
@@ -69,6 +79,8 @@ it.each([
       a.socket.terminate();
       await vi.waitFor(() => expect(a.socket.readyState).toBe(WebSocket.OPEN));
       await vi.waitFor(() => expect(a.replica.getState().sessionControl?.access).toBe('control'));
+      expect(a.controlStates).not.toContain('read_only');
+      expect(b.controlStates).not.toContain('read_only');
       await a.client.sendMessage('shared input after reconnect');
       expect(b.replica.getState().sessionControl?.access).toBe('control');
       expect(sendMessage.mock.calls).toEqual([['first shared input'], ['second shared input'], ['shared input after reconnect']]);

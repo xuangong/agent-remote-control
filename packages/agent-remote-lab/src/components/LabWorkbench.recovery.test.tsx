@@ -14,7 +14,7 @@ async function workbench(initial: Partial<Props> = {}) {
   function Harness() {
     const [props, setProps] = useState<Props>({ state: replicaState, sessionStatus: 'ready', actions: {}, ...initial });
     update = patch => setProps(current => ({ ...current, ...patch }));
-    return <ToastProvider><LabWorkbench {...props} /></ToastProvider>;
+    return <ToastProvider><LabWorkbench {...props} onMessageDraftChange={props.onMessageDraftChange ?? (messageDraft => setProps(current => ({ ...current, messageDraft })))} /></ToastProvider>;
   }
   const container = await render(<Harness />);
   return { container, toast: () => container.querySelector('.lab-toast'), update: (props: Partial<Props>) => act(async () => update(props)) };
@@ -193,4 +193,33 @@ it('keeps an unsent message pending across recovery phases and uses the ready ac
   expect(send).toHaveBeenCalledExactlyOnceWith('Send after recovery');
   expect(staleSend).not.toHaveBeenCalled();
   expect(pending()).toBeNull();
+});
+
+it.each(['shared', 'exclusive'] as const)('keeps the %s draft editable and focused while control is synchronizing', async mode => {
+  const state = { ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, sessionControl: mode } }, sessionControl: { access: 'control' as const, available: false } };
+  const sendMessage = vi.fn(async () => {});
+  const view = await workbench({ state, messageDraft: 'Keep typing', actions: { sendMessage } });
+  const input = view.container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  input.focus(); input.setSelectionRange(4, 4);
+  for (const sessionStatus of ['disconnected', 'connecting', 'catching_up', 'ready'] as const) {
+    await view.update({ sessionStatus, state: { ...state, sessionControl: { access: 'checking', available: false } } });
+    expect(view.container.querySelector('[data-testid="prompt-input"]')).toBe(input);
+    expect(input.disabled).toBe(false);
+    expect(input.readOnly).toBe(false);
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(4);
+    expect(view.container.querySelector('.lab-session-control')).toBeNull();
+    expect(view.container.textContent).not.toContain('Take control');
+  }
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Keep typing during recovery');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(input.value).toBe('Keep typing during recovery');
+  expect(sendMessage).not.toHaveBeenCalled();
+  await view.update({ sessionStatus: 'ready', state });
+  expect(view.container.querySelector('[data-testid="prompt-input"]')).toBe(input);
+  expect(input.value).toBe('Keep typing during recovery');
+  expect(document.activeElement).toBe(input);
+  expect(sendMessage).not.toHaveBeenCalled();
 });

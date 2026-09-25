@@ -343,7 +343,7 @@ describe('built ardb against the recorded Relay', () => {
         payload: { requestId: subscriptionId, agentIds: [agentId] },
       },
     });
-    const page = trace.find(({ messageType, channel }) => messageType === 'timeline_page' && channel === 'http');
+    const page = trace.find(({ messageType, channel }) => messageType === 'timeline_page' && channel === 'websocket');
     expect(page).toMatchObject({
       direction: 'inbound',
       requestId: expect.any(String),

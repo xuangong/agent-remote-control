@@ -5,12 +5,12 @@ import { AgentReplica, HttpWebSocketTransport, type RemoteSessionStatus, type We
 import { ConversationConnections } from './conversation-connections.js';
 import { createRecordedValidationServer } from './server/recorded.js';
 
-async function fixture() {
+async function fixture(sessionChannels = false) {
   const server = createRecordedValidationServer();
   const { url } = await server.http.listen();
   const origin = process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175';
   const sockets: WebSocket[] = [];
-  const transport = new HttpWebSocketTransport(url, { webSocketFactory: address => {
+  const transport = new HttpWebSocketTransport(url, { sessionChannels, webSocketFactory: address => {
     const socket = new WebSocket(address, { origin });
     sockets.push(socket);
     return socket as unknown as WebSocketLike;
@@ -88,5 +88,31 @@ it('isolates native identities and disposes retained subscriptions at scope tear
     lease.release();
     expect(status).toBe('idle');
     expect(f.connections.agentIds).toEqual([]);
+  } finally { await f.close(); }
+});
+
+
+it.each([false, true])('recovers timeline over the existing socket without HTTP history (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const wire: Array<{direction: string; type: string}> = [];
+  f.transport.onProtocolMessage(event => wire.push({direction: event.direction, type: event.message.type}));
+  try {
+    const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
+    let status = ''; lease.client.subscribeStatus(value => { status = value; });
+    await vi.waitFor(() => expect(status).toBe('ready'));
+    expect(f.history).not.toHaveBeenCalled();
+    expect(wire).toContainEqual({direction: 'outbound', type: 'timeline_request'});
+    wire.length = 0;
+    f.sockets[0]!.terminate();
+    await vi.waitFor(() => expect(status).toBe('disconnected'));
+    const before = lease.replica.getState().timeline.nextSeq;
+    f.server.recorded.advance(f.session.nativeSessionId);
+    await vi.waitFor(() => expect(status).toBe('ready'), {timeout: 4000});
+    expect(f.history).not.toHaveBeenCalled();
+    expect(lease.replica.getState().timeline.nextSeq).toBeGreaterThan(before);
+    const history = wire.findIndex(event => event.direction === 'outbound' && event.type === 'timeline_request');
+    const acknowledged = wire.findIndex(event => event.direction === 'inbound' && event.type === 'timeline_subscribed');
+    expect(history).toBeGreaterThanOrEqual(0);
+    expect(acknowledged).toBeGreaterThan(history);
   } finally { await f.close(); }
 });

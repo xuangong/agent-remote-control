@@ -176,27 +176,86 @@ describe('session channel transport', () => {
     ]);
   }, 10_000);
 
-  it('retires both channels on browser resume and removes resume listeners on dispose', async () => {
+  it('preserves healthy content and activity channels through a short page suspension', async () => {
     const browserWindow = new EventTarget();
-    vi.stubGlobal('window', browserWindow);
-    vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
     cleanups.push(() => vi.unstubAllGlobals());
     const harness = await server();
     const a = connect(harness.transport, 'a');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    for (const socket of harness.sockets) socket.on('message', data => {
+      if (JSON.parse(String(data)).type === 'ping') socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
+    });
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
     browserWindow.dispatchEvent(new Event('online'));
-    expect(a.disconnect).toHaveBeenCalledTimes(1);
-    expect(activity.disconnect).toHaveBeenCalledTimes(1);
-    connect(harness.transport, 'a');
-    connect(harness.transport, 'a', true);
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(4));
-    expect(harness.sockets).toHaveLength(4);
+    await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(2));
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    expect(a.disconnect).not.toHaveBeenCalled(); expect(activity.disconnect).not.toHaveBeenCalled();
+    expect(harness.sockets).toHaveLength(2);
     harness.transport.dispose();
     browserWindow.dispatchEvent(new Event('online'));
+    expect(a.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('retires an unresponsive resumed channel promptly and only once', async () => {
+    const browserWindow = new EventTarget();
+    vi.stubGlobal('window', browserWindow);
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
+    cleanups.push(() => vi.unstubAllGlobals());
+    const harness = await server(); const a = connect(harness.transport, 'a');
+    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    browserWindow.dispatchEvent(new Event('online'));
+    expect(a.disconnect).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(a.disconnect).toHaveBeenCalledTimes(1), {timeout: 2000});
+    browserWindow.dispatchEvent(new Event('online'));
     expect(a.disconnect).toHaveBeenCalledTimes(1);
-    expect(() => connect(harness.transport, 'disposed')).toThrow('disposed');
-  }, 10_000);
+  });
+
+  it.each(['content', 'activity'] as const)('wakes a waiting %s reconnect immediately and coalesces browser signals', async mode => {
+    const browserWindow = new EventTarget();
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const harness = await server();
+    const { RemoteActivityClient } = await import('./remote-activity-client.js');
+    const client = mode === 'content'
+      ? new RemoteSessionClient('a', harness.transport, new AgentReplica(), {reconnectInitialDelayMs: 5000})
+      : new RemoteActivityClient('a', harness.transport, () => {});
+    cleanups.push(() => client.stop()); client.start();
+    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    harness.sockets[0]!.terminate();
+    await vi.waitFor(() => expect(harness.sockets[0]!.readyState).toBe(WebSocket.CLOSED));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    browserWindow.dispatchEvent(new Event('online'));
+    await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'subscribe')).toHaveLength(2), {timeout: 500});
+    expect(harness.sockets).toHaveLength(2);
+    client.stop(); browserWindow.dispatchEvent(new Event('online'));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(harness.sockets).toHaveLength(2);
+  });
+
+  it('replaces channels immediately after a long suspension', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const browserWindow = new EventTarget();
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const socket = new ControlledSocket();
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => socket });
+    cleanups.push(() => transport.dispose());
+    const a = connect(transport, 'a'); await Promise.resolve();
+    socket.receive({protocolVersion: version, type: 'ready'});
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    vi.setSystemTime(Date.now() + 60_000);
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    expect(a.disconnect).toHaveBeenCalledOnce(); expect(socket.readyState).toBe(3);
+    transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
 
   it('bounds pending commands and never sends a canceled pending stream after ready', async () => {
     const harness = await server(false);
@@ -336,18 +395,19 @@ it.each(['acknowledge', 'reject', 'disconnect'] as const)('keeps a slow send pen
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
       interactions: { question: false, planApproval: false, toolApproval: false } },
   } });
-  await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+  await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
   emit({ protocolVersion: version, type: 'timeline_subscribed', payload: { requestId: harness.frames[1]!.frame.message.payload.requestId, agentIds: ['a'] } });
+  emit({...history, payload: {...history.payload, requestId: harness.frames[2]!.frame.message.payload.requestId}});
   await vi.waitFor(() => expect(status).toBe('ready'));
   let result = 'pending';
   const send = client.sendMessage('Continue after compact');
   void send.then(() => { result = 'accepted'; }, () => { result = 'rejected'; });
-  await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
+  await vi.waitFor(() => expect(harness.frames).toHaveLength(4));
   await new Promise(resolve => setTimeout(resolve, 60));
   expect(result).toBe('pending');
   expect(status).toBe('ready');
   expect(replica.getState().outgoingMessages?.[0]?.status).toBe('sending');
-  const requestId = harness.frames[2]!.frame.message.payload.requestId;
+  const requestId = harness.frames[3]!.frame.message.payload.requestId;
   if (outcome === 'acknowledge') {
     emit({ protocolVersion: version, type: 'command_acknowledged', payload: { requestId, agentId: 'a', command: 'send_message' } });
     await expect(send).resolves.toMatchObject({ type: 'command_acknowledged' });

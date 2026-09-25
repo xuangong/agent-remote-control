@@ -1761,3 +1761,121 @@ it('reconnects an unconfirmed control handshake instead of presenting a takeover
     expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
   } finally { client.stop(); vi.useRealTimers(); }
 });
+
+it('pipelines socket history with subscription and waits for both confirmations', async () => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica, {timelineRecovery: 'websocket'});
+  const statuses: string[] = []; client.subscribeStatus(value => statuses.push(value));
+  try {
+    client.start(); transport.open();
+    transport.emit({protocolVersion: '1.5.0', type: 'negotiated'});
+    transport.emit(snapshot());
+    const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
+    const request = transport.sent.find(message => message.type === 'timeline_request');
+    expect(request?.type).toBe('timeline_request');
+    if (request?.type !== 'timeline_request' || subscription.type !== 'timeline_subscription') throw new Error('Missing recovery requests');
+    transport.emit(page('tail', [entry(1, 1, 'Recovered')], {requestId: request.payload.requestId}));
+    await transport.settle();
+    expect(statuses.at(-1)).toBe('catching_up');
+    transport.emit({protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    await transport.settle();
+    expect(statuses.at(-1)).toBe('ready');
+    expect(transport.timelineRequests).toHaveLength(0);
+    expect(replica.getState().timeline.entries).toHaveLength(1);
+  } finally { client.stop(); }
+});
+
+it('requests control before socket history so slow history cannot block ownership acquisition', async () => {
+  const transport = new FakeTransport();
+  const client = new RemoteSessionClient('agent-one', transport, new AgentReplica(), {timelineRecovery: 'websocket', requireSessionControl: true});
+  const statuses: string[] = []; client.subscribeStatus(value => statuses.push(value));
+  try {
+    client.start(); transport.open();
+    transport.emit({protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true});
+    transport.emit(snapshot());
+    transport.emit({protocolVersion: '1.5.0', type: 'session_control', payload: {agentId: 'agent-one', access: 'read_only', available: true, revision: '1'}});
+    const types = transport.sent.map(message => message.type);
+    expect(types).toContain('timeline_request');
+    expect(types.indexOf('session_control_request')).toBeLessThan(types.indexOf('timeline_request'));
+    const request = transport.sent.find(message => message.type === 'timeline_request')!;
+    if (request.type !== 'timeline_request') throw new Error('Missing history');
+    transport.emit(page('tail', [], {requestId: request.payload.requestId}));
+    const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
+    if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
+    transport.emit({protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    await transport.settle(); expect(statuses.at(-1)).toBe('catching_up');
+    const control = transport.sent.find(message => message.type === 'session_control_request')!;
+    if (control.type !== 'session_control_request') throw new Error('Missing control');
+    transport.emit({protocolVersion: '1.5.0', type: 'session_control', payload: {agentId: 'agent-one', requestId: control.payload.requestId, access: 'read_only', available: false, revision: '1'}});
+    await transport.settle(); expect(statuses.at(-1)).toBe('ready');
+  } finally { client.stop(); }
+});
+
+it('follows socket recovery pages from the retained cursor without losing interleaved live events', async () => {
+  const transport = new FakeTransport(); const replica = new AgentReplica();
+  replica.applySnapshot(snapshot()); replica.applyHistory(page('tail', [entry(1, 1, 'Before disconnect')]));
+  const client = new RemoteSessionClient('agent-one', transport, replica, {timelineRecovery: 'websocket'});
+  let status = ''; client.subscribeStatus(value => {status = value;});
+  const requests = () => transport.sent.filter(message => message.type === 'timeline_request');
+  try {
+    client.start(); transport.open(); transport.emit({protocolVersion: '1.5.0', type: 'negotiated'}); transport.emit(snapshot());
+    const first = requests()[0]!; expect(first.payload).toMatchObject({direction: 'after', cursor: {epoch: 'epoch-one', seq: 1}});
+    const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
+    if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
+    transport.emit({protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    transport.emit(page('after', [entry(2, 2, 'Second')], {requestId: first.payload.requestId, hasNewer: true}));
+    await transport.settle();
+    expect(status).toBe('catching_up');
+    const second = requests()[1]!; expect(second.payload.cursor).toEqual({epoch: 'epoch-one', seq: 2});
+    transport.emit(live(4, 'Live fourth'));
+    transport.emit(page('after', [entry(3, 3, 'Third'), entry(4, 4, 'Live fourth')], {requestId: second.payload.requestId}));
+    await transport.settle();
+    expect(status).toBe('ready'); expect(replica.getState().timeline.nextSeq).toBe(5);
+    expect(transport.timelineRequests).toHaveLength(0);
+    expect(replica.getState().timeline.entries.map(item => item.seqEnd)).toEqual([1, 2, 3, 4]);
+  } finally {client.stop();}
+});
+
+it('ignores retired socket history when a timeline replacement starts a fresh recovery', async () => {
+  const transport = new FakeTransport(); const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica, {timelineRecovery: 'websocket'});
+  let status = ''; client.subscribeStatus(value => {status = value;});
+  try {
+    client.start(); transport.open(); transport.emit({protocolVersion: '1.5.0', type: 'negotiated'}); transport.emit(snapshot());
+    const old = transport.sent.find(message => message.type === 'timeline_request')!;
+    const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
+    if (old.type !== 'timeline_request' || subscription.type !== 'timeline_subscription') throw new Error('Missing recovery');
+    transport.emit({protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    transport.emit({protocolVersion: '1.5.0', type: 'timeline_replacement', payload: {agentId: 'agent-one', epoch: 'new-epoch'}});
+    const current = transport.sent.filter(message => message.type === 'timeline_request').at(-1)!;
+    expect(current.payload.requestId).not.toBe(old.payload.requestId);
+    transport.emit(page('tail', [entry(1, 1, 'Obsolete')], {requestId: old.payload.requestId}));
+    transport.emit(page('tail', [entry(1, 1, 'Current')], {requestId: current.payload.requestId, epoch: 'new-epoch', startCursor: {epoch: 'new-epoch', seq: 1}, endCursor: {epoch: 'new-epoch', seq: 1}}));
+    await transport.settle();
+    expect(status).toBe('ready'); expect(replica.getState().timeline.epoch).toBe('new-epoch');
+    expect(replica.getState().timeline.entries).toEqual([entry(1, 1, 'Current')]);
+  } finally {client.stop();}
+});
+
+it.each(['history', 'subscription'] as const)('reconnects when socket recovery lacks its %s confirmation', async missing => {
+  vi.useFakeTimers();
+  const transport = new FakeTransport(); const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica, {timelineRecovery: 'websocket', connectionTimeoutMs: 100, reconnectInitialDelayMs: 10});
+  let status = ''; client.subscribeStatus(value => {status = value;});
+  try {
+    client.start(); transport.open(); transport.emit({protocolVersion: '1.5.0', type: 'negotiated'}); transport.emit(snapshot());
+    const request = transport.sent.find(message => message.type === 'timeline_request')!;
+    const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
+    if (request.type !== 'timeline_request' || subscription.type !== 'timeline_subscription') throw new Error('Missing recovery');
+    if (missing === 'history') transport.emit({protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    else transport.emit(page('tail', [], {requestId: request.payload.requestId}));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(status).toBe('disconnected');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(transport.connections).toBe(2);
+    transport.emit(page('tail', [entry(10, 10, 'Retired response')], {requestId: request.payload.requestId}));
+    expect(replica.getState().timeline.entries).toHaveLength(0);
+    client.stop(); expect(vi.getTimerCount()).toBe(0);
+  } finally {client.stop(); vi.useRealTimers();}
+});

@@ -43,6 +43,7 @@ interface Channel {
   readyTimer?: ReturnType<typeof setTimeout>;
   pingTimer?: ReturnType<typeof setInterval>;
   pongTimer?: ReturnType<typeof setTimeout>;
+  probingResume?: boolean;
 }
 
 const utf8 = new TextEncoder();
@@ -59,8 +60,11 @@ export class SessionChannelPool {
   private pendingBytes = 0;
 
   constructor(private readonly dependencies: Dependencies) {
-    this.unwatch = watchPageResume(() => {
-      for (const channel of [...this.channels.values()]) this.failChannel(channel, false);
+    this.unwatch = watchPageResume(suspendedMs => {
+      for (const channel of [...this.channels.values()]) {
+        if (suspendedMs >= 30_000) this.failChannel(channel, false);
+        else if (channel.ready) this.probeResume(channel);
+      }
     });
   }
 
@@ -165,6 +169,7 @@ export class SessionChannelPool {
       } else if (frame.type === 'pong') {
         clearTimeout(channel.pongTimer);
         channel.pongTimer = undefined;
+        channel.probingResume = false;
       } else {
         const subscription = channel.subscriptions.get(frame.subscriptionId);
         if (!subscription?.active) return;
@@ -182,6 +187,15 @@ export class SessionChannelPool {
       this.failChannel(channel);
     };
     return channel;
+  }
+
+  private probeResume(channel: Channel): void {
+    if (!channel.active || channel.probingResume) return;
+    channel.probingResume = true;
+    clearTimeout(channel.pongTimer);
+    channel.pongTimer = setTimeout(() => this.failChannel(channel, false), 1000);
+    try { this.write(channel, { protocolVersion: PROTOCOL_VERSION, type: 'ping' }); }
+    catch { /* write retires the channel. */ }
   }
 
   private subscribe(subscription: Subscription): void {

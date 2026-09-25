@@ -11,11 +11,8 @@ it('recovers an omitted live echo through HTTP without reconnecting or resending
   let sends = 0;
   let connections = 0;
   const reads: URL[] = [];
-  const server = createServer((request, response) => {
-    const url = new URL(request.url!, 'http://localhost');
-    reads.push(url);
-    const history: HistoryPage = { protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
-      requestId: url.searchParams.get('requestId')!, agentId: 'one', direction: sends ? 'after' : 'tail', epoch: 'epoch-one',
+  const history = (requestId: string): HistoryPage => ( { protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
+      requestId, agentId: 'one', direction: sends ? 'after' : 'tail', epoch: 'epoch-one',
       reset: false, staleCursor: false, gap: false, error: null,
       window: { minSeq: sends ? 1 : 0, maxSeq: sends ? 1 : 0, nextSeq: sends ? 2 : 1 },
       startCursor: sends ? { epoch: 'epoch-one', seq: 1 } : null,
@@ -23,9 +20,12 @@ it('recovers an omitted live echo through HTTP without reconnecting or resending
       entries: sends ? [{ providerId: 'test', item: { type: 'user_message', text: 'Recover my message' },
         timestamp: '2026-09-25T00:00:00.000Z', seqStart: 1, seqEnd: 1,
         sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [] }] : [],
-    } };
+    } });
+  const server = createServer((request, response) => {
+    const url = new URL(request.url!, 'http://localhost');
+    reads.push(url);
     response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(JSON.stringify(history));
+    response.end(JSON.stringify(history(url.searchParams.get('requestId')!)));
   });
   const sockets = new WebSocketServer({ server });
   sockets.on('connection', socket => {
@@ -45,6 +45,7 @@ it('recovers an omitted live echo through HTTP without reconnecting or resending
           runtimeInfo: { providerId: 'test', sessionId: 'one', status: 'idle' },
         } });
       }
+      if (frame.message?.type === 'timeline_request') emit(history(frame.message.payload.requestId));
       if (frame.message?.type === 'timeline_subscription') emit({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed',
         payload: { requestId: frame.message.payload.requestId, agentIds: ['one'] } });
       if (frame.message?.type === 'send_message') {
@@ -72,9 +73,9 @@ it('recovers an omitted live echo through HTTP without reconnecting or resending
     expect(replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
     await vi.waitFor(() => expect(replica.getState().outgoingMessages).toEqual([]), { timeout: 12_000, interval: 25 });
     expect(replica.getState().timeline.entries[0]?.item).toMatchObject({ type: 'user_message', text: 'Recover my message' });
-    expect(reads).toHaveLength(2);
-    expect(reads[1]?.searchParams.get('direction')).toBe('after');
-    expect(reads[1]?.searchParams.get('seq')).toBe('0');
+    expect(reads).toHaveLength(1);
+    expect(reads[0]?.searchParams.get('direction')).toBe('after');
+    expect(reads[0]?.searchParams.get('seq')).toBe('0');
     expect(sends).toBe(1);
     expect(connections).toBe(1);
     expect(statuses).toEqual([]);

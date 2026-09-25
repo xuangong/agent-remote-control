@@ -43,6 +43,7 @@ it('holds a message through a real channel reconnect and never replays an unconf
           pendingInteractions: [], runtimeInfo: { providerId: 'test', sessionId: 'one', status: 'idle' },
         } });
       }
+      if (frame.message?.type === 'timeline_request') emit({...history, payload: {...history.payload, requestId: frame.message.payload.requestId, direction: frame.message.payload.direction}});
       if (frame.message?.type === 'timeline_subscription') {
         const ready = () => emit({ protocolVersion: version, type: 'timeline_subscribed', payload: { requestId: frame.message.payload.requestId, agentIds: ['one'] } });
         if (blockRecovery) releaseRecovery = ready; else ready();

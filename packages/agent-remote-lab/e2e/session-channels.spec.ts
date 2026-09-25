@@ -1,37 +1,43 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { ClientMessage } from '@orchardworks/agent-remote-protocol';
+
+type TimelineRequest = Extract<ClientMessage, { type: 'timeline_request' }>['payload'];
 
 test.describe.configure({ timeout: 20_000 });
 
 function observeChannels(page: Page) {
-  const sockets: { mode: string; closed: boolean }[] = [];
+  const sockets: { mode: string; closed: boolean; pongs: number }[] = [];
   const subscriptions = new Map<number, { mode: string; agentId: string }>();
   const activityMessages: string[] = [];
   const errors: string[] = [];
-  const historyRequests: URL[] = [];
+  const httpHistoryRequests: URL[] = [];
+  const historyRequests: TimelineRequest[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => {
     const url = new URL(request.url());
-    if (/\/v1\/sessions\/[^/]+\/timeline$/.test(url.pathname)) historyRequests.push(url);
+    if (/\/v1\/sessions\/[^/]+\/timeline$/.test(url.pathname)) httpHistoryRequests.push(url);
   });
   page.on('websocket', socket => {
     const url = new URL(socket.url());
     if (!url.pathname.startsWith('/v1/')) return;
-    const state = { mode: url.searchParams.get('observation') ?? 'legacy', closed: false };
+    const state = { mode: url.searchParams.get('observation') ?? 'legacy', closed: false, pongs: 0 };
     sockets.push(state);
     socket.on('close', () => { state.closed = true; });
     socket.on('framesent', ({ payload }) => {
       const frame = JSON.parse(String(payload));
+      if (frame.type === 'message' && frame.message.type === 'timeline_request') historyRequests.push(frame.message.payload);
       if (frame.type === 'subscribe') subscriptions.set(frame.subscriptionId, { mode: state.mode, agentId: frame.agentId });
       if (frame.type === 'unsubscribe') subscriptions.delete(frame.subscriptionId);
     });
     socket.on('framereceived', ({ payload }) => {
       const frame = JSON.parse(String(payload));
+      if (frame.type === 'pong') state.pongs++;
       if (frame.type === 'closed') subscriptions.delete(frame.subscriptionId);
       if (state.mode === 'activity' && frame.type === 'message') activityMessages.push(frame.message.type);
     });
   });
   return {
-    sockets, activityMessages, errors, historyRequests,
+    sockets, activityMessages, errors, historyRequests, httpHistoryRequests,
     fullSessions: () => [...subscriptions.values()].filter(value => value.mode === 'session').map(value => value.agentId).sort(),
   };
 }
@@ -47,7 +53,7 @@ async function initialize(page: Page) {
   };
 }
 
-test('restores shared channels after page resume and reuses them for subsequent switches', async ({ page }) => {
+test('keeps healthy shared channels after a short page suspension and subsequent switches', async ({ page }) => {
   const wire = observeChannels(page);
   await initialize(page);
   expect(wire.sockets).toHaveLength(2);
@@ -55,16 +61,17 @@ test('restores shared channels after page resume and reuses them for subsequent 
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
-  await expect.poll(() => wire.sockets.filter(socket => socket.closed).length).toBe(2);
+  await expect.poll(() => wire.sockets.map(socket => socket.pongs)).toEqual([1, 1]);
+  expect(wire.sockets.every(socket => !socket.closed)).toBe(true);
   await expect(page.locator('#primary-state')).toHaveText('a:ready');
   await expect(page.locator('#activity-state')).toContainText('a:ready');
   await expect(page.locator('#activity-state')).toContainText('b:ready');
   await expect.poll(() => wire.sockets.filter(socket => !socket.closed).map(socket => socket.mode).sort()).toEqual(['activity', 'session']);
-  expect(wire.sockets).toHaveLength(4);
+  expect(wire.sockets).toHaveLength(2);
   for (const name of ['B', 'A', 'B']) {
     await page.getByRole('button', { name: `Primary ${name}`, exact: true }).click();
     await expect(page.locator('#primary-state')).toHaveText(`${name.toLowerCase()}:ready`);
-    expect(wire.sockets).toHaveLength(4);
+    expect(wire.sockets).toHaveLength(2);
   }
   expect(wire.errors).toEqual([]);
 });
@@ -75,6 +82,7 @@ test('reuses two physical channels across ordinary switches and concurrent side 
   await expect.poll(() => wire.sockets.map(socket => socket.mode).sort()).toEqual(['activity', 'session']);
   await expect.poll(wire.fullSessions).toEqual([ids.a]);
   expect(wire.historyRequests).toHaveLength(1);
+  expect(wire.httpHistoryRequests).toHaveLength(0);
 
   await page.getByRole('button', { name: 'Primary B', exact: true }).click();
   await expect(page.locator('#primary-state')).toHaveText('b:ready');
@@ -104,7 +112,24 @@ test('reuses two physical channels across ordinary switches and concurrent side 
 
 test('renders cached history during an incremental recovery and waits for target ready before enabling commands', async ({ page }, testInfo) => {
   const wire = observeChannels(page);
+  let recoveryAgentId: string | undefined;
+  let recoveryRequest: TimelineRequest | undefined;
+  let releaseHistory!: () => void;
+  const historyGate = new Promise<void>(resolve => { releaseHistory = resolve; });
+  await page.routeWebSocket(/session-channel/, route => {
+    const server = route.connectToServer();
+    route.onMessage(async message => {
+      const frame = JSON.parse(String(message));
+      if (frame.type === 'message' && frame.message.type === 'timeline_request'
+        && frame.message.payload.agentId === recoveryAgentId && frame.message.payload.direction === 'after') {
+        recoveryRequest = frame.message.payload;
+        await historyGate;
+      }
+      server.send(message);
+    });
+  });
   const ids = await initialize(page);
+  recoveryAgentId = ids.a;
   const cached = await page.locator('#primary-timeline').textContent();
   expect(cached).toContain('Recorded history 1');
   await page.getByRole('button', { name: 'Primary B', exact: true }).click();
@@ -114,25 +139,14 @@ test('renders cached history during an incremental recovery and waits for target
   await expect(page.locator('#advance-state')).toHaveText('advanced');
   expect(wire.historyRequests).toHaveLength(2);
 
-  let releaseHistory!: () => void;
-  const historyGate = new Promise<void>(resolve => { releaseHistory = resolve; });
-  let recoveryUrl: URL | undefined;
-  await page.route('**/v1/sessions/*/timeline?**', async route => {
-    const url = new URL(route.request().url());
-    if (url.pathname === `/v1/sessions/${ids.a}/timeline` && url.searchParams.get('direction') === 'after') {
-      recoveryUrl = url;
-      await historyGate;
-    }
-    await route.continue();
-  });
   try {
     await page.getByRole('button', { name: 'Primary A', exact: true }).click();
-    await expect.poll(() => recoveryUrl?.searchParams.get('direction')).toBe('after');
+    await expect.poll(() => recoveryRequest?.direction).toBe('after');
     await expect(page.locator('#primary-state')).toHaveText('a:catching_up');
     await expect(page.getByRole('button', { name: 'Send to primary', exact: true })).toBeDisabled();
     await expect(page.locator('#primary-timeline')).toHaveText(cached!);
-    expect(recoveryUrl!.searchParams.get('seq')).toBe('6');
-    expect(recoveryUrl!.searchParams.get('epoch')).toBeTruthy();
+    expect(recoveryRequest!.cursor?.seq).toBe(6);
+    expect(recoveryRequest!.cursor?.epoch).toBeTruthy();
     expect(wire.sockets).toHaveLength(2);
     await expect.poll(wire.fullSessions).toEqual([ids.a]);
     await page.screenshot({ path: testInfo.outputPath('cached-history-while-synchronizing.png'), fullPage: true });
@@ -142,6 +156,7 @@ test('renders cached history during an incremental recovery and waits for target
   await expect(page.locator('#primary-timeline')).toContainText('Live recorded output.');
   await expect(page.locator('#primary-timeline')).toContainText('Recorded history 1');
   expect(wire.historyRequests).toHaveLength(3);
+  expect(wire.httpHistoryRequests).toHaveLength(0);
   expect(wire.sockets).toHaveLength(2);
   expect(wire.errors).toEqual([]);
   await expect(page.locator('#error')).toBeEmpty();

@@ -1,3 +1,4 @@
+import { watchPageResume } from './page-resume.js';
 import { PROTOCOL_VERSION, type TimelineCursor, type AgentStatus } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport, RemoteConnection, RemoteServerMessage } from './transport.js';
 
@@ -13,11 +14,23 @@ export class RemoteActivityClient {
   private timer?: ReturnType<typeof setTimeout>;
   private deadline?: ReturnType<typeof setTimeout>;
   private generation = 0;
+  private unwatchResume?: () => void;
   private attempts = 0;
   constructor(private readonly agentId: string, private readonly transport: RemoteAgentTransport,
     private readonly changed: (state: RemoteActivityState) => void) {}
-  start(): void { this.stop(); this.attempts = 0; this.connect(); }
+  start(): void {
+    this.stop(); this.attempts = 0;
+    this.unwatchResume = watchPageResume(() => queueMicrotask(() => {
+      if (!this.timer) return;
+      this.closeConnection(); this.attempts = 0; this.connect();
+    }));
+    this.connect();
+  }
   stop(): void {
+    this.unwatchResume?.(); this.unwatchResume = undefined;
+    this.closeConnection();
+  }
+  private closeConnection(): void {
     ++this.generation;
     clearTimeout(this.timer); clearTimeout(this.deadline);
     this.timer = undefined; this.deadline = undefined;
@@ -25,6 +38,7 @@ export class RemoteActivityClient {
     connection?.close();
   }
   private connect(): void {
+    this.timer = undefined;
     const generation = ++this.generation;
     this.changed({ connection: 'connecting' });
     this.deadline = setTimeout(() => this.failed(generation, 'The Host did not confirm activity tracking. Retrying…'), 20000);
@@ -49,7 +63,7 @@ export class RemoteActivityClient {
   }
   private failed(generation: number, error?: string, retry = true): void {
     if (generation !== this.generation) return;
-    this.stop();
+    this.closeConnection();
     this.changed({ connection: 'disconnected', ...(error ? { error } : {}) });
     if (retry) this.timer = setTimeout(() => this.connect(), Math.min(1000 * 2 ** this.attempts++, 15000));
   }

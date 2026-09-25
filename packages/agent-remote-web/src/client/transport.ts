@@ -53,6 +53,8 @@ export interface RemoteConnection {
 }
 
 export interface RemoteAgentTransport {
+  /** Preferred recovery path; custom transports can retain HTTP history loading. */
+  readonly timelineRecovery?: 'http' | 'websocket';
   onSessionTitle?(listener: (session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate) => void): () => void;
   onSessionMigration?(listener: (migration: import('@orchardworks/agent-remote-protocol').SessionMigration) => void): () => void;
   fetchSnapshot(agentId: string, options?: RemoteRequestOptions): Promise<AgentSnapshot>;

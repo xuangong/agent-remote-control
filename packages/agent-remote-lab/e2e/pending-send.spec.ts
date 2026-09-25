@@ -35,9 +35,10 @@ for (const target of ['main', 'side', 'ask'] as const) {
     await expect(pane.locator('button[aria-label="Open chat commands"]')).toBeDisabled();
     await expect(pane.getByTestId('prompt-submit')).toBeEnabled();
     await pane.getByTestId('prompt-submit').click();
-    await expect(pane.getByTestId('pending-send')).toContainText('Waiting to send');
+    await expect(pane.getByTestId('pending-send')).toHaveAttribute('data-state', 'waiting');
+    await expect(pane.getByTestId('pending-send')).toContainText(text);
     expect(sent.filter(message => message.includes(text))).toHaveLength(0);
-    await expect(input).toHaveValue(text);
+    await expect(input).toHaveValue('');
     await page.context().setOffline(false);
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await expect(pane.getByTestId('pending-send')).toHaveCount(0);

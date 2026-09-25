@@ -38,8 +38,11 @@ Conversation composition remains independent of product navigation and authentic
 ```mermaid
 flowchart LR
   snapshot["Agent snapshot"] --> agent["Replace Agent state<br/>preserve Timeline"]
-  agent --> subscribe["Confirm Timeline subscription"]
-  subscribe --> tail["Fetch tail or reconnect suffix"]
+  agent --> subscribe["Send Timeline subscription"]
+  subscribe --> tail["Pipeline socket tail or reconnect suffix"]
+  subscribe --> confirmed["Subscription confirmed"]
+  confirmed --> ready["Ready after catch-up and control"]
+  replica --> ready
   live["Live Timeline event"] --> buffer["Buffer if uninitialized or gapped"]
   tail --> replica["Merge authoritative ranges"]
   buffer --> replica
@@ -55,7 +58,8 @@ flowchart LR
 ## Invariants
 
 - Agent Snapshot replacement never clears the independently paged Timeline (`packages/agent-remote-web/src/replica/reducer.ts:75-99`).
-- Subscription confirmation starts tail or reconnect-suffix catch-up; a live Timeline event is buffered only while its Timeline is uninitialized or it is ahead of the next expected sequence, and a contiguous event can apply while catch-up is in flight (`packages/agent-remote-web/src/client/remote-session-client.ts:174-196`, `packages/agent-remote-web/src/client/remote-session-client.ts:226-301`, `packages/agent-remote-web/src/replica/reducer.ts:233-265`).
+- The HTTP/WebSocket transport pipelines an existing `timeline_request` immediately after `timeline_subscription` (and any initial control-acquisition request) on the same ordered session wire. The client correlates `timeline_page` responses by request ID, agent, direction, generation and active recovery. It becomes ready only after subscription confirmation, complete history catch-up, and control confirmation. Older-page browsing and message-echo reconciliation still use HTTP. Custom transports without a recovery preference retain the sequential HTTP path; `RemoteSessionClientOptions.timelineRecovery` can explicitly select either path. No public protocol version or message schema changes are required.
+- Live Timeline events remain buffered while the timeline is uninitialized or gapped; contiguous events can apply while catch-up is in flight.
 - An `after` catch-up keeps one recovery controller, follows each advancing page-end cursor while newer history remains, and becomes ready only after the terminal page; a missing, cross-epoch, or non-advancing continuation enters recoverable reconnection instead of spinning (`packages/agent-remote-web/src/client/remote-session-client.ts:247-301`).
 - Duplicate sequence delivery leaves the replica unchanged, while a forward gap holds later events until an `after` page fills the missing range (`packages/agent-remote-web/src/replica/reducer.ts:233-260`, `packages/agent-remote-web/src/client/remote-session-client.ts:235-245`).
 - Authoritative page ranges replace overlapping live projections, so live-before-fetch and history-before-live orders converge (`packages/agent-remote-web/src/replica/reducer.ts:191-230`, `packages/agent-remote-web/src/replica/reducer.ts:323-435`).
@@ -94,7 +98,9 @@ flowchart LR
 
 ## Browser recovery
 
-- Returning from a hidden page, restoring a frozen page, or regaining network access retires the old browser socket. The client reconnects and catches up from the existing cursor before the application enables input. Connection and history recovery have a 20-second progress deadline; operation timeouts also retire the connection without replaying the operation. Closing a connection invalidates pending history responses before reconnecting (`packages/agent-remote-web/src/client/page-resume.ts`, `packages/agent-remote-web/src/client/remote-session-client.ts`).
+- Shared browser channels probe with the existing ping/pong after a suspension shorter than 30 seconds or a foreground network-restored event. A healthy channel remains subscribed; a missing pong retires it after one second. Longer or unknown suspensions replace the channel immediately. Legacy direct sockets retain their existing reconnect behavior.
+- Foreground/network-restored signals wake pending content and activity reconnects immediately, reset the backoff, and coalesce while a connection attempt is already in flight. Stopped clients and unsupported activity subscriptions are not revived. Normal repeated failures retain bounded exponential backoff.
+- Connection and history recovery retain a 20-second progress deadline. Closing a connection rejects pending operations, aborts correlated history requests, and preserves the replica cursor without replaying uncertain mutations. Pending client-side input still waits for readiness before dispatch.
 - The application remembers the last Host, Provider, native session, and optional parent identity in local browser storage scoped to its authenticated Relay URL. Explicit URL targets take precedence. A fresh home-screen launch reattaches the remembered native session, retries temporary attachment failures, and ignores responses superseded by user navigation. Authorization denial stops restoration. Foreground recovery also refreshes Host availability and renewable gateway authorization (`packages/agent-remote-lab/src/session-restoration.ts`, `packages/agent-remote-lab/src/conversation-recovery.tsx`, `packages/agent-remote-lab/src/GatewayController.tsx`).
 - Unconfirmed input is persisted under the same Relay and native session scope. Restored input is never sent automatically. Browser storage retains text, delivery options, operation identity, and the confirmation cursor; it contains no credentials. Signing out clears this recovery data. If storage is unavailable or full, feedback remains in memory (`packages/agent-remote-lab/src/message-recovery.ts`).
 

@@ -1,3 +1,4 @@
+import { watchPageResume } from './page-resume.js';
 import { isSessionMutation, type SessionControlClientKind, type SessionControlMessage, type SessionControlState } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
@@ -38,6 +39,8 @@ export interface RemoteSessionClientOptions {
   readonly requireSessionControl?: boolean;
   readonly observeOnly?: boolean;
   readonly retainControlOnDisconnect?: boolean;
+  /** Pipeline recovery over the session wire; HTTP remains available for custom transports. */
+  readonly timelineRecovery?: 'http' | 'websocket';
   readonly historyPageSize?: number;
   readonly connectionTimeoutMs?: number;
   readonly operationTimeoutMs?: number;
@@ -48,7 +51,7 @@ export interface RemoteSessionClientOptions {
   readonly operationId?: () => string;
 }
 
-type RemoteOperationResult = SessionControlMessage | ImageUploadResult | CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
+type RemoteOperationResult = HistoryPage | SessionControlMessage | ImageUploadResult | CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
 
 interface PendingOperation {
   readonly matches: (message: RemoteServerMessage) => message is RemoteOperationResult;
@@ -73,6 +76,9 @@ export class RemoteSessionClient {
   private readonly clientKind: SessionControlClientKind;
   private readonly retainControlOnDisconnect: boolean;
   private readonly historyPageSize: number;
+  private readonly timelineRecovery: 'http' | 'websocket';
+  private subscriptionReady?: Promise<void>;
+  private resolveSubscriptionReady?: () => void;
   private readonly connectionTimeoutMs: number;
   private connectionDeadline?: ReturnType<typeof setTimeout>;
   private connectionOpen = false;
@@ -94,6 +100,7 @@ export class RemoteSessionClient {
   private readonly imageDigests = new Map<string, string>();
   private requestCounter = 0;
   private reconnectAttempt = 0;
+  private unwatchResume?: () => void;
   private cancelReconnect: (() => void) | undefined;
   private subscriptionRequestId: string | undefined;
   private currentStatus: RemoteSessionStatus = 'idle';
@@ -111,6 +118,7 @@ export class RemoteSessionClient {
     this.requireSessionControl = options.requireSessionControl ?? false;
     this.connectionTimeoutMs = options.connectionTimeoutMs ?? 20_000;
     this.historyPageSize = options.historyPageSize ?? 100;
+    this.timelineRecovery = options.timelineRecovery ?? transport.timelineRecovery ?? 'http';
     this.operationTimeoutMs = options.operationTimeoutMs ?? 10_000;
     this.reconnectInitialDelayMs = options.reconnectInitialDelayMs ?? 250;
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 5_000;
@@ -120,6 +128,12 @@ export class RemoteSessionClient {
   }
 
   start(): void {
+    this.unwatchResume?.();
+    this.unwatchResume = watchPageResume(() => queueMicrotask(() => {
+      if (!this.cancelReconnect) return;
+      this.reconnectAttempt = 0;
+      this.connect();
+    }));
     this.reconnectAttempt = 0;
     this.connect();
   }
@@ -160,6 +174,7 @@ export class RemoteSessionClient {
   }
 
   stop(): void {
+    this.unwatchResume?.(); this.unwatchResume = undefined;
     this.generation += 1;
     this.rejectPendingOperations('operation_stopped', 'Remote session client was stopped.', false);
     this.stopConnection();
@@ -446,6 +461,7 @@ export class RemoteSessionClient {
             }
             ready?.();
           });
+          this.beginSocketRecovery(generation);
         } else if (this.observeOnly) {
           this.resolveControlReady?.();
         }
@@ -453,7 +469,9 @@ export class RemoteSessionClient {
       }
       case 'provider_list':
       case 'agent_session':
+        return;
       case 'timeline_page':
+        this.resolvePendingOperation(message.payload.requestId, message);
         return;
       case 'command_acknowledged':
       case 'command_list':
@@ -464,18 +482,22 @@ export class RemoteSessionClient {
       case 'agent_snapshot':
         this.replica.applySnapshot(message);
         this.subscriptionRequestId = this.createRequestId();
+        this.subscriptionReady = new Promise(resolve => { this.resolveSubscriptionReady = resolve; });
         this.send({
           protocolVersion: PROTOCOL_VERSION,
           type: 'timeline_subscription',
           payload: { requestId: this.subscriptionRequestId, agentIds: [this.agentId] },
         });
+        this.beginSocketRecovery(generation);
         return;
       case 'agent_update':
         this.replica.applySnapshot(message);
         return;
       case 'timeline_subscribed':
         if (message.payload.requestId !== this.subscriptionRequestId) return;
-        this.catchUpAfterSubscription(generation);
+        if (!message.payload.agentIds.includes(this.agentId)) { this.restartDisconnected(generation); return; }
+        this.resolveSubscriptionReady?.();
+        if (this.timelineRecovery === 'http') this.catchUpAfterSubscription(generation);
         return;
       case 'timeline_replacement':
         this.replica.replaceTimeline(message.payload.epoch);
@@ -523,6 +545,13 @@ export class RemoteSessionClient {
     }
   }
 
+  private beginSocketRecovery(generation: number): void {
+    if (this.timelineRecovery !== 'websocket' || !this.subscriptionRequestId) return;
+    // Queue control acquisition first: a slow history load must not delay that request.
+    if (this.controlSupported && !this.observeOnly && !this.controlRequested) return;
+    this.catchUpAfterSubscription(generation);
+  }
+
   private catchUpAfterSubscription(generation: number): void {
     const timeline = this.replica.getState().timeline;
     if (timeline.initialized && timeline.epoch) {
@@ -557,13 +586,9 @@ export class RemoteSessionClient {
     let nextCursor = cursor;
     try {
       while (true) {
-        const page = await this.transport.fetchTimeline(
-          this.agentId,
-          direction,
-          nextCursor,
-          this.historyPageSize,
-          { signal: controller.signal },
-        );
+        const page = await (this.timelineRecovery === 'websocket'
+          ? this.fetchSocketTimeline(direction, nextCursor, controller.signal)
+          : this.transport.fetchTimeline(this.agentId, direction, nextCursor, this.historyPageSize, { signal: controller.signal }));
         if (generation !== this.generation || this.recovery !== controller) return;
         const continuation = direction === 'after' && page.payload.hasNewer && page.payload.epoch === nextCursor?.epoch
           ? this.afterContinuation(page, nextCursor)
@@ -576,6 +601,7 @@ export class RemoteSessionClient {
           return;
         }
         if (!continuation) {
+          if (this.subscriptionReady) await this.subscriptionReady;
           if (this.controlReady) await this.controlReady;
           if (generation !== this.generation || this.recovery !== controller) return;
           this.recovery = undefined;
@@ -594,6 +620,21 @@ export class RemoteSessionClient {
       this.replica.reportDiagnostic('timeline_recovery_failed', 'Timeline recovery failed.', true);
       this.restartDisconnected(generation);
     }
+  }
+
+  private async fetchSocketTimeline(direction: TimelineDirection, cursor: TimelineCursor | undefined, signal: AbortSignal): Promise<HistoryPage> {
+    const requestId = this.createRequestId();
+    const pending = this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_request', payload: {
+      requestId, agentId: this.agentId, direction, limit: this.historyPageSize, ...(cursor ? {cursor} : {}),
+    } }, 'timeline_page', (message): message is HistoryPage => message.type === 'timeline_page'
+      && message.payload.agentId === this.agentId && message.payload.direction === direction, this.connectionTimeoutMs);
+    const abort = () => this.rejectPendingOperation(requestId, 'timeline_page', new RemoteOperationError(
+      'recovery_retired', 'This timeline recovery has been superseded.', true, requestId,
+    ));
+    signal.addEventListener('abort', abort, {once: true});
+    if (signal.aborted) abort();
+    try { return await pending; }
+    finally { signal.removeEventListener('abort', abort); }
   }
 
   private afterContinuation(page: HistoryPage, cursor: TimelineCursor): TimelineCursor {
@@ -748,6 +789,8 @@ export class RemoteSessionClient {
   }
 
   private stopConnection(): void {
+    this.resolveSubscriptionReady?.();
+    this.resolveSubscriptionReady = undefined; this.subscriptionReady = undefined;
     this.stopMessageEchoSync?.();
     this.stopMessageEchoSync = undefined;
     this.resolveControlReady?.();

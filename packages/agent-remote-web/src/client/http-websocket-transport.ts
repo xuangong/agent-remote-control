@@ -57,6 +57,7 @@ export interface HttpWebSocketTransportDependencies {
 }
 
 export class HttpWebSocketTransport implements RemoteAgentTransport {
+  readonly timelineRecovery = 'websocket' as const;
   private readonly titleListeners = new Set<(session: SessionTitleUpdate) => void>();
   private readonly titles = new Map<string, SessionTitleUpdate>();
   onSessionTitle(listener: (session: SessionTitleUpdate) => void): () => void {

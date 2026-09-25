@@ -22,7 +22,7 @@ export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
   readonly providerId: string;
   readonly supportsSourceReferences?: boolean;
-  validateSessionRename?(nativeSessionId: string): Promise<void>;
+  validateSessionRename?(nativeSessionId: string, title: string): Promise<void>;
   sessionTitle?(nativeSessionId: string): Promise<string | undefined>;
   renameSession?(nativeSessionId: string, title: string): Promise<string>;
   readonly supportsPromptEditing?: boolean;
@@ -518,7 +518,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           }
           const directory = registration(providerId).directory;
           if (!directory.renameSession) throw new HostRequestError(400, 'unsupported_configuration', 'Native session renaming is unavailable. Update the Controller.');
-          await directory.validateSessionRename?.(nativeSessionId);
+          await directory.validateSessionRename?.(nativeSessionId, title);
           let result: { title: string };
           try {
             result = await operationCache.execute({ operationId: string(payload.operationId, 'operationId'), scope: operationScope(request),

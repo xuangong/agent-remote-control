@@ -102,3 +102,19 @@ it('retains failed initialization until native exit can be confirmed, then allow
     await reopened.dispose();
   } finally {canExit=true;await provider.dispose();started.mockRestore();exit.mockRestore();}
 });
+
+it('renames Claude native metadata once without starting a query and reads it back', async () => {
+  const id='11111111-1111-1111-1111-111111111111'; let title='Original';
+  const rename=vi.fn(async (_id: string, name: string) => {title=name;});
+  const query=vi.fn(() => {throw new Error('Must not start a query');});
+  const provider=new ClaudeAgentProvider({query, catalog:{list:async()=>[],messages:async()=>[],
+    info:async()=>({sessionId:id,summary:'Summary',customTitle:title,lastModified:1}),rename}});
+  expect(await provider.renameSession(id,'  New name  ')).toBe('New name');
+  expect(await provider.renameSession(id,'New name')).toBe('New name');
+  expect(await provider.readSessionTitle(id)).toBe('New name');
+  expect(rename).toHaveBeenCalledTimes(1);expect(query).not.toHaveBeenCalled();
+  rename.mockImplementation(async()=>{});
+  await expect(provider.renameSession(id,'Unconfirmed')).rejects.toThrow(/confirmed/);
+  for(const name of ['', 'x'.repeat(513), 'line\nline']) await expect(provider.renameSession(id,name)).rejects.toThrow(/name/i);
+  await expect(provider.renameSession('../bad','New')).rejects.toThrow(/identity/);
+});

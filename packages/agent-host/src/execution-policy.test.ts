@@ -122,11 +122,14 @@ it('masks the actual Relay configuration namespace while preserving native provi
 });
 
 it('checks native workspace metadata before renaming even when the catalog omits the session', async () => {
-  const f = await fixture(); let name = 'Original';
+  const f = await fixture(); let name = 'Original', preparations = 0;
   const directory = protectHostDirectory({ ...f.source, list: () => [], sessionWorkspace: async () => f.info.cwd,
+    validateSessionRename: async () => { preparations++; },
     renameSession: async (_id, title) => { name = title; return name; } }, f.policy!);
+  await directory.validateSessionRename!('session', 'Renamed'); expect(preparations).toBe(1);
   expect(await directory.renameSession!('session', 'Allowed')).toBe('Allowed');
   f.info.cwd = f.outside;
   await expect(directory.renameSession!('session', 'Blocked')).rejects.toThrow(/workspace/i);
   expect(name).toBe('Allowed');
+  await expect(directory.validateSessionRename!('session', 'Renamed')).rejects.toThrow(/workspace/i); expect(preparations).toBe(1);
 });

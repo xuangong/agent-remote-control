@@ -6,6 +6,11 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 
 export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession'> & {
     listSessions(): Promise<RemoteSessionSummary[]>;
+    readSessionTitle?(id: string): Promise<string | undefined>;
+    renameSession?(id: string, title: string): Promise<string>;
+    validateSessionTitle?(title: string): void;
+    /** Some runtimes expose metadata writes only on a loaded native session. */
+    sessionRenameRequiresOpen?: boolean;
     sessionWorkspace?(id: string): Promise<string | undefined>;
     openChildSession?(parent: string, child: string): Promise<AgentSession>;
     dispose?(): Promise<void>;
@@ -110,10 +115,22 @@ export function createManagedStdioDirectory(
       return info.sessionId;
     } catch (error) { await session.dispose(); await owner?.release(); throw error; }
   }
-  return {
+  const directory: AgentHostDirectory = {
     providerId,
     list() { if (closed) throw new Error(`${displayName} directory is closed.`); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
+    ...(provider.readSessionTitle ? {sessionTitle: provider.readSessionTitle.bind(provider)} : {}),
+    ...(provider.renameSession ? {
+      async validateSessionRename(id: string, title: string) {
+        if (closed) throw new Error(`${displayName} directory is closed.`);
+        provider.validateSessionTitle?.(title);
+        if (provider.sessionRenameRequiresOpen) await directory.open(id);
+      },
+      async renameSession(id: string, title: string) {
+        await directory.validateSessionRename!(id, title);
+        return provider.renameSession!(id, title);
+      },
+    } : {}),
     ...(provider.sessionWorkspace ? {sessionWorkspace: provider.sessionWorkspace.bind(provider)} : {}),
     async create(input) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
@@ -180,4 +197,5 @@ export function createManagedStdioDirectory(
       return provider.openChildSession!(parentNativeSessionId, nativeSessionId);
     } } : {}),
   };
+  return directory;
 }

@@ -95,7 +95,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     providerId: directory.providerId,
     supportsSourceReferences: directory.supportsSourceReferences,
     supportsPromptEditing: directory.supportsPromptEditing,
-    validateSessionRename: checkSource,
+    async validateSessionRename(id: string, title: string) { await checkSource(id); await directory.validateSessionRename?.(id, title); },
     ...(directory.sessionTitle ? { async sessionTitle(id: string) { await checkSource(id); return directory.sessionTitle!(id); } } : {}),
     ...(directory.renameSession ? { async renameSession(id: string, title: string) { await checkSource(id); return directory.renameSession!(id, title); } } : {}),
     async validatePromptEdit(target) { await checkSource(target.nativeSessionId); await directory.validatePromptEdit?.(target); },

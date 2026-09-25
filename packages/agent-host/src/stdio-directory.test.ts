@@ -133,3 +133,25 @@ it.each([false,true])('does not release an in-flight resume lease when the direc
   try {await directory.close();expect(await inspectNativeOwner(key)).toMatchObject({kind:'controller'});}
   finally {finish();await expect(opening).rejects.toThrow(/closed/);expect(disposed).toBe(true);await rm(root,{recursive:true,force:true});}
 },10000);
+
+it('prepares native rename through managed ownership and never takes over a CLI session', async () => {
+  const root=await mkdtemp(join(tmpdir(),'arc-stdio-rename-'));
+  const key={root,providerId:'copilot',sessionId:'session'};
+  let opens=0, writes=0, title='Original';
+  const native:AgentSession={capabilities:{history:true,sendMessage:true,steer:false,cancel:false,readResource:false,interactions:{question:false,planApproval:false,toolApproval:false}},
+    async *observe(){yield {type:'history_boundary'};},async runtimeInfo(){return {providerId:'copilot',sessionId:'session',status:'idle',persistence:{providerId:'copilot',sessionId:'session',opaque:'{}'}};},
+    async sendMessage(){},async respondToInteraction(){},async dispose(){}};
+  const directory=createManagedStdioDirectory('copilot','Copilot',{listSessions:async()=>[],createSession:async()=>native,
+    resumeSession:async()=>{opens++;return native;},sessionRenameRequiresOpen:true,
+    renameSession:async(_id,name)=>{writes++;title=name;return title;},readSessionTitle:async()=>title},[],{root});
+  const cli=await acquireNativeSession({...key,kind:'native_cli'});
+  try {
+    await expect(directory.validateSessionRename!('session', 'Renamed')).rejects.toMatchObject({code:'native_session_owned'});
+    expect(opens).toBe(0);expect(writes).toBe(0);
+    await cli.release();
+    await directory.validateSessionRename!('session', 'Renamed');
+    expect(await directory.renameSession!('session','Renamed')).toBe('Renamed');
+    expect(await directory.sessionTitle!('session')).toBe('Renamed');
+    await directory.validateSessionRename!('session', 'Renamed');expect(opens).toBe(1);
+  } finally {await cli.release();await directory.close();await rm(root,{recursive:true,force:true});}
+});

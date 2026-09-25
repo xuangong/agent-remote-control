@@ -31,8 +31,8 @@ it('opens a folder chooser when starring and preserves the existing folder when 
  expect(favorites.change).toHaveBeenCalledWith({type:'remove-session',session:{hostId:'h',providerId:'codex',nativeSessionId:'n'}});
 });
 
-it('renames a favorite session through its Host and keeps rejected input editable', async()=>{
- const favorites=fixture(); favorites.stars=[{...star,canRename:true}];
+it.each(['codex','copilot','claude'])('renames a %s favorite through its Host and keeps rejected input editable', async providerId=>{
+ const favorites=fixture(); favorites.stars=[{...star,providerId,canRename:true}];
  const requests: any[]=[];
  vi.stubGlobal('fetch',async(url:URL,init:RequestInit)=>{requests.push({url:String(url),body:JSON.parse(String(init.body))});return Response.json({error:'Native rename failed.'},{status:503});});
  favorites.scope='https://relay.example/account/';
@@ -43,9 +43,11 @@ it('renames a favorite session through its Host and keeps rejected input editabl
  await act(async()=>button(document,'Rename session…').click());
  const input=document.querySelector<HTMLInputElement>('dialog input')!;
  expect(input.value).toBe('Research');
+ expect(input.maxLength).toBe(providerId==='copilot'?100:512);
+ expect(document.querySelector('dialog')!.textContent).toContain(providerId==='claude'?'Claude Code':providerId==='copilot'?'GitHub Copilot':'Codex');
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'New name');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await act(async()=>document.querySelector('dialog form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
- expect(requests[0]).toMatchObject({url:'https://relay.example/account/v1/remote/hosts/h/session/rename',body:{providerId:'codex',nativeSessionId:'n',title:'New name'}});
+ expect(requests[0]).toMatchObject({url:'https://relay.example/account/v1/remote/hosts/h/session/rename',body:{providerId,nativeSessionId:'n',title:'New name'}});
  expect(document.querySelector('dialog')!.textContent).toContain('Native rename failed.');expect(input.value).toBe('New name');
  await act(async()=>document.querySelector('dialog form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
  expect(requests[1].body.operationId).toBe(requests[0].body.operationId);

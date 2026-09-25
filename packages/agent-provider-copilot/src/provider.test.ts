@@ -492,3 +492,42 @@ it('reads an opened workspace before native metadata has been persisted', async 
     expect(mock.client.getSessionMetadata).not.toHaveBeenCalled();
   } finally {await provider.dispose();}
 }, 10000);
+
+function nativeNames() {
+  let name = 'Original';
+  const set = vi.fn(async (input: {name: string}) => { name = input.name; });
+  mock.native.rpc.name = { get: vi.fn(async () => ({name})), set };
+  return {set};
+}
+it('renames an open Copilot session once and reads the confirmed native name', async () => {
+  const names = nativeNames(); const {provider, session} = await open();
+  const id = (await session.runtimeInfo()).sessionId!;
+  try {
+    expect(provider.sessionRenameRequiresOpen).toBe(true);
+    expect(await provider.renameSession(id, '  New name  ')).toBe('New name');
+    expect(await provider.renameSession(id, 'New name')).toBe('New name');
+    expect(await provider.readSessionTitle(id)).toBe('New name');
+    expect(names.set).toHaveBeenCalledTimes(1);
+    expect(mock.native.send).not.toHaveBeenCalled();
+    expect(mock.native.disconnect).not.toHaveBeenCalled();
+    expect(mock.client.resumeSession).not.toHaveBeenCalled();
+  } finally { await provider.dispose(); }
+});
+it('rejects invalid Copilot names and refuses to rename a session outside managed ownership', async () => {
+  const names = nativeNames(); const {provider, session} = await open();
+  const id = (await session.runtimeInfo()).sessionId!;
+  try {
+    for (const title of ['', 'x'.repeat(101), 'line\nline', '"quoted"']) {
+      await expect(provider.renameSession(id, title)).rejects.toThrow(/name/i);
+    }
+    await expect(provider.renameSession('unopened', 'New')).rejects.toThrow(/open/i);
+    expect(names.set).not.toHaveBeenCalled();
+    expect(mock.client.resumeSession).not.toHaveBeenCalled();
+  } finally { await provider.dispose(); }
+});
+it('does not report an unconfirmed Copilot native write as a successful rename', async () => {
+  const names = nativeNames(); const {provider, session} = await open();
+  names.set.mockImplementation(async () => {});
+  try { await expect(provider.renameSession((await session.runtimeInfo()).sessionId!, 'New')).rejects.toThrow(/confirmed/); }
+  finally { await provider.dispose(); }
+});

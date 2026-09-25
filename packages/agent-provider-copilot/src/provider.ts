@@ -17,6 +17,7 @@ export function resolveCopilotExecutable(): string {
 }
 export class CopilotAgentProvider implements AgentProviderAdapter {
   readonly descriptor = { providerId: 'copilot', displayName: 'GitHub Copilot' };
+  readonly sessionRenameRequiresOpen = true;
   private readonly client: CopilotClient;
   private readonly sessions = new Map<string, CopilotAgentSession>();
   private readonly loading = new Set<string>();
@@ -38,6 +39,27 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
     await this.ready();
     // Persisted metadata does not establish activity in another CLI server.
     return (await deadline(this.client.listSessions(), this.options.requestTimeoutMs ?? 15000, 'Copilot session discovery')).map(s => ({ nativeSessionId: s.sessionId, providerId: 'copilot', title: s.summary || 'Copilot session', workspace: s.context?.workingDirectory, createdAt: s.startTime.toISOString(), updatedAt: s.modifiedTime.toISOString(), state: 'unknown' }));
+  }
+  async readSessionTitle(sessionId: string): Promise<string | undefined> {
+    if (!sessionId || /[\x00/\\]/u.test(sessionId)) throw new Error('Invalid Copilot session ID.');
+    await this.ready();
+    const session = this.sessions.get(sessionId);
+    if (session) return (await deadline(session.rpc.name.get(), this.options.requestTimeoutMs ?? 15000, 'Read Copilot session name')).name ?? undefined;
+    return (await deadline(this.client.getSessionMetadata(sessionId), this.options.requestTimeoutMs ?? 15000, 'Read Copilot session metadata'))?.summary;
+  }
+  validateSessionTitle(title: string): void {
+    const name = title.trim();
+    if (!name || name.length > 100 || /[\u0000-\u001f\u007f"]/.test(name)) throw new Error('Enter a Copilot session name of up to 100 characters without control characters or double quotes.');
+  }
+  async renameSession(sessionId: string, title: string): Promise<string> {
+    this.validateSessionTitle(title);
+    const name = title.trim();
+    const session = this.sessions.get(sessionId);
+    if (!session || (await session.runtimeInfo()).status === 'closed') throw new Error('Open the Copilot session under managed ownership before renaming it.');
+    if (await this.readSessionTitle(sessionId) === name) return name;
+    await deadline(session.rpc.name.set({name}), this.options.requestTimeoutMs ?? 15000, 'Rename Copilot session');
+    if (await this.readSessionTitle(sessionId) !== name) throw new Error('The native session name could not be confirmed. Refresh before retrying.');
+    return name;
   }
   async sessionWorkspace(sessionId: string): Promise<string | undefined> {
     if (!sessionId || /[\x00/\\]/u.test(sessionId)) throw new Error('Invalid Copilot session ID.');

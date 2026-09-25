@@ -25,6 +25,23 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     this.catalog = options.catalog ?? createClaudeCatalog(options.env ?? {}, options.requestTimeoutMs ?? 15_000);
   }
 
+  async readSessionTitle(sessionId: string): Promise<string | undefined> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error('Invalid Claude session identity.');
+    const info = await this.catalog.info(sessionId);
+    return info?.customTitle || info?.summary || info?.firstPrompt;
+  }
+
+  async renameSession(sessionId: string, title: string): Promise<string> {
+    const name = title.trim();
+    if (!name || name.length > 512 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error('Enter a session name of up to 512 characters.');
+    const current = await this.readSessionTitle(sessionId);
+    if (current === name) return name;
+    if (!this.catalog.rename) throw new Error('Native Claude session renaming is unavailable.');
+    await this.catalog.rename(sessionId, name);
+    if (await this.readSessionTitle(sessionId) !== name) throw new Error('The native session name could not be confirmed. Refresh before retrying.');
+    return name;
+  }
+
   async listSessions(): Promise<ClaudeSessionSummary[]> {
     // Persisted SDK metadata does not describe an external query's current activity.
     return (await this.catalog.list()).map((entry) => ({ nativeSessionId: entry.sessionId, providerId: 'claude',

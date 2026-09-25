@@ -34,6 +34,7 @@ async function configureGatewayClaude(stateDir: string, connection: HostConnecti
 export async function configureGatewayProviders(stateDir: string, connection: HostConnection, hostId: string,
   onCredential?: (secret: string) => void): Promise<NodeJS.ProcessEnv> {
   const providers = selectedHostProviders(connection.environment);
+  if (providers.includes('opencode')) throw new Error('Gateway setup for opencode is not supported. Configure credentials on the independent OpenCode server and enroll a host-only Host.');
   if (providers.includes('copilot')) throw new Error('Gateway setup for copilot is not supported. Select codex or claude, or enroll a separate host-only Host with your existing Copilot login.');
   if (providers.includes('codex')) managedCodexHome(stateDir, connection.environment);
   if (providers.includes('claude')) managedClaudeHome(stateDir, connection.environment);

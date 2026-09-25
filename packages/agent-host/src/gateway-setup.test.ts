@@ -52,3 +52,10 @@ it('rejects personal Claude home overrides before requesting a token', async () 
   await expect(configureGatewayProviders(f.root, { ...f.connection, environment: { ...f.connection.environment, AGENT_HOST_CLAUDE_HOME: '/personal/claude' } }, 'host-test')).rejects.toThrow(/dedicated/i);
   expect(f.requests).toBe(0);
 }, 10000);
+
+
+it('rejects OpenCode Gateway provisioning before requesting managed credentials', async () => {
+  const f = await fixture('opencode');
+  await expect(configureGatewayProviders(f.root, f.connection, 'host-test')).rejects.toThrow(/opencode.*not supported/i);
+  expect(f.requests).toBe(0);
+}, 10000);

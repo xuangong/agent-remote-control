@@ -42,6 +42,10 @@
         "packages/agent-provider-dsh/scripts",
         "packages/agent-provider-dsh/src",
         "packages/agent-provider-dsh/tsconfig.json",
+        "packages/agent-provider-opencode/README.md",
+        "packages/agent-provider-opencode/package.json",
+        "packages/agent-provider-opencode/src",
+        "packages/agent-provider-opencode/tsconfig.json",
         "packages/agent-provider-sdk/README.md",
         "packages/agent-provider-sdk/package.json",
         "packages/agent-provider-sdk/src",
@@ -116,7 +120,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:9d0445c4395b7620663c4b878922e95638873e3763e8f774fb53decabda4442a"
+      "digest": "sha256:f20e62156a537b5667f0c897a7d4a41cb942d9c5b99b7650a21eb3533051ca64"
     }
   },
   "providers": [
@@ -275,6 +279,45 @@
           "capability": "controls.immediate-input",
           "status": "degraded",
           "reason": "SDK immediate input may become native queued delivery after the active interaction has ended. Native interactionId/delivery determine public turn grouping; adapter does not synthesize a queue."
+        }
+      ]
+    },
+    {
+      "providerId": "opencode",
+      "native": {
+        "name": "opencode",
+        "version": "1.18.18",
+        "revision": null
+      },
+      "sdk": {
+        "name": "@opencode-ai/sdk",
+        "version": "1.18.31"
+      },
+      "degradations": [
+        {
+          "capability": "controls.queue-steer",
+          "status": "degraded",
+          "reason": "The established shared server API is used. Explicit follow-up queue and steer delivery are unavailable; unsupported delivery is rejected rather than simulated."
+        },
+        {
+          "capability": "events.subagent.navigation",
+          "status": "degraded",
+          "reason": "Native child sessions can be listed and opened by identity. Parent-attached child projections and callback tool orchestration are not exposed."
+        },
+        {
+          "capability": "controls.prompt-edit",
+          "status": "degraded",
+          "reason": "Native revert may also change workspace files. Prompt editing, fork and source references are not exposed by this adapter."
+        },
+        {
+          "capability": "events.resources",
+          "status": "degraded",
+          "reason": "Image input and bounded native image resources are supported. Arbitrary native file paths and remote resource URLs are not fetched; terminal control is unavailable."
+        },
+        {
+          "capability": "events.usage",
+          "status": "degraded",
+          "reason": "Tokens describe the latest native model step. Session-wide total cost is omitted because history is paginated and cannot establish a complete aggregate."
         }
       ]
     }

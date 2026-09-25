@@ -143,7 +143,7 @@ Agent Remote Debugger: inspect and exercise the Session View protocol and state.
 
 Commands:
   server [--open] [--cwd <path>] [--port <0-65535>]
-  server --provider <codex|claude|copilot> [--cwd <path>] [--executable <path>] [--port <0-65535>] [--open] [--jsonl]
+  server --provider <codex|claude|copilot|opencode> [--cwd <path>] [--executable <path>] [--port <0-65535>] [--open] [--jsonl]
   server --adapter <module-path> [--persistence-file <path>] [--port <0-65535>] [--open] [--jsonl]
   replay <session.jsonl> [--open] [--port <0-65535>]
   provider list

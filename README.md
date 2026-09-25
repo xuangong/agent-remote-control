@@ -177,3 +177,7 @@ The live Codex process tests require `codex-cli 0.148.0`. Set `BORGEE_CODEX_TEST
 Optional authenticated hosting: see [Gateway Relay](docs/current/agent-remote/gateway-relay.md) for gateway login, Host sharing and cumulative session allowances.
 [Agents deployment](docs/current/agent-remote/deployment.md) covers the independent
 `agents.xianliao.de5.net` Worker, SSH Docker and local Node/workerd Docker profiles.
+
+### OpenCode
+
+OpenCode is available as a shared HTTP/SSE provider for Controller and ARDB. See [OpenCode setup and capabilities](docs/opencode.md).

@@ -76,3 +76,13 @@ it('persists issued credentials before registration and never overwrites them wi
   await Promise.all([saveRegisteredConnection(path, config, Promise.resolve()), saveIssuedCredential(path, config, 'rotated')]);
   expect((await resolveHostConnection(path, {})).remoteKey).toBe('rotated');
 });
+
+it('privately retains the local OpenCode endpoint and Basic credentials across restarts', async () => {
+  const path = await directory();
+  const environment = { AGENT_HOST_PROVIDERS: 'opencode', AGENT_HOST_OPENCODE: '/native/opencode',
+    AGENT_HOST_OPENCODE_TRUST_SHARED: '0', AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:4097', AGENT_HOST_OPENCODE_USERNAME: 'local', AGENT_HOST_OPENCODE_PASSWORD: 'native-server-secret' };
+  const config = await resolveHostConnection(path, { ...environment, AGENT_HOST_SERVER: 'https://relay.example', AGENT_HOST_REMOTE_KEY: 'device-secret' });
+  await saveRegisteredConnection(path, config, Promise.resolve());
+  expect((await resolveHostConnection(path, {})).environment).toMatchObject(environment);
+  if (process.platform !== 'win32') expect((await stat(join(path, 'connection.json'))).mode & 0o777).toBe(0o600);
+}, 10000);

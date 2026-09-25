@@ -5,7 +5,7 @@ import type { VisibleSessionStar } from '../../session-stars-client.js';
 import { SessionDirectoryClient } from '../../directory-client.js';
 
 export function RenameSessionDialog({ favorites, session, onClose }: { favorites: SessionStars; session: VisibleSessionStar; onClose(): void }) {
-  const providerName = session.providerId === 'codex' ? 'Codex' : session.providerId === 'copilot' ? 'GitHub Copilot' : session.providerId === 'claude' ? 'Claude Code' : session.providerId;
+  const providerName = session.providerId === 'codex' ? 'Codex' : session.providerId === 'copilot' ? 'GitHub Copilot' : session.providerId === 'claude' ? 'Claude Code' : session.providerId === 'opencode' ? 'OpenCode' : session.providerId;
   const dialog = useRef<HTMLDialogElement>(null), label = useId();
   const [title, setTitle] = useState(session.title), [saving, setSaving] = useState(false), [error, setError] = useState<string>();
   const intent = useRef<{ title: string; operationId: string }>();

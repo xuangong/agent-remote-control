@@ -38,14 +38,14 @@ export async function createReplayServer(options: {
       if (path === '/__ardb/live/start' && request.method === 'POST') {
         const config = await readLocalJson(request, url);
         if (Object.keys(config).some(key => !['provider', 'cwd', 'executable'].includes(key))
-          || typeof config.provider !== 'string' || !['codex', 'claude', 'copilot'].includes(config.provider)
+          || typeof config.provider !== 'string' || !['codex', 'claude', 'copilot', 'opencode'].includes(config.provider)
           || typeof config.cwd !== 'string' || !config.cwd.trim()
           || (config.executable !== undefined && typeof config.executable !== 'string')) {
           throw Object.assign(new Error('Choose a supported provider and a server working directory.'), { status: 400 });
         }
         const provider = config.provider;
         const cwd = resolve(config.cwd);
-        const executable = typeof config.executable === 'string' && config.executable.trim() ? config.executable.trim() : options.executable;
+        const executable = provider === 'opencode' ? undefined : typeof config.executable === 'string' && config.executable.trim() ? config.executable.trim() : options.executable;
         const key = JSON.stringify({ provider, cwd, executable });
         if (closing) throw new Error('ARDB is closing.');
         if ((pending || live) && selection !== key) throw new Error('A live session is already opening or running. Return to it instead.');

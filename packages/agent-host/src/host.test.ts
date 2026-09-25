@@ -1430,7 +1430,7 @@ it.each([false, true])('preserves diagnostic capability independently of unreada
   } finally { await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
 });
 
-it.each(['codex', 'copilot', 'claude'])('renames by native identity once per operation without loading a session (%s)', async providerId => {
+it.each(['codex', 'copilot', 'claude', 'opencode'])('renames by native identity once per operation without loading a session (%s)', async providerId => {
   const f = fixture(providerId); let writes = 0; let title = 'Original';
   f.directory.renameSession = async (id, name) => { expect(id).toBe('saved'); writes++; title = name; return title; };
   const host = createAgentHostRuntime({ registrations: [f] });
@@ -1443,7 +1443,7 @@ it.each(['codex', 'copilot', 'claude'])('renames by native identity once per ope
   } finally { await host.close(); }
 });
 
-it.each(['codex', 'copilot', 'claude'])('reconciles a repeated rename with the current native title instead of restoring an old cached result (%s)', async providerId => {
+it.each(['codex', 'copilot', 'claude', 'opencode'])('reconciles a repeated rename with the current native title instead of restoring an old cached result (%s)', async providerId => {
   const f=fixture(providerId); let title='Original'; let writes=0;
   f.directory.renameSession=async (_id,name)=>{writes++;title=name;return name;};
   f.directory.sessionTitle=async()=>title;
@@ -1456,7 +1456,7 @@ it.each(['codex', 'copilot', 'claude'])('reconciles a repeated rename with the c
   } finally {await host.close();}
 });
 
-it.each(['codex', 'copilot', 'claude'])('reconciles an uncertain rename without repeating the native write (%s)', async providerId => {
+it.each(['codex', 'copilot', 'claude', 'opencode'])('reconciles an uncertain rename without repeating the native write (%s)', async providerId => {
   const f = fixture(providerId); let title = 'Original', writes = 0, readable = false;
   f.directory.renameSession = async (_id, name) => { writes++; title = name; throw new Error('Reply lost'); };
   f.directory.sessionTitle = async () => { if (!readable) throw new Error('Disconnected'); return title; };

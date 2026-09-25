@@ -15,7 +15,7 @@ export function ModeControls({ mode, onMode, onClear, session, directory, execut
     setBusy(true); setError(undefined);
     try {
       const response = await fetch('/__ardb/live/start', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, cwd, executable: binary || undefined }), signal: AbortSignal.timeout(120000) });
+        body: JSON.stringify({ provider, cwd, executable: provider === 'opencode' ? undefined : binary || undefined }), signal: AbortSignal.timeout(120000) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Cannot start live session.');
       onStarted(data);
@@ -30,10 +30,10 @@ export function ModeControls({ mode, onMode, onClear, session, directory, execut
     </div>
     {mode === 'live' && !session ? <form onSubmit={event => { event.preventDefault(); void start(); }}>
       <label>Provider<select value={provider} disabled={busy} onChange={event => setProvider(event.target.value)}>
-        <option value="codex">Codex</option><option value="claude">Claude</option><option value="copilot">Copilot</option>
+        <option value="codex">Codex</option><option value="claude">Claude</option><option value="copilot">Copilot</option><option value="opencode">OpenCode</option>
       </select></label>
       <label>Working directory<input value={cwd} required disabled={busy} onChange={event => setCwd(event.target.value)} /></label>
-      <details><summary>Executable (optional)</summary><input aria-label="Provider executable" placeholder="Use server PATH" value={binary} disabled={busy} onChange={event => setBinary(event.target.value)} /></details>
+      {provider !== 'opencode' ? <details><summary>Executable (optional)</summary><input aria-label="Provider executable" placeholder="Use server PATH" value={binary} disabled={busy} onChange={event => setBinary(event.target.value)} /></details> : <p>Connects to the OpenCode server configured on this machine.</p>}
       <button type="submit" disabled={busy}>{busy ? 'Starting…' : 'Start live session'}</button>
       <p>Runs on the ARDB server. Switching to Replay keeps this session running.</p>
     </form> : null}

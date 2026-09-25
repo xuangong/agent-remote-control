@@ -5,11 +5,18 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
-const requiredProviderIds = ['claude', 'codex', 'copilot', 'dsh'] as const;
+const requiredProviderIds = ['claude', 'codex', 'copilot', 'dsh', 'opencode'] as const;
 const requiredDegradations: Record<
   (typeof requiredProviderIds)[number],
   ReadonlyArray<{ capability: string; status: ProviderCompatibility['degradations'][number]['status'] }>
 > = {
+  opencode: [
+    { capability: 'controls.queue-steer', status: 'degraded' },
+    { capability: 'events.subagent.navigation', status: 'degraded' },
+    { capability: 'controls.prompt-edit', status: 'degraded' },
+    { capability: 'events.resources', status: 'degraded' },
+    { capability: 'events.usage', status: 'degraded' },
+  ],
   copilot: [
     {capability: 'native.experimental-rpc', status: 'degraded'},
     {capability: 'controls.settings', status: 'degraded'},
@@ -102,7 +109,7 @@ export function loadCompatibilityManifest(path?: string): CompatibilityManifest 
   const providerIds = providers.map(({ providerId }) => providerId).sort();
   if (providerIds.length !== requiredProviderIds.length
     || providerIds.some((providerId, index) => providerId !== requiredProviderIds[index])) {
-    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: claude, codex, copilot, and dsh.');
+    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: claude, codex, copilot, dsh, and opencode.');
   }
   for (const provider of providers) validateRequiredDegradations(provider);
   verifyImplementationDigest(manifestPath, borgee);
@@ -139,6 +146,10 @@ function parseProviderCompatibility(value: unknown): ProviderCompatibility {
     || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@github/copilot-sdk'
     || value.sdk.version !== '1.0.11')) {
     throw new Error('Agent Remote compatibility manifest must pin Copilot CLI 1.0.83 and @github/copilot-sdk 1.0.11.');
+  }
+  if (value.providerId === 'opencode' && (value.native.name !== 'opencode' || value.native.version !== '1.18.18'
+    || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@opencode-ai/sdk' || value.sdk.version !== '1.18.31')) {
+    throw new Error('Agent Remote compatibility manifest must pin OpenCode 1.18.18 and @opencode-ai/sdk 1.18.31.');
   }
   let sdk: ProviderCompatibility['sdk'];
   if (value.sdk !== undefined) {
@@ -193,8 +204,8 @@ function parseDegradation(value: unknown): ProviderCompatibility['degradations']
 }
 
 function validateRequiredDegradations(provider: ProviderCompatibility): void {
-  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex' && provider.providerId !== 'claude' && provider.providerId !== 'copilot') return;
-  const displayName = provider.providerId === 'dsh' ? 'DSH' : provider.providerId === 'codex' ? 'Codex' : provider.providerId === 'copilot' ? 'Copilot' : 'Claude';
+  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex' && provider.providerId !== 'claude' && provider.providerId !== 'copilot' && provider.providerId !== 'opencode') return;
+  const displayName = provider.providerId === 'opencode' ? 'OpenCode' : provider.providerId === 'dsh' ? 'DSH' : provider.providerId === 'codex' ? 'Codex' : provider.providerId === 'copilot' ? 'Copilot' : 'Claude';
   const actual = new Map(provider.degradations.map((entry) => [entry.capability, entry.status]));
   if (actual.size !== provider.degradations.length) {
     throw new Error(`Agent Remote compatibility manifest must contain unique degradation capabilities for ${displayName}.`);

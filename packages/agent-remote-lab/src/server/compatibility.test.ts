@@ -9,6 +9,7 @@ import { loadCompatibilityManifest } from './compatibility.js';
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
 const implementationDigest = 'sha256:d8fdc7cc1b3b4a412e46aaacede0afa478eee509c99e48f2d684e2ede8ee5a15';
 
+const opencodeCapabilities = ['controls.queue-steer', 'events.subagent.navigation', 'controls.prompt-edit', 'events.resources', 'events.usage'];
 const copilotCapabilities = ['native.experimental-rpc', 'controls.settings', 'events.subagent.navigation', 'interactions.callback-identity', 'events.resources-usage', 'controls.immediate-input'];
 
 describe('Agent Remote compatibility manifest', () => {
@@ -35,6 +36,7 @@ describe('Agent Remote compatibility manifest', () => {
         { providerId: 'codex' },
         { providerId: 'claude', native: { name: 'claude-code', version: '2.1.247', revision: null },
           sdk: { name: '@anthropic-ai/claude-agent-sdk', version: '0.3.247' } },
+        { providerId: 'opencode', native: {name: 'opencode', version: '1.18.18', revision: null}, sdk: {name: '@opencode-ai/sdk', version: '1.18.31'} },
         { providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'} },
       ],
     });
@@ -173,6 +175,17 @@ describe('Agent Remote compatibility manifest', () => {
     expect(() => loadCompatibilityManifest()).toThrow(/degradation/);
   });
 
+  it('rejects mismatched OpenCode SDK compatibility and missing recovery limitations', () => {
+    const manifest = validManifest();
+    const opencode = manifest.providers.find(p => p.providerId === 'opencode')!;
+    opencode.sdk!.version = '0.0.0';
+    process.env[manifestEnvironment] = writeManifest(manifest);
+    expect(() => loadCompatibilityManifest()).toThrow('OpenCode');
+    opencode.sdk!.version = '1.18.31'; opencode.degradations = [];
+    process.env[manifestEnvironment] = writeManifest(manifest);
+    expect(() => loadCompatibilityManifest()).toThrow('OpenCode degradation');
+  });
+
   function writeManifest(manifest: object, files: Record<string, string> = { 'implementation.txt': 'implementation\n' }): string {
     const root = mkdtempSync(join(tmpdir(), 'borgee-compatibility-'));
     roots.push(root);
@@ -271,6 +284,7 @@ function validManifest(overrides: {
       ...(!overrides.omitClaudeSdk ? { sdk: { name: overrides.claudeSdkName ?? '@anthropic-ai/claude-agent-sdk', version: overrides.claudeSdkVersion ?? '0.3.247' } } : {}),
       degradations: claudeDegradations,
     },
+    {providerId: 'opencode', native: {name: 'opencode', version: '1.18.18', revision: null}, sdk: {name: '@opencode-ai/sdk', version: '1.18.31'}, degradations: opencodeCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Bounded shared native provider.'}))},
     {providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'}, degradations: copilotCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Accepted bounded native integration scope.'}))},
   ];
   return {

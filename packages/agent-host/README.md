@@ -525,3 +525,26 @@ The web session-link dialog includes **Resume locally** for native Codex session
 A confirmed shared-daemon RPC error for file descriptor exhaustion is reported as `native_file_limit` when creating or opening sessions. The web notice offers an expandable restart explanation and a copyable `agent-remote-controller codex daemon restart` command. Copying does not execute a restart. Restarting disconnects every session attached to that daemon and can interrupt running responses and tools. Saved history remains, but unfinished operations need inspection and unconfirmed messages must not be replayed automatically. Restarting frees descriptors and starts the replacement with the configured soft limit (`8192` by default).
 
 Creation failures retain their uncertain operation identity even when a file-limit cause is known. Retrying the same operation never dispatches a duplicate creation. Private-runtime failures, local Controller socket errors, and ordinary timeouts do not receive shared-daemon restart advice.
+
+## OpenCode shared server
+
+Start `opencode serve --hostname 127.0.0.1 --port 4096` independently and add
+`opencode` to `AGENT_HOST_PROVIDERS`. Set `AGENT_HOST_OPENCODE_URL` (default
+`http://127.0.0.1:4096`) and, when enabled on the native server,
+`AGENT_HOST_OPENCODE_USERNAME` / `AGENT_HOST_OPENCODE_PASSWORD` in the Controller
+local configuration. Model credentials belong to OpenCode's own configuration.
+
+`agent-remote-controller opencode resume <session-id>` attaches the native TUI to
+that same server. `AGENT_HOST_OPENCODE` optionally selects its CLI executable.
+Browser sessions use shared control and never require takeover. Disconnecting,
+releasing subscriptions or updating Controller does not stop native tasks.
+
+Shared native permissions are trusted by default, as for Codex shared. Set
+`AGENT_HOST_OPENCODE_TRUST_SHARED=0` to require the Host execution policy instead;
+if that policy requires restricted execution, registration fails because an
+external server cannot enforce an additional Controller sandbox.
+
+The adapter is validated with OpenCode 1.18.18 and pins SDK 1.18.31. Explicit queue,
+steer, prompt editing and Host callback tools are not advertised. Settings select
+native model/agent for the next prompt. See `docs/opencode.md` in the source
+repository for detailed setup and isolated native tests.

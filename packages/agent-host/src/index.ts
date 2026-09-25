@@ -12,3 +12,5 @@ export * from './workspace-folders.js';
 
 export * from './session-reference.js';
 export * from './environment.js';
+export * from './opencode.js';
+export * from './opencode-directory.js';

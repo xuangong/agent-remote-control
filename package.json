@@ -21,6 +21,8 @@
     "ardb": "node packages/agent-remote-debugger/dist/cli.js",
     "agent-remote-controller": "node packages/agent-host/dist/cli.js",
     "test:claude": "node scripts/run-tests.mjs claude",
+    "test:opencode": "node scripts/run-tests.mjs opencode",
+    "test:opencode:native": "node scripts/run-tests.mjs opencode-native",
     "test:copilot": "node scripts/run-tests.mjs copilot",
     "start:gateway-relay": "pnpm --filter @orchardworks/agent-remote-lab exec tsx src/server/gateway.ts",
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",

@@ -22,6 +22,7 @@
     "@orchardworks/agent-provider-claude": "workspace:*",
     "@orchardworks/agent-provider-codex": "workspace:*",
     "@orchardworks/agent-provider-copilot": "workspace:*",
+    "@orchardworks/agent-provider-opencode": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "@orchardworks/agent-remote-hosted": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",

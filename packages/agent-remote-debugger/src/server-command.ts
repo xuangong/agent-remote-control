@@ -20,7 +20,7 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
     const { runReplayCommand } = await import('./replay-command.js');
     return runReplayCommand(invocation, io, signal);
   }
-  if (!!provider === !!module) throw usage('Select exactly one --provider codex|claude|copilot or --adapter FILE.');
+  if (!!provider === !!module) throw usage('Select exactly one --provider codex|claude|copilot|opencode or --adapter FILE.');
   const port = Number(get('port') ?? 0);
   if (!/^\d+$/.test(get('port') ?? '0') || !Number.isInteger(port) || port < 0 || port > 65535) throw usage('--port must be between 0 and 65535.');
   const startupTimeout = Number(get('timeout') ?? 30000);

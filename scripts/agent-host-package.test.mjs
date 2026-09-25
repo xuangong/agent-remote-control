@@ -30,6 +30,7 @@ test('packs the public Controller name with the unchanged command and npm regist
   assert.deepEqual(manifest.os, ['darwin', 'linux', 'win32']);
   assert.deepEqual(manifest.bin, { 'agent-remote-controller': 'dist/launcher.js' });
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
+  assert.equal(manifest.dependencies['@opencode-ai/sdk'], '1.18.31');
 });
 
 test('installs the tarball independently and manages a paired daemon from a path containing spaces', { timeout: 180000 }, async t => {
@@ -42,7 +43,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   const home = join(directory, 'home'); await mkdir(home);
   const env = { PATH: process.env.PATH, PATHEXT: process.env.PATHEXT, HOME: home, USERPROFILE: home, APPDATA: join(home, 'AppData/Roaming'), SystemRoot: process.env.SystemRoot,
     TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR, AGENT_HOST_STATE_DIR: state,
-    AGENT_HOST_PROVIDERS: 'codex,claude,copilot', AGENT_HOST_WORKSPACE: directory,
+    AGENT_HOST_PROVIDERS: 'codex,claude,copilot,opencode', AGENT_HOST_WORKSPACE: directory,
     AGENT_HOST_CLAUDE_HOME: join(home, 'claude'), AGENT_HOST_COPILOT_HOME: join(home, 'copilot') };
   if (process.platform === 'linux') Object.assign(env, { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
     DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
@@ -88,6 +89,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.equal(manifest.name, '@orchardworks/agent-remote-controller');
   assert.deepEqual(Object.keys(manifest.bin), ['agent-remote-controller']);
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
+  assert.equal(manifest.dependencies['@opencode-ai/sdk'], '1.18.31');
   assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@orchardworks/')));
   await assert.rejects(run(['start']), /AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required/);
   await assert.rejects(run(['start'], { AGENT_HOST_REMOTE_KEY: 'key-without-relay' }), /Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together/);
@@ -157,7 +159,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.deepEqual(denied, { error: 'Unauthorized local management request.' });
   assert.match((await run(['status'])).stdout, /uplink: registered/);
   assert.deepEqual(registrations[0].providers, []);
-  assert.deepEqual(registrations.at(-1).providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot']);
+  assert.deepEqual(registrations.at(-1).providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot', 'opencode']);
   const buildInfo = JSON.parse(await readFile(join(packageRoot, 'build-info.json'), 'utf8'));
   assert.deepEqual(registrations.at(-1).controller, {
     version: manifest.version, revision: buildInfo.revision, platform: process.platform,

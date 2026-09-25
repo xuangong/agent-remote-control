@@ -51,7 +51,7 @@ it('restores the Host and Provider directory for an opened remote conversation',
       hosts: async () => ({ hosts: [{ id: 'host-1', name: 'Codex Host', online: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }] }), pair: vi.fn(),
     }} initialState={{ ...replicaState, agent: { ...replicaState.agent!, providerId: 'codex' } }} initialSessionStatus="ready" />);
     expect(container.querySelector<HTMLSelectElement>('#remote-host')?.value).toBe('host-1');
-    expect(container.querySelector<HTMLSelectElement>('#provider-select')?.selectedOptions[0]?.textContent).toContain('Codex · Codex Host');
+    expect(container.querySelector<HTMLSelectElement>('#provider-select')?.selectedOptions[0]?.textContent).toBe('Codex');
     expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Codex · Codex Host');
     expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toContain('Online');
   } finally { window.localStorage.removeItem(`agent-remote-opened:${baseUrl}`); }

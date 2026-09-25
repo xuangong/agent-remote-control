@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -45,7 +46,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   const home = join(directory, 'home'); await mkdir(home);
   const env = { PATH: process.env.PATH, PATHEXT: process.env.PATHEXT, HOME: home, USERPROFILE: home, APPDATA: join(home, 'AppData/Roaming'), SystemRoot: process.env.SystemRoot,
     TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR, AGENT_HOST_STATE_DIR: state,
-    AGENT_HOST_PROVIDERS: 'codex,claude,copilot,opencode', AGENT_HOST_WORKSPACE: directory,
+    AGENT_HOST_PROVIDERS: 'codex', AGENT_HOST_WORKSPACE: directory,
     AGENT_HOST_CLAUDE_HOME: join(home, 'claude'), AGENT_HOST_COPILOT_HOME: join(home, 'copilot') };
   if (process.platform === 'linux') Object.assign(env, { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
     DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
@@ -105,6 +106,14 @@ test('installs the tarball independently and manages a paired daemon from a path
     await writeFile(executable, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(version)});\n`, { mode: 0o755 });
     env[`AGENT_HOST_${provider.toUpperCase()}`] = executable;
   }
+  const nativeServer = createServer((request, response) => {
+    if (request.url !== '/global/health') { response.writeHead(404); response.end(); return; }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ healthy: true, version: '1.18.31' }));
+  });
+  await new Promise(resolve => nativeServer.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { nativeServer.closeAllConnections(); await new Promise(resolve => nativeServer.close(resolve)); });
+  env.AGENT_HOST_OPENCODE_URL = `http://127.0.0.1:${nativeServer.address().port}`;
   // Exercise the separately shipped helper and installed public SDK outside the repository.
   const catalog = await exec(process.execPath, [join(packageRoot, 'dist/catalog-worker.js'), 'list'],
     { cwd: directory, env: { ...env, CLAUDE_CONFIG_DIR: env.AGENT_HOST_CLAUDE_HOME }, timeout: 10000 });

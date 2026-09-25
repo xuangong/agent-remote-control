@@ -9,14 +9,15 @@ import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.j
 export interface OpenCodeHostRegistrationOptions extends OpenCodeAgentProviderOptions {
   workspaces?: readonly AgentHostWorkspace[];
   referenceDirectory?: string;
+  probe?: boolean;
 }
 
 export async function createOpenCodeHostRegistration(options: OpenCodeHostRegistrationOptions = {}): Promise<AgentHostProviderRegistration> {
   const { OpenCodeAgentProvider } = await import('@orchardworks/agent-provider-opencode');
-  const { workspaces = [], referenceDirectory, ...providerOptions } = options;
+  const { workspaces = [], referenceDirectory, probe, ...providerOptions } = options;
   const provider = new OpenCodeAgentProvider({ ...providerOptions, restrictedNative: options.restrictedNative ?? false });
   let callbacksAvailable = false;
-  try { if (options.callbackConfigPath) callbacksAvailable = await provider.supportsHostCallbacks(workspaces[0]?.path ?? process.cwd()); }
+  try { if (probe) await provider.checkAvailability(); if (options.callbackConfigPath) callbacksAvailable = await provider.supportsHostCallbacks(workspaces[0]?.path ?? process.cwd()); }
   catch (error) { await provider.close(); throw error; }
   const scope = createHash('sha256').update(new URL(options.serverUrl ?? 'http://127.0.0.1:4096').toString()).digest('hex');
   const references = new SessionReferenceStore(referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'opencode', scope), 'opencode');

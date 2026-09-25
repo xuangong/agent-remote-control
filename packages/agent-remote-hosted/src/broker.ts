@@ -1,3 +1,4 @@
+import { isHostProviderChange } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { isCodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { DiagnosticJournal } from './diagnostic-journal.js';
@@ -17,6 +18,7 @@ type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
 type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
+  providerManagement?: true;
   connectionId?: string; stopDiagnostics?(): void;
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
@@ -37,7 +39,7 @@ export interface RemoteHostBrokerState {
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
@@ -98,7 +100,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   function snapshot(): RemoteHostBrokerState {
     return { pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller }) => ({ ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement }) => ({ ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -156,7 +158,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
   }
   function visibleHosts(subject?: string) {
-    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller }) => ({
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement }) => ({
+      ...(providerManagement ? { providerManagement } : {}),
       ...(controller ? { controller } : {}),
       ...(environment ? { environment } : {}),
       ...(credentialRotation ? {credentialRotation:true} : {}), id, name, online: ready === true && socket?.readyState === RELAY_SOCKET_OPEN, providers,
@@ -214,7 +217,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           ? 'The Host did not confirm opening the session before the Relay deadline. It may still be opening; wait briefly and reopen the same session.'
           : method === 'GET' ? 'The Host did not return the requested data before the Relay deadline. Try reading it again.'
           : 'The Host did not confirm the operation before the Relay deadline. Its outcome is unknown; check the session before retrying.', false, requestId));
-      }, diagnosticRequest ? 5000 : options.rpcTimeoutMs ?? 30_000);
+      }, diagnosticRequest ? 5000 : options.rpcTimeoutMs ?? (path === '/remote/provider-settings' ? 45000 : 30000));
       host.pending.set(requestId, { resolve, reject, timer, method, path, diagnostic: diagnosticRequest, startedAt });
       try { send(host, { uplinkVersion: 2, type: 'rpc_request', requestId, method, path, ...(sessionId ? { sessionId } : {}), ...(body === undefined ? {} : { body }) }); }
       catch (error) { clearTimeout(timer); host.pending.delete(requestId); if (!diagnosticRequest) diagnostic(host, {event:'rpc_failed',requestId,operation:diagnosticOperation(path),reason:error instanceof BrokerError && error.code==='host_backpressure'?'host_backpressure':'write_failed'}); reject(error); }
@@ -339,7 +342,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, pairingPurpose: purpose,
+          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, pairingPurpose: purpose,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
@@ -397,6 +400,16 @@ export function createHostBroker(options: HostBrokerOptions) {
         }
       } else if (message.type === 'stream_close') {
         const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); if(stream)diagnostic(host,{event:'stream_closed',streamId:message.streamId,closeCode:message.code}); stream?.socket.close(message.code, message.reason);
+      } else if (message.type === 'provider_snapshot') {
+        if (!host.providerManagement) return closeConnection(1008, 'Provider management was not advertised');
+        const currentHost = host;
+        await commit(draft => {
+          if (currentHost.socket !== socket) throw new BrokerError(409, 'host_replaced', 'Host connection changed.');
+          const saved = draft.hosts.find(value => value.id === currentHost.id);
+          if (!saved) throw new BrokerError(404, 'host_unavailable', 'Host is unavailable.');
+          saved.providers = [...message.providers];
+          return { value: undefined, publish() { if (currentHost.socket === socket) currentHost.providers = [...message.providers]; } };
+        });
       } else if (message.type === 'preview_snapshot') {
         await previews.update(host.id, message.snapshot);
       } else closeConnection(1008, 'Unexpected uplink message');
@@ -696,6 +709,22 @@ export function createHostBroker(options: HostBrokerOptions) {
         body = JSON.stringify({ version: release.version, operationId: input.operationId });
       }
       const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/controller-update', undefined, body);
+      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
+    const providerSettings = /^\/v1\/remote\/hosts\/([^/]+)\/provider-settings$/.exec(url.pathname);
+    if (providerSettings) {
+      requireOwner(subject); requireAccess(providerSettings[1]!, subject);
+      if (!['GET', 'POST'].includes(request.method)) return json(405, { error: 'Method is not allowed.' });
+      const host = requireHost(providerSettings[1]!);
+      if (!host.providerManagement) return json(409, { error: 'Update the Controller to manage providers.' });
+      let body: string | undefined;
+      if (request.method === 'POST') {
+        const input = await readBody(request);
+        if (!isHostProviderChange(input)) return json(400, { error: 'Invalid provider preferences.' });
+        body = JSON.stringify(input);
+      }
+      const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/provider-settings', undefined, body);
+      requireOwner(principal(context)); requireAccess(providerSettings[1]!, principal(context));
       return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
     const codexDaemon = /^\/v1\/remote\/hosts\/([^/]+)\/codex-daemon$/.exec(url.pathname);

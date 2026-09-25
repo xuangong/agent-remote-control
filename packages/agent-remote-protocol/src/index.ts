@@ -27,3 +27,5 @@ export * from './controller-release.js';
 export * from './codex-daemon.js';
 
 export * from './session-control.js';
+
+export * from './host-providers.js';

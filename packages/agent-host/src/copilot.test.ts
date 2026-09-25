@@ -24,7 +24,7 @@ describe('Copilot registration executable preflight', () => {
     const previous = process.env.COPILOT_HOME;
     const directory = await mkdtemp(join(tmpdir(), 'copilot-profile-')); temporary.push(directory);
     const copilotHome = join(directory, 'selected-profile');
-    const executable = await entry(`if (process.argv[2] !== '--version' || process.env.COPILOT_HOME !== ${JSON.stringify(copilotHome)} || process.env.COPILOT_HOST_TEST !== 'yes') process.exit(1); console.log('GitHub Copilot CLI 1.0.83');`);
+    const executable = await entry(`if (process.argv[2] !== '--version' || process.env.COPILOT_HOME !== ${JSON.stringify(copilotHome)} || process.env.COPILOT_HOST_TEST !== 'yes' || process.env.COPILOT_AUTO_UPDATE !== 'false') process.exit(1); console.log('GitHub Copilot CLI 1.0.83');`);
     const registration = await createCopilotHostRegistration({ executable, copilotHome, env: { COPILOT_HOST_TEST: 'yes' },
       workspaces: [{ id: 'work', name: 'Work', path: '/work' }] });
     try {

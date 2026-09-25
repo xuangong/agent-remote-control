@@ -66,26 +66,25 @@ pnpm agent-remote-controller start
 
 Select **Codex · <Host name> · Online** in Session intake. The verified CLI version is `0.148.0`; older versions are rejected with an actionable message. `AGENT_REMOTE_CODEX_HOME`, `AGENT_REMOTE_CODEX_EXECUTABLE`, and `AGENT_REMOTE_WORKSPACE` remain supported aliases. See [Codex installation and debugging](docs/runbooks/codex-debug.md) for an isolated Tencent-registry install and the process/session boundaries.
 
-## Connect Claude Code, or both native providers
+## Connect Claude Code and other native providers
 
-Start the workbench and generate a temporary key through **Pair Agent Host**. For Claude alone:
+Start the workbench and generate a temporary key through **Pair Agent Host**. For a custom Claude installation:
 
 ```bash
 export AGENT_HOST_SERVER=http://127.0.0.1:5910
 export AGENT_HOST_REMOTE_KEY='paste-the-generated-key'
-export AGENT_HOST_PROVIDERS=claude
 export AGENT_HOST_CLAUDE=/absolute/path/to/claude
 export AGENT_HOST_WORKSPACE=/absolute/path/to/workspace
 pnpm agent-remote-controller start
 ```
 
-Select **Claude Code · <Host name> · Online**. Claude Code must be version `2.1.247` or newer; the adapter pins `@anthropic-ai/claude-agent-sdk` to `0.3.247`. Set `AGENT_HOST_PROVIDERS=codex,claude` and `AGENT_HOST_CODEX` to advertise both providers under one Host. The default remains `codex`. All selected executables must be available; empty, duplicate, or unknown selections fail startup.
+Select **Claude Code · <Host name> · Online**. Claude Code must be version `2.1.247` or newer; the adapter pins `@anthropic-ai/claude-agent-sdk` to `0.3.247`. Controller automatically detects supported providers at startup and every minute; unavailable installations do not prevent Host startup. Use **Settings → Hosts → Agent providers** for persistent per-Host opt-outs. Executable overrides such as `AGENT_HOST_CODEX` remain supported.
 
 `AGENT_HOST_CLAUDE_HOME` selects an optional native profile through `CLAUDE_CONFIG_DIR`. Native authentication and settings remain owned by Claude Code. See [Claude installation and debugging](docs/runbooks/claude-debug.md) for isolated installation, configuration, session lifetime, and supported controls. Use a different `AGENT_HOST_STATE_DIR` when keeping an existing daemon running alongside a separate Host.
 
 ## Connect GitHub Copilot through its official SDK
 
-Copilot is opt-in: `pnpm start --providers copilot` uses the pinned installed CLI; pass `--copilot /absolute/path/to/copilot` to override. For a manually paired Host, set `AGENT_HOST_PROVIDERS=copilot`, `AGENT_HOST_SERVER`, `AGENT_HOST_REMOTE_KEY` and `AGENT_HOST_WORKSPACE`, then run `pnpm agent-remote-controller start`. `AGENT_HOST_COPILOT` overrides the executable and `AGENT_HOST_COPILOT_HOME` selects the native profile. Comma-separated Host selections may include `codex,claude,copilot`.
+Copilot is opt-in: `pnpm start --providers copilot` uses the pinned installed CLI; pass `--copilot /absolute/path/to/copilot` to override. For a manually paired Host, set `AGENT_HOST_SERVER`, `AGENT_HOST_REMOTE_KEY` and `AGENT_HOST_WORKSPACE`, then run `pnpm agent-remote-controller start`. `AGENT_HOST_COPILOT` overrides the executable and `AGENT_HOST_COPILOT_HOME` selects the native profile. The Host discovers compatible native providers automatically.
 
 The adapter uses official `@github/copilot-sdk` **1.0.11** and Copilot CLI **1.0.83**, through SDK stdio. It does not use ACP. Authentication remains in the native CLI profile/environment. Real SDK/CLI tests use an isolated local model endpoint, without cloud prompts. See the [Copilot audit](docs/current/agent-remote/copilot-support-audit.md) for supported input, history, parent-owned children, experimental APIs and remaining gaps. Run `pnpm test:copilot` for the bounded adapter and native loopback suite.
 

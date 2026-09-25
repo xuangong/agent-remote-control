@@ -37,19 +37,20 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
   Type.Union([
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providers: Type.Array(provider, { minItems: 0, maxItems: 64 }) }, object),
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity, pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat_ack'), nonce: heartbeatNonce }, object),
@@ -89,14 +90,14 @@ export function encodeRemoteHostUplinkMessage(value: RemoteHostUplinkMessage): W
 function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplinkMessage {
   if (!Value.Check(RemoteHostUplinkMessage, value)) return false;
   if (value.type === 'registered' && value.heartbeat.timeoutMs >= value.heartbeat.intervalMs) return false;
-  if (value.type === 'register' && 'providers' in value
+  if ((value.type === 'register' || value.type === 'provider_snapshot') && 'providers' in value
     && new Set(value.providers.map((provider) => provider.providerId)).size !== value.providers.length) return false;
   if (value.type === 'rpc_request') {
     const pathname = value.path.split('?', 1)[0]!;
     const sessionScoped = pathname === '/remote/attach' || pathname === '/remote/child/attach' || pathname === '/remote/create' || pathname === '/v1/providers'
       || /^\/v1\/sessions\/[^/]+\/(snapshot|timeline)$/.test(pathname);
     if (sessionScoped !== (value.sessionId !== undefined)) return false;
-    if (pathname === '/remote/previews' || pathname === '/remote/controller-update' || pathname === '/remote/codex-daemon') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
+    if (pathname === '/remote/previews' || pathname === '/remote/controller-update' || pathname === '/remote/codex-daemon' || pathname === '/remote/provider-settings') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
     if (pathname.startsWith('/remote/')) {
       const isRead = pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
         || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models' || pathname === '/remote/vscode-tunnel';

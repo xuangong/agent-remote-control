@@ -64,14 +64,14 @@ async function fixture(purpose: 'host-only' | 'gateway-setup' | 'legacy' = 'gate
   const start = (overrides: NodeJS.ProcessEnv = {}, saved = false, command = 'foreground') => {
     output = '';
     child = spawn(process.execPath, ['dist/cli.js', command], { env: {
-      PATH: process.env.PATH, HOME: root, AGENT_HOST_STATE_DIR: root, AGENT_HOST_WORKSPACE: root, AGENT_HOST_CODEX: executable, AGENT_HOST_CLAUDE: claudeExecutable, TEST_CLAUDE_CAPTURE: join(root, 'claude-native.json'),
+      PATH: process.env.PATH, HOME: root, AGENT_HOST_STATE_DIR: root, AGENT_HOST_WORKSPACE: root, AGENT_HOST_CODEX: executable, ...(saved ? {} : { AGENT_HOST_CLAUDE: join(root, 'missing-claude') }), AGENT_HOST_COPILOT: join(root, 'missing-copilot'), AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:1', TEST_CLAUDE_CAPTURE: join(root, 'claude-native.json'),
       TEST_CAPTURE: join(root, 'native.json'), ...(nativeFails ? { TEST_NATIVE_FAIL: '1' } : {}),
       ...(saved ? {} : { AGENT_HOST_SERVER: `http://127.0.0.1:${address.port}`, AGENT_HOST_REMOTE_KEY: 'invitation' }), ...overrides,
     }, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout!.on('data', chunk => { output += chunk; }); child.stderr!.on('data', chunk => { output += chunk; });
     return child;
   };
-  return { root, start, stop, apiKey, deviceKey, sequence, registrations, sockets, serverUrl: `http://127.0.0.1:${address.port}`, get output() { return output; }, get bootstrapKey() { return bootstrapKey; },
+  return { root, claudeExecutable, start, stop, apiKey, deviceKey, sequence, registrations, sockets, serverUrl: `http://127.0.0.1:${address.port}`, get output() { return output; }, get bootstrapKey() { return bootstrapKey; },
     delayNextRegistration: (delay: number) => { registrationDelay = delay; }, setPurpose: (value: 'host-only' | 'gateway-setup' | 'legacy') => { purpose = value; }, failBootstrap: () => { status = 503; }, failNative: () => { nativeFails = true; } };
 }
 
@@ -107,9 +107,11 @@ it('rejects shared native state after enrolling and redacts a provisioned key fr
   expect((await once(child, 'exit'))[0]).toBe(1); expect(f.registrations).toHaveLength(1);
   child = f.start({ CODEX_HOME: '', AGENT_HOST_CODEX_CONNECTION: 'shared' }, true);
   expect((await once(child, 'exit'))[0]).toBe(1); expect(f.registrations).toHaveLength(2);
-  f.failNative(); child = f.start({ CODEX_HOME: '', AGENT_HOST_CODEX_CONNECTION: 'private' }, true);
-  expect((await once(child, 'exit'))[0]).toBe(1);
-  expect(f.output).not.toContain(f.apiKey); expect(f.output).toContain('[redacted]');
+  f.failNative(); f.start({ CODEX_HOME: '', AGENT_HOST_CODEX_CONNECTION: 'private' }, true);
+  await vi.waitFor(() => expect(f.output).toContain('uplink is registered'), { timeout: 5000 });
+  expect(f.registrations.at(-1)?.providers).toEqual([]);
+  expect(f.output).not.toContain(f.apiKey);
+  expect(f.output).toContain('unavailable');
 }, 15000);
 
 
@@ -174,7 +176,9 @@ for (const purpose of ['host-only', 'legacy'] as const) {
 }
 
 it('initializes the selected Claude adapter without starting Codex and restores its setup on restart', async () => {
-  const f = await fixture(); f.start({ AGENT_HOST_PROVIDERS: 'claude' });
+  const f = await fixture();
+  await writeFile(join(f.root, 'provider-settings.json'), JSON.stringify({ disabled: ['codex'] }));
+  f.start({ AGENT_HOST_PROVIDERS: 'claude', AGENT_HOST_CLAUDE: f.claudeExecutable });
   await vi.waitFor(() => expect(f.output).toContain('uplink is registered'), { timeout: 5000 });
   expect(f.sequence).toEqual(['enrollment', 'bootstrap', 'closed', 'providers']);
   expect(f.registrations[1]?.providers).toEqual([expect.objectContaining({ providerId: 'claude' })]);
@@ -266,6 +270,19 @@ it('exposes sharing identity only through the authenticated local socket without
   expect(await local({ action: 'share-catalog', token: state!.token, hostId: 'host-cli', providerId: 'codex', serverUrl: 'https://wrong.example' }))
     .toEqual({ error: 'The Host connection changed. Run share again.' });
   expect(await local({ action: 'share-catalog', token: state!.token, hostId: 'host-cli', providerId: 'disabled', serverUrl: f.serverUrl }))
-    .toMatchObject({ status: 400 });
+    .toMatchObject({ status: 403 });
   expect(f.registrations).toHaveLength(2);
+}, 10000);
+
+
+it('discovers another installed agent on a Host whose saved provider selection is codex', async () => {
+  const f = await fixture('host-only');
+  f.start({ AGENT_HOST_PROVIDERS: 'codex', AGENT_HOST_CLAUDE: f.claudeExecutable });
+  await vi.waitFor(() => expect(f.output).toContain('uplink is registered'), { timeout: 5000 });
+  expect(f.registrations.at(-1)?.providers).toHaveLength(2);
+  expect(f.registrations.at(-1)?.providers).toEqual(expect.arrayContaining([
+    expect.objectContaining({ providerId: 'codex' }), expect.objectContaining({ providerId: 'claude' }),
+  ]));
+  expect(f.bootstrapKey).toBeUndefined();
+  expect(JSON.parse(await readFile(join(f.root, 'claude-native.json'), 'utf8')).key).toBeUndefined();
 }, 10000);

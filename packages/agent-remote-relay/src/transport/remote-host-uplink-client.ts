@@ -44,6 +44,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly environment?: HostEnvironment;
   readonly controller?: ControllerIdentity;
   readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true }[];
+  readonly providerChanges?: { current(): NonNullable<RemoteHostUplinkClientOptions['providers']>; subscribe(listener: () => void): () => void };
   readonly remoteKey: string;
   /** Must durably persist the offered credential before resolving. */
   readonly onCredential?: (credential: string) => Promise<void>;
@@ -126,6 +127,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     let lastHeartbeatAt: number | undefined;
     let retirement: DiagnosticDetails | undefined;
     let operationScope: string | undefined;
+    let unsubscribeProviders: (() => void) | undefined;
     let unsubscribePreviews: (() => void) | undefined;
     function details(): DiagnosticDetails {
       return { connectionId, registered,
@@ -150,7 +152,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     function retire(cause: DisconnectCause): void {
       if (retired) return;
       retired = true;
-      unsubscribePreviews?.();
+      unsubscribeProviders?.(); unsubscribeProviders = undefined; unsubscribePreviews?.();
       if (registered) options.previews?.disconnected();
       retirement = { ...details(), ...cause };
       clearTimeout(registrationDeadline);
@@ -196,7 +198,8 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         ...(options.onCredential ? { credentialRotation: true } : {}),
         ...(options.environment ? { environment: options.environment } : {}),
         ...(options.controller ? { controller: options.controller } : {}),
-        name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providers }),
+        ...(options.providerChanges ? { providerManagement: true } : {}),
+        name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providerChanges?.current() ?? options.providers }),
       }));
     });
     socket.on('message', (data, isBinary) => {
@@ -240,6 +243,11 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         diagnose({ ...details(), event: 'registered' });
         attempts = 0;
         resolveReady({ hostId: decoded.value.hostId, ...(decoded.value.pairingPurpose ? { pairingPurpose: decoded.value.pairingPurpose } : {}) });
+        if (options.providerChanges) {
+          const publish = () => { if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'provider_snapshot', providers: options.providerChanges!.current() })); };
+          unsubscribeProviders = options.providerChanges.subscribe(publish);
+          publish();
+        }
         if (options.previews && decoded.value.tunnelToken) {
           const publish = (snapshot: PreviewRegistrationSnapshot) => {
             if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'preview_snapshot', snapshot }));

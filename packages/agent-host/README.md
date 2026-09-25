@@ -123,7 +123,6 @@ This project's hosted Relay and browser controller use `https://agents.xianliao.
 
 ```sh
 export AGENT_HOST_SERVER=https://agents.xianliao.de5.net
-export AGENT_HOST_PROVIDERS=codex,claude,copilot
 export AGENT_HOST_WORKSPACE="$HOME/projects"
 export AGENT_HOST_NAME="My development machine"
 # Bash (Linux): read the key without putting it in shell history.
@@ -135,8 +134,22 @@ unset AGENT_HOST_REMOTE_KEY AGENT_HOST_SERVER
 agent-remote-controller status
 ```
 
-Select only providers installed and authenticated on this machine. The default
-is `codex`. Codex must be 0.148.0 or newer, Claude Code 2.1.247 or newer; newer
+Controller automatically detects all supported providers at startup and every
+minute. One unavailable provider does not prevent the Host or other providers
+from connecting. In website **Settings → Hosts → Agent providers**, turn off an
+agent to persist an opt-out on that Host, or use **Detect again** after installing
+an agent. Disabled providers are not probed, and preferences survive Controller
+upgrades. Existing sessions and native tasks continue after a provider is disabled;
+new catalog/open/create operations are refused until it is enabled again.
+
+Old saved `AGENT_HOST_PROVIDERS` lists no longer restrict discovery. That variable
+still selects which CLIs are initialized by an explicitly requested Gateway setup.
+Executable/profile/server overrides remain supported. A supported installation
+is not proof of native authentication; sign in through the native CLI as needed.
+Detection does not log in, run prompts, install agents, or start a native server.
+Provider updates reach the Relay without restarting sessions or the Host uplink.
+
+Codex must be 0.148.0 or newer, Claude Code 2.1.247 or newer; newer
 versions are accepted but only the repository compatibility targets are verified.
 The packaged Copilot CLI is 1.0.83 with SDK 1.0.11. Codex and Claude use their
 existing native login/profile. Copilot uses its native authentication as well.
@@ -196,7 +209,6 @@ the providers locally before pairing. After installing the Controller:
 $env:AGENT_HOST_SERVER = 'https://your-relay.example'
 $env:AGENT_HOST_REMOTE_KEY = 'paste-the-generated-key'
 $env:AGENT_HOST_WORKSPACE = 'C:\Users\me\projects\app'
-$env:AGENT_HOST_PROVIDERS = 'codex'
 agent-remote-controller start
 agent-remote-controller status
 Remove-Item Env:AGENT_HOST_SERVER, Env:AGENT_HOST_REMOTE_KEY
@@ -208,7 +220,6 @@ For CMD, use `set` instead of PowerShell's `$env:` or Unix `export`:
 set "AGENT_HOST_SERVER=https://your-relay.example"
 set "AGENT_HOST_REMOTE_KEY=paste-the-generated-key"
 set "AGENT_HOST_WORKSPACE=C:\Users\me\projects\app"
-set "AGENT_HOST_PROVIDERS=codex"
 agent-remote-controller start
 agent-remote-controller status
 set "AGENT_HOST_SERVER="
@@ -528,8 +539,8 @@ Creation failures retain their uncertain operation identity even when a file-lim
 
 ## OpenCode shared server
 
-Start `opencode serve --hostname 127.0.0.1 --port 4096` independently and add
-`opencode` to `AGENT_HOST_PROVIDERS`. Set `AGENT_HOST_OPENCODE_URL` (default
+Start `opencode serve --hostname 127.0.0.1 --port 4096` independently. Controller
+automatically discovers a healthy supported server. Set `AGENT_HOST_OPENCODE_URL` (default
 `http://127.0.0.1:4096`) and, when enabled on the native server,
 `AGENT_HOST_OPENCODE_USERNAME` / `AGENT_HOST_OPENCODE_PASSWORD` in the Controller
 local configuration. Model credentials belong to OpenCode's own configuration.

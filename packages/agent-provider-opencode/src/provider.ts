@@ -25,6 +25,14 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
     this.transport = new OpenCodeTransport(options);
     if (options.callbackConfigPath) this.callbackBridge = new OpenCodeCallbackBridge(options.callbackConfigPath, new URL(options.serverUrl ?? 'http://127.0.0.1:4096').toString().replace(/\/$/, ''));
   }
+  async checkAvailability(timeoutMs = 5000): Promise<void> {
+    this.assertOpen();
+    const health = await this.transport.request(() => this.transport.client.global.health({ signal: AbortSignal.timeout(timeoutMs) }));
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(health.version);
+    if (!health.healthy || !match || !(Number(match[1]) > 1 || Number(match[1]) === 1 && (Number(match[2]) > 18 || Number(match[2]) === 18 && Number(match[3]) >= 18))) {
+      throw new Error('OpenCode server must be healthy and version 1.18.18 or newer.');
+    }
+  }
   private assertOpen(): void { if (this.closed) throw new Error('OpenCode provider is closed.'); }
   async createSession(config: AgentSessionConfig): Promise<OpenCodeSession> {
     this.assertOpen();

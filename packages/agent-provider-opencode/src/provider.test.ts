@@ -24,6 +24,7 @@ async function fixture() {
   let rejectPrompt = false;
   let abortBarrier: { arrive(): void; wait: Promise<void> } | undefined;
   let promptStatus = 204;
+  let health: unknown = { healthy: true, version: '1.18.31' };
   let title = 'Native title';
   let nativeSelection: any = {};
   let children: any[] = [];
@@ -43,6 +44,7 @@ async function fixture() {
     const body = data ? JSON.parse(data) : undefined;
     requests.push({ method: req.method!, path: url.pathname, body });
     const json = (value: any) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
+    if (url.pathname === '/global/health') return json(health);
     if (url.pathname === '/experimental/session') {
       if (globalListingStatus !== 200) { res.writeHead(globalListingStatus); res.end(); return; }
       const cursor = url.searchParams.get('cursor'); const limit = Number(url.searchParams.get('limit') ?? 100);
@@ -92,7 +94,7 @@ async function fixture() {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const emit = (type: string, properties: any) => { for (const stream of streams) stream.write(`data: ${JSON.stringify({ directory: process.cwd(), payload: { type, properties } })}\n\n`); };
   cleanups.push(async () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); server.close(); await once(server, 'close'); });
-  return { url: `http://127.0.0.1:${(server.address() as any).port}`, requests, emit, native, set nativeSelection(value: any) { nativeSelection = value; }, set children(value: any[]) { children = value; }, set globalSessions(value: any[]) { globalSessions = value; }, set globalListingStatus(value: number) { globalListingStatus = value; }, set connectedProviders(value: string[]) { connectedProviders = value; }, get connections() { return connections; }, get activeConnections() { return streams.size; }, set failHistoryReads(value: number) { failHistoryReads = value; }, blockNextHistory() {
+  return { set health(value: unknown) { health = value; }, url: `http://127.0.0.1:${(server.address() as any).port}`, requests, emit, native, set nativeSelection(value: any) { nativeSelection = value; }, set children(value: any[]) { children = value; }, set globalSessions(value: any[]) { globalSessions = value; }, set globalListingStatus(value: number) { globalListingStatus = value; }, set connectedProviders(value: string[]) { connectedProviders = value; }, get connections() { return connections; }, get activeConnections() { return streams.size; }, set failHistoryReads(value: number) { failHistoryReads = value; }, blockNextHistory() {
     let arrive!: () => void; let release!: () => void; const arrived = new Promise<void>(resolve => { arrive = resolve; });
     historyBarrier = { arrive, wait: new Promise<void>(resolve => { release = resolve; }) }; return { arrived, release };
   }, blockNextAbort() {
@@ -652,3 +654,18 @@ test('does not release a newer uncertain steer when an older cancellation acknow
     expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
   } finally { barrier.release(); await canceling; }
 }, 10000);
+
+
+test('availability probes only server health and rejects unsupported or unhealthy services', async () => {
+  const f = await fixture();
+  const provider = new OpenCodeAgentProvider({ serverUrl: f.url });
+  try {
+    await provider.checkAvailability();
+    for (const health of [{ healthy: true, version: '1.18.17' }, { healthy: false, version: '1.18.31' }, { healthy: true, version: 'dev' }]) {
+      f.health = health;
+      await expect(provider.checkAvailability()).rejects.toThrow('healthy and version');
+    }
+    expect(f.connections).toBe(0);
+    expect(f.requests.map(({ method, path }) => `${method} ${path}`)).toEqual(Array(4).fill('GET /global/health'));
+  } finally { await provider.close(); }
+});

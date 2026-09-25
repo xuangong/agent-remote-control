@@ -26,14 +26,13 @@ opencode serve --hostname 127.0.0.1 --port 4096
 Set these variables in the Controller's local environment before running the usual Controller start/connect command:
 
 ```sh
-export AGENT_HOST_PROVIDERS=codex,claude,copilot,opencode
 export AGENT_HOST_OPENCODE_URL=http://127.0.0.1:4096
 export AGENT_HOST_OPENCODE_PASSWORD='choose-a-local-password'
 # Optional: defaults to opencode, matching the native server.
 export AGENT_HOST_OPENCODE_USERNAME=opencode
 ```
 
-Select only the providers installed and configured on this machine. For OpenCode alone use `AGENT_HOST_PROVIDERS=opencode`. The URL defaults to `http://127.0.0.1:4096`; it must not contain credentials, a query or a fragment. Basic credentials stay in local configuration, never in persistence handles or public events. Controller's existing workspace admission policy still applies to each native session's actual directory, including direct-ID opens.
+Controller detects a reachable, healthy OpenCode server (1.18.18 or newer) automatically. Website Settings can disable it per Host; detecting it does not start the server or change its credentials. The URL defaults to `http://127.0.0.1:4096`; it must not contain credentials, a query or a fragment. Basic credentials stay in local configuration, never in persistence handles or public events. Controller's existing workspace admission policy still applies to each native session's actual directory, including direct-ID opens.
 
 OpenCode is a shared runtime. As with Codex shared, its native execution policy is trusted by default. `AGENT_HOST_OPENCODE_TRUST_SHARED=0` requests the Host's restricted policy instead. An external server cannot enforce that additional sandbox, so a restricted registration is rejected explicitly; the Controller does not claim restrictions it cannot enforce. Explicit full-control Host configuration can also authorize native execution.
 

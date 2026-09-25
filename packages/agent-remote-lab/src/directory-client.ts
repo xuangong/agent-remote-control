@@ -1,3 +1,4 @@
+import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from './workspace-access.js';
 import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
@@ -73,6 +74,11 @@ export class RemoteHostClient implements HostPairingService {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
   controllerRelease(options: { refresh?: boolean } = {}): Promise<{ release: ControllerRelease | null }> { return this.request(`controller-release${options.refresh ? '?refresh=1' : ''}`, 'GET', undefined, 35000); }
+  async providerSettings(hostId: string, input?: HostProviderChange): Promise<HostProviderSettings> {
+    const value = await this.request(`hosts/${encodeURIComponent(hostId)}/provider-settings`, input ? 'POST' : 'GET', input, 50000);
+    if (!isHostProviderSettings(value)) throw new Error('The Host provider result could not be verified. Refresh before changing settings.');
+    return value;
+  }
   async codexDaemon(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus> {
     const value = await this.request(`hosts/${encodeURIComponent(hostId)}/codex-daemon`, input ? 'POST' : 'GET', input, 15000);
     if (!isCodexDaemonStatus(value)) throw new Error('The daemon result could not be verified. Check status before restarting again.');

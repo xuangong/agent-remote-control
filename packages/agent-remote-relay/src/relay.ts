@@ -16,6 +16,7 @@ import { InMemoryResourceStore, type ResourceStore } from './resources/resource-
 
 export interface AgentRemoteRelay {
   readonly sessionControls?: SessionControlRegistry;
+  registerProvider(adapter: AgentProviderAdapter): void;
   listProviders(): readonly AgentProviderDescriptor[];
   createAgent(request: CreateAgentRequest): Promise<AgentSessionResponse>;
   resumeAgent(request: ResumeAgentRequest): Promise<AgentSessionResponse>;
@@ -68,6 +69,8 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
   ) {
     this.providers = new ProviderRegistry(providers);
   }
+
+  registerProvider(adapter: AgentProviderAdapter): void { this.ensureOpen(); this.providers.register(adapter); }
 
   listProviders(): readonly AgentProviderDescriptor[] {
     return this.providers.list();

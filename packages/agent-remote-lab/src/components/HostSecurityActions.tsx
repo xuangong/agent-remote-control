@@ -1,3 +1,4 @@
+import { HostProviders } from './HostProviders.js';
 import { HostCodexDaemon } from './HostCodexDaemon.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
@@ -27,6 +28,7 @@ export function HostSecurityActions({ host, service, visible = true }: { host: R
   }
   if (host.access === 'shared' || !host.managed) return null;
   return <div className="lab-host-security">
+    <HostProviders host={host} service={service} visible={visible} />
     <HostCodexDaemon host={host} service={service} visible={visible} />
     <div className="lab-host-security-actions">
       {host.credentialRotation && service.rotate ? <button type="button" disabled={busy} onClick={() => setAction('rotate')}>Rotate credential</button> : null}

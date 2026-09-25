@@ -1523,3 +1523,10 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 }
 
 :is(.lab-shell, .lab-session-view) .lab-composer-dock[data-collapsed]:has(.agent-composer[data-control-readonly]) .lab-composer-toggle { bottom: calc(100% - 1px); }
+
+.lab-host-providers { min-width: 0; margin-block: .75rem; }
+.lab-host-provider-list { display: grid; gap: .75rem; margin-block: .75rem; }
+.lab-host-provider-row { display: flex; align-items: flex-start; gap: .6rem; min-width: 0; cursor: pointer; }
+.lab-host-provider-row > input { flex: 0 0 auto; width: auto; margin-top: .25rem; }
+.lab-host-provider-row > span { display: grid; gap: .2rem; min-width: 0; overflow-wrap: anywhere; }
+.lab-host-provider-row small { font-weight: normal; opacity: .75; }

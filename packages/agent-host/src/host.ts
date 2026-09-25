@@ -1,3 +1,4 @@
+import type { HostProviderDiscovery } from './provider-discovery.js';
 import {NativeSessionOwnerError, type NativeOwnerIdentity} from './native-session-owner.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
@@ -53,6 +54,7 @@ export interface AgentHostProviderRegistration {
 }
 export interface AgentHostRuntimeOptions {
   registrations: readonly AgentHostProviderRegistration[];
+  providerEnabled?: (providerId: string) => boolean;
   onRequestDiagnostic?: (diagnostic: AgentHostRequestDiagnostic) => void;
   idleGraceMs?: number;
   idleReconcileMs?: number;
@@ -73,6 +75,7 @@ export interface AgentHostRequestDiagnostic {
 }
 export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
+  addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
   executeOperation(scope: string): SessionWireOperationExecutor;
   acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
@@ -83,6 +86,7 @@ export interface AgentHostRuntime {
   close(): Promise<void>;
 }
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
+  providerDiscovery?: HostProviderDiscovery;
   codexDaemon?: { stateDir: string; restart(operationId: string): Promise<void> };
   controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string, clean?: boolean): void | Promise<void> };
   vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
@@ -109,6 +113,7 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
   const runtime = createAgentHostRuntime({ ...options, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
+  options.providerDiscovery?.onRegistration(runtime.addRegistration);
   runtime.setRelayConnected(false);
   const updater = options.controller ? createControllerUpdater({ ...options.controller, beginRestart: runtime.beginControllerRestart, cancelRestart: runtime.cancelControllerRestart }) : undefined;
   const codexDaemon = options.codexDaemon ? createCodexDaemonControl(options.codexDaemon) : undefined;
@@ -120,11 +125,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   interface Connection { client: RemoteHostUplinkClient; superseded: boolean }
   let connection: Connection;
   let credentialPersistence: Promise<void> = Promise.resolve();
+  const describeProviders = () => options.registrations.filter(item => options.providerEnabled?.(item.directory.providerId) !== false).map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(codexDaemon && adapter.descriptor.providerId === 'codex' ? { daemonControl: true as const } : {}), ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) }));
   const connect = (config: AgentHostOptions['uplink']): Connection => {
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
-      providers: options.registrations.map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(codexDaemon && adapter.descriptor.providerId === 'codex' ? { daemonControl: true as const } : {}), ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) })), url: config.url, remoteKey: config.remoteKey,
+      providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
           if (generation !== current || closed) throw new Error('Host credential persistence was superseded.');
@@ -144,7 +150,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           return { status: 202, body: JSON.stringify(await updater.request(body.version, body.operationId)) };
         } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.',
           ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}) }) }; }
-      })() : request.path === '/remote/codex-daemon' && codexDaemon ? codexDaemon.control(request) : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
+      })() : request.path === '/remote/provider-settings' && options.providerDiscovery ? options.providerDiscovery.control(request) : request.path === '/remote/codex-daemon' && codexDaemon ? codexDaemon.control(request) : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
         : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
       operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
@@ -159,7 +165,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const current = connection;
     const { hostId } = await current.client.ready;
     if (current !== connection || closed || state !== 'registered') throw new Error('The Host connection changed. Run share again.');
-    return { hostId, providers: options.registrations.map(({ adapter }) => ({
+    return { hostId, providers: options.registrations.filter(item => options.providerEnabled?.(item.directory.providerId) !== false).map(({ adapter }) => ({
       providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName })) };
   }
   let closePromise: Promise<void> | undefined;
@@ -209,7 +215,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   if (options.executionPolicy) options = { ...options, registrations: options.registrations.map(registration => ({ ...registration,
     directory: protectHostDirectory(registration.directory, { ...options.executionPolicy!,
       lockPermissions: registration.nativePermissionControl ? false : options.executionPolicy!.lockPermissions }) })) };
-  if (!options.registrations.length) throw new Error('Agent Host requires at least one provider registration.');
+  if (!options.registrations.length && !options.providerEnabled) throw new Error('Agent Host requires at least one provider registration.');
   const registrations = new Map<string, AgentHostProviderRegistration>();
   const prepared = new Map<string, AgentSession>();
   for (const registration of options.registrations) {
@@ -254,11 +260,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       for (const binding of found) {family.push(binding); ids.add(binding.nativeSessionId);}
     }
   }
-  for (const {directory} of registrations.values()) directory.setSessionHandoffHandler?.(async (nativeSessionId, next) => {
+  function bindHandoff(directory: AgentHostDirectory) { directory.setSessionHandoffHandler?.(async (nativeSessionId, next) => {
     const family = nativeFamily(directory.providerId, nativeSessionId);
     for (const binding of family) relay.sessionControls?.setNativeOwner(binding.agentId, next);
     for (const binding of family.reverse()) await relay.closeAgent(binding.agentId);
-  });
+  }); }
+  for (const {directory} of registrations.values()) bindHandoff(directory);
   function tracked<T>(operation: Promise<T>): Promise<T> {
     pending.add(operation);
     void operation.finally(() => pending.delete(operation)).catch(() => undefined);
@@ -490,6 +497,17 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (closed) throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
       if (draining && request.method === 'POST') throw new HostRequestError(503, 'controller_updating', 'Controller is updating. Reconnect before retrying.');
       const url = new URL(request.path, 'http://agent-host.local');
+      const payload = request.method === 'POST' ? body(request.body) : undefined;
+      const selectedProvider = request.method === 'GET' ? url.searchParams.get('providerId') : payload?.providerId;
+      const existing = request.sessionId ? bindingsByAgent.get(request.sessionId) : undefined;
+      // Uplink recovery may rebind a still-live session after its provider is disabled.
+      // It must not open another native session or revive an idle released session.
+      const recovering = request.method === 'POST' && (url.pathname === '/remote/attach' || url.pathname === '/remote/child/attach')
+        && existing?.providerId === selectedProvider && existing?.nativeSessionId === payload?.nativeSessionId
+        && !!existing && !!liveAgent(existing.agentId) && payload?.takeOver === undefined;
+      if (!recovering && typeof selectedProvider === 'string' && options.providerEnabled?.(selectedProvider) === false) {
+        throw new HostRequestError(403, 'provider_disabled', 'This provider is disabled or unavailable on the Host. Enable it in Settings.');
+      }
       if (request.method === 'GET') {
         const providerId = string(url.searchParams.get('providerId'), 'providerId');
         const directory = registration(providerId).directory;
@@ -598,7 +616,22 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         : { agentId, status: 'failed' as const, message: 'Native cancellation did not complete.' };
     } finally { clearTimeout(timer); release(); }
   }
-  return { relay, control, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  function addRegistration(value: AgentHostProviderRegistration): void {
+    if (closed || draining) throw new Error('Host cannot register a provider while stopping.');
+    const id = value.adapter.descriptor.providerId;
+    if (id !== value.directory.providerId || registrations.has(id)) throw new Error('Invalid or duplicate provider registration.');
+    const registration = options.executionPolicy ? { ...value, directory: protectHostDirectory(value.directory, {
+      ...options.executionPolicy, lockPermissions: value.nativePermissionControl ? false : options.executionPolicy.lockPermissions,
+    }) } : value;
+    relay.registerProvider({ descriptor: value.adapter.descriptor,
+      async createSession(config) { const session = prepared.get(config.sessionId); if (!session) throw new Error('Agent Host projection session is unavailable.'); prepared.delete(config.sessionId); return session; },
+      resumeSession: value.adapter.resumeSession.bind(value.adapter),
+    });
+    registrations.set(id, registration);
+    catalogs.set(id, new RemoteHostCatalog({ roots: registration.directory.list }));
+    bindHandoff(registration.directory);
+  }
+  return { relay, addRegistration, control, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the
@@ -612,7 +645,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       closed = true;
       const releasing = idle.close();
       for (const catalog of catalogs.values()) catalog.dispose();
-      const cleanup = Promise.allSettled([releasing, relay.close(), operationCache.close(), ...options.registrations.map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
+      const cleanup = Promise.allSettled([releasing, relay.close(), operationCache.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
       await bounded(cleanup, shutdownTimeoutMs);
     })(); } };
 }

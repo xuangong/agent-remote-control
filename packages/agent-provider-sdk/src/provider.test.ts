@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError, prepareAgentOperation, validateSessionSetting } from './index.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -116,4 +117,13 @@ describe('provider contract', () => {
     expect(stream.filter((item) => item.type === 'history_boundary')).toHaveLength(1);
     expect(stream.map((item) => item.type)).toEqual(['observation', 'history_boundary', 'observation']);
   });
+});
+
+
+it('classifies only explicit side-effect-free preparation as definitely rejected', async () => {
+  expect(await prepareAgentOperation(() => 'ready')).toBe('ready');
+  await expect(prepareAgentOperation(() => { throw new Error('Image unavailable'); })).rejects.toMatchObject({name: 'AgentOperationRejectedError', code: 'operation_preparation_failed'});
+  const rejection = new AgentOperationRejectedError('busy', 'Busy');
+  await expect(prepareAgentOperation(async () => { throw rejection; })).rejects.toBe(rejection);
+  expect(() => validateSessionSetting([], 'missing', 'value')).toThrow(AgentOperationRejectedError);
 });

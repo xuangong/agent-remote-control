@@ -45,6 +45,11 @@ it('queues input during consumer access restoration and dispatches only after ac
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false },
     runtimeInfo: { providerId: 'test', status: 'idle' },
   } });
+  replica.applyHistory({ protocolVersion: '1.5.0', type: 'timeline_page', payload: {
+    requestId: 'initial', agentId: 'access-restoration', direction: 'tail', epoch: 'access-restoration',
+    reset: false, staleCursor: false, gap: false, window: { minSeq: 0, maxSeq: 0, nextSeq: 1 },
+    startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [], error: null,
+  } });
   const sendMessage = vi.fn(async (_text: string, _options?: unknown) => {});
   const client = { subscribeSessionState(listener: (state: RemoteSessionState) => void) { listener(remoteSessionState(replica.getState(), 'ready')); return () => {}; }, sendMessage } as unknown as RemoteSessionClient;
   const source: SessionConnectionSource = { acquire: () => ({ client, replica, release() {} }) };
@@ -68,5 +73,24 @@ it('queues input during consumer access restoration and dispatches only after ac
   await rerender(container, <View enabled />);
   await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
   expect(sendMessage.mock.calls[0]?.[0]).toBe('Keep this pending');
+  await unmount(container);
+});
+
+
+it('exposes the complete public session state and gates actions by its operation availability', async () => {
+  const replica = new AgentReplica();
+  let publish!: (state: RemoteSessionState) => void;
+  const initial = remoteSessionState(replica.getState(), 'ready');
+  const client = { subscribeSessionState(listener: typeof publish) { publish = listener; listener(initial); return () => {}; } } as unknown as RemoteSessionClient;
+  const source: SessionConnectionSource = { acquire: () => ({ client, replica, release() {} }) };
+  let view!: ReturnType<typeof useSessionView>;
+  function View() { view = useSessionView({ agentId: 'session', transport: {} as RemoteAgentTransport, source }); return null; }
+  const container = await render(<View />);
+  expect(view.sessionState).toEqual(initial);
+  expect(view.actions.cancel).toBeUndefined();
+  const ready = { ...initial, synchronized: true, operations: { ...initial.operations, cancel: { allowed: true as const } } };
+  await act(async () => publish(ready));
+  expect(view.sessionState).toEqual(ready);
+  expect(view.actions.cancel).toBeDefined();
   await unmount(container);
 });

@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -128,13 +129,14 @@ export class CopilotAgentSession implements AgentSession {
   async respondToInteraction(id: string, response: AgentInteractionResponse): Promise<void> {
     await this.interactions.respond(id, response); this.emitRuntime();
   }
-  private assertOpen() { if (this.closed) throw new Error('Copilot session is closed.'); }
+  private assertOpen() { if (this.closed) throw new AgentOperationRejectedError('operation_rejected', 'Copilot session is closed.'); }
   async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> { this.assertOpen(); await this.call(this.native.send({prompt: text, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot input'); }
   async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
     this.assertOpen();
     if (!parts.some(p => p.type === 'image')) return this.sendMessage(parts.flatMap(p => p.type === 'text' ? [p.text] : []).join('\n'), options);
-    if (!this.capabilities.imageInput) throw new Error('The selected Copilot model does not advertise image input.');
-    const input = await this.images.input(parts, this.capabilities.imageInput);
+    if (!this.capabilities.imageInput) throw new AgentOperationRejectedError('operation_rejected', 'The selected Copilot model does not advertise image input.');
+    const input = await prepareAgentOperation(() => this.images.input(parts, this.capabilities.imageInput!));
+    this.assertOpen();
     await this.call(this.native.send({...input, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot image input');
   }
   async steer(text: string): Promise<void> { await this.sendMessage(text, {delivery: 'immediate'}); }
@@ -198,7 +200,8 @@ export class CopilotAgentSession implements AgentSession {
       } finally {this.updatingPermissions = false;}
       return;
     }
-    if ((await this.call(this.rpc.metadata.isProcessing(), 'Copilot foreground activity')).processing) throw new Error('Copilot model changes require an idle session.');
+    if ((await prepareAgentOperation(() => this.call(this.rpc.metadata.isProcessing(), 'Copilot foreground activity'))).processing) throw new AgentOperationRejectedError('operation_rejected', 'Copilot model changes require an idle session.');
+    this.assertOpen();
     if (id === 'reasoning_effort') await this.call(this.rpc.model.setReasoningEffort({reasoningEffort: value}), 'Copilot reasoning effort');
     else {
       const result = await this.call(this.rpc.model.switchTo({modelId: value}), 'Copilot model switch');
@@ -215,7 +218,7 @@ export class CopilotAgentSession implements AgentSession {
   }
   async setPlanning(active: boolean): Promise<void> {
     this.assertOpen();
-    if (!this.capabilities.planning) throw new Error('Copilot planning is unavailable.');
+    if (!this.capabilities.planning) throw new AgentOperationRejectedError('operation_rejected', 'Copilot planning is unavailable.');
     await this.call(this.rpc.mode.set({mode: active ? 'plan' : 'interactive'}), 'Copilot planning mode');
     await this.refreshMode(); this.emitRuntime();
     if (this.info.planning?.active !== active) throw new Error('Copilot did not confirm the requested planning mode.');
@@ -245,8 +248,9 @@ export class CopilotAgentSession implements AgentSession {
     }));
   }
   async executeCommand(id: string, args: string) {
-    const command = (await this.listCommands()).find(command => command.id === id);
-    if (!command) throw new Error('Unknown or disabled Copilot skill.');
+    const command = (await prepareAgentOperation(() => this.listCommands())).find(command => command.id === id);
+    if (!command) throw new AgentOperationRejectedError('operation_rejected', 'Unknown or disabled Copilot skill.');
+    this.assertOpen();
     const result = await this.call(this.rpc.commands.invoke({name: command.name, input: args}), 'Invoke Copilot skill');
     if (result.runtimeSettingsChanged) { await this.refreshControls(); this.emitRuntime(); }
     if (result.kind === 'agent-prompt') {

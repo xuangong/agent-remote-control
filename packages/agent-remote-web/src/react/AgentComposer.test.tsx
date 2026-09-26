@@ -6,7 +6,7 @@ import { render, rerender } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
 
 it('allows cached-session drafts while synchronizing but waits for readiness to send or execute commands', async () => {
-  const state: AgentReplicaState = { ...createReplicaState(), agent: {
+  const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
     id: 'cached', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false },
     pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' },
@@ -55,7 +55,7 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
 it('keeps image atoms through reconnect and sends ordered image-only content with digest identity', async () => {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
-  const state: AgentReplicaState = { ...createReplicaState(), agent: {
+  const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
     id: 'images', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: true, imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } },
     pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' },
@@ -97,7 +97,7 @@ it('offers explicit upload retry after the Host rejects an expired attachment', 
   });
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
-  const state: AgentReplicaState = { ...createReplicaState(), agent: {
+  const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
     id: 'expired-image', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: true, imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } },
     pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' },

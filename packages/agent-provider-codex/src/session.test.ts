@@ -473,3 +473,17 @@ describe('CodexAppServerSession', () => {
     await session.dispose();
   });
 });
+
+
+it('reports a definite local cancellation rejection without sending a native mutation', async () => {
+  const harness = createSessionHarness();
+  const starting = CodexAppServerSession.resume(harness.transport, { providerId: 'codex', sessionId: 'thread-1', opaque: '{}' });
+  respond(harness, (await waitForRequest(harness, 'initialize')).id, {});
+  respond(harness, (await waitForRequest(harness, 'thread/resume')).id, { thread: { id: 'thread-1' } });
+  respond(harness, (await waitForRequest(harness, 'thread/read')).id, { thread: { id: 'thread-1', status: { type: 'idle' }, turns: [] } });
+  const session = await starting;
+  try {
+    await expect(session.cancel()).rejects.toMatchObject({ name: 'AgentOperationRejectedError' });
+    expect(harness.requests.some(request => request.method === 'turn/interrupt')).toBe(false);
+  } finally { await session.dispose(); }
+});

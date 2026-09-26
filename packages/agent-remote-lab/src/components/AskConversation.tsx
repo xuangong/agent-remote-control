@@ -5,7 +5,6 @@ import { TimelineDisplay, type TimelineDisplayMode } from '@orchardworks/agent-r
 import type { AskEntry, AskInput, AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { ForkStore, SessionFork } from '../session-forks.js';
-import { sessionActivity } from '../session-activity.js';
 import { sessionKey } from '../session-tree.js';
 import type { FloatingPosition } from '../hooks/useTrackingPosition.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
@@ -52,11 +51,11 @@ function AskChat({ mode, record, inputs, onSendInput, replica, transport, draftB
   draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
 }) {
   const session = record.target!;
-  const { state, status, actions, questions, setQuestions, sendQueuedInput } = useConversationSession(session, transport, replica, busy);
+  const { state, sessionState, status, actions, questions, setQuestions, sendQueuedInput } = useConversationSession(session, transport, replica, busy);
   useEffect(() => {
     if (sendQueuedInput && !busy && inputs?.[0]) onSendInput(inputs[0].id, sendQueuedInput);
   }, [sendQueuedInput, inputs, onSendInput, busy]);
-  return <TimelineDisplay.Provider value={mode}><LabWorkbench compact state={state}
+  return <TimelineDisplay.Provider value={mode}><LabWorkbench sessionState={sessionState} compact state={state}
     consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
       if (args.trim()) {
         if (!actions.sendMessage) throw new Error('Wait for Ask to finish synchronizing.');
@@ -67,7 +66,7 @@ function AskChat({ mode, record, inputs, onSendInput, replica, transport, draftB
     sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
     draftSessionKey={sessionKey(session)} draftBinding={draftBinding}
     questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
-    conversationPath={<strong className="agent-session-title" data-session-status={sessionActivity(state)}>Ask</strong>}
+    conversationPath={<strong className="agent-session-title" data-session-status={state?.agent?.status}>Ask</strong>}
     sessionManager={tools} /></TimelineDisplay.Provider>;
 }
 

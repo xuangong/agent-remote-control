@@ -245,3 +245,14 @@ it('reserves submission during image reads and releases it on a failed image pre
     expect((await native.nextInput()).value.message.content).toBe('after failure');
   } finally { await session.dispose(); await rm(root, { recursive: true, force: true }); }
 });
+
+
+it('reports local busy rejection without enqueuing a second input', async () => {
+  const native = runtime();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+  try {
+    await session.sendMessage('First');
+    await expect(session.sendMessage('Second')).rejects.toMatchObject({ name: 'AgentOperationRejectedError' });
+    expect((await native.nextInput()).value.message.content).toBe('First');
+  } finally { await session.dispose(); }
+});

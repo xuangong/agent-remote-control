@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { SessionEvent } from '@github/copilot-sdk';
 import type { AgentCapabilities, AgentChildSession, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { Channel } from './channel.js';
@@ -67,14 +68,14 @@ export class CopilotChildSession implements AgentSession {
   }
   observe() { if (this.observed) throw new Error('Copilot child observation already attached.'); this.observed = true; return this.stream; }
   async sendMessage(text: string): Promise<void> {
-    if (this.closed || this.parent.isClosed) throw new Error('Copilot child view is closed.');
+    if (this.closed || this.parent.isClosed) throw new AgentOperationRejectedError('operation_rejected', 'Copilot child view is closed.');
     this.activityGeneration++;
     const result = await this.parent.call(this.parent.rpc.tasks.sendMessage({id: this.info.nativeSessionId, message: text}), 'Copilot child input');
     if (!result.sent) throw new Error(result.error ?? 'Copilot child input was rejected.');
   }
   async steer(text: string) { await this.sendMessage(text); }
   async cancel() {
-    if (this.closed || this.parent.isClosed) throw new Error('Copilot child view is closed.');
+    if (this.closed || this.parent.isClosed) throw new AgentOperationRejectedError('operation_rejected', 'Copilot child view is closed.');
     const result = await this.parent.call(this.parent.rpc.tasks.cancel({id: this.info.nativeSessionId}), 'Copilot child cancellation');
     if (!result.cancelled) throw new Error('Copilot child cancellation was rejected.');
     this.finishCanceled();
@@ -83,7 +84,7 @@ export class CopilotChildSession implements AgentSession {
     this.parent.cancelChildInteractions(this.info.nativeSessionId);
     this.project({type: 'abort', id: `task-canceled:${this.info.nativeSessionId}:${++this.taskRevision}`, parentId: null, timestamp: new Date().toISOString(), data: {}} as SessionEvent, 'live');
   }
-  async respondToInteraction(): Promise<void> { throw new Error('Copilot child interactions are owned by the parent session.'); }
+  async respondToInteraction(): Promise<void> { throw new AgentOperationRejectedError('operation_rejected', 'Copilot child interactions are owned by the parent session.'); }
   async runtimeInfo(): Promise<AgentRuntimeInfo> {
     const parent = await this.parent.runtimeInfo(); const current = parent.childSessions?.find(child => child.nativeSessionId === this.info.nativeSessionId) ?? this.info;
     return {providerId: 'copilot', sessionId: this.info.nativeSessionId, status: this.closed ? 'closed' : current.status, cwd: parent.cwd};

@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { DshChildSessions, DshObservationQueue, dshRuntimeObservation, dshChildLifecycleKey, type DshChildEvent } from './children.js';
 import { DshProjector } from './projector.js';
@@ -61,13 +62,13 @@ export class DshChildSession implements AgentSession {
     this.observed = true;
     try { yield* this.queue; } finally { await this.dispose(); }
   }
-  async sendMessage(): Promise<void> { throw new Error('DSH child view is read-only.'); }
+  async sendMessage(): Promise<void> { throw new AgentOperationRejectedError('operation_rejected', 'DSH child view is read-only.'); }
   async cancel(): Promise<void> {
     if (this.closed || !this.live || this.lifecycle === undefined) throw new Error('DSH child cancellation is unavailable.');
     // Admission stays synchronous: no catalog or history await may change the current target turn.
     this.source.interrupt(this.parentId, this.entry, this.lifecycle);
   }
-  async respondToInteraction(): Promise<void> { throw new Error('DSH child view is read-only; use its native owner for approvals.'); }
+  async respondToInteraction(): Promise<void> { throw new AgentOperationRejectedError('operation_rejected', 'DSH child view is read-only; use its native owner for approvals.'); }
   async runtimeInfo(): Promise<AgentRuntimeInfo> { return { ...this.info }; }
   async dispose(): Promise<void> {
     if (this.closed) return;

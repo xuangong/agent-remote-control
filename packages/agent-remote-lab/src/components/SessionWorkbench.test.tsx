@@ -25,3 +25,13 @@ it('keeps recordings read-only even when mutation and takeover actions are suppl
   expect(sendMessage).not.toHaveBeenCalled();
   expect(takeControl).not.toHaveBeenCalled();
 });
+
+
+it('renders authoritative idle activity even when retained turn metadata is present', async () => {
+  const state = { ...replicaState, agent: { ...replicaState.agent!, status: 'idle' as const,
+    activeTurn: { turnId: 'retained', startedAt: '2026-09-26T00:00:00Z' } } };
+  const container = await render(<SessionWorkbench state={state} sessionStatus="ready" actions={{}} />);
+  expect(container.querySelector('.lab-conversation-status')!.textContent).toBe('Ready');
+  expect(container.querySelector('[data-testid="agent-activity-label"]')!.textContent).toBe('Ready');
+  expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
+});

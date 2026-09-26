@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { createHash, type Hash } from 'node:crypto';
 
 import type {
@@ -141,9 +142,9 @@ export class LiveDshSession implements AgentSession {
 
   async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
     this.assertOpen();
-    if (!text.trim()) throw new Error('DSH message must not be empty.');
+    if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'DSH message must not be empty.');
     if (options?.delivery !== 'next_turn' && this.agent.runtimeInfo.status === 'running') {
-      if (!this.capabilities.steer) throw new Error('DSH immediate delivery requires native steering while running.');
+      if (!this.capabilities.steer) throw new AgentOperationRejectedError('operation_rejected', 'DSH immediate delivery requires native steering while running.');
       this.agent.steer(text);
       return;
     }
@@ -152,14 +153,15 @@ export class LiveDshSession implements AgentSession {
 
   async steer(text: string): Promise<void> {
     this.assertOpen();
-    if (!this.capabilities.steer) throw new Error('DSH steering is unsupported.');
-    if (!text.trim()) throw new Error('DSH steering message must not be empty.');
+    if (!this.capabilities.steer) throw new AgentOperationRejectedError('operation_rejected', 'DSH steering is unsupported.');
+    if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'DSH steering message must not be empty.');
     this.agent.steer(text);
   }
 
   async cancel(): Promise<void> {
     this.assertOpen();
-    if (!this.capabilities.cancel || !this.agent.cancel()) throw new Error('DSH session cannot be canceled.');
+    if (!this.capabilities.cancel) throw new AgentOperationRejectedError('unsupported_command', 'DSH session cannot be canceled.');
+    if (!this.agent.cancel()) throw new Error('DSH session cancellation was not confirmed.');
   }
 
   async listCommands(): Promise<AgentCommand[]> {
@@ -170,31 +172,31 @@ export class LiveDshSession implements AgentSession {
 
   async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
     this.assertOpen();
-    if (!this.capabilities.commands || !this.agent.executeCommand) throw new Error('DSH commands are unsupported.');
-    if (this.pending.size > 0) throw new Error('DSH commands cannot execute with pending interactions.');
+    if (!this.capabilities.commands || !this.agent.executeCommand) throw new AgentOperationRejectedError('operation_rejected', 'DSH commands are unsupported.');
+    if (this.pending.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'DSH commands cannot execute with pending interactions.');
     return this.agent.executeCommand(id, args);
   }
 
   async setSessionSetting(id: string, value: string): Promise<void> {
     this.assertOpen();
-    if (!this.capabilities.sessionSettings || !this.agent.setSessionSetting) throw new Error('DSH session settings are unsupported.');
-    if (this.pending.size > 0) throw new Error('DSH settings cannot change with pending interactions.');
+    if (!this.capabilities.sessionSettings || !this.agent.setSessionSetting) throw new AgentOperationRejectedError('operation_rejected', 'DSH session settings are unsupported.');
+    if (this.pending.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'DSH settings cannot change with pending interactions.');
     await this.agent.setSessionSetting(id, value);
   }
 
   async setPlanning(active: boolean): Promise<void> {
     this.assertOpen();
-    if (!this.capabilities.planning || !this.agent.setPlanning) throw new Error('DSH planning control is unsupported.');
-    if (this.pending.size > 0) throw new Error('DSH planning cannot change with pending interactions.');
+    if (!this.capabilities.planning || !this.agent.setPlanning) throw new AgentOperationRejectedError('operation_rejected', 'DSH planning control is unsupported.');
+    if (this.pending.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'DSH planning cannot change with pending interactions.');
     this.agent.setPlanning(active);
   }
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
     this.assertOpen();
     const request = this.pending.get(requestId);
-    if (!request) throw new Error(`No pending DSH interaction ${requestId}`);
+    if (!request) throw new AgentOperationRejectedError('operation_rejected', `No pending DSH interaction ${requestId}`);
     if (request.kind !== response.kind) {
-      throw new Error(`DSH interaction ${requestId} requires a ${request.kind} response`);
+      throw new AgentOperationRejectedError('operation_rejected', `DSH interaction ${requestId} requires a ${request.kind} response`);
     }
     validateDshInteractionResponse(request, response);
     if (!await this.agent.respondToInteraction(requestId, response)) {
@@ -262,8 +264,8 @@ export class LiveDshSession implements AgentSession {
   }
 
   private assertOpen(): void {
-    if (this.state === 'closing') throw new Error('DSH session is closing.');
-    if (this.state === 'closed') throw new Error('DSH session is closed.');
+    if (this.state === 'closing') throw new AgentOperationRejectedError('operation_rejected', 'DSH session is closing.');
+    if (this.state === 'closed') throw new AgentOperationRejectedError('operation_rejected', 'DSH session is closed.');
   }
 
   private receive(record: DshNativeObservation): void {

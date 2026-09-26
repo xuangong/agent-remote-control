@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from './provider.js';
 import type { AgentInteractionRequest, AgentInteractionResponse } from './control.js';
 import type { AgentStreamEvent } from './observation.js';
 import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from './interactions.js';
@@ -58,7 +59,7 @@ export class CommandInteractions {
   async respond(requestId: string, response: AgentInteractionResponse): Promise<boolean> {
     const pending = this.requests.get(requestId);
     if (!pending) return false;
-    if (pending.submitting) throw new Error('Command interaction response is already pending.');
+    if (pending.submitting) throw new AgentOperationRejectedError('interaction_pending', 'Command interaction response is already pending.');
     validateInteractionResponse(pending.request, response);
     pending.submitting = true;
     try {

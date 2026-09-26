@@ -1,8 +1,9 @@
+import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import { randomBytes } from 'node:crypto';
 import { IMAGE_INPUT_CAPABILITIES, validateInteractionResponse, type AgentCapabilities, type AgentCommand, type AgentInputPart, type AgentInteractionRequest, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionExtensions, type AgentStreamEvent, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { Event, GlobalEvent, Message, Session } from '@opencode-ai/sdk/v2/client';
 import type { OpenCodePersistence } from './provider.js';
-import { OpenCodeRequestError, OpenCodeTransport } from './transport.js';
+import { OpenCodeTransport } from './transport.js';
 import { ObservationChannel } from './channel.js';
 import { OpenCodeImages } from './images.js';
 import { fingerprint, nativeError, normalize, todoItem, usage, type NativeMessage } from './normalize.js';
@@ -309,9 +310,9 @@ export class OpenCodeSession implements AgentSession {
   private emitRuntime(): void { this.emit({ type: 'runtime_updated', provider: 'opencode', runtimeInfo: this.info(), activeTurnId: this.activeTurnId }); }
   async runtimeInfo(): Promise<AgentRuntimeInfo> { return this.info(); }
   private writable(): void {
-    if (this.closed) throw new Error('OpenCode session is closed.');
-    if (this.transport.restricted) throw new Error('OpenCode native execution is locked by Host policy.');
-    if (this.connection.state !== 'connected') throw new Error('OpenCode is reconnecting. Wait for native state recovery before sending input.');
+    if (this.closed) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode session is closed.');
+    if (this.transport.restricted) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode native execution is locked by Host policy.');
+    if (this.connection.state !== 'connected') throw new AgentOperationRejectedError('operation_rejected', 'OpenCode is reconnecting. Wait for native state recovery before sending input.');
   }
   async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> { await this.sendMessageContent([{ type: 'text', text }], options); }
   async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
@@ -319,31 +320,30 @@ export class OpenCodeSession implements AgentSession {
   }
   async steer(text: string): Promise<void> {
     this.writable();
-    if (!this.active) throw new Error('OpenCode has no active turn to steer.');
+    if (!this.active) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode has no active turn to steer.');
     return this.admitInput([{ type: 'text', text }], undefined, true);
   }
   private async admitInput(parts: readonly AgentInputPart[], options?: AgentMessageOptions, requireActive = false): Promise<void> {
     this.writable();
-    if (this.pendingInput) throw new Error('Wait for the OpenCode turn and pending interactions before sending another message.');
-    if (options?.delivery && options.delivery !== 'immediate') throw new Error('OpenCode does not support queued message delivery.');
+    if (this.pendingInput) throw new AgentOperationRejectedError('operation_rejected', 'Wait for the OpenCode turn and pending interactions before sending another message.');
+    if (options?.delivery && options.delivery !== 'immediate') throw new AgentOperationRejectedError('operation_rejected', 'OpenCode does not support queued message delivery.');
     const messageID = this.messageId();
     this.pendingInput = messageID;
     this.pendingInputWhileRunning = this.active;
     let dispatched = false;
     try {
-      const nativeParts = await this.images.input(parts);
+      const nativeParts = await prepareAgentOperation(() => this.images.input(parts));
       const selected = this.model();
       this.writable();
-      if (this.pendingInput !== messageID) throw new Error('OpenCode input admission changed before dispatch.');
-      if (requireActive && !this.active) throw new Error('OpenCode has no active turn to steer.');
+      if (this.pendingInput !== messageID) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode input admission changed before dispatch.');
+      if (requireActive && !this.active) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode has no active turn to steer.');
       this.pendingInputWhileRunning = this.active;
       dispatched = true;
       await this.transport.request(() => this.transport.client.session.promptAsync({ sessionID: this.nativeId, directory: this.config.cwd, messageID, parts: nativeParts, ...(selected ? { model: selected } : {}), agent: this.config.agent, variant: this.config.variant, system: this.extensions.systemPrompt }));
       if (this.pendingInputWhileRunning && this.pendingInput === messageID) this.pendingInput = undefined;
     } catch (error) {
       // A lost acknowledgement may have accepted the input. Only native evidence can release it.
-      const rejected = error instanceof OpenCodeRequestError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 408;
-      if ((!dispatched || rejected) && this.pendingInput === messageID) this.pendingInput = undefined;
+      if (!dispatched && this.pendingInput === messageID) this.pendingInput = undefined;
       throw error;
     } finally { if (dispatched) this.scheduleRefresh(); }
   }
@@ -352,7 +352,7 @@ export class OpenCodeSession implements AgentSession {
   private model(): { providerID: string; modelID: string } | undefined {
     if (!this.config.model) return;
     const separator = this.config.model.indexOf('/');
-    if (separator < 1 || separator === this.config.model.length - 1) throw new Error('OpenCode models use provider/model identifiers.');
+    if (separator < 1 || separator === this.config.model.length - 1) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode models use provider/model identifiers.');
     return { providerID: this.config.model.slice(0, separator), modelID: this.config.model.slice(separator + 1) };
   }
   async cancel(): Promise<void> {
@@ -365,8 +365,8 @@ export class OpenCodeSession implements AgentSession {
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
     this.writable();
     const request = this.pending.get(requestId);
-    if (!request) throw new Error('OpenCode interaction is no longer pending.');
-    if (this.submitting.has(requestId)) throw new Error('OpenCode interaction response is already pending.');
+    if (!request) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode interaction is no longer pending.');
+    if (this.submitting.has(requestId)) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode interaction response is already pending.');
     validateInteractionResponse(request, response);
     this.submitting.add(requestId);
     try {
@@ -379,7 +379,7 @@ export class OpenCodeSession implements AgentSession {
         }) }));
       } else if (request.kind === 'tool_approval' && response.kind === 'tool_approval') {
         await this.transport.request(() => this.transport.client.permission.reply({ ...parameters, reply: response.decision === 'allow' ? response.scope === 'session' ? 'always' : 'once' : 'reject' }));
-      } else throw new Error('Unsupported OpenCode interaction response.');
+      } else throw new AgentOperationRejectedError('operation_rejected', 'Unsupported OpenCode interaction response.');
       this.resolveInteraction(requestId, response);
     } finally { this.submitting.delete(requestId); }
   }
@@ -401,7 +401,7 @@ export class OpenCodeSession implements AgentSession {
   }
   async executeCommand(id: string, args: string): Promise<{ text?: string }> {
     this.writable();
-    if (this.active || this.pending.size || this.pendingInput) throw new Error('Wait for the OpenCode turn and pending interactions before executing a command.');
+    if (this.active || this.pending.size || this.pendingInput) throw new AgentOperationRejectedError('operation_rejected', 'Wait for the OpenCode turn and pending interactions before executing a command.');
     const messageID = this.messageId();
     this.pendingInput = messageID;
     this.pendingInputWhileRunning = this.active;
@@ -409,13 +409,12 @@ export class OpenCodeSession implements AgentSession {
     try {
       await this.commands.execute(id, args, this.config, messageID, () => this.controls.compactionModel(), () => {
         this.writable();
-        if (this.active || this.pending.size || this.pendingInput !== messageID) throw new Error('Wait for the OpenCode turn and pending interactions before executing a command.');
+        if (this.active || this.pending.size || this.pendingInput !== messageID) throw new AgentOperationRejectedError('operation_rejected', 'Wait for the OpenCode turn and pending interactions before executing a command.');
         dispatched = true;
       });
       if (this.pendingInput === messageID) this.pendingInput = undefined;
     } catch (error) {
-      const rejected = error instanceof OpenCodeRequestError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 408;
-      if ((!dispatched || rejected) && this.pendingInput === messageID) this.pendingInput = undefined;
+      if (!dispatched && this.pendingInput === messageID) this.pendingInput = undefined;
       throw error;
     } finally { if (dispatched) this.scheduleRefresh(); }
     return {};

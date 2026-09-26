@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import {ClaudeNativeProcess} from './native-process.js';
 import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
@@ -86,7 +87,7 @@ export class ClaudeAgentSession implements AgentSession {
       this.status = this.interactions.size ? 'waiting' : this.turnId ? 'running' : 'idle';
       this.runtimeUpdated();
     }, async () => {
-      if (this.changingSetting) throw new Error('Claude already has a setting change in progress.');
+      if (this.changingSetting) throw new AgentOperationRejectedError('operation_rejected', 'Claude already has a setting change in progress.');
       this.changingSetting = true;
       try {
         await this.updatePermissionMode(this.resumePermissionMode);
@@ -133,17 +134,17 @@ export class ClaudeAgentSession implements AgentSession {
 
   async sendMessage(text: string, options: AgentMessageOptions = {}): Promise<void> {
     this.assertMessageReady(options);
-    if (!text.trim()) throw new Error('Claude message cannot be empty.');
+    if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
     this.dispatchMessage(text);
   }
 
   async sendMessageContent(parts: readonly AgentInputPart[], options: AgentMessageOptions = {}): Promise<void> {
     this.assertMessageReady(options);
-    if (!parts.some(part => part.type === 'image' || part.text.trim())) throw new Error('Claude message cannot be empty.');
+    if (!parts.some(part => part.type === 'image' || part.text.trim())) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
     const snapshot = parts.map(part => ({ ...part }));
     this.preparingMessage = true;
     try {
-      const content = await claudeMessageContent(snapshot);
+      const content = await prepareAgentOperation(() => claudeMessageContent(snapshot));
       this.requireOpen();
       this.dispatchMessage(content);
     } finally { this.preparingMessage = false; }
@@ -151,21 +152,22 @@ export class ClaudeAgentSession implements AgentSession {
 
   private assertMessageReady(options: AgentMessageOptions): void {
     this.requireOpen();
-    if (options.delivery === 'next_turn') throw new Error('Claude queued delivery is not supported.');
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude already has an active turn or setting change.');
+    if (options.delivery === 'next_turn') throw new AgentOperationRejectedError('operation_rejected', 'Claude queued delivery is not supported.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude already has an active turn or setting change.');
   }
 
   private dispatchMessage(content: SDKUserMessage['message']['content']): void {
-    this.turnId = randomUUID();
+    const turnId = randomUUID();
+    const message: SDKUserMessage = { type: 'user', uuid: turnId, session_id: this.config.sessionId,
+      parent_tool_use_id: null, message: { role: 'user', content } };
+    this.input.push(message);
+    this.turnId = turnId;
     this.usage.startTurn();
     this.status = 'running';
     this.cancelRequested = false;
-    const message: SDKUserMessage = { type: 'user', uuid: this.turnId, session_id: this.config.sessionId,
-      parent_tool_use_id: null, message: { role: 'user', content } };
-    this.emit({ type: 'turn_started', provider: 'claude', turnId: this.turnId });
+    this.emit({ type: 'turn_started', provider: 'claude', turnId });
     for (const observation of this.projector.project(message)) this.output.push({ ...observation, event: this.withTurn(observation.event) });
     this.runtimeUpdated();
-    this.input.push(message);
   }
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
@@ -181,11 +183,11 @@ export class ClaudeAgentSession implements AgentSession {
 
   async executeCommand(id: string, args: string) {
     this.requireOpen();
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude commands require an idle session.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude commands require an idle session.');
     this.changingSetting = true;
     try {
-      const command = (await this.listCommands()).find((entry) => entry.id === id);
-      if (!command) throw new Error('Claude command is unavailable in this session.');
+      const command = (await prepareAgentOperation(() => this.listCommands())).find((entry) => entry.id === id);
+      if (!command) throw new AgentOperationRejectedError('operation_rejected', 'Claude command is unavailable in this session.');
       this.changingSetting = false;
       await this.sendMessage(`/${command.name}${args ? ` ${args}` : ''}`);
       return {};
@@ -203,15 +205,15 @@ export class ClaudeAgentSession implements AgentSession {
 
   async setSessionSetting(id: string, value: string): Promise<void> {
     this.requireOpen();
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude settings can only change while idle.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude settings can only change while idle.');
     this.changingSetting = true;
     try {
-      if (id === 'model') this.models = await deadline(this.native.supportedModels(), this.timeout, 'Claude model discovery');
+      if (id === 'model') this.models = await prepareAgentOperation(() => deadline(this.native.supportedModels(), this.timeout, 'Claude model discovery'));
       this.requireOpen();
       validateSessionSetting(this.settings(), id, value);
       if (id === 'model') {
         await this.updateNative(this.native.setModel(value), 'Claude model update');
-        this.requireOpen();
+        if (this.disposed) throw new Error('Claude closed before model confirmation.');
         this.config.model = value;
       } else await this.updatePermissionMode(value as PermissionMode);
       this.runtimeUpdated();
@@ -220,7 +222,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async setPlanning(active: boolean): Promise<void> {
     this.requireOpen();
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new Error('Claude planning can only change while idle.');
+    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude planning can only change while idle.');
     this.changingSetting = true;
     try {
       await this.updatePermissionMode(active ? 'plan' : this.resumePermissionMode);
@@ -230,7 +232,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   private async updatePermissionMode(mode: PermissionMode): Promise<void> {
     await this.updateNative(this.native.setPermissionMode(mode), 'Claude permission update');
-    this.requireOpen();
+    if (this.disposed) throw new Error('Claude closed before permission confirmation.');
     this.confirmPermissionMode(mode);
   }
   private async updateNative(operation: Promise<void>, label: string): Promise<void> {
@@ -285,8 +287,8 @@ export class ClaudeAgentSession implements AgentSession {
   }
 
   private requireOpen(): void {
-    if (this.disposed) throw new Error('Claude session is closed.');
-    if (this.failure) throw this.failure;
+    if (this.disposed) throw new AgentOperationRejectedError('operation_rejected', 'Claude session is closed.');
+    if (this.failure) throw new AgentOperationRejectedError('native_runtime_unavailable', this.failure.message);
   }
   private info(): AgentRuntimeInfo {
     return { providerId: 'claude', sessionId: this.config.sessionId, status: this.status, cwd: this.config.cwd,

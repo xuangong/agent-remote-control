@@ -1,26 +1,28 @@
-import { sessionOperationAvailability } from '@orchardworks/agent-remote-protocol';
+import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { useEffect, useRef, useState } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import type { RemoteSessionStatus } from '../client/remote-session-client.js';
 
 export interface AgentPlanningControlProps {
+  readonly sessionState?: RemoteSessionState;
   readonly state: AgentReplicaState;
   readonly sessionStatus: RemoteSessionStatus;
   readonly onSetPlanning?: (active: boolean) => Promise<void>;
 }
 
-export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: AgentPlanningControlProps) {
+export function AgentPlanningControl({ state, sessionState, sessionStatus, onSetPlanning }: AgentPlanningControlProps) {
   const [target, setTarget] = useState<boolean>();
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string>();
   const inFlight = useRef(false);
   const agent = state.agent;
   const planning = agent?.runtimeInfo.planning;
-  const connection = agent?.runtimeInfo.connection;
+  const session = sessionState ?? remoteSessionState(state, sessionStatus);
+  const connection = session.runtime;
   const recoveryMessage = planningRecoveryMessage(connection?.state);
   const supported = agent?.capabilities.planning === true;
   const pending = submitting || target !== undefined || planning?.requested !== undefined;
-  const canChange = planning !== undefined && sessionOperationAvailability(agent, 'set_planning', { synchronized: sessionStatus === 'ready', control: state.sessionControl?.access }).allowed
+  const canChange = planning !== undefined && session.operations.set_planning.allowed
     && !pending && onSetPlanning !== undefined;
 
   useEffect(() => {
@@ -52,7 +54,7 @@ export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: Ag
     </div>
     <p className="agent-composer-note" role="status">{!supported ? 'Planning is not supported by this session.'
       : !planning ? 'Waiting for Provider planning state.'
-      : state.sessionControl && state.sessionControl.access !== 'control' ? 'Read only. Take control to change planning mode.'
+      : session.readOnly ? 'Read only. Take control to change planning mode.'
       : recoveryMessage ?? (pending ? 'Waiting for Provider confirmation.'
       : !canChange ? 'Planning can change only while connected and idle, with no pending interactions.'
       : 'Provider confirmed. Changes apply to the next message.')}</p>

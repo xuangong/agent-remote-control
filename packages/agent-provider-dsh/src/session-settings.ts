@@ -1,4 +1,4 @@
-import { validateSessionSetting, type AgentSessionSetting, type AgentSessionSettingOption } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, validateSessionSetting, type AgentSessionSetting, type AgentSessionSettingOption } from '@orchardworks/agent-provider-sdk';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { isRecord, nonEmptyString } from './native.js';
 
@@ -126,7 +126,7 @@ export class DshSessionSettings {
       if (execution?.result.kind !== 'success') throw new Error(execution?.result.text ?? 'Native permission command rejected.');
       return;
     }
-    throw new Error('Unsupported DSH session setting.');
+    throw new AgentOperationRejectedError('operation_rejected', 'Unsupported DSH session setting.');
   }
 
   private selection(): ModelSelection | undefined {

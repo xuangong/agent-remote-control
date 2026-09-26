@@ -1,4 +1,4 @@
-import { CommandInteractions, type AgentCommand, type AgentCommandResult, type AgentInteractionResponse, type AgentSessionSetting, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, prepareAgentOperation, CommandInteractions, type AgentCommand, type AgentCommandResult, type AgentInteractionResponse, type AgentSessionSetting, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
@@ -72,24 +72,24 @@ export class DshCommands {
   }
 
   async execute(id: string, args: string): Promise<AgentCommandResult> {
-    this.assertOpen();
-    if (this.pending) throw new Error('A DSH command or interaction is pending.');
+    this.assertOpen(true);
+    if (this.pending) throw new AgentOperationRejectedError('operation_rejected', 'A DSH command or interaction is pending.');
     this.assertIdle();
     const abort = new AbortController();
     this.execution = abort;
     try {
-      const command = (await this.list()).find((entry) => entry.id === id);
-      this.assertOpen();
-      abort.signal.throwIfAborted();
+      const command = (await prepareAgentOperation(() => this.list())).find((entry) => entry.id === id);
+      this.assertOpen(true);
+      if (abort.signal.aborted) throw new AgentOperationRejectedError('operation_rejected', 'DSH command was canceled before dispatch.');
       this.assertIdle();
-      if (!command) throw new Error('DSH command is unavailable.');
+      if (!command) throw new AgentOperationRejectedError('operation_rejected', 'DSH command is unavailable.');
       if (command.kind === 'skill') {
         this.agent.followup(createUserMessage({ content: [{ type: 'text', text: `/${command.name}${args && !/^\s/.test(args) ? ' ' : ''}${args}` }], source: { kind: 'user' } }));
         return {};
       }
       if (id === 'dsh:selection:model') {
-        if ((this.native()?.list(this.agent) ?? []).some(({ name }) => name === 'model')) throw new Error('DSH command is unavailable.');
-        if (args.trim()) throw new Error('Choose a model from the native model menu.');
+        if ((this.native()?.list(this.agent) ?? []).some(({ name }) => name === 'model')) throw new AgentOperationRejectedError('operation_rejected', 'DSH command is unavailable.');
+        if (args.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Choose a model from the native model menu.');
         this.openSelection('model');
         return {};
       }
@@ -105,8 +105,8 @@ export class DshCommands {
     } finally { if (this.execution === abort) this.execution = undefined; }
   }
 
-  respond(requestId: string, response: AgentInteractionResponse): Promise<boolean> {
-    this.assertOpen();
+  async respond(requestId: string, response: AgentInteractionResponse): Promise<boolean> {
+    this.assertOpen(true);
     return this.interactions.respond(requestId, response);
   }
 
@@ -149,21 +149,21 @@ export class DshCommands {
       ...(setting.description ? { description: setting.description } : {}),
       required: true, selection: 'single', options: setting.options, allowCustomText: false, allowDismiss: true,
     }] }, async (response) => {
-      this.assertOpen();
+      this.assertOpen(true);
       this.assertIdle();
-      if (response.kind !== 'question') throw new Error('DSH command requires a question response.');
+      if (response.kind !== 'question') throw new AgentOperationRejectedError('operation_rejected', 'DSH command requires a question response.');
       const value = response.answers.find(({ questionId }) => questionId === id)?.selectedValues[0];
-      if (!value) throw new Error('DSH command requires a selection.');
+      if (!value) throw new AgentOperationRejectedError('operation_rejected', 'DSH command requires a selection.');
       const current = this.settings.describe().find((entry) => entry.id === id);
       validateChoice(current, value);
       const abort = new AbortController();
       this.execution = abort;
       try {
         if (id === 'permissions') {
-          if (!(this.native()?.list(this.agent) ?? []).some(({ name }) => name === 'permission')) throw new Error('DSH command is unavailable.');
+          if (!(this.native()?.list(this.agent) ?? []).some(({ name }) => name === 'permission')) throw new AgentOperationRejectedError('operation_rejected', 'DSH command is unavailable.');
           await this.invoke('permission', value, abort.signal);
         } else {
-          if ((this.native()?.list(this.agent) ?? []).some(({ name }) => name === 'model')) throw new Error('DSH model command changed; open the command again.');
+          if ((this.native()?.list(this.agent) ?? []).some(({ name }) => name === 'model')) throw new AgentOperationRejectedError('operation_rejected', 'DSH model command changed; open the command again.');
           await this.settings.select('model', value);
         }
         this.assertOpen();
@@ -174,15 +174,19 @@ export class DshCommands {
 
   private async invoke(name: string, args: string, signal: AbortSignal): Promise<AgentCommandResult> {
     const separator = args && !/^[\t\n\r ]/.test(args) ? ' ' : '';
-    if (!(this.native()?.list(this.agent) ?? []).some((command) => command.name === name)) throw new Error('DSH command is unavailable.');
+    if (!(this.native()?.list(this.agent) ?? []).some((command) => command.name === name)) throw new AgentOperationRejectedError('operation_rejected', 'DSH command is unavailable.');
     const execution = await this.native()?.execute(this.agent, `/${name}${separator}${args}`, [], signal);
     if (signal.aborted) throw signal.reason;
-    if (!execution) throw new Error('DSH command is unavailable.');
+    if (!execution) throw new Error('DSH command execution was not confirmed.');
     if (execution.result.kind !== 'success') throw new Error(execution.result.text ?? 'Native DSH command failed.');
     return execution.result.text === undefined ? {} : { text: execution.result.text };
   }
 
-  private assertOpen(): void { if (this.disposed) throw new Error('DSH session is closed.'); }
+  private assertOpen(beforeDispatch = false): void {
+    if (!this.disposed) return;
+    if (beforeDispatch) throw new AgentOperationRejectedError('operation_rejected', 'DSH session is closed.');
+    throw new Error('DSH session closed before command confirmation.');
+  }
   private native(): NativeCommands | undefined {
     const value = this.service('commands');
     return isRecord(value) && typeof value.list === 'function' && typeof value.execute === 'function' ? value as unknown as NativeCommands : undefined;
@@ -190,5 +194,5 @@ export class DshCommands {
 }
 
 function validateChoice(setting: AgentSessionSetting | undefined, value: string): void {
-  if (!setting?.mutable || !setting.options.some((option) => option.value === value)) throw new Error('Native DSH choice is unavailable.');
+  if (!setting?.mutable || !setting.options.some((option) => option.value === value)) throw new AgentOperationRejectedError('operation_rejected', 'Native DSH choice is unavailable.');
 }

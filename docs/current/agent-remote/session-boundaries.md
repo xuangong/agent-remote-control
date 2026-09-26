@@ -4,7 +4,7 @@ The logical Session View includes headless observation, native-derived state, op
 
 ## Consumer contract
 
-`RemoteSessionClient.getSessionState()` and `subscribeSessionState()` expose transport status, replica synchronization, native connection state, control, native handoff progress and per-operation availability. A synchronized read-only session is valid; `ready` does not grant permission to mutate.
+`RemoteSessionClient.getSessionState()` and `subscribeSessionState()` expose transport status, replica synchronization, authoritative activity, native connection state, control, native handoff progress and per-operation availability. Renderers and headless consumers use these same facts; retained turn metadata is not an independent activity signal. The public hook retains the complete state and gates mutation actions by operation availability. Browser pending input remains local until send admission becomes available. A synchronized read-only session is valid; `ready` does not grant permission to mutate.
 
 `SessionViewActions` describes input, interaction responses, settings, commands, resources and control. `useSessionView` owns a connection lease. A `SessionConnectionSource` can retain an existing connection independently of mounted views. Tracked/Favorites decide retention policy; releasing a view does not decide native process ownership.
 
@@ -44,7 +44,9 @@ All native mutations require native availability. The public client also reports
 
 Control transfer fences accepted operations that have not yet called the native mutation. It does not cancel or relabel operations already dispatched to the provider. Shared sessions continue to authorize multiple clients independently. Client availability only explains behavior; it cannot authorize a mutation.
 
-A generic native error after dispatch has an unknown outcome. `AgentOperationRejectedError` is an explicit guarantee that the requested effect was not applied. Only that guarantee releases a failed interaction claim for another submission. Resolution or invalidation from the native source retires the claim. Historical interaction text does not reconstruct a live callback.
+A generic native error after dispatch has an unknown outcome. `AgentOperationRejectedError` is an explicit guarantee that the requested effect was not applied. Only that guarantee releases a failed interaction claim for another submission. Resolution or invalidation from the native source retires the claim. Historical interaction text does not reconstruct a live callback. Adapters use `prepareAgentOperation` only around side-effect-free preparation before dispatch; they recheck local validity after asynchronous preparation. HTTP status classes, an unrelated new turn, or an unconfirmed permission response do not prove rejection or success.
+
+A resolved input operation confirms acceptance by the adapter delivery channel, not turn completion. RPC adapters require the native receipt; streaming stdio adapters may accept into their owned input queue. Normalized events describe subsequent execution. An uncertain input or interaction remains protected from automatic resubmission until authoritative evidence resolves it.
 
 ## Settlement and binding lifetime
 

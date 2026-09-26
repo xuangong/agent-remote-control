@@ -1,7 +1,8 @@
+import { AgentOperationRejectedError } from './provider.js';
 import type { AgentFormField, AgentFormValue, AgentInteractionRequest, AgentInteractionResponse } from './control.js';
 
 function requireValid(condition: unknown): asserts condition {
-  if (!condition) throw new Error('Interaction response does not satisfy the pending request.');
+  if (!condition) throw new AgentOperationRejectedError('invalid_operation', 'Interaction response does not satisfy the pending request.');
 }
 
 function onlyKeys(value: object, keys: string[]): void {

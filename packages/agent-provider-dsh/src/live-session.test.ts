@@ -634,3 +634,15 @@ describe('live DSH Provider session', () => {
     }
   });
 });
+
+
+it('reports local DSH validation rejection without delivering input to the native owner', async () => {
+  const agent = new FakeOwnedAgent('validation');
+  const session = await createLiveDshProvider({runtime: new FakeRuntime(agent)}).createSession({sessionId: 'validation'});
+  try {
+    await expect(session.sendMessage(' ')).rejects.toMatchObject({name: 'AgentOperationRejectedError'});
+    expect(agent.messages).toEqual([]);
+    await session.sendMessage('Accepted');
+    expect(agent.messages).toEqual(['Accepted']);
+  } finally { await session.dispose(); }
+});

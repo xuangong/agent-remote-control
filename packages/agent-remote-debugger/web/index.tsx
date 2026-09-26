@@ -31,13 +31,13 @@ function SessionView({ session, ...view }: ViewProps & { session: OpenedSession 
     value.onDiagnostic(diagnostic => trace.record({ event: 'diagnostic', code: diagnostic.code }));
     return value;
   }, [trace]);
-  const { state, handoff, status, questions, setQuestions, actions } = useSessionView({ agentId: session.agentId, transport });
+  const { state, sessionState, handoff, status, questions, setQuestions, actions } = useSessionView({ agentId: session.agentId, transport });
   useEffect(() => { trace.record({ event: 'connection', status }); }, [status, trace]);
   useEffect(() => () => trace.close(), [trace]);
   const controls = <LiveControls capture={capture} agentId={session.agentId} onOpen={view.mode === 'live' ? view.onOpen : undefined} />;
   const recordingActive = capture.status?.phase === 'recording';
   if (view.mode === 'replay') return <Playback {...view} liveControls={controls} recordingActive={recordingActive} />;
-  return <DebugSessionView modeControls={view.modeControls} liveControls={controls} recordingActive={recordingActive}><SessionWorkbench handoff={handoff} state={state} sessionStatus={status} attachingAgentId={session.agentId}
+  return <DebugSessionView modeControls={view.modeControls} liveControls={controls} recordingActive={recordingActive}><SessionWorkbench sessionState={sessionState} handoff={handoff} state={state} sessionStatus={status} attachingAgentId={session.agentId}
     actions={actions} questionDrafts={questions} draftSessionKey={session.agentId}
     onQuestionDraftChange={(id, draft) => setQuestions(current => ({ ...current, [id]: draft }))} /></DebugSessionView>;
 }

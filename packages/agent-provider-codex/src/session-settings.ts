@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { validateSessionSetting, type AgentSessionSetting, type AgentSessionSettingOption } from '@orchardworks/agent-provider-sdk';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
@@ -121,7 +122,7 @@ export class CodexSessionSettings {
       value === 'workspaceWrite' ? { type: value, writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
         : value === 'readOnly' ? { type: value, networkAccess: false } : { type: value }
     ) };
-    throw new Error('Unsupported Codex setting.');
+    throw new AgentOperationRejectedError('invalid_operation', 'Unsupported Codex setting.');
   }
 }
 

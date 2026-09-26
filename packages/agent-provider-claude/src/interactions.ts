@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import {claudeSessionGrant, claudeGrantDescription} from './permissions.js';
 import { randomUUID } from 'node:crypto';
 import type { CanUseTool, PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
@@ -38,8 +39,8 @@ export class ClaudeInteractions {
 
   respond(requestId: string, response: AgentInteractionResponse): void | Promise<void> {
     const pending = this.pending.get(requestId);
-    if (!pending) throw new Error('Claude permission request is no longer active.');
-    if (pending.responding) throw new Error('Claude permission response is already in progress.');
+    if (!pending) throw new AgentOperationRejectedError('operation_rejected', 'Claude permission request is no longer active.');
+    if (pending.responding) throw new AgentOperationRejectedError('operation_rejected', 'Claude permission response is already in progress.');
     validateInteractionResponse(pending.request, response);
     if (response.kind === 'plan_approval') {
       if (response.action === 'reject') {
@@ -61,7 +62,7 @@ export class ClaudeInteractions {
       }
       result = response.dismissed ? { behavior: 'deny', message: 'The user dismissed the questions.' }
         : { behavior: 'allow', updatedInput: { ...pending.input, answers } };
-    } else throw new Error('Unsupported Claude interaction response.');
+    } else throw new AgentOperationRejectedError('operation_rejected', 'Unsupported Claude interaction response.');
     this.finish(requestId, response, result);
   }
 

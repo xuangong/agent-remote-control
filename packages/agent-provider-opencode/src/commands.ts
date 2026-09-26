@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import { validateCommandDirectory, type AgentCommand, type AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 import { OpenCodeTransport } from './transport.js';
 import type { OpenCodeSelection } from './settings.js';
@@ -34,11 +35,11 @@ export class OpenCodeCommands {
   }
 
   async execute(id: string, args: string, selected: OpenCodeSelection, messageID: string, compactionModel: () => { providerID: string; modelID: string }, beforeDispatch: () => void = () => {}): Promise<void> {
-    if (this.transport.restricted) throw new Error('OpenCode native execution is locked by Host policy.');
-    if (!(await this.list()).some(command => command.id === id)) throw new Error('Unknown OpenCode command.');
+    if (this.transport.restricted) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode native execution is locked by Host policy.');
+    if (!(await prepareAgentOperation(() => this.list())).some(command => command.id === id)) throw new AgentOperationRejectedError('operation_rejected', 'Unknown OpenCode command.');
     const parameters = { sessionID: this.nativeId, directory: this.cwd };
     if (id === this.compactCommandId) {
-      if (args.trim()) throw new Error('OpenCode compact does not accept arguments.');
+      if (args.trim()) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode compact does not accept arguments.');
       const model = compactionModel();
       beforeDispatch();
       await this.transport.request(() => this.transport.client.session.summarize({ ...parameters, ...model, auto: false }));

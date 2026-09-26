@@ -1,4 +1,4 @@
-import { sessionOperationAvailability } from '@orchardworks/agent-remote-protocol';
+import { remoteSessionState, type RemoteSessionState } from '@orchardworks/agent-remote-web';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -12,7 +12,6 @@ import type {
 import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-remote-web';
 import { AgentCommandDetails, AgentTimeline, PreviewDock, TimelineDisplay, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 
-import { sessionActivity } from '../session-activity.js';
 
 import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-remote-web/react';
 
@@ -26,13 +25,21 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, compact = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
-  const controlChecking = state?.sessionControl?.access === 'checking';
-  const sessionStatus = controlChecking && connectionStatus === 'ready' ? 'catching_up' : connectionStatus;
-  const controlReadOnly = !!nativeTakeover || !controlChecking && state?.sessionControl !== undefined && state.sessionControl.access !== 'control';
+export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, compact = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+  const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
+  const sessionStatus = session.connection;
+  const controlReadOnly = !!nativeTakeover || session.readOnly;
   const readOnly = recordingReadOnly || controlReadOnly;
   const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id, isAuthenticationError);
-  const actions: LabWorkbenchActions = readOnly ? { loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : sessionStatus === 'ready' ? suppliedFeedbackActions : { deleteMessage: suppliedFeedbackActions.deleteMessage };
+  const actions: LabWorkbenchActions = readOnly ? { loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : session.synchronized ? { ...suppliedFeedbackActions,
+    retryMessage: session.operations.send_message.allowed ? suppliedFeedbackActions.retryMessage : undefined,
+    editPrompt: session.operations.send_message.allowed ? suppliedFeedbackActions.editPrompt : undefined,
+    cancel: session.operations.cancel.allowed ? suppliedFeedbackActions.cancel : undefined,
+    setPlanning: session.operations.set_planning.allowed ? suppliedFeedbackActions.setPlanning : undefined,
+    setSessionSetting: session.operations.set_session_setting.allowed ? suppliedFeedbackActions.setSessionSetting : undefined,
+    executeCommand: session.operations.execute_command.allowed ? suppliedFeedbackActions.executeCommand : undefined,
+    respondToInteraction: session.operations.interaction_response.allowed ? suppliedFeedbackActions.respondToInteraction : undefined,
+  } : { deleteMessage: suppliedFeedbackActions.deleteMessage };
   const localPositions = useMemo(() => new Map(), []);
   const readingPositions = suppliedReadingPositions ?? localPositions;
   const [composerHidden, setComposerHidden] = useState(false);
@@ -50,8 +57,8 @@ export function SessionWorkbench({ handoff, workspaceLink, readingPositions: sup
   const agentFailure = state?.agent?.status === 'failed'
     ? state.agent.lastError?.trim() || 'The Agent did not provide a failure reason.'
     : undefined;
-  const runtimeConnection = state?.agent?.runtimeInfo.connection;
-  const runtimeMutationDisabled = !sessionOperationAvailability(state?.agent ?? null, 'interaction_response', { synchronized: sessionStatus === 'ready', control: state?.sessionControl?.access }).allowed;
+  const runtimeConnection = session.runtime;
+  const runtimeMutationDisabled = !session.operations.interaction_response.allowed;
   const runtimeNotice = runtimeConnection?.state === 'reconnecting'
     ? 'Native runtime is reconnecting. Changes are temporarily unavailable.'
     : runtimeConnection?.state === 'restoring'
@@ -69,12 +76,13 @@ export function SessionWorkbench({ handoff, workspaceLink, readingPositions: sup
   useFeedbackToast('Session runtime', visible && !readOnly ? runtimeError
     ?? (recoveryNoticeDue ? runtimeNotice ?? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
     runtimeError ? 'error' : 'info');
-  const activity = sessionActivity(state);
+  const activity = session.activity;
   const activityLabel = state?.sessionControl?.nativeOwner ? (state.sessionControl.nativeOwner.kind === 'native_cli' ? 'Native CLI has control' : 'Native control transferred')
     : agentFailure ? 'Agent failed'
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
     : sessionStatus === 'connecting' ? 'Opening session'
+    : session.controlChecking ? 'Checking control'
     : sessionStatus === 'catching_up' ? 'Synchronizing'
     : sessionStatus === 'idle' ? 'Disconnected'
     : !state?.agent ? 'Opening session'
@@ -118,6 +126,7 @@ export function SessionWorkbench({ handoff, workspaceLink, readingPositions: sup
         </button>
         <div id={composerId} className="lab-composer-body" hidden={composerHidden && !controlReadOnly}>
           <DraftComposer
+            sessionState={session}
             compact={compact}
             readOnly={readOnly}
             readOnlyCollapsed={composerHidden}
@@ -125,7 +134,7 @@ export function SessionWorkbench({ handoff, workspaceLink, readingPositions: sup
             readOnlyNotice={nativeTakeover ?? (!recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice handoff={handoff} control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={suppliedActions.takeControl} /> : undefined)}
             consoleCommands={!readOnly && sessionStatus === 'ready' ? consoleCommands : []}
             onExecuteConsoleCommand={!readOnly && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
-            sessionControls={state?.agent ? <PlanningControl key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
+            sessionControls={state?.agent ? <PlanningControl sessionState={session} key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
             state={state}
             sessionKey={draftSessionKey ?? state?.agent?.id}
             draftScope={draftScope}
@@ -137,7 +146,7 @@ export function SessionWorkbench({ handoff, workspaceLink, readingPositions: sup
             onDraftChange={onMessageDraftChange}
             disabled={sessionStatus !== 'ready'}
             disabledLabel={activityLabel}
-            recovering={!readOnly && !runtimeError && (sessionStatus === 'disconnected' || sessionStatus === 'connecting' || sessionStatus === 'catching_up' || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring')}
+            recovering={!readOnly && !runtimeError && session.recovering}
             onSendMessage={readOnly ? undefined : suppliedFeedbackActions.sendMessage}
             onCancel={actions.cancel}
             onSetSessionSetting={actions.setSessionSetting}
@@ -217,8 +226,8 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
             {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
             <AgentTimeline
               state={state}
-              onEditPrompt={runtimeMutationDisabled ? undefined : actions.editPrompt}
-              onRetryMessage={runtimeMutationDisabled ? undefined : actions.retryMessage}
+              onEditPrompt={actions.editPrompt}
+              onRetryMessage={actions.retryMessage}
               onDeleteMessage={actions.deleteMessage}
               onInspectEntry={onInspectEntry}
               inspectedEntryKey={revealEntry?.key}
@@ -231,7 +240,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
               interactionsReadOnly={readOnly}
-              interactionsWaitingForConnection={!readOnly && sessionStatus !== 'ready'}
+              interactionsWaitingForConnection={!readOnly && (sessionStatus !== 'ready' || runtimeMutationDisabled)}
               interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
               onResourceRequest={actions.requestResource}
               onResourceResolve={actions.resolveResource}

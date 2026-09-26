@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { CopilotSession, SessionEvent } from '@github/copilot-sdk';
 import { validateInteractionResponse, redactInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import { provider, record } from './native.js';
@@ -123,22 +124,22 @@ export class NativeInteractions {
   cancelOwner(owner?: string | null, toolCallId?: string): void { for (const [id, pending] of this.pending) if (pending.owner === owner) this.retire(id); }
   dispose(): void { for (const id of this.pending.keys()) this.retire(id); }
   async respond(requestId: string, response: AgentInteractionResponse): Promise<void> {
-    const pending = this.pending.get(requestId); if (!pending) throw new Error('Unknown Copilot interaction.');
-    if (pending.submitting) throw new Error('Copilot interaction response is already pending.');
+    const pending = this.pending.get(requestId); if (!pending) throw new AgentOperationRejectedError('operation_rejected', 'Unknown Copilot interaction.');
+    if (pending.submitting) throw new AgentOperationRejectedError('operation_rejected', 'Copilot interaction response is already pending.');
     validateInteractionResponse(pending.request, response); pending.submitting = true; pending.submittedResponse = response;
     try {
       if (response.kind === 'form' || response.kind === 'external_action') {
-        if (!pending.elicitationCallback) throw new Error('Copilot native elicitation callback is not available.');
+        if (!pending.elicitationCallback) throw new AgentOperationRejectedError('operation_rejected', 'Copilot native elicitation callback is not available.');
         pending.elicitationCallback.resolve(response.kind === 'form' && response.action === 'submit' ? {action: 'accept', content: response.values} : {action: response.action === 'completed' ? 'accept' : response.action as 'decline' | 'cancel'});
         this.retire(requestId, response); return;
       }
       if (response.kind === 'plan_approval') {
-        if (!pending.planCallback) throw new Error('Copilot native plan callback is not available.');
+        if (!pending.planCallback) throw new AgentOperationRejectedError('operation_rejected', 'Copilot native plan callback is not available.');
         pending.planCallback.resolve(response.action === 'reject' ? {approved: false, feedback: response.feedback} : {approved: true, selectedAction: response.action === 'approve' ? 'exit_only' : 'interactive'});
         this.retire(requestId, response); return;
       }
       if (response.kind === 'question') {
-        if (!pending.callback) throw new Error('Copilot native question callback is not available.');
+        if (!pending.callback) throw new AgentOperationRejectedError('operation_rejected', 'Copilot native question callback is not available.');
         const answer = response.answers[0]!;
         pending.callback.resolve({answer: answer.customText ?? answer.selectedValues[0]!, wasFreeform: answer.customText !== undefined});
         this.retire(requestId, response); return;
@@ -146,7 +147,7 @@ export class NativeInteractions {
       const result = response.kind === 'tool_approval'
         ? await this.call(this.rpc().permissions.handlePendingPermissionRequest({requestId, result: response.decision === 'allow' ? response.scope === 'session' && pending.sessionDecision ? pending.sessionDecision : {kind: 'approve-once', approvedInteractively: true} : {kind: 'reject'}}), 'Respond to Copilot permission')
         : undefined;
-      if (!result?.success) { this.retire(requestId); throw new Error('Copilot interaction is no longer pending.'); }
+      if (!result?.success) throw new Error('Copilot did not confirm the interaction response.');
       this.retire(requestId, response);
     } finally { pending.submitting = false; pending.submittedResponse = undefined; }
   }

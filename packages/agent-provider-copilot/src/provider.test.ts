@@ -531,3 +531,33 @@ it('does not report an unconfirmed Copilot native write as a successful rename',
   try { await expect(provider.renameSession((await session.runtimeInfo()).sessionId!, 'New')).rejects.toThrow(/confirmed/); }
   finally { await provider.dispose(); }
 });
+
+
+it('does not retire an interaction or report definite rejection when its native reply is unconfirmed', async () => {
+  const {provider, session} = await open(); const seen = await collect(session);
+  try {
+    mock.handler(event('permission.requested', {requestId: 'unconfirmed', permissionRequest: {kind: 'shell', command: 'pwd'}}));
+    await new Promise(resolve => setImmediate(resolve));
+    mock.native.rpc.permissions.handlePendingPermissionRequest.mockResolvedValue({success: false});
+    const error = await session.respondToInteraction('unconfirmed', {kind: 'tool_approval', decision: 'allow', scope: 'once'}).catch((error: Error) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toMatchObject({name: 'AgentOperationRejectedError'});
+    await new Promise(resolve => setImmediate(resolve));
+    expect(seen.values.some(value => value.type === 'observation' && value.event.type === 'interaction_resolved')).toBe(false);
+  } finally { await provider.dispose(); await seen.done; }
+});
+
+it('rejects command dispatch when the session closes during discovery', async () => {
+  const { AgentOperationRejectedError } = await import('@orchardworks/agent-provider-sdk');
+  const { provider, session } = await open();
+  let finish!: (value: unknown) => void;
+  mock.native.rpc.skills.list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const pending = session.executeCommand!('native', 'args');
+  const rejected = expect(pending).rejects.toBeInstanceOf(AgentOperationRejectedError);
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  await provider.dispose();
+  finish({ skills: [{ name: 'native', commandName: 'native-cmd', description: 'Native skill', userInvocable: true, enabled: true }] });
+  await rejected;
+  expect(mock.native.rpc.commands.invoke).not.toHaveBeenCalled();
+  expect(mock.native.send).not.toHaveBeenCalled();
+});

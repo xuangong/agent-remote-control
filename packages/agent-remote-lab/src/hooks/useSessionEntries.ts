@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
-import { sessionActivity } from '../session-activity.js';
 
 export function useSessionEntries(opened: readonly OpenedSession[], state?: AgentReplicaState): SessionEntry[] {
   const [observed, setObserved] = useState<{ entries: SessionEntry[]; childTitles: Map<string, string> }>(() => ({ entries: [], childTitles: new Map() }));
   const agent = state?.agent;
-  const activity = sessionActivity(state);
+  const activity = state?.agent?.status;
   const merged = useMemo(() => {
     const items = new Map(observed.entries.map((item) => [sessionKey(item), item]));
     const childTitles = new Map(observed.childTitles);

@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { DshCommands } from './commands.js';
 import { DshSessionSettings } from './session-settings.js';
 import { validateInteractionResponse } from '@orchardworks/agent-provider-sdk';
@@ -492,32 +493,32 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
   executeCommand(id: string, args: string): Promise<AgentCommandResult> { return this.commands.execute(id, args); }
 
   private assertCommandIdle(): void {
-    if (this.disposePromise) throw new Error('DSH session is closed.');
+    if (this.disposePromise) throw new AgentOperationRejectedError('operation_rejected', 'DSH session is closed.');
     if (this.changingSetting || currentDshTurn(this.handle.agent.session.snapshotEvents()) !== undefined || this.handle.agent.status === 'running') {
-      throw new Error('DSH commands can only execute while idle.');
+      throw new AgentOperationRejectedError('operation_rejected', 'DSH commands can only execute while idle.');
     }
-    if (this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new Error('DSH commands cannot execute with pending interactions.');
+    if (this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new AgentOperationRejectedError('operation_rejected', 'DSH commands cannot execute with pending interactions.');
   }
 
   async setSessionSetting(id: string, value: string): Promise<void> {
-    if (this.disposePromise) throw new Error('DSH session is closed.');
+    if (this.disposePromise) throw new AgentOperationRejectedError('operation_rejected', 'DSH session is closed.');
     if (this.changingSetting || currentDshTurn(this.handle.agent.session.snapshotEvents()) !== undefined || this.handle.agent.status === 'running') {
-      throw new Error('DSH settings can only change while idle.');
+      throw new AgentOperationRejectedError('operation_rejected', 'DSH settings can only change while idle.');
     }
-    if (this.commands.pending || this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new Error('DSH settings cannot change with pending interactions.');
+    if (this.commands.pending || this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new AgentOperationRejectedError('operation_rejected', 'DSH settings cannot change with pending interactions.');
     this.changingSetting = true;
     try { await this.settings.select(id, value); }
     finally { this.changingSetting = false; }
   }
 
   setPlanning(active: boolean): void {
-    if (this.disposePromise) throw new Error('DSH session is closed.');
+    if (this.disposePromise) throw new AgentOperationRejectedError('operation_rejected', 'DSH session is closed.');
     const service = readPlanningService(scopedService(this.context, this.handle.agent, 'planMode'));
-    if (!service) throw new Error('DSH planning control is unsupported.');
+    if (!service) throw new AgentOperationRejectedError('operation_rejected', 'DSH planning control is unsupported.');
     if (currentDshTurn(this.handle.agent.session.snapshotEvents()) !== undefined || this.handle.agent.status === 'running') {
-      throw new Error('DSH planning can only change while idle.');
+      throw new AgentOperationRejectedError('operation_rejected', 'DSH planning can only change while idle.');
     }
-    if (this.commands.pending || this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new Error('DSH planning cannot change with pending interactions.');
+    if (this.commands.pending || this.pending.size > 0 || this.sharedInteractions?.hasPending(this.sessionId)) throw new AgentOperationRejectedError('operation_rejected', 'DSH planning cannot change with pending interactions.');
     service.set(this.handle.agent, active);
   }
 
@@ -527,12 +528,12 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
   }
 
   followup(text: string): void {
-    if (this.commands.pending) throw new Error('A DSH command or interaction is pending.');
+    if (this.commands.pending) throw new AgentOperationRejectedError('operation_rejected', 'A DSH command or interaction is pending.');
     this.handle.agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
   }
 
   steer(text: string): void {
-    if (this.commands.pending) throw new Error('A DSH command or interaction is pending.');
+    if (this.commands.pending) throw new AgentOperationRejectedError('operation_rejected', 'A DSH command or interaction is pending.');
     this.handle.agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
   }
 
@@ -549,7 +550,7 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
   }
 
   respondToInteraction(requestId: string, response: AgentInteractionResponse): boolean | Promise<boolean> {
-    if (this.disposePromise) throw new Error('DSH session is closed.');
+    if (this.disposePromise) throw new AgentOperationRejectedError('operation_rejected', 'DSH session is closed.');
     if (this.commandRequests.has(requestId)) return this.commands.respond(requestId, response);
     if (this.sharedInteractions) return this.sharedInteractions.respond(this.sessionId, requestId, response);
     const pending = this.pending.get(requestId);

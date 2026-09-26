@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { AgentChildSession, AgentRuntimeConnection, AgentRuntimeInfo } from '@orchardworks/agent-provider-sdk';
 import { CodexDaemonClient, CodexRestorationSemaphore, type CodexChildSnapshot, type CodexThreadOrigin } from '@orchardworks/codex-daemon-client';
 import type { CodexAppServerTransport } from './app-server-transport.js';
@@ -74,7 +75,10 @@ export class CodexSessionRuntime {
   }
 
   connectionInfo(): AgentRuntimeConnection | undefined { return this.client.connectionInfo(); }
-  assertConnected(): void { this.client.assertConnected(); }
+  assertConnected(): void {
+    try { this.client.assertConnected(); }
+    catch (error) { throw new AgentOperationRejectedError('native_runtime_unavailable', error instanceof Error ? error.message : 'Codex runtime is unavailable.'); }
+  }
   registerRoot(id: string): void { this.sessions.set(id, this.root); this.client.registerRoot(id); }
   hasThread(id: string): boolean { return this.client.hasThread(id); }
   hasChild(parentId: string, childId: string): boolean { return this.client.hasChild(parentId, childId); }

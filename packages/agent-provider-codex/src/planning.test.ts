@@ -165,7 +165,7 @@ describe('Codex planning', () => {
     expect(observed.filter((type) => type === 'interaction_resolved')).toHaveLength(1);
   });
 
-  it('does not retry a continuation whose native completion precedes an RPC error', async () => {
+  it('does not infer continuation success from an uncorrelated native turn after an RPC error', async () => {
     const { session, server, iterator, notify } = await openPlanning(true, true, () => {
       notify('turn/started', { turn: { id: 'turn-accepted' } });
       notify('turn/completed', { turn: { id: 'turn-accepted', status: 'completed' } });
@@ -177,11 +177,17 @@ describe('Codex planning', () => {
     const event = await nextEvent(iterator, 'interaction_requested');
     if (event.type !== 'interaction_requested') throw new Error('Missing plan');
     const response = { kind: 'plan_approval' as const, action: 'approve_and_resume' as const };
-    await expect(session.respondToInteraction(event.request.requestId, response)).resolves.toBeUndefined();
+    await expect(session.respondToInteraction(event.request.requestId, response)).rejects.toThrow('Late acknowledgement failed');
     expect((await session.runtimeInfo()).planning).toEqual({ active: false });
     expect((await session.runtimeInfo()).status).toBe('idle');
-    await expect(session.respondToInteraction(event.request.requestId, response)).rejects.toThrow('No pending');
     expect(server.requests.filter(({ method }) => method === 'turn/start')).toHaveLength(1);
     await session.dispose();
+    const events: string[] = [];
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done) break;
+      if (next.value.type === 'observation') events.push(next.value.event.type);
+    }
+    expect(events).not.toContain('interaction_resolved');
   });
 });

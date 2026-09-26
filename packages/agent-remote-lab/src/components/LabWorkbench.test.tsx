@@ -1,4 +1,4 @@
-import { SessionHandoff } from '@orchardworks/agent-remote-web';
+import { applyInteractionRequested, SessionHandoff } from '@orchardworks/agent-remote-web';
 import { ToastProvider } from './Toast.js';
 import { act, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -65,7 +65,7 @@ describe('LabWorkbench', () => {
   });
 
   it('indicates a pending answer even before an Agent status change arrives', async () => {
-    const state = { ...replicaState, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'plan-1', plan: 'Review this plan.', allowedActions: ['approve' as const] }] };
+    const state = applyInteractionRequested(replicaState, { kind: 'plan_approval', requestId: 'plan-1', plan: 'Review this plan.', allowedActions: ['approve'] });
     const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{}} />);
     expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Waiting for response');
   });
@@ -129,6 +129,8 @@ describe('LabWorkbench', () => {
     expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe(heading);
     expect(container.textContent).toContain(notice);
     expect(container.textContent).toContain(composerNotice);
+    expect(container.textContent).toContain('Waiting for connection to respond.');
+    expect(container.textContent).not.toContain('The host cannot respond');
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
     expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({

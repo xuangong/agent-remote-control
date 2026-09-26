@@ -207,3 +207,20 @@ describe('native DSH commands', () => {
     } finally { await h.close(); }
   });
 });
+
+it('does not dispatch a skill canceled during asynchronous discovery', async () => {
+  const { AgentOperationRejectedError } = await import('@orchardworks/agent-provider-sdk');
+  const h = await host(true);
+  try {
+    let finish!: (value: unknown[]) => void;
+    h.services.skills = { list: () => new Promise(resolve => { finish = resolve; }), get: async () => undefined };
+    const operation = h.session.executeCommand!('dsh:skill:inspect', '');
+    const rejected = expect(operation).rejects.toBeInstanceOf(AgentOperationRejectedError);
+    await expect.poll(() => finish).toBeDefined();
+    await h.session.cancel();
+    finish([...h.skills.values()]);
+    await rejected;
+    expect(h.skillMessages).toEqual([]);
+    expect(h.lines).toEqual([]);
+  } finally { await h.close(); }
+});

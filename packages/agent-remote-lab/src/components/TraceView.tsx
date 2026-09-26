@@ -1,5 +1,4 @@
 import { useFeedbackToast } from './Toast.js';
-import { sessionActivity } from '../session-activity.js';
 import { Fragment, type ReactElement, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
 import { createTimelineRenderModel, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
@@ -84,7 +83,7 @@ function TraceBrowser({ state, visible = true, revealEntry, onShowConversation, 
         <ul>{waits.map(({ entry, key }) => {
           const current = sessionStatus === 'ready' && state?.agent?.activeTurn?.turnId === entry.turnId && entry.turnId !== undefined;
           return <li key={key} data-wait-call={entry.item.type === 'tool_call' ? entry.item.callId : undefined}>
-            <div><strong className="agent-session-title" data-session-status={sessionActivity(state)}>{sessionTitle || state?.agent?.runtimeInfo.sessionId || 'This session'}</strong>
+            <div><strong className="agent-session-title" data-session-status={state?.agent?.status}>{sessionTitle || state?.agent?.runtimeInfo.sessionId || 'This session'}</strong>
               <span>{current ? 'Waiting for' : 'Last observed waiting for'}</span>
               {traceSessionReferences(entry.item).length ? <TraceSessionLinks item={entry.item} resolveSessionLink={resolveSessionLink} /> : <span>{traceItemSummary(entry.item)}</span>}
             </div>

@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { AgentCapabilities, AgentChildSession, AgentSession, AgentRuntimeInfo, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { ClaudeImageRegistry } from './images.js';
 import { Channel } from './channel.js';
@@ -117,8 +118,8 @@ export class ClaudeChildSession implements AgentSession {
   }
 
   async readResource(locator: string) { return this.images.readResource(locator); }
-  async sendMessage(): Promise<void> { throw new Error('Claude child views are read-only.'); }
-  async respondToInteraction(): Promise<void> { throw new Error('Claude child views are read-only; respond in the parent session.'); }
+  async sendMessage(): Promise<void> { throw new AgentOperationRejectedError('operation_rejected', 'Claude child views are read-only.'); }
+  async respondToInteraction(): Promise<void> { throw new AgentOperationRejectedError('operation_rejected', 'Claude child views are read-only; respond in the parent session.'); }
   async runtimeInfo(): Promise<AgentRuntimeInfo> {
     return { providerId: 'claude', sessionId: this.descriptor.nativeSessionId, status: this.descriptor.status, cwd: this.cwd, model: this.model ?? null };
   }

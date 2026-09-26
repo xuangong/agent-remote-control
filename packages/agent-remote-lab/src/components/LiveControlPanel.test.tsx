@@ -160,6 +160,7 @@ describe('LiveControlPanel', () => {
       ...replicaState,
       agent: {
         ...replicaState.agent!,
+        status: 'running' as const,
         activeTurn: { turnId: 'turn-1', startedAt: '2026-09-03T00:00:00.000Z' },
         capabilities: { ...replicaState.agent!.capabilities, steer: true, cancel: true },
       },

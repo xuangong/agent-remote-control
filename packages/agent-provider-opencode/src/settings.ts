@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { validateSessionSetting, type AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
 import type { Agent, PermissionRuleset, ProviderListResponse, Session } from '@opencode-ai/sdk/v2/client';
 import { OpenCodeTransport } from './transport.js';
@@ -121,11 +122,11 @@ export class OpenCodeSettings {
     if (id === 'model') { next.model = value; delete next.variant; }
     else if (id === 'agent') next.agent = value;
     else if (id === 'variant') { if (value === this.defaultVariantValue()) delete next.variant; else next.variant = value; }
-    else throw new Error('Unsupported OpenCode setting.');
+    else throw new AgentOperationRejectedError('operation_rejected', 'Unsupported OpenCode setting.');
     if (id === 'agent') await this.transport.request(() => this.transport.client.v2.session.switchAgent({ sessionID: this.nativeId, agent: next.agent }));
     else {
       const model = openCodeModel(next.model);
-      if (!model) throw new Error('Select an OpenCode model before choosing its variant.');
+      if (!model) throw new AgentOperationRejectedError('operation_rejected', 'Select an OpenCode model before choosing its variant.');
       await this.transport.request(() => this.transport.client.v2.session.switchModel({ sessionID: this.nativeId, model: { providerID: model.providerID, id: model.modelID, ...(next.variant ? { variant: next.variant } : {}) } }));
     }
     Object.assign(this.selected, next);
@@ -139,6 +140,6 @@ export class OpenCodeSettings {
     if (this.native?.model) return { providerID: this.native.model.providerID, modelID: this.native.model.id };
     const agent = this.agents.find(agent => agent.name === this.selected.agent);
     if (agent?.model) return agent.model;
-    throw new Error('Choose an available OpenCode model before compacting this session.');
+    throw new AgentOperationRejectedError('operation_rejected', 'Choose an available OpenCode model before compacting this session.');
   }
 }

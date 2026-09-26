@@ -313,7 +313,7 @@ function conditionSatisfied(replica: AgentReplica, condition: WaitCondition): bo
 
 function isTurnActive(replica: AgentReplica): boolean {
   const agent = replica.getState().agent;
-  return agent !== null && (agent.activeTurn !== null || agent.status === 'running' || agent.status === 'waiting');
+  return agent !== null && (agent.status === 'running' || agent.status === 'waiting');
 }
 
 function progressValue(replica: AgentReplica): string {

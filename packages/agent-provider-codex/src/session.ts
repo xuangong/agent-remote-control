@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import type { AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
@@ -280,7 +281,7 @@ export class CodexAppServerSession implements AgentSession {
 
   async prepareObservation(): Promise<void> {
     if (this.disposed) throw new Error('Codex session is closed');
-    if (this.transportFailure) throw this.transportFailure;
+    if (this.transportFailure) throw new AgentOperationRejectedError('native_runtime_unavailable', this.transportFailure.message);
     this.released = false;
     if (this.preparingObservation) return this.preparingObservation;
     if (this.observing || !this.historyRefreshNeeded) return;
@@ -355,8 +356,8 @@ export class CodexAppServerSession implements AgentSession {
   private assertDirectInput(): void {
     this.assertOpen();
     this.runtime.assertConnected();
-    if (!this.acceptsDirectInput) throw new Error('Codex native child does not accept direct input.');
-    if (this.runtimeStatus === 'closed') throw new Error('Codex session is closed');
+    if (!this.acceptsDirectInput) throw new AgentOperationRejectedError('operation_rejected', 'Codex native child does not accept direct input.');
+    if (this.runtimeStatus === 'closed') throw new AgentOperationRejectedError('operation_rejected', 'Codex session is closed');
   }
 
   static async create(
@@ -486,11 +487,12 @@ export class CodexAppServerSession implements AgentSession {
 
   async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
     this.assertMessageReady();
-    if (options?.delivery === 'next_turn') throw new Error('Codex does not support next-turn message delivery.');
-    if (this.sendingMessage) throw new Error('A Codex message is already being submitted.');
-    const input = codexMessageInput(parts);
+    if (options?.delivery === 'next_turn') throw new AgentOperationRejectedError('operation_rejected', 'Codex does not support next-turn message delivery.');
+    if (this.sendingMessage) throw new AgentOperationRejectedError('operation_rejected', 'A Codex message is already being submitted.');
     this.sendingMessage = true;
     try {
+      const input = await prepareAgentOperation(() => codexMessageInput(parts));
+      this.assertMessageReady();
       if (!this.activeTurnId) return await this.startTurn(input);
       let expectedTurnId = this.activeTurnId;
       for (let attempt = 0; ; attempt += 1) {
@@ -526,15 +528,15 @@ export class CodexAppServerSession implements AgentSession {
 
   private assertMessageReady(): void {
     this.assertDirectInput();
-    if (this.commandInteractions.pending || (!this.activeTurnId && this.pendingInteractions.size > 0)) throw new Error('Codex has pending interactions');
-    if (this.executingCommand) throw new Error('A Codex command is active');
-    if (this.changingSetting || this.startingTurn) throw new Error('A Codex turn or setting change is already active');
+    if (this.commandInteractions.pending || (!this.activeTurnId && this.pendingInteractions.size > 0)) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending interactions');
+    if (this.executingCommand) throw new AgentOperationRejectedError('operation_rejected', 'A Codex command is active');
+    if (this.changingSetting || this.startingTurn) throw new AgentOperationRejectedError('operation_rejected', 'A Codex turn or setting change is already active');
   }
 
   async steer(text: string): Promise<void> {
     this.assertDirectInput();
-    if (!this.activeTurnId) throw new Error('Codex has no active turn.');
-    if (!text.trim()) throw new Error('Codex message must not be empty.');
+    if (!this.activeTurnId) throw new AgentOperationRejectedError('operation_rejected', 'Codex has no active turn.');
+    if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Codex message must not be empty.');
     await this.steerTurn(codexMessageInput([{ type: 'text', text }]), this.activeTurnId);
   }
 
@@ -547,17 +549,17 @@ export class CodexAppServerSession implements AgentSession {
 
   async cancel(): Promise<void> {
     this.assertDirectInput();
-    if (!this.activeTurnId) throw new Error('Codex has no active turn.');
+    if (!this.activeTurnId) throw new AgentOperationRejectedError('operation_rejected', 'Codex has no active turn.');
     await this.transport.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId });
   }
 
   private async startTurn(message: string | CodexInput[], skill?: { name: string; path: string }): Promise<void> {
     this.assertDirectInput();
-    if (!this.threadId) throw new Error('Codex session has no thread');
-    if (typeof message === 'string' && !message.trim() && !skill) throw new Error('Codex message must not be empty');
+    if (!this.threadId) throw new AgentOperationRejectedError('operation_rejected', 'Codex session has no thread');
+    if (typeof message === 'string' && !message.trim() && !skill) throw new AgentOperationRejectedError('operation_rejected', 'Codex message must not be empty');
     const input: CodexInput[] = typeof message === 'string' ? (message ? [{ type: 'text', text: message, text_elements: [] }] : []) : message;
-    if (!input.length && !skill) throw new Error('Codex message must not be empty');
-    if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new Error('A Codex turn is already active');
+    if (!input.length && !skill) throw new AgentOperationRejectedError('operation_rejected', 'Codex message must not be empty');
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new AgentOperationRejectedError('operation_rejected', 'A Codex turn is already active');
     const collaborationMode = this.buildCollaborationMode();
     const statusRevision = this.statusRevision;
     this.startingTurn = true;
@@ -579,17 +581,17 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   async setSessionSetting(id: string, value: string): Promise<void> {
-    if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new Error('Codex has pending command interactions or message submission');
+    if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending command interactions or message submission');
     await this.applySessionSetting(id, value);
   }
 
   private async applySessionSetting(id: string, value: string): Promise<void> {
     this.assertDirectInput();
     if (this.restrictedNative && this.settings.describe(this.config.model, this.config.reasoningEffort).some(setting => setting.id === id && setting.category === 'permissions')) {
-      throw new Error('Native permission settings are locked by local Host policy.');
+      throw new AgentOperationRejectedError('operation_rejected', 'Native permission settings are locked by local Host policy.');
     }
-    if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle' || this.activeTurnId) throw new Error('Codex settings can only change while idle.');
-    if (this.pendingInteractions.size > 0) throw new Error('Codex settings cannot change with pending interactions.');
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle' || this.activeTurnId) throw new AgentOperationRejectedError('operation_rejected', 'Codex settings can only change while idle.');
+    if (this.pendingInteractions.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'Codex settings cannot change with pending interactions.');
     const patch = this.settings.patch(id, value, this.config.model, this.config.reasoningEffort);
     const collaborationMode = this.buildCollaborationMode();
     if (collaborationMode) {
@@ -618,10 +620,10 @@ export class CodexAppServerSession implements AgentSession {
 
   async setPlanning(active: boolean): Promise<void> {
     this.assertDirectInput();
-    if (!this.capabilities.planning) throw new Error('Codex planning control is unsupported.');
-    if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new Error('Codex has pending command interactions or message submission');
-    if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle') throw new Error('Codex planning can only change while idle.');
-    if (this.pendingInteractions.size > 0) throw new Error('Codex planning cannot change with pending interactions.');
+    if (!this.capabilities.planning) throw new AgentOperationRejectedError('operation_rejected', 'Codex planning control is unsupported.');
+    if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending command interactions or message submission');
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle') throw new AgentOperationRejectedError('operation_rejected', 'Codex planning can only change while idle.');
+    if (this.pendingInteractions.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'Codex planning cannot change with pending interactions.');
     this.collaborationModeSelected = true;
     if (active) this.config.collaborationMode = 'plan';
     else delete this.config.collaborationMode;
@@ -632,7 +634,7 @@ export class CodexAppServerSession implements AgentSession {
     if (!this.planningModes || (!this.ownsRuntime && !this.collaborationModeSelected && !this.config.collaborationMode)) return undefined;
     const selected = this.config.collaborationMode === 'plan' ? this.planningModes.plan : this.planningModes.normal;
     const model = this.config.model ?? selected.model;
-    if (!model) throw new Error('Codex collaboration mode requires a model');
+    if (!model) throw new AgentOperationRejectedError('operation_rejected', 'Codex collaboration mode requires a model');
     return {
       mode: selected.mode,
       settings: {
@@ -648,11 +650,11 @@ export class CodexAppServerSession implements AgentSession {
     this.runtime.assertConnected();
     if (await this.commandInteractions.respond(requestId, response)) return;
     const pending = this.pendingInteractions.get(requestId);
-    if (!pending) throw new Error(`No pending Codex interaction ${requestId}`);
+    if (!pending) throw new AgentOperationRejectedError('operation_rejected', `No pending Codex interaction ${requestId}`);
     if (pending.kind !== response.kind) {
-      throw new Error(`Codex interaction ${requestId} requires a ${pending.kind} response`);
+      throw new AgentOperationRejectedError('operation_rejected', `Codex interaction ${requestId} requires a ${pending.kind} response`);
     }
-    if (response.kind === 'plan_approval' && response.action !== 'reject' && 'feedback' in response) throw new Error('Codex approval cannot contain revision feedback.');
+    if (response.kind === 'plan_approval' && response.action !== 'reject' && 'feedback' in response) throw new AgentOperationRejectedError('operation_rejected', 'Codex approval cannot contain revision feedback.');
     validateInteractionResponse(pending.request, response);
     if (pending.request.kind === 'plan_approval' && response.kind === 'plan_approval') {
       await this.respondToPlan(pending.request, response);
@@ -673,21 +675,21 @@ export class CodexAppServerSession implements AgentSession {
 
   async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
     this.assertCommandIdle();
-    if (this.restrictedNative && id === 'permissions') throw new Error('Native permission commands are locked by local Host policy.');
-    if (this.executingCommand) throw new Error('A Codex command is already active.');
-    if (this.commandInteractions.pending) throw new Error('Codex has pending command interactions.');
+    if (this.restrictedNative && id === 'permissions') throw new AgentOperationRejectedError('operation_rejected', 'Native permission commands are locked by local Host policy.');
+    if (this.executingCommand) throw new AgentOperationRejectedError('operation_rejected', 'A Codex command is already active.');
+    if (this.commandInteractions.pending) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending command interactions.');
     this.executingCommand = true;
     try {
-      const command = (await discoverCodexCommands(this.transport, this.config.cwd, this.codexHome)).find(({ descriptor }) => descriptor.id === id);
+      const command = (await prepareAgentOperation(() => discoverCodexCommands(this.transport, this.config.cwd, this.codexHome))).find(({ descriptor }) => descriptor.id === id);
       this.assertCommandIdle();
-      if (!command) throw new Error('Codex command is unavailable. Refresh the command directory.');
+      if (!command) throw new AgentOperationRejectedError('operation_rejected', 'Codex command is unavailable. Refresh the command directory.');
       if (command.type === 'skill') await this.startTurn(args, { name: command.name, path: command.path });
-      else if (command.type === 'prompt') await this.startTurn(expandCodexPrompt(command.body, args));
+      else if (command.type === 'prompt') await this.startTurn(await prepareAgentOperation(() => expandCodexPrompt(command.body, args)));
       else {
-        if (args.trim()) throw new Error('This Codex command does not accept arguments.');
+        if (args.trim()) throw new AgentOperationRejectedError('operation_rejected', 'This Codex command does not accept arguments.');
         if (id === 'compact') await this.transport.request('thread/compact/start', { threadId: this.threadId });
         else {
-          await this.settings.discover(this.transport);
+          await prepareAgentOperation(() => this.settings.discover(this.transport));
           this.assertCommandIdle();
           if (id === 'model') this.openSettingQuestion('model', true);
           else this.openPermissionsQuestion();
@@ -699,16 +701,16 @@ export class CodexAppServerSession implements AgentSession {
 
   private assertCommandIdle(): void {
     this.assertDirectInput();
-    if (this.changingSetting || this.startingTurn || this.sendingMessage || this.activeTurnId || this.runtimeStatus !== 'idle') throw new Error('Codex commands require an idle session.');
-    if (this.pendingInteractions.size > 0) throw new Error('Codex has pending native interactions.');
+    if (this.changingSetting || this.startingTurn || this.sendingMessage || this.activeTurnId || this.runtimeStatus !== 'idle') throw new AgentOperationRejectedError('operation_rejected', 'Codex commands require an idle session.');
+    if (this.pendingInteractions.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending native interactions.');
   }
 
   private openSettingQuestion(id: string, followWithEffort = false): void {
     const setting = this.settings.describe(this.config.model, this.config.reasoningEffort).find((item) => item.id === id);
-    if (!setting?.mutable || !setting.options.length) throw new Error('Codex setting is unavailable.');
+    if (!setting?.mutable || !setting.options.length) throw new AgentOperationRejectedError('operation_rejected', 'Codex setting is unavailable.');
     this.openCommandQuestion(setting, async (value) => {
       this.assertCommandIdle();
-      await this.settings.discover(this.transport);
+      await prepareAgentOperation(() => this.settings.discover(this.transport));
       await this.applySessionSetting(id, value);
       if (followWithEffort) {
         const effort = this.settings.describe(this.config.model, this.config.reasoningEffort).find((item) => item.id === 'effort');
@@ -719,13 +721,13 @@ export class CodexAppServerSession implements AgentSession {
 
   private openPermissionsQuestion(): void {
     const available = this.settings.describe(this.config.model, this.config.reasoningEffort).filter((setting) => setting.category === 'permissions' && setting.mutable && setting.options.length);
-    if (!available.length) throw new Error('Codex permission settings are unavailable.');
+    if (!available.length) throw new AgentOperationRejectedError('operation_rejected', 'Codex permission settings are unavailable.');
     this.openCommandQuestion({
       id: 'permissions', category: 'permissions', label: 'Permissions', value: null, mutable: true, scope: 'session',
       options: available.map(({ id, label, description }) => ({ value: id, label, description })),
     }, async (value) => {
       this.assertCommandIdle();
-      await this.settings.discover(this.transport);
+      await prepareAgentOperation(() => this.settings.discover(this.transport));
       this.openSettingQuestion(value);
     });
   }
@@ -736,9 +738,9 @@ export class CodexAppServerSession implements AgentSession {
       description: [setting.value ? `Current: ${setting.options.find(({ value }) => value === setting.value)?.label ?? setting.value}.` : '', setting.description ?? ''].filter(Boolean).join(' '),
       required: true, selection: 'single', options: setting.options, allowCustomText: false, allowDismiss: true,
     }] }, async (response) => {
-      if (response.kind !== 'question') throw new Error('Codex command requires a question response.');
+      if (response.kind !== 'question') throw new AgentOperationRejectedError('operation_rejected', 'Codex command requires a question response.');
       const value = response.answers.find(({ questionId }) => questionId === setting.id)?.selectedValues[0];
-      if (!value) throw new Error('Codex command requires a selection.');
+      if (!value) throw new AgentOperationRejectedError('operation_rejected', 'Codex command requires a selection.');
       await handler(value);
     });
   }
@@ -798,7 +800,7 @@ export class CodexAppServerSession implements AgentSession {
 
   private async initialize(): Promise<unknown> {
     const initialization = await initializeCodexTransport(this.transport);
-    await this.settings.discover(this.transport);
+    await prepareAgentOperation(() => this.settings.discover(this.transport));
     let modes: unknown;
     try {
       modes = await this.transport.request('collaborationMode/list', {});
@@ -981,9 +983,9 @@ export class CodexAppServerSession implements AgentSession {
     request: Extract<AgentInteractionRequest, { kind: 'plan_approval' }>,
     response: Extract<AgentInteractionResponse, { kind: 'plan_approval' }>,
   ): Promise<void> {
-    if (!request.allowedActions.includes(response.action)) throw new Error(`Unsupported Codex plan action ${response.action}`);
-    if (response.action !== 'reject' && 'feedback' in response) throw new Error('Codex approval cannot contain revision feedback.');
-    if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new Error('Codex plan review requires an idle turn.');
+    if (!request.allowedActions.includes(response.action)) throw new AgentOperationRejectedError('operation_rejected', `Unsupported Codex plan action ${response.action}`);
+    if (response.action !== 'reject' && 'feedback' in response) throw new AgentOperationRejectedError('operation_rejected', 'Codex approval cannot contain revision feedback.');
+    if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new AgentOperationRejectedError('operation_rejected', 'Codex plan review requires an idle turn.');
     const previousMode = this.config.collaborationMode;
     const nativeTurnRevision = this.nativeTurnRevision;
     if (response.action === 'approve_and_resume') delete this.config.collaborationMode;
@@ -994,13 +996,13 @@ export class CodexAppServerSession implements AgentSession {
         await this.startTurn(`Revise the proposed plan using this feedback. Stay in planning mode and present the revised plan.\n\nFeedback:\n${response.feedback.trim()}\n\nPrevious plan:\n${request.plan}`);
       }
     } catch (error) {
-      // A new native turn proves acceptance even when its RPC reply fails later.
+      // Native activity from another client cannot confirm this failed request.
       if (nativeTurnRevision === this.nativeTurnRevision) {
         if (previousMode) this.config.collaborationMode = previousMode;
         else delete this.config.collaborationMode;
         this.emitRuntimeUpdate();
-        throw error;
       }
+      throw error;
     }
     this.pendingInteractions.delete(request.requestId);
     this.emitInteractionResolved(request.requestId, response);
@@ -1247,7 +1249,7 @@ export class CodexAppServerSession implements AgentSession {
 
   private assertRequestThread(params: unknown): asserts params is Record<string, unknown> {
     if (this.disposed || this.runtimeStatus === 'closed') throw new Error('Codex session is closed');
-    if (this.transportFailure) throw this.transportFailure;
+    if (this.transportFailure) throw new AgentOperationRejectedError('native_runtime_unavailable', this.transportFailure.message);
     if (!isRecord(params) || !this.threadId || params.threadId !== this.threadId) throw new Error('Codex request belongs to an unknown thread');
   }
 
@@ -1270,8 +1272,8 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private assertOpen(): void {
-    if (this.disposed || this.released) throw new Error('Codex session is closed');
-    if (this.transportFailure) throw this.transportFailure;
+    if (this.disposed || this.released) throw new AgentOperationRejectedError('operation_rejected', 'Codex session is closed');
+    if (this.transportFailure) throw new AgentOperationRejectedError('native_runtime_unavailable', this.transportFailure.message);
   }
 }
 

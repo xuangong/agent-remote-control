@@ -5,7 +5,7 @@ import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender, unmount } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
 
-const state: AgentReplicaState = { ...createReplicaState(), agent: {
+const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
   id: 'one', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
   capabilities: { history: true, sendMessage: true, queueMessage: true, steer: false, cancel: true, commands: true, readResource: false },
   pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' },
@@ -264,4 +264,23 @@ it('queues input when control is checking even if the transport reports ready', 
   expect(view.container.querySelector('textarea')!.value).toBe('');
   await view.update({ state });
   expect(view.send).toHaveBeenCalledExactlyOnceWith('Wait for control');
+});
+
+it('uses public synchronization and operation admission without legacy disabled props', async () => {
+  const { remoteSessionState } = await import('../client/session-state.js');
+  const view = await setup({ disabled: false, recovering: false, sessionState: remoteSessionState(state, 'connecting') });
+  expect(view.container.querySelector('[data-testid="agent-activity-label"]')!.textContent).toBe('Waiting for session');
+  await view.type('Wait for synchronization');
+  await view.click();
+  expect(view.send).not.toHaveBeenCalled();
+  expect(view.notice()?.textContent).toContain('Wait for synchronization');
+  const ready = remoteSessionState(state, 'ready');
+  await view.update({ sessionState: { ...ready, operations: { ...ready.operations, send_message: { allowed: false, code: 'blocked', reason: 'Input unavailable' } } } });
+  await advance(1000);
+  expect(view.send).not.toHaveBeenCalled();
+  await view.type('Another draft');
+  expect(view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  await view.update({ sessionState: ready });
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Wait for synchronization');
+  expect(view.container.querySelector('textarea')!.value).toBe('Another draft');
 });

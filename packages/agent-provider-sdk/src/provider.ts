@@ -60,6 +60,17 @@ export class AgentOperationRejectedError extends Error {
   }
 }
 
+/** Run only side-effect-free preparation before native dispatch or callback resolution.
+ * Recheck session admission synchronously after awaiting preparation.
+ */
+export async function prepareAgentOperation<T>(prepare: () => T | Promise<T>): Promise<T> {
+  try { return await prepare(); }
+  catch (error) {
+    if (error instanceof AgentOperationRejectedError) throw error;
+    throw new AgentOperationRejectedError('operation_preparation_failed', error instanceof Error ? error.message : 'Operation preparation failed.');
+  }
+}
+
 /** Host-owned tools are local callbacks, never accepted from public wire input. */
 export interface AgentSessionTool {
   name: string;
@@ -110,6 +121,11 @@ export interface AgentSession {
   observe(): AsyncIterable<ProviderStreamItem>;
   /** Reads an older, chronological Timeline page without changing live runtime state. */
   readTimelineHistory?(cursor: string): Promise<{ observations: import('./observation.js').ProviderObservation[]; nextCursor?: string }>;
+  /** Resolves when input is accepted by the adapter-owned delivery channel, not when a turn completes.
+   * RPC providers require a native receipt; streaming providers may accept into their owned input queue.
+   * Subsequent normalized observations report execution; resolution alone does not guarantee durable persistence.
+   * A rejected operation must throw AgentOperationRejectedError only with proof of no requested effect.
+   */
   sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
   sendMessageContent?(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;

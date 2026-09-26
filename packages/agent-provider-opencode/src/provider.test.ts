@@ -518,13 +518,16 @@ test('reserves native input admission through the acknowledgement-to-busy notifi
   expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(2);
 }, 10000);
 
-test('releases input admission after definite rejection but retains unknown outcomes until cancellation', async () => {
+test('retains input admission after HTTP errors until native cancellation confirms release', async () => {
   const f = await fixture();
   const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
   const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
   f.promptStatus = 400;
   await expect(session.sendMessage('Rejected')).rejects.toThrow('HTTP 400');
-  f.promptStatus = 204; f.rejectPrompt = true;
+  f.promptStatus = 204;
+  await expect(session.sendMessage('Unconfirmed HTTP rejection')).rejects.toThrow('Wait for');
+  await session.cancel();
+  f.rejectPrompt = true;
   await expect(session.sendMessage('Unknown')).rejects.toThrow('unknown');
   f.rejectPrompt = false;
   await expect(session.sendMessage('Must not replay')).rejects.toThrow('Wait for');
@@ -607,7 +610,7 @@ test('steer requires active native work and does not replay an uncertain admissi
 test('retains uncertain idle-origin input across unrelated busy and error events', async () => {
   const f = await fixture();
   const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
+  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
   f.rejectPrompt = true;
   await expect(session.sendMessage('Unknown')).rejects.toThrow('unknown');
   f.rejectPrompt = false;
@@ -615,7 +618,7 @@ test('retains uncertain idle-origin input across unrelated busy and error events
   await expect.poll(async () => (await session.runtimeInfo()).status).toBe('running');
   await expect(session.sendMessage('Do not duplicate')).rejects.toThrow('Wait for');
   f.emit('session.error', { sessionID: 'ses_test', error: { name: 'UnknownError', data: { message: 'Uncorrelated' } } });
-  await expect.poll(async () => (await session.runtimeInfo()).status).toBe('failed');
+  await waitFor(() => items.some(item => item.type === 'observation' && item.event.type === 'turn_failed'));
   await expect(session.sendMessage('Still unknown')).rejects.toThrow('Wait for');
   expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
 }, 10000);

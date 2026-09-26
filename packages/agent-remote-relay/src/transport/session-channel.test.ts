@@ -1,3 +1,5 @@
+import { createOperationCache } from '../operation-cache.js';
+import { createOperationExecutor } from '../operation-settlement.js';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import WebSocket from 'ws';
@@ -35,7 +37,8 @@ async function fixture() {
       capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
         interactions: { question: false, planApproval: false, toolApproval: false } } },
   });
-  const relay = { requireAgent(id: string): SessionWireAgent {
+  const cache = createOperationCache(); cleanup.push(() => cache.close());
+  const relay = { executeOperation: (scope: string) => createOperationExecutor(cache, scope), requireAgent(id: string): SessionWireAgent {
     let set = listeners.get(id); if (!set) { set = new Set(); listeners.set(id, set); }
     return { agentId: id, snapshot: () => snapshot(id), timelineCursor: () => ({ epoch: id + '-epoch', seq: 3 }), subscribe: listener => { set!.add(listener); return () => { set!.delete(listener); }; },
       fetchTimeline: () => { throw new Error('Unexpected history request'); }, sendMessage: async () => {}, respondToInteraction: async () => {} };

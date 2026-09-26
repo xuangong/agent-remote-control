@@ -116,7 +116,7 @@ export function createRemoteHostPluginHost(
         sessionControls: relay.sessionControls,
         authorize: () => true,
         ...(options.imageScope ? { imageScope: options.imageScope } : {}),
-        ...(options.executeOperation ? { executeOperation: options.executeOperation } : {}),
+        executeOperation: options.executeOperation ?? relay.executeOperation('local'),
         onFailure: () => { if (streams.get(streamId) === stream) closeStream(streamId, 1011, 'Remote Session delivery failed.'); },
       });
       emit({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'stream_opened', streamId });

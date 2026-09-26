@@ -157,7 +157,7 @@ describe('observeReplica', () => {
     replica.reportDiagnostic('wire_problem', 'Wire problem.', true);
     replica.applyInteractionResolved(resolved);
 
-    expect(records.map(({ kind }) => kind)).toEqual(['interaction_requested', 'resource', 'diagnostic', 'interaction_resolved']);
+    expect(records.map(({ kind }) => kind)).toEqual(['agent', 'interaction_requested', 'resource', 'diagnostic', 'agent', 'interaction_resolved']);
     expect(records.find(({ kind }) => kind === 'resource')).toMatchObject({
       kind: 'resource', resourceId: 'resource-one', state: { status: 'available', byteLength: 3 },
     });

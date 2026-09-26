@@ -1,4 +1,4 @@
-import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { createHash } from 'node:crypto';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -19,6 +19,7 @@ export interface OperationDescriptor {
 
 export interface OperationWork<T> {
   readonly validate?: () => Promise<void> | void;
+  /** Synchronous, side-effect-free admission; may run again after queued preparation. */
   readonly beforeDispatch?: () => void;
   readonly dispatch: () => Promise<T>;
   readonly maximumResultBytes?: number;
@@ -86,7 +87,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
   timer.unref?.();
 
   async function execute<T>(descriptor: OperationDescriptor, work: OperationWork<T>): Promise<T> {
-    if (closing) throw new OperationCacheError('operation_cache_closed', 'The Host operation cache is closing.');
+    if (closing) throw new OperationCacheError('operation_cache_closed', 'The operation cache is closing.');
     if (!UUID.test(descriptor.operationId)) {
       throw new OperationCacheError('invalid_operation_id', 'Operation identity must be a UUID.');
     }
@@ -112,7 +113,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     }
     const reservedBytes = entryBytes(key, resultReservation);
     if (entries.size >= maxEntries || retainedBytes + reservedBytes > maxBytes) {
-      throw new OperationCacheError('operation_capacity_exceeded', 'The Host operation cache is full. Wait for retained operations to expire before trying a new mutation.');
+      throw new OperationCacheError('operation_capacity_exceeded', 'The operation cache is full. Wait for retained operations to expire before trying a new mutation.');
     }
 
     let resolvePending!: (value: T | PromiseLike<T>) => void;
@@ -148,6 +149,13 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     try {
       result = await work.dispatch();
     } catch (error) {
+      if (error instanceof AgentOperationRejectedError) {
+        const errorCode = safeErrorCode(error);
+        settle(key, fingerprint, reservedBytes, {
+          state: 'rejected', errorCode, bytes: entryBytes(key, 0), settledAt: validNow(now),
+        });
+        throw new OperationCacheError(errorCode, 'The operation was rejected without side effects.');
+      }
       const errorCode = error instanceof AgentRuntimeError && error.code === 'native_file_limit' ? error.code : undefined;
       settle(key, fingerprint, reservedBytes, {
         state: 'unknown', errorCode, bytes: entryBytes(key, 0), settledAt: validNow(now),
@@ -237,6 +245,6 @@ function validNow(now: () => number): number {
 function unknownOutcome(cause?: string): OperationCacheError {
   const detail = 'The operation may have reached the native runtime. Inspect native state before creating a new intent.';
   return cause === 'native_file_limit'
-    ? new OperationCacheError(cause, `The shared Codex daemon reached its file descriptor limit. ${detail}`)
+    ? new OperationCacheError(cause, `The native runtime reached its file descriptor limit. ${detail}`)
     : new OperationCacheError('operation_outcome_unknown', detail);
 }

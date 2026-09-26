@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type {
   AgentCapabilities,
   AgentInteractionResponse,
@@ -15,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { AgentManager, InteractionResponseError } from './agent-manager.js';
 import { InMemoryResourceStore } from './resources/resource-store.js';
-import { createSessionWire } from './session-wire.js';
+import { createSettledSessionWire as createSessionWire } from './session-wire.test-fixture.js';
 
 const capabilities: AgentCapabilities = {
   history: true,
@@ -1090,7 +1091,7 @@ describe('AgentManager interactions', () => {
     await manager.close();
   });
 
-  it('releases an interaction claim when Provider submission fails', async () => {
+  it('releases an interaction claim only when the Provider confirms rejection', async () => {
     const providerStream = new ManualProviderStream();
     providerStream.push({
       type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'history',
@@ -1103,7 +1104,7 @@ describe('AgentManager interactions', () => {
       session: sessionFor(providerStream, {
         async respondToInteraction() {
           providerCalls += 1;
-          if (providerCalls === 1) throw new Error('Provider submission failed.');
+          if (providerCalls === 1) throw new AgentOperationRejectedError('submission_rejected', 'Provider submission failed.');
         },
       }),
     });
@@ -1120,6 +1121,24 @@ describe('AgentManager interactions', () => {
     expect(providerCalls).toBe(2);
     await manager.close();
   });
+  it('retains the interaction claim when native submission has an unknown outcome', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'observation', sourceKey: 'request', occurredAt: 1, delivery: 'history',
+      event: { type: 'interaction_requested', provider: 'codex', request: questionRequest } });
+    stream.push({ type: 'history_boundary' });
+    let calls = 0;
+    const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'e',
+      session: sessionFor(stream, { async respondToInteraction() { calls++; throw new Error('Native response lost.'); } }) });
+    try {
+      await manager.ready;
+      const response = { kind: 'question' as const, answers: [{ questionId: 'channel', selectedValues: ['beta'] }] };
+      await expect(manager.respondToInteraction(questionRequest.requestId, response)).rejects.toThrow('Native response lost.');
+      await expect(manager.respondToInteraction(questionRequest.requestId, response)).rejects.toMatchObject({ code: 'stale_interaction' });
+      expect(calls).toBe(1);
+      expect(manager.snapshot().payload.pendingInteractions).toEqual([questionRequest]);
+    } finally { await manager.close(); }
+  });
+
 });
 
 describe('AgentManager observation lifecycle', () => {
@@ -1149,7 +1168,7 @@ describe('AgentManager observation lifecycle', () => {
     await manager.close();
   });
 
-  it('turns a post-boundary observation failure into visible failed state without rejecting settlement', async () => {
+  it('reports observation unavailability without inventing a native turn failure', async () => {
     const providerStream = new ManualProviderStream();
     const manager = await AgentManager.attach({
       agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' },
@@ -1165,15 +1184,14 @@ describe('AgentManager observation lifecycle', () => {
     await expect(manager.settled).resolves.toBeUndefined();
 
     expect(manager.snapshot()).toMatchObject({
-      payload: { status: 'failed', lastError: 'Provider observation stream failed.' },
+      payload: { status: 'idle', runtimeInfo: { connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } } },
     });
     expect(events).toMatchObject([
-      { type: 'agent_state', snapshot: { payload: { status: 'failed' } } },
+      { type: 'agent_state', snapshot: { payload: { status: 'idle', runtimeInfo: { connection: { state: 'unavailable' } } } } },
       {
         type: 'agent_stream',
         event: {
-          type: 'turn_failed', code: 'provider_observation_failed',
-          error: 'Provider observation stream failed.', diagnostic: 'native stream disconnected',
+          type: 'runtime_updated', runtimeInfo: { connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } },
         },
       },
     ]);
@@ -1197,17 +1215,15 @@ describe('AgentManager observation lifecycle', () => {
 
     expect(manager.snapshot()).toMatchObject({
       payload: {
-        status: 'failed',
-        runtimeInfo: { status: 'failed' },
-        lastError: 'Provider observation stream failed.',
+        status: 'idle',
+        runtimeInfo: { status: 'idle', connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } },
       },
     });
     expect(events).toContainEqual(expect.objectContaining({
       type: 'agent_stream',
       event: expect.objectContaining({
-        type: 'turn_failed',
-        code: 'provider_observation_failed',
-        diagnostic: 'Provider observation stream ended unexpectedly.',
+        type: 'runtime_updated',
+        runtimeInfo: expect.objectContaining({ connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } }),
       }),
     }));
     await manager.close();
@@ -1420,4 +1436,41 @@ it('ignores late history from a replaced epoch without blocking the new history 
     expect(manager.fetchTimeline({ ...request, direction: 'tail', cursor: undefined }).payload.entries.map(entry => entry.item))
       .toEqual([{ type: 'assistant_message', messageId: 'older restored', text: 'older restored' }, { type: 'assistant_message', messageId: 'restored', text: 'restored' }]);
   } finally { await manager.close(); }
+});
+
+
+describe('shared session lifecycle', () => {
+  it('rejects native mutations during restore and reopens them on authoritative recovery', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    let sends = 0;
+    const manager = await AgentManager.attach({ agentId: 'recovering', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'e', session: sessionFor(stream, {
+      runtimeInfo: async () => ({ providerId: 'codex', sessionId: 's', status: 'running', connection: { state: 'restoring' } }),
+      async sendMessage() { sends++; },
+    }) });
+    try {
+      await manager.ready;
+      await expect(manager.sendMessage('not yet')).rejects.toMatchObject({ code: 'native_runtime_restoring' });
+      expect(sends).toBe(0);
+      stream.push({ type: 'observation', sourceKey: 'restored', occurredAt: 2, delivery: 'live', event: { type: 'runtime_updated', provider: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 's', status: 'running', connection: { state: 'connected' } } } });
+      await expect.poll(() => manager.snapshot().payload.runtimeInfo.connection?.state).toBe('connected');
+      await manager.sendMessage('join current work');
+      expect(sends).toBe(1);
+    } finally { await manager.close(); }
+  });
+
+  it('preserves active work when observation fails and rejects new mutations', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'history_boundary' });
+    const manager = await AgentManager.attach({ agentId: 'lost', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'e', session: sessionFor(stream) });
+    try {
+      await manager.ready;
+      stream.push({ type: 'observation', sourceKey: 'turn', occurredAt: 2, delivery: 'live', event: { type: 'turn_started', provider: 'codex', turnId: 'still-running' } });
+      await expect.poll(() => manager.snapshot().payload.activeTurn?.turnId).toBe('still-running');
+      stream.fail(new Error('transport lost'));
+      await manager.settled;
+      expect(manager.snapshot().payload).toMatchObject({ status: 'running', activeTurn: { turnId: 'still-running' }, runtimeInfo: { connection: { state: 'unavailable' } } });
+      await expect(manager.sendMessage('unsafe')).rejects.toMatchObject({ code: 'native_runtime_unavailable' });
+    } finally { await manager.close(); }
+  });
 });

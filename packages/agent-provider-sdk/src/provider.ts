@@ -52,6 +52,14 @@ export class AgentRuntimeError extends Error {
   }
 }
 
+/** Adapter-confirmed operation rejection: native work did not start and produced no side effects. */
+export class AgentOperationRejectedError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'AgentOperationRejectedError';
+  }
+}
+
 /** Host-owned tools are local callbacks, never accepted from public wire input. */
 export interface AgentSessionTool {
   name: string;

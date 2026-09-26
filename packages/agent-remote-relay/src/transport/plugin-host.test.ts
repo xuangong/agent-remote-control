@@ -12,13 +12,15 @@ async function fixture(options: Record<string, unknown> = {}) {
   if (typeof agentId !== 'string') throw new TypeError('fixture agentId must be a string.');
   const sent: unknown[] = [], failures: unknown[] = [], commands: string[] = [];
   let finishSend: (() => void) | undefined;
+  let closeObservation!: () => void;
+  const observationClosed = new Promise<void>(resolve => { closeObservation = resolve; });
   const session: AgentSession = {
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
       interactions: { question: false, toolApproval: false, planApproval: false } },
-    async *observe() { yield { type: 'history_boundary' }; },
+    async *observe() { yield { type: 'history_boundary' }; await observationClosed; },
     async runtimeInfo() { return { providerId: 'test', sessionId: 'native-one', status: 'idle' }; },
     async sendMessage(text) { commands.push(text); if (text === 'hold') await new Promise<void>((r) => { finishSend = r; }); },
-    async respondToInteraction() {}, async dispose() {},
+    async respondToInteraction() {}, async dispose() { closeObservation(); },
   };
   const relay = remote.createAgentRemoteRelay({ providers: [{ descriptor: { providerId: 'test', displayName: 'Test' },
     async createSession() { return session; }, async resumeSession() { return session; } }], epoch: () => 'epoch-one' });

@@ -1,9 +1,10 @@
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { UnsupportedAgentCapabilityError } from './agent-manager.js';
-import { createSessionWire, type SessionWireAgent } from './session-wire.js';
+import type { SessionWireAgent } from './session-wire.js';
+import { createSettledSessionWire as createSessionWire } from './session-wire.test-fixture.js';
 import { describe, expect, it, vi } from 'vitest';
 import { InputImageError } from './resources/input-image-store.js';
-import { createOperationCache } from '../../agent-host/src/operation-cache.js';
+import { createOperationCache } from './operation-cache.js';
 
 const OPERATION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -442,7 +443,7 @@ describe('session wire Timeline and manager-event projection', () => {
 
   it('reports unsupported manager capabilities as a recoverable command error', async () => {
     const { agent } = fakeAgent();
-    agent.sendMessage = async () => {
+    agent.validateOperation = () => {
       throw new UnsupportedAgentCapabilityError('send_message');
     };
     const output: Array<Record<string, unknown>> = [];

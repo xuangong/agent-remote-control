@@ -173,6 +173,10 @@ class RecordedLabSession implements AgentSession {
 
   async cancel(): Promise<void> {
     this.assertOpen();
+    for (const requestId of this.pending.keys()) {
+      this.emit({ type: 'interaction_invalidated', provider: PROVIDER_ID, requestId, reason: 'Canceled from the Lab.' });
+    }
+    this.pending.clear();
     this.emit({ type: 'turn_canceled', provider: PROVIDER_ID, reason: 'Canceled from the Lab.', turnId: 'recorded-turn' });
   }
 

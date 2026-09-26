@@ -1,3 +1,4 @@
+import { sessionOperationAvailability } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentSessionSetting } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
@@ -41,8 +42,7 @@ export function AgentSessionSettings({ state, children, disabled, readOnly = fal
   const runtimeUnavailable = settingsRecoveryMessage(runtimeConnection?.state);
   const [failure, setFailure] = useState<{ error: unknown; message: string }>();
   const inFlight = useRef(false);
-  const canChange = !readOnly && !disabled && runtimeConnected && !busy && agent.status === 'idle' && !agent.activeTurn
-    && state.pendingInteractions.length === 0 && agent.capabilities.sessionSettings === true && onSelect !== undefined;
+  const canChange = !readOnly && !busy && onSelect !== undefined && sessionOperationAvailability(agent, 'set_session_setting', { synchronized: !disabled, control: state.sessionControl?.access }).allowed;
 
   async function change(setting: AgentSessionSetting, value: string): Promise<void> {
     if (!canChange || inFlight.current || !setting.mutable || !setting.options.some((option) => option.value === value) || !onSelect) return;

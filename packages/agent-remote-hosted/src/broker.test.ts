@@ -2,7 +2,7 @@ import { AgentRuntimeError } from '../../agent-provider-sdk/dist/index.js';
 import { afterEach, expect, it } from 'vitest';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
-import { createOperationCache, OperationCacheError } from '../../agent-host/dist/operation-cache.js';
+import { createOperationCache, OperationCacheError } from '@orchardworks/agent-remote-relay';
 
 const close: Array<() => void | Promise<void>> = [];
 const operationOne = '00000000-0000-4000-8000-000000000001';

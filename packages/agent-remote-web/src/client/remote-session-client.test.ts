@@ -13,6 +13,7 @@ import type {
 
 import { AgentReplica } from '../replica/store.js';
 import { RemoteSessionClient } from './remote-session-client.js';
+import { SessionHandoffScope } from './session-control-extension.js';
 import type {
   RemoteAgentTransport,
   RemoteConnection,
@@ -1879,3 +1880,174 @@ it.each(['history', 'subscription'] as const)('reconnects when socket recovery l
     client.stop(); expect(vi.getTimerCount()).toBe(0);
   } finally {client.stop(); vi.useRealTimers();}
 });
+
+it('exposes synchronized observation separately from native recovery and write authority', async () => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('agent-one', transport, replica);
+  const states: string[] = [];
+  const unsubscribe = client.subscribeSessionState(state => states.push(state.runtime?.state ?? 'unknown'));
+  try {
+    client.start(); transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated' });
+    const restoring = snapshot();
+    restoring.payload.runtimeInfo.connection = { state: 'restoring' };
+    transport.emit(restoring);
+    const subscription = transport.sent.at(-1)!;
+    if (subscription.type !== 'timeline_subscription') throw new Error('Expected subscription');
+    transport.emit({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: { requestId: subscription.payload.requestId, agentIds: ['agent-one'] } });
+    transport.resolveTimeline(page('tail', []));
+    await transport.settle();
+    expect(client.getSessionState()).toMatchObject({ synchronized: true, runtime: { state: 'restoring' }, operations: { send_message: { allowed: false, code: 'native_runtime_restoring' } } });
+    replica.applySnapshot(snapshot());
+    expect(client.getSessionState().operations.send_message).toEqual({ allowed: true });
+    replica.setSessionControl({ access: 'read_only', available: true });
+    expect(client.getSessionState()).toMatchObject({ synchronized: true, operations: { send_message: { allowed: false, code: 'session_read_only' } } });
+    expect(states).toContain('restoring');
+    expect(states).toContain('connected');
+  } finally { unsubscribe(); client.stop(); }
+});
+
+it('owns native handoff synchronization and only acquires control after the native owner clears', async () => {
+  const transport = new FakeTransport();
+  const replica = new AgentReplica();
+  const resumeNative = vi.fn(async () => {});
+  const client = new RemoteSessionClient('agent-one', transport, replica, { controlExtension: { resumeNative }, reconnectInitialDelayMs: 1 });
+  const nativeOwner = { kind: 'native_cli' as const, generation: 'native-one' };
+  try {
+    client.start(); transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+    transport.emit(snapshot());
+    const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
+    if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
+    transport.emit({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: subscription.payload });
+    transport.resolveTimeline(page('tail', []));
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'native', access: 'read_only', available: false, nativeOwner } });
+    const acquire = transport.sent.find(message => message.type === 'session_control_request');
+    if (acquire?.type !== 'session_control_request') throw new Error('Missing acquisition');
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: acquire.payload.requestId, revision: 'native', access: 'read_only', available: false, nativeOwner } });
+    await transport.settle();
+    const onRestoring = vi.fn();
+    const taking = client.takeControl({ onRestoring });
+    void taking.catch(() => {});
+    await transport.settle();
+    expect(resumeNative).toHaveBeenCalledWith(nativeOwner, { checkOnly: false, signal: expect.any(AbortSignal) });
+    expect(onRestoring).toHaveBeenCalledTimes(1);
+    expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
+    await vi.waitFor(() => expect(transport.connections).toBe(2));
+    transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+    transport.emit(snapshot());
+    const resubscribe = transport.sent.filter(message => message.type === 'timeline_subscription').at(-1)!;
+    if (resubscribe.type !== 'timeline_subscription') throw new Error('Missing subscription');
+    transport.emit({ protocolVersion: '1.5.0', type: 'timeline_subscribed', payload: resubscribe.payload });
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
+    const reacquire = transport.sent.filter(message => message.type === 'session_control_request').at(-1)!;
+    if (reacquire.type !== 'session_control_request') throw new Error('Missing reacquisition');
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: reacquire.payload.requestId, revision: 'restored', access: 'read_only', available: true } });
+    transport.resolveTimeline(page('after', []));
+    await transport.settle();
+    const request = transport.sent.find(message => message.type === 'session_control_request' && message.payload.action === 'take_over');
+    expect(request).toBeDefined();
+    if (request?.type !== 'session_control_request') throw new Error('Missing takeover');
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: request.payload.requestId, revision: 'ours', access: 'control', available: false, token: 'private' } });
+    await taking;
+    expect(client.getSessionState().operations.send_message.allowed).toBe(true);
+  } finally { client.stop(); }
+});
+
+it('reports unsupported native control without pretending browser takeover can resume the runtime', async () => {
+  const transport = new FakeTransport();
+  const client = new RemoteSessionClient('agent-one', transport, new AgentReplica());
+  try {
+    client.start(); transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'native', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'native-one' } } });
+    await expect(client.takeControl()).rejects.toMatchObject({ code: 'native_control_unavailable' });
+    expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
+  } finally { client.stop(); }
+});
+
+it('stops a pending native-resume synchronization when the session lease is released', async () => {
+  vi.useFakeTimers();
+  const transport = new FakeTransport();
+  const client = new RemoteSessionClient('agent-one', transport, new AgentReplica());
+  try {
+    const pending = client.takeControlAfterNativeResume();
+    const result = expect(pending).rejects.toMatchObject({ code: 'native_handoff_unknown' });
+    client.stop();
+    await result;
+    expect(transport.sent.some(message => message.type === 'session_control_request')).toBe(false);
+  } finally { client.stop(); vi.useRealTimers(); }
+});
+
+
+it('retains uncertain handoff by owner generation for headless retries and new subscribers', async () => {
+  const transport = new FakeTransport();
+  const requests: { generation: string; checkOnly: boolean }[] = [];
+  const client = new RemoteSessionClient('agent-one', transport, new AgentReplica(), { controlExtension: {
+    async resumeNative(owner, options) { requests.push({ generation: owner.generation, checkOnly: options.checkOnly }); throw Object.assign(new Error('Reply lost'), { code: 'host_timeout' }); },
+  } });
+  try {
+    client.start(); transport.open();
+    transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+    const owner = (generation: string) => transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: generation, access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation } } });
+    owner('first');
+    await expect(client.takeControl()).rejects.toMatchObject({ code: 'host_timeout' });
+    const states: unknown[] = [];
+    const stop = client.subscribeSessionState(state => states.push(state.handoff));
+    expect(states.at(-1)).toMatchObject({ generation: 'first', phase: 'unknown' });
+    await expect(client.takeControl()).rejects.toMatchObject({ code: 'host_timeout' });
+    expect(requests).toEqual([{ generation: 'first', checkOnly: false }, { generation: 'first', checkOnly: true }]);
+    expect(states).toContainEqual(expect.objectContaining({ phase: 'checking' }));
+    owner('second');
+    expect(client.getSessionState().handoff).toBeUndefined();
+    await expect(client.takeControl()).rejects.toMatchObject({ code: 'host_timeout' });
+    expect(requests.at(-1)).toEqual({ generation: 'second', checkOnly: false });
+    stop();
+  } finally { client.stop(); }
+}, 2000);
+
+it('retains uncertain handoffs when clients are destroyed and recreated in the same transport scope', async () => {
+  const transport = new FakeTransport();
+  const requests: boolean[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const client = new RemoteSessionClient('agent-one', transport, new AgentReplica(), { controlExtension: {
+      async resumeNative(_owner, options) {
+        requests.push(options.checkOnly);
+        throw Object.assign(new Error('Reply lost'), { code: 'host_timeout' });
+      },
+    } });
+    try {
+      client.start(); transport.open();
+      transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+      transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'owner', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'same-owner' } } });
+      await expect(client.takeControl()).rejects.toMatchObject({ code: 'host_timeout' });
+    } finally { client.stop(); }
+  }
+  expect(requests).toEqual([false, true]);
+}, 2000);
+
+it('reuses an explicit native-target scope across transport and public binding replacement', async () => {
+  const scope = new SessionHandoffScope();
+  const requests: boolean[] = [];
+  for (const [agentId, handoffTarget, handoffScope] of [
+    ['binding-a', 'host/provider/native', scope],
+    ['binding-b', 'host/provider/native', scope],
+    ['binding-c', 'other-host/provider/native', scope],
+    ['binding-d', 'host/provider/native', new SessionHandoffScope()],
+  ] as const) {
+    const transport = new FakeTransport();
+    const client = new RemoteSessionClient(agentId, transport, new AgentReplica(), { handoffScope, handoffTarget, controlExtension: {
+      async resumeNative(_owner, options) { requests.push(options.checkOnly); throw new Error('Reply lost'); },
+    } });
+    try {
+      client.start(); transport.open();
+      transport.emit({ protocolVersion: '1.5.0', type: 'negotiated', sessionControl: true });
+      transport.emit({ protocolVersion: '1.5.0', type: 'session_control', payload: { agentId, revision: 'owner', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'same-owner' } } });
+      await expect(client.takeControl()).rejects.toThrow('Reply lost');
+    } finally { client.stop(); }
+  }
+  expect(requests).toEqual([false, true, false, false]);
+}, 2000);

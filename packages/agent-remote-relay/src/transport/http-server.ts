@@ -20,6 +20,8 @@ export interface AgentRemoteHttpServer {
 }
 
 export interface AgentRemoteHttpServerOptions {
+  /** Resolve a stable authority from trusted authentication state, never from an unverified client field. */
+  operationScope?: (request: import('node:http').IncomingMessage) => string | Promise<string>;
   accessPolicy?: AgentRemoteRequestAccessPolicy;
   websocketAuthorizer?: AgentRemoteWebSocketAuthorizer;
   mutationPolicy?: AgentRemoteHttpMutationPolicy;
@@ -30,6 +32,11 @@ export function createAgentRemoteHttpServer(
   options: AgentRemoteHttpServerOptions = {},
 ): AgentRemoteHttpServer {
   const server = createServer(createAgentRemoteHttpRouter(relay, {
+    operationScope: options.operationScope ?? (options.websocketAuthorizer ? async request => {
+      const principal = await options.websocketAuthorizer!.authenticate(request);
+      if (!principal) throw new Error('Authenticated mutation scope is unavailable.');
+      return principal.subject;
+    } : undefined),
     ...(options.accessPolicy === undefined ? {} : { accessPolicy: options.accessPolicy }),
     ...(options.mutationPolicy === undefined ? {} : { mutationPolicy: options.mutationPolicy }),
   }));

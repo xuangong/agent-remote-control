@@ -1,3 +1,5 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
+import { OperationCacheError } from './operation-cache.js';
 import { isSessionMutation } from '@orchardworks/agent-remote-protocol';
 import { SessionControlError, type SessionControlRegistry, type SessionControlLease } from './session-control.js';
 import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
@@ -6,6 +8,7 @@ import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions,
 import {
   PROTOCOL_VERSION,
   type AgentCommand,
+  type SessionOperationKind,
   decodeClientMessage,
   encodeServerMessage,
   type AgentSnapshot,
@@ -24,6 +27,8 @@ import type { TimelinePageRequest } from './timeline-projector.js';
 
 export interface SessionWireAgent {
   readonly agentId: string;
+  runOperation?<T>(work: () => Promise<T>, beforeDispatch?: () => void): Promise<T>;
+  validateOperation?(kind: SessionOperationKind): void;
   snapshot(): AgentSnapshot;
   timelineCursor?(): TimelineCursor;
   fetchTimeline(request: TimelinePageRequest): HistoryPage;
@@ -74,6 +79,7 @@ export interface SessionWireOperation {
 
 export interface SessionWireOperationWork<T> {
   readonly validate?: () => Promise<void> | void;
+  /** Synchronous, side-effect-free admission; may run again after queued preparation. */
   readonly beforeDispatch?: () => void;
   readonly dispatch: () => Promise<T>;
 }
@@ -89,7 +95,7 @@ export function createSessionWire(
 ): SessionWire {
   const maxBufferedManagerEvents = options.maxBufferedManagerEvents ?? 1_024;
   const runOperation: SessionWireOperationExecutor = options.executeOperation
-    ?? (async (_agent, _operation, work) => { await work.validate?.(); work.beforeDispatch?.(); return work.dispatch(); });
+    ?? (async () => { throw new OperationCacheError('operation_settlement_unavailable', 'This session requires a runtime-owned operation settlement service.'); });
   if (!Number.isSafeInteger(maxBufferedManagerEvents) || maxBufferedManagerEvents < 1) {
     throw new RangeError('maxBufferedManagerEvents must be a positive safe integer.');
   }
@@ -213,11 +219,18 @@ export function createSessionWire(
       return;
     }
     const assertControl = () => { if (isSessionMutation(message)) control?.assert(message.controlToken); };
-    const executeOperation: SessionWireOperationExecutor = (agent, operation, work) => runOperation(agent, operation, {
+    const executeOperation: SessionWireOperationExecutor = async (agent, operation, work) => {
+      assertControl();
+      if (options.authorize && !await options.authorize('send_message')) {
+        throw new OperationCacheError('forbidden', 'This connection cannot mutate the session.');
+      }
+      assertControl();
+      return runOperation(agent, operation, {
       ...work,
-      beforeDispatch: () => { assertControl(); work.beforeDispatch?.(); },
+      beforeDispatch: () => { assertControl(); agent.validateOperation?.(message.type === 'send_message' && message.payload.delivery === 'next_turn' ? 'queue_message' : operation.kind); work.beforeDispatch?.(); },
       dispatch: () => { assertControl(); return work.dispatch(); },
-    });
+      });
+    };
     try {
       assertControl();
       switch (message.type) {
@@ -423,8 +436,8 @@ export function createSessionWire(
         sendMessage(protocolError(error.code, error.message, true, requestId));
         return;
       }
-      if (isOperationExecutionError(error)) {
-        sendMessage(protocolError(error.code, error.message, error.code === 'operation_capacity_exceeded', requestId));
+      if (error instanceof OperationCacheError || error instanceof AgentOperationRejectedError || isOperationExecutionError(error)) {
+        sendMessage(protocolError(error.code, error.message, ['operation_capacity_exceeded', 'unsupported_command', 'agent_busy'].includes(error.code), requestId));
         return;
       }
       const imageOperation = message.type.startsWith('image_upload_') || (message.type === 'send_message' && 'content' in message.payload);

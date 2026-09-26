@@ -1,3 +1,4 @@
+import { sessionOperationAvailability } from '@orchardworks/agent-remote-protocol';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
@@ -132,7 +133,7 @@ export function AgentComposer({ readOnly: forcedReadOnly = false, readOnlyLabel,
   const canInterrupt = ready && capabilities?.cancel === true && (activeTurnId !== undefined || pending === 'command')
     && state?.agent?.status !== 'failed' && state?.agent?.status !== 'closed' && !interruptRequested;
 
-  const dispatchReady = ready && !readOnly && !terminal && !operationBusy;
+  const dispatchReady = ready && !readOnly && !terminal && !operationBusy && sessionOperationAvailability(state?.agent ?? null, 'send_message', { synchronized: !disabled, control: state?.sessionControl?.access }).allowed;
   const latest = useRef({ agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage });
   latest.current = { agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage };
   function deferMessage(): void {

@@ -620,3 +620,40 @@ function remoteNativeHost() {
     listenerCount: (event: string) => listeners.get(event)?.size ?? 0, dispose, createCalls, resolveCalls, disposed,
     requestQuestion, answers };
 }
+
+
+it('retains successful native creation when projection fails and retries only attachment', async () => {
+  const native = remoteNativeHost();
+  const remote = await startRemoteHost(native);
+  const create = native.context.sessionController.create;
+  let fail = true;
+  native.context.sessionController.create = async request => {
+    const result = await create(request);
+    const session = native.context.agents.get(result.sessionId)!.session;
+    const snapshot = session.snapshotEvents;
+    session.snapshotEvents = () => { if (fail) throw new Error('Native snapshot temporarily unavailable'); return snapshot(); };
+    return result;
+  };
+  const body = JSON.stringify({ providerId: 'dsh', operationId: '00000000-0000-4000-8000-000000000099', workspaceId: 'workspace-one' });
+  expect((await remote.request('/remote/create', 'first-binding', body)).status).toBe(503);
+  expect(native.createCalls).toHaveLength(1);
+  fail = false;
+  const recovered = await remote.request('/remote/create', 'second-binding', body);
+  expect(recovered.status).toBe(200);
+  expect(await recovered.json()).toMatchObject({ nativeSessionId: native.createCalls[0]!.sessionId });
+  expect(native.createCalls).toHaveLength(1);
+});
+
+it('does not repeat native creation when its acknowledgement was lost', async () => {
+  const native = remoteNativeHost();
+  const remote = await startRemoteHost(native);
+  const create = native.context.sessionController.create;
+  native.context.sessionController.create = async request => { await create(request); throw new Error('Lost native creation response'); };
+  const body = JSON.stringify({ providerId: 'dsh', operationId: '00000000-0000-4000-8000-000000000100' });
+  for (const binding of ['first-binding', 'retry-binding']) {
+    const response = await remote.request('/remote/create', binding, body);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: 'mutation_outcome_unknown' });
+  }
+  expect(native.createCalls).toHaveLength(1);
+});

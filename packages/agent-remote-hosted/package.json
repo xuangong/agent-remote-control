@@ -30,6 +30,7 @@
     "postcss": "^8.5.24"
   },
   "devDependencies": {
+    "@orchardworks/agent-remote-relay": "workspace:*",
     "@types/node": "^24.3.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.5"

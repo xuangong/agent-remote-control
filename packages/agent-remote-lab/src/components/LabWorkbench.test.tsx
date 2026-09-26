@@ -1,8 +1,9 @@
+import { SessionHandoff } from '@orchardworks/agent-remote-web';
 import { ToastProvider } from './Toast.js';
-import { act, useState } from 'react';
+import { act, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { render } from '../test/setup.js';
+import { render, unmount } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { LabWorkbench } from './LabWorkbench.js';
@@ -375,17 +376,25 @@ it('keeps takeover drafts selectable without allowing edits', async () => {
   expect(input.closest('[hidden]')).toBeNull();
 });
 
-it('checks uncertain native handoffs without sending another interruption and reports synchronization', async () => {
+it('renders shared handoff recovery after the notice remounts without owning retry policy', async () => {
   let finish!: () => void;
   const calls: boolean[] = [];
-  const control = {access: 'read_only' as const, available: false, nativeOwner: {kind: 'native_cli' as const, generation: 'native-one'}};
-  const container = await render(<SessionControlNotice control={control} connected onTakeControl={async options => {
-    calls.push(options?.checkOnly === true);
-    if (!options?.checkOnly) throw Object.assign(new Error('No reply'), {code: 'native_handoff_unknown'});
-    options.onRestoring?.();
-    await new Promise<void>(resolve => {finish = resolve;});
-  }} />);
-  await act(async () => container.querySelector('button')!.click());
+  const handoff = new SessionHandoff();
+  const control = { access: 'read_only' as const, available: false, nativeOwner: { kind: 'native_cli' as const, generation: 'native-one' } };
+  function View() {
+    const [state, setState] = useState(handoff.getState());
+    useEffect(() => handoff.subscribe(() => setState(handoff.getState())), []);
+    return <SessionControlNotice control={control} handoff={state} connected onTakeControl={() => handoff.run('native-one', async options => {
+      calls.push(options.checkOnly);
+      if (!options.checkOnly) throw Object.assign(new Error('No reply'), { code: 'native_handoff_unknown' });
+      options.onRestoring();
+      await new Promise<void>(resolve => { finish = resolve; });
+    })} />;
+  }
+  const first = await render(<View />);
+  await act(async () => first.querySelector('button')!.click());
+  await unmount(first);
+  const container = await render(<View />);
   expect(container.querySelector('[role="alert"]')!.textContent).toContain('not confirmed');
   expect(container.querySelector('button')!.textContent).toBe('Check status');
   await act(async () => container.querySelector('button')!.click());

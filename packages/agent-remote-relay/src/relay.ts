@@ -1,8 +1,11 @@
+import { createOperationCache, type OperationCache } from './operation-cache.js';
+import { createOperationExecutor, type OperationLifecycle } from './operation-settlement.js';
+import type { SessionWireAgent, SessionWireOperationExecutor } from './session-wire.js';
 import { SessionControlRegistry } from './session-control.js';
 import type { InputImageStore } from './resources/input-image-store.js';
 import { randomUUID } from 'node:crypto';
 
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, type AgentSession, type AgentPersistenceHandle, type AgentProviderAdapter, type AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentSessionResponse,
@@ -16,8 +19,10 @@ import { InMemoryResourceStore, type ResourceStore } from './resources/resource-
 
 export interface AgentRemoteRelay {
   readonly sessionControls?: SessionControlRegistry;
+  executeOperation(scope: string): SessionWireOperationExecutor;
   registerProvider(adapter: AgentProviderAdapter): void;
   listProviders(): readonly AgentProviderDescriptor[];
+  executeSessionOperation(request: CreateAgentRequest | ResumeAgentRequest, scope: string): Promise<AgentSessionResponse>;
   createAgent(request: CreateAgentRequest): Promise<AgentSessionResponse>;
   resumeAgent(request: ResumeAgentRequest): Promise<AgentSessionResponse>;
   requireAgent(agentId: string): AgentManager;
@@ -26,15 +31,17 @@ export interface AgentRemoteRelay {
 }
 
 export interface AgentRemoteRelayOptions {
+  operationCache?: OperationCache;
+  operationLifecycle?: OperationLifecycle;
   providers: readonly AgentProviderAdapter[];
   epoch?: () => string;
   resourceStore?: ResourceStore;
   inputImageStore?: InputImageStore;
 }
 
-export class AgentAlreadyExistsError extends Error {
+export class AgentAlreadyExistsError extends AgentOperationRejectedError {
   constructor(readonly agentId: string) {
-    super(`Agent already exists: ${agentId}`);
+    super('agent_already_exists', `Agent already exists: ${agentId}`);
     this.name = 'AgentAlreadyExistsError';
   }
 }
@@ -47,6 +54,7 @@ export class AgentNotFoundError extends Error {
 }
 
 export class RelayClosedError extends Error {
+  readonly code = 'relay_closed';
   constructor() {
     super('Agent Remote relay is closed.');
     this.name = 'RelayClosedError';
@@ -60,20 +68,54 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
   private readonly reservations = new Set<string>();
   private readonly restorations = new Map<string, Promise<AgentManager>>();
   private closed = false;
+  private closePromise?: Promise<void>;
+  private readonly nativeSessions = new Set<() => Promise<void>>();
+  private readonly ephemeralOperationTargets = new WeakMap<SessionWireAgent, string>();
 
   constructor(
     providers: readonly AgentProviderAdapter[],
     private readonly createEpoch: () => string,
     private readonly resourceStore: ResourceStore,
     private readonly inputImageStore?: InputImageStore,
+    private readonly operationCache: OperationCache = createOperationCache(),
+    private readonly operationLifecycle?: OperationLifecycle,
   ) {
     this.providers = new ProviderRegistry(providers);
+  }
+
+  executeOperation(scope: string): SessionWireOperationExecutor {
+    return createOperationExecutor(this.operationCache, scope, this.operationLifecycle, this.ephemeralOperationTargets);
   }
 
   registerProvider(adapter: AgentProviderAdapter): void { this.ensureOpen(); this.providers.register(adapter); }
 
   listProviders(): readonly AgentProviderDescriptor[] {
     return this.providers.list();
+  }
+
+  async executeSessionOperation(request: CreateAgentRequest | ResumeAgentRequest, scope: string): Promise<AgentSessionResponse> {
+    this.ensureOpen();
+    const { requestId, operationId, ...parameters } = request.payload;
+    if (!operationId && request.type === 'resume_agent') return this.resumeAgent(request);
+    const payload = await this.operationCache.execute({
+      operationId: operationId!, scope, kind: request.type,
+      target: request.type === 'create_agent' ? request.payload.providerId
+        : JSON.stringify([request.payload.persistence.providerId, request.payload.persistence.sessionId]),
+      parameters,
+    }, {
+      validate: () => {
+        this.ensureOpen();
+        this.providers.require(request.type === 'create_agent' ? request.payload.providerId : request.payload.persistence.providerId);
+      },
+      beforeDispatch: () => this.ensureOpen(),
+      dispatch: async () => {
+        const response = request.type === 'create_agent' ? await this.createAgent(request) : await this.resumeAgent(request);
+        const { requestId: _correlation, ...result } = response.payload;
+        return result;
+      },
+      maximumResultBytes: 256 * 1024,
+    });
+    return { protocolVersion: PROTOCOL_VERSION, type: 'agent_session', payload: { ...payload, requestId } };
   }
 
   async createAgent(request: CreateAgentRequest): Promise<AgentSessionResponse> {
@@ -83,7 +125,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
       const adapter = this.providers.require(request.payload.providerId);
       manager = await AgentManager.create({
         agentId: request.payload.agentId,
-        adapter,
+        adapter: this.ownAdapter(adapter),
         config: request.payload.config,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
@@ -123,6 +165,35 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
     }
   }
 
+  private ownAdapter(adapter: AgentProviderAdapter): AgentProviderAdapter {
+    const own = async (opening: Promise<AgentSession>): Promise<AgentSession> => {
+      const session = await opening;
+      let disposed: Promise<void> | undefined;
+      const dispose = (): Promise<void> => {
+        disposed ??= Promise.resolve().then(() => session.dispose()).finally(() => this.nativeSessions.delete(dispose));
+        return disposed;
+      };
+      this.nativeSessions.add(dispose);
+      if (this.closed) {
+        await dispose();
+        // Native opening already occurred, so closing cannot prove this operation was rejected.
+        throw new RelayClosedError();
+      }
+      return new Proxy(session, {
+        get(target, property) {
+          if (property === 'dispose') return dispose;
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    };
+    return {
+      descriptor: adapter.descriptor,
+      createSession: config => own(adapter.createSession(config)),
+      resumeSession: handle => own(adapter.resumeSession(handle)),
+    };
+  }
+
   private findOwnedSession(handle: AgentPersistenceHandle): AgentManager | undefined {
     for (const manager of this.agents.values()) {
       const persistence = manager.snapshot().payload.persistence;
@@ -139,7 +210,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
       const adapter = this.providers.require(request.payload.persistence.providerId);
       manager = await AgentManager.resume({
         agentId: request.payload.agentId,
-        adapter,
+        adapter: this.ownAdapter(adapter),
         handle: request.payload.persistence,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
@@ -168,13 +239,19 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
     await manager.close();
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.closed = true;
+    const draining = this.operationCache.close();
     this.sessionControls.close();
     const managers = [...this.agents.values()];
     this.agents.clear();
-    await Promise.all(managers.map((manager) => manager.close()));
+    const disposingNative = [...this.nativeSessions].map(dispose => dispose());
+    this.closePromise = Promise.allSettled([draining, ...disposingNative, ...managers.map(manager => manager.close())]).then(results => {
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failure) throw failure.reason;
+    });
+    return this.closePromise;
   }
 
   private reserve(agentId: string): () => void {
@@ -197,6 +274,8 @@ export function createAgentRemoteRelay(options: AgentRemoteRelayOptions): AgentR
     options.epoch ?? randomUUID,
     options.resourceStore ?? new InMemoryResourceStore(),
     options.inputImageStore,
+    options.operationCache,
+    options.operationLifecycle,
   );
 }
 

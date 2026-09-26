@@ -124,6 +124,7 @@ export const ResumeAgentRequest = Strict({
   type: Type.Literal('resume_agent'),
   payload: Strict({
     requestId: NonEmptyString,
+    operationId: Type.Optional(OperationId),
     agentId: NonEmptyString,
     persistence: AgentPersistenceHandle,
   }),

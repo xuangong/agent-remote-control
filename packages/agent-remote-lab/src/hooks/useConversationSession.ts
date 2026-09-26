@@ -1,52 +1,18 @@
+import { useContext, useEffect, useMemo } from 'react';
+import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { useSessionView } from '@orchardworks/agent-remote-web/react';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { WorkspaceReady } from '../workspace-access.js';
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionStatus } from '@orchardworks/agent-remote-web';
-import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
-import type { OpenedSession } from '../directory-client.js';
-import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
 import { RecoveryScope } from '../conversation-recovery.js';
+import type { OpenedSession } from '../directory-client.js';
 
-/** Mounted views share the retained conversation subscription and its replica. */
+/** Product retention and account policy compose the neutral session consumer. */
 export function useConversationSession(session: OpenedSession, transport: RemoteAgentTransport, cachedReplica?: AgentReplica, pending = false) {
-  const accessReady = useContext(WorkspaceReady);
+  const enabled = useContext(WorkspaceReady);
   const recoveryScope = useContext(RecoveryScope)?.scope;
-  const sharedConnections = useContext(ConversationConnectionScope);
-  const connections = useMemo(() => sharedConnections ?? new ConversationConnections(transport, recoveryScope), [sharedConnections, transport, recoveryScope]);
-  useEffect(() => () => { if (!sharedConnections) connections.clear(); }, [connections, sharedConnections]);
-  const [state, setState] = useState<AgentReplicaState | undefined>(() => cachedReplica?.getState().agent ? cachedReplica.getState() : undefined);
-  const [status, setStatus] = useState<RemoteSessionStatus>('connecting');
-  const [questions, setQuestions] = useState<Record<string, QuestionDraft>>({});
-  const client = useRef<RemoteSessionClient>();
-  useEffect(() => {
-    const lease = connections.acquire(session.agentId, cachedReplica ?? new AgentReplica(), session);
-    const { replica, client: connection } = lease;
-    client.current = connection;
-    setState(replica.getState().agent ? replica.getState() : undefined); setStatus('connecting'); setQuestions({});
-    const unsubscribe = replica.subscribe(() => setState(replica.getState()));
-    const unsubscribeStatus = connection.subscribeStatus(setStatus);
-    return () => { unsubscribe(); unsubscribeStatus(); lease.release(); if (client.current === connection) client.current = undefined; };
-  }, [session.agentId, connections, cachedReplica]);
-  const active = client.current;
-  const messageActions: LabWorkbenchActions = {
-    deleteMessage: id => active?.deleteMessage(id),
-    ...(active && !pending ? {
-      sendMessage: async (text, options) => { await active.sendMessage(text, options); },
-      sendMessageContent: async (content, options) => { await active.sendMessageContent(content, options); },
-    } satisfies LabWorkbenchActions : {}),
-  };
-  const actions: LabWorkbenchActions = accessReady && active && status === 'ready' && !pending ? {
-    ...messageActions,
-    takeControl: () => active.takeControl(),
-    uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
-    retryMessage: async id => { await active.retryMessage(id); },
-    loadOlder: () => active.loadOlder(), cancel: async () => { await active.cancel(); },
-    setPlanning: async value => { await active.setPlanning(value); }, setSessionSetting: async (id, value) => { await active.setSessionSetting(id, value); },
-    listCommands: () => active.listCommands(), executeCommand: (id, args) => active.executeCommand(id, args),
-    respondToInteraction: async (id, response) => { await active.respondToInteraction(id, response); }, requestResource: async binding => (await active.requestResource(binding.resourceId)).payload.state,
-    resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
-  } : messageActions;
-  const sendQueuedInput = accessReady && active && status === 'ready' && !pending
-    ? (text: string, operationId: string) => active.sendMessage(text, { operationId }) : undefined;
-  return { state, status: accessReady ? status : 'connecting' as const, questions, setQuestions, actions, sendQueuedInput };
+  const shared = useContext(ConversationConnectionScope);
+  const connections = useMemo(() => shared ?? new ConversationConnections(transport, recoveryScope), [shared, transport, recoveryScope]);
+  useEffect(() => () => { if (!shared) connections.clear(); }, [connections, shared]);
+  const source = useMemo(() => ({ acquire: (agentId: string, replica: AgentReplica) => connections.acquire(agentId, replica, session) }), [connections, session.agentId, session.hostId, session.providerId, session.nativeSessionId]);
+  return useSessionView({ agentId: session.agentId, transport, source, cachedReplica, pending, enabled });
 }

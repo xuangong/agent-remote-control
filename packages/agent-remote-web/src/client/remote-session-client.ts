@@ -1,3 +1,5 @@
+import { sessionHandoffScope, type SessionHandoffScope, type SessionHandoff, type SessionControlExtension, type SessionTakeControlOptions } from './session-control-extension.js';
+import { remoteSessionState, type RemoteSessionState } from './session-state.js';
 import { watchPageResume } from './page-resume.js';
 import { isSessionMutation, type SessionControlClientKind, type SessionControlMessage, type SessionControlState } from '@orchardworks/agent-remote-protocol';
 import {
@@ -35,6 +37,11 @@ import {
 export type RemoteSessionStatus = 'idle' | 'connecting' | 'catching_up' | 'ready' | 'disconnected';
 
 export interface RemoteSessionClientOptions {
+  /** Share across transport replacement within one authority; defaults to the transport lifetime. */
+  readonly handoffScope?: SessionHandoffScope;
+  /** Stable native target identity when public bindings can change; defaults to agentId. */
+  readonly handoffTarget?: string;
+  readonly controlExtension?: SessionControlExtension;
   readonly clientKind?: SessionControlClientKind;
   readonly requireSessionControl?: boolean;
   readonly observeOnly?: boolean;
@@ -65,6 +72,9 @@ const controlProofs = new WeakMap<RemoteAgentTransport, Map<string, string>>();
 
 export class RemoteSessionClient {
   private control?: SessionControlState;
+  private readonly controlExtension?: SessionControlExtension;
+  private nativeTakeover?: AbortController;
+  private readonly handoff: SessionHandoff;
   private resumeControlToken?: string;
   private controlSupported = false;
   private controlRequested = false;
@@ -111,6 +121,8 @@ export class RemoteSessionClient {
     private readonly replica: AgentReplica,
     options: RemoteSessionClientOptions = {},
   ) {
+    this.controlExtension = options.controlExtension;
+    this.handoff = (options.handoffScope ?? sessionHandoffScope(transport)).forTarget(options.handoffTarget ?? agentId);
     this.observeOnly = options.observeOnly ?? false;
     this.clientKind = options.clientKind ?? 'unknown';
     this.retainControlOnDisconnect = options.retainControlOnDisconnect ?? true;
@@ -174,6 +186,7 @@ export class RemoteSessionClient {
   }
 
   stop(): void {
+    this.nativeTakeover?.abort();
     this.unwatchResume?.(); this.unwatchResume = undefined;
     this.generation += 1;
     this.rejectPendingOperations('operation_stopped', 'Remote session client was stopped.', false);
@@ -187,9 +200,72 @@ export class RemoteSessionClient {
     return () => this.statusListeners.delete(listener);
   }
 
-  async takeControl(): Promise<void> {
+  getSessionState(): RemoteSessionState {
+    return { ...remoteSessionState(this.replica.getState(), this.currentStatus), handoff: this.handoff.getState(this.control?.nativeOwner?.generation) };
+  }
+
+  subscribeSessionState(listener: (state: RemoteSessionState) => void): () => void {
+    const notify = () => listener(this.getSessionState());
+    const stopHandoff = this.handoff.subscribe(notify);
+    const stopReplica = this.replica.subscribe(notify);
+    const stopStatus = this.subscribeStatus(notify);
+    return () => { stopHandoff(); stopReplica(); stopStatus(); };
+  }
+
+  async takeControl(options: SessionTakeControlOptions = {}): Promise<void> {
     if (!this.control || !this.controlSupported) throw new RemoteOperationError('session_control_unavailable', 'Update the Controller to enable session control.', false);
+    if (this.observeOnly) throw new RemoteOperationError('session_read_only', 'This client only observes the session.', false);
+    const owner = this.control.nativeOwner;
+    if (owner) {
+      if (!this.controlExtension) throw new RemoteOperationError('native_control_unavailable', 'This connection cannot resume a native-owned session.', false);
+      if (this.nativeTakeover) throw new RemoteOperationError('native_control_in_progress', 'Native control is already being requested.', false);
+      const controller = new AbortController();
+      this.nativeTakeover = controller;
+      const deadline = setTimeout(() => controller.abort(), this.connectionTimeoutMs);
+      try {
+        await this.handoff.run(owner.generation, async handoff => {
+          await this.controlExtension!.resumeNative(owner, { checkOnly: handoff.checkOnly, signal: controller.signal });
+          handoff.onRestoring();
+          await this.waitForNativeControl(controller.signal, owner.generation);
+        }, options);
+      } finally {
+        clearTimeout(deadline);
+        if (this.nativeTakeover === controller) this.nativeTakeover = undefined;
+      }
+    }
     await this.requestControl('take_over');
+  }
+
+  async takeControlAfterNativeResume(): Promise<void> {
+    if (this.observeOnly) throw new RemoteOperationError('session_read_only', 'This client only observes the session.', false);
+    if (this.nativeTakeover) throw new RemoteOperationError('native_control_in_progress', 'Native control is already being requested.', false);
+    const controller = new AbortController();
+    this.nativeTakeover = controller;
+    const deadline = setTimeout(() => controller.abort(), this.connectionTimeoutMs);
+    try { await this.waitForNativeControl(controller.signal); await this.takeControl(); }
+    finally { clearTimeout(deadline); if (this.nativeTakeover === controller) this.nativeTakeover = undefined; }
+  }
+
+  private waitForNativeControl(signal: AbortSignal, ownerGeneration?: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      let unwatch = () => {};
+      const finish = (error?: Error) => {
+        if (done) return;
+        done = true; unwatch(); signal.removeEventListener('abort', aborted);
+        error ? reject(error) : resolve();
+      };
+      const aborted = () => finish(new RemoteOperationError('native_handoff_unknown', 'Native resume has not synchronized. Check the session before retrying.', false));
+      const check = () => {
+        if (signal.aborted) return aborted();
+        const owner = this.control?.nativeOwner;
+        if (owner && ownerGeneration !== undefined && owner.generation !== ownerGeneration) return finish(new RemoteOperationError('native_owner_changed', 'Native ownership changed before control was acquired.', false));
+        if (this.currentStatus === 'ready' && this.control && !owner) finish();
+      };
+      signal.addEventListener('abort', aborted, { once: true });
+      unwatch = this.subscribeSessionState(() => queueMicrotask(check));
+      check();
+    });
   }
 
   private requestControl(action: 'acquire' | 'take_over'): Promise<SessionControlMessage> {

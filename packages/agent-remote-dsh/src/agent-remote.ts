@@ -1,3 +1,4 @@
+import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -92,7 +93,7 @@ interface Projection {
 }
 
 // Pairing replaces the transport, not the native session-creation identity.
-const nativeCreationRegistries = new WeakMap<object, Map<string, { fingerprint: string; nativeSessionId: string }>>();
+const nativeCreationRegistries = new WeakMap<object, Map<string, { fingerprint: string; nativeSessionId: string; created?: boolean; dispatched?: boolean }>>();
 
 async function startRemoteHost(
   context: WebContext,
@@ -133,7 +134,7 @@ async function startRemoteHost(
       async resumeSession() { throw new Error('Remote Host session import is unavailable.'); },
     }] });
     const projections = new Map<string, Projection>();
-    const nativeBindings = new Map<string, string>();
+    const bindings = new SessionBindings();
     const pendingProjections = new Map<string, Projection>();
     let lifecycle = Promise.resolve();
     let closing: Promise<void> | undefined;
@@ -144,32 +145,28 @@ async function startRemoteHost(
       lifecycle = result.then(() => undefined, () => undefined);
       return result;
     };
-    const release = async (projection: Projection): Promise<void> => {
+    const release = async (projection: Projection, preserveBinding = false): Promise<void> => {
       if (projections.get(projection.bindingId) !== projection) return;
       projections.delete(projection.bindingId);
-      if (nativeBindings.get(projection.nativeSessionId) === projection.bindingId) nativeBindings.delete(projection.nativeSessionId);
+      const binding = bindings.getByAgent(projection.bindingId);
+      if (binding && !preserveBinding) bindings.release(binding);
       await relay!.closeAgent(projection.bindingId);
     };
     const bind = async (bindingId: string, nativeSessionId: string, parentNativeSessionId?: string, canonical = false): Promise<string> => {
-      if (parentNativeSessionId && !nativeBindings.has(parentNativeSessionId)) throw new RemoteHostRequestError(404, 'parent_unavailable', 'Attach the owning parent first.');
-      const existingBinding = nativeBindings.get(nativeSessionId);
-      if (canonical && existingBinding) {
-        const prior = projections.get(existingBinding)!;
-        if (prior.parentNativeSessionId !== parentNativeSessionId) throw new RemoteHostRequestError(409, 'session_conflict', 'Native session ownership conflicts with this attachment.');
-        bindingId = existingBinding;
-      }
+      if (parentNativeSessionId && !bindings.getByNative('dsh', parentNativeSessionId)) throw new RemoteHostRequestError(404, 'parent_unavailable', 'Attach the owning parent first.');
+      const result = await bindings.bind({ providerId: 'dsh', agentId: bindingId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }, {
+        canonical,
+        discard: binding => relay!.closeAgent(binding.agentId),
+        attach: async binding => {
+      bindingId = binding.agentId;
       const existingProjection = projections.get(bindingId);
-      if ((existingBinding !== undefined && existingBinding !== bindingId)
-        || (existingProjection !== undefined && existingProjection.nativeSessionId !== nativeSessionId)) {
-        throw new RemoteHostRequestError(409, 'session_conflict', 'Remote Session binding conflicts with its native session.');
-      }
       const agent = parentNativeSessionId ? undefined : await resolveRootAgent(context, shared.sessionController, nativeSessionId);
       if (closing) throw new RemoteHostRequestError(503, 'host_closed', 'Remote Host is closing.');
       if (existingProjection && existingProjection.agent === agent && existingProjection.parentNativeSessionId === parentNativeSessionId) {
         if (existingProjection.parentNativeSessionId && existingProjection.session) await children.validate(existingProjection.session);
-        return bindingId;
+        return;
       }
-      if (existingProjection) await release(existingProjection);
+      if (existingProjection) await release(existingProjection, true);
       const projection: Projection = { bindingId, nativeSessionId, agent, parentNativeSessionId,
         ...(parentNativeSessionId ? { session: await children.open(parentNativeSessionId, nativeSessionId) } : {}) };
       if (closing) { await projection.session?.dispose(); throw new RemoteHostRequestError(503, 'host_closed', 'Remote Host is closing.'); }
@@ -179,11 +176,13 @@ async function startRemoteHost(
           requestId: randomUUID(), operationId: randomUUID(), agentId: bindingId, providerId: 'dsh', config: { sessionId: bindingId },
         } });
         projections.set(bindingId, projection);
-        nativeBindings.set(nativeSessionId, bindingId);
-        return bindingId;
+
       } catch (error) { await projection.session?.dispose(); throw error; } finally {
         if (pendingProjections.get(bindingId) === projection) pendingProjections.delete(bindingId);
       }
+        },
+      });
+      return result.agentId;
     };
     stopDisposed = context.on('agent/disposed', ((payload: { agent: Agent }) => {
       const projection = [...projections.values()].find((candidate) => candidate.agent === payload.agent);
@@ -227,18 +226,25 @@ async function startRemoteHost(
           const payload = createPayload(JSON.stringify({ nativeSessionId: raw.nativeSessionId, ...(raw.workspaceId === undefined ? {} : { workspaceId: raw.workspaceId }) }));
           if (!request.sessionId) throw new RemoteHostRequestError(400, 'invalid_request', 'Remote Session target is required.');
           const agentId = await serialize(async () => {
-            const priorBinding = nativeBindings.get(payload.nativeSessionId);
+            const priorBinding = bindings.getByNative('dsh', payload.nativeSessionId)?.agentId;
             const priorProjection = projections.get(request.sessionId!);
             if (raw.providerId && priorBinding) return bind(request.sessionId!, payload.nativeSessionId, undefined, true);
             if ((priorBinding !== undefined && priorBinding !== request.sessionId)
               || (priorProjection !== undefined && priorProjection.nativeSessionId !== payload.nativeSessionId)) {
               throw new RemoteHostRequestError(409, 'session_conflict', 'Remote Session binding conflicts with its native session.');
             }
-            const created = await shared.sessionController.create({
-              sessionId: payload.nativeSessionId, ...(payload.workspaceId === undefined ? {} : { workspaceId: payload.workspaceId }),
-            });
-            if (created.sessionId !== payload.nativeSessionId) {
-              throw new RemoteHostRequestError(503, 'mutation_outcome_unknown', 'DSH returned an unexpected native session identity.');
+            const intent = typeof raw.operationId === 'string' && raw.providerId ? creationRegistry.get(raw.operationId) : undefined;
+            if (!intent?.created) {
+              if (intent?.dispatched) throw new RemoteHostRequestError(503, 'mutation_outcome_unknown', 'Native creation was dispatched but its outcome is unknown.');
+              if (intent) intent.dispatched = true;
+              const created = await shared.sessionController.create({
+                sessionId: payload.nativeSessionId, ...(payload.workspaceId === undefined ? {} : { workspaceId: payload.workspaceId }),
+              });
+              if (created.sessionId !== payload.nativeSessionId) {
+                throw new RemoteHostRequestError(503, 'mutation_outcome_unknown', 'DSH returned an unexpected native session identity.');
+              }
+              // Native creation survives projection failures and transport replacement.
+              if (intent) intent.created = true;
             }
             return bind(request.sessionId!, payload.nativeSessionId);
           });
@@ -265,6 +271,7 @@ async function startRemoteHost(
         }
         throw new RemoteHostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
       } catch (error) {
+        if (error instanceof SessionBindingError) return remoteHostResult(error.status, { error: error.message, code: error.code === 'session_binding_conflict' ? 'session_conflict' : error.code });
         if (error instanceof RemoteHostRequestError) return remoteHostResult(error.status, { error: error.message, code: error.code });
         if (error instanceof RemoteHostCatalogError) return remoteHostResult(error.status, { error: error.message, code: error.code });
         return remoteHostResult(503, { error: 'Remote Host operation outcome is unknown.', code: 'mutation_outcome_unknown' });
@@ -279,6 +286,7 @@ async function startRemoteHost(
       control,
     });
     const close = (): Promise<void> => closing ??= (async () => {
+      bindings.close();
       try { await uplink?.close(); } finally {
         try { stopDisposed?.(); } finally {
           try {

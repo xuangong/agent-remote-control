@@ -1,4 +1,4 @@
-import type { AgentProviderAdapter, AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, type AgentProviderAdapter, type AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
 
 export class DuplicateProviderError extends Error {
   constructor(readonly providerId: string) {
@@ -7,9 +7,9 @@ export class DuplicateProviderError extends Error {
   }
 }
 
-export class ProviderNotFoundError extends Error {
+export class ProviderNotFoundError extends AgentOperationRejectedError {
   constructor(readonly providerId: string) {
-    super(`Unknown provider ID: ${providerId}`);
+    super('provider_not_found', `Unknown provider ID: ${providerId}`);
     this.name = 'ProviderNotFoundError';
   }
 }

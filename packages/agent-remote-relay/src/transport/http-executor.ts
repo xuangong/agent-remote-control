@@ -1,3 +1,4 @@
+import { OperationCacheError } from '../operation-cache.js';
 import {
   PROTOCOL_VERSION,
   decodeCreateAgentRequest,
@@ -46,6 +47,7 @@ class MalformedIngressError extends Error {
 export async function executeAgentRemoteHttpRequest(
   relay: AgentRemoteRelay,
   request: AgentRemoteHttpRequest,
+  operationScope = 'standalone-plugin',
 ): Promise<AgentRemoteHttpResult> {
   try {
     if (!request.path.startsWith('/') || request.path.startsWith('//') || request.path.includes('\\') || request.path.includes('#')) {
@@ -54,13 +56,14 @@ export async function executeAgentRemoteHttpRequest(
     if (Buffer.byteLength(request.body ?? '') > 1_048_576) {
       throw new MalformedIngressError('request_body_too_large', 'Relay request body exceeds one megabyte.');
     }
-    return await route(relay, request);
+    return await route(relay, request, operationScope);
   } catch (error) {
     return agentRemoteHttpFailure(error);
   }
 }
 
 export function agentRemoteHttpFailure(error: unknown): AgentRemoteHttpResult {
+  if (error instanceof OperationCacheError) return agentRemoteHttpError(error.code === 'provider_not_found' ? 404 : ['operation_capacity_exceeded', 'relay_closed'].includes(error.code) ? 503 : 409, error.code, error.message, error.code === 'operation_capacity_exceeded');
   if (error instanceof MalformedIngressError) return agentRemoteHttpError(400, error.code, error.message, error.recoverable);
   if (error instanceof AgentNotFoundError) return agentRemoteHttpError(404, 'agent_not_found', 'Agent was not found.', true);
   if (error instanceof ProviderNotFoundError) return agentRemoteHttpError(404, 'provider_not_found', 'Agent provider was not found.', true);
@@ -69,7 +72,7 @@ export function agentRemoteHttpFailure(error: unknown): AgentRemoteHttpResult {
   return agentRemoteHttpError(500, 'request_failed', 'Relay request failed.', false);
 }
 
-async function route(relay: AgentRemoteRelay, request: AgentRemoteHttpRequest): Promise<AgentRemoteHttpResult> {
+async function route(relay: AgentRemoteRelay, request: AgentRemoteHttpRequest, operationScope: string): Promise<AgentRemoteHttpResult> {
   const method = request.method;
   const url = new URL(request.path, 'http://relay.local');
   if (method === 'GET' && url.pathname === '/v1/providers') {
@@ -86,7 +89,7 @@ async function route(relay: AgentRemoteRelay, request: AgentRemoteHttpRequest): 
     if (decoded.status === 'rejected') {
       return decodeError('invalid_create_agent', decoded);
     }
-    return encodedResult(201, encodeAgentSessionResponse(await relay.createAgent(decoded.value)));
+    return encodedResult(201, encodeAgentSessionResponse(await relay.executeSessionOperation(decoded.value, operationScope)));
   }
 
   if (method === 'POST' && url.pathname === '/v1/sessions/resume') {
@@ -94,7 +97,7 @@ async function route(relay: AgentRemoteRelay, request: AgentRemoteHttpRequest): 
     if (decoded.status === 'rejected') {
       return decodeError('invalid_resume_agent', decoded);
     }
-    return encodedResult(200, encodeAgentSessionResponse(await relay.resumeAgent(decoded.value)));
+    return encodedResult(200, encodeAgentSessionResponse(await relay.executeSessionOperation(decoded.value, operationScope)));
   }
 
   const match = /^\/v1\/sessions\/([^/]+)\/(snapshot|timeline)$/.exec(url.pathname);

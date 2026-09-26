@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { connect } from 'node:net';
 
 import type {
@@ -526,10 +527,10 @@ describe.each(interactionCases)('Serialized $kind interaction recovery', ({ requ
     const first = await connectInteractionClient(context.url);
     const second = await connectInteractionClient(context.url);
     const submit = vi.spyOn(context.session, 'respondToInteraction')
-      .mockRejectedValueOnce(new Error('Submission rejected before acceptance.'));
+      .mockRejectedValueOnce(new AgentOperationRejectedError('native_rejected', 'Submission rejected before acceptance.'));
 
     await expect(first.client.respondToInteraction(request.requestId, response))
-      .rejects.toMatchObject({ code: 'command_failed' });
+      .rejects.toMatchObject({ code: 'native_rejected' });
     expect(first.replica.getState().pendingInteractions).toEqual([request]);
     expect(first.replica.getState().timeline.entries).toEqual([]);
     await second.client.takeControl();
@@ -687,6 +688,7 @@ async function connectInteractionClient(url: string, fetchImplementation?: typeo
   transport.onProtocolMessage((observation) => observations.push(observation));
   const replica = new AgentReplica();
   const client = new RemoteSessionClient('agent-interaction', transport, replica, {
+    timelineRecovery: fetchImplementation ? 'http' : 'websocket',
     operationTimeoutMs: 5_000,
     scheduleReconnect: (_delay, restart) => {
       reconnect = restart;

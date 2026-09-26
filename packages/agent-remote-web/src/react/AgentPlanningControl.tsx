@@ -1,3 +1,4 @@
+import { sessionOperationAvailability } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import type { RemoteSessionStatus } from '../client/remote-session-client.js';
@@ -17,11 +18,9 @@ export function AgentPlanningControl({ state, sessionStatus, onSetPlanning }: Ag
   const planning = agent?.runtimeInfo.planning;
   const connection = agent?.runtimeInfo.connection;
   const recoveryMessage = planningRecoveryMessage(connection?.state);
-  const runtimeConnected = recoveryMessage === undefined;
   const supported = agent?.capabilities.planning === true;
   const pending = submitting || target !== undefined || planning?.requested !== undefined;
-  const canChange = supported && planning !== undefined && sessionStatus === 'ready' && runtimeConnected
-    && agent?.status === 'idle' && !agent.activeTurn && state.pendingInteractions.length === 0
+  const canChange = planning !== undefined && sessionOperationAvailability(agent, 'set_planning', { synchronized: sessionStatus === 'ready', control: state.sessionControl?.access }).allowed
     && !pending && onSetPlanning !== undefined;
 
   useEffect(() => {

@@ -158,3 +158,15 @@ it('classifies control revoked during validation as not dispatched, including re
     expect(dispatch).not.toHaveBeenCalled();
   } finally { await cache.close(); }
 });
+
+
+it('retains only adapter-confirmed dispatch rejection as rejected', async () => {
+  const { AgentOperationRejectedError } = await import('@orchardworks/agent-provider-sdk');
+  const cache = createOperationCache();
+  const dispatch = vi.fn(async () => { throw new AgentOperationRejectedError('native_rejected', 'Rejected without side effects.'); });
+  try {
+    await expect(cache.execute(descriptor(), { dispatch })).rejects.toMatchObject({ code: 'native_rejected' });
+    await expect(cache.execute(descriptor(), { dispatch })).rejects.toMatchObject({ code: 'native_rejected' });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  } finally { await cache.close(); }
+}, 10000);

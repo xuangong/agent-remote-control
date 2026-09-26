@@ -1,13 +1,14 @@
+import type { SessionViewActions } from '@orchardworks/agent-remote-web/react';
 import { RecordingPicker } from './recording-picker.js';
 import { memo, useEffect, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
-import { LabWorkbench, type LabWorkbenchActions } from '../../agent-remote-lab/src/components/LabWorkbench.js';
+import { SessionWorkbench } from '../../agent-remote-lab/src/components/SessionWorkbench.js';
 import { DebugSessionView } from './session-view.js';
 import { RecordingPlayer, type SessionRecording } from '../src/recording.js';
 
-const noActions: LabWorkbenchActions = {};
+const noActions: SessionViewActions = {};
 const ReplaySession = memo(function ReplaySession({ state, status }: { state: AgentReplicaState; status: RemoteSessionStatus }) {
-  return <LabWorkbench readOnly state={state} sessionStatus={status} actions={noActions} draftSessionKey={`replay:${state.agent?.id}`} />;
+  return <SessionWorkbench readOnly state={state} sessionStatus={status} actions={noActions} draftSessionKey={`replay:${state.agent?.id}`} />;
 });
 const time = (milliseconds: number) => `${Math.floor(milliseconds / 60000)}:${(milliseconds / 1000 % 60).toFixed(1).padStart(4, '0')}`;
 

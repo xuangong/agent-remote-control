@@ -116,3 +116,31 @@ it.each([false, true])('recovers timeline over the existing socket without HTTP 
     expect(acknowledged).toBeGreaterThan(history);
   } finally { await f.close(); }
 });
+
+it.each([false, true])('retains an unconfirmed native interruption after collecting an untracked connection (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const requests: boolean[] = [];
+  const connections = new ConversationConnections(f.transport, undefined, () => ({
+    async resumeNative(_owner, options) {
+      requests.push(options.checkOnly);
+      throw Object.assign(new Error('Native reply lost'), { code: 'ECONNRESET' });
+    },
+  }));
+  const owner = { kind: 'native_cli' as const, generation: 'native-owner' };
+  f.server.relay.sessionControls!.setNativeOwner('agent', owner);
+  try {
+    const first = connections.acquire('agent', new AgentReplica(), f.session);
+    await vi.waitFor(() => expect(first.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner } }));
+    await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
+    await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
+    first.release();
+    expect(connections.agentIds).toEqual([]);
+    const next = connections.acquire('agent', new AgentReplica(), f.session);
+    expect(next.client).not.toBe(first.client);
+    await vi.waitFor(() => expect(next.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner }, handoff: { phase: 'unknown' } }));
+    await expect(next.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
+    expect(requests).toEqual([false, true, true]);
+    expect(f.sockets).toHaveLength(sessionChannels ? 1 : 2);
+    next.release();
+  } finally { connections.clear(); await f.close(); }
+}, 8000);

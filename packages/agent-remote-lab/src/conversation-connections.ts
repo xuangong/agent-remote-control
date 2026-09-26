@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { RemoteSessionClient, type AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { RemoteSessionClient, type AgentReplica, type RemoteAgentTransport, type SessionControlExtension } from '@orchardworks/agent-remote-web';
 import { recoverMessages } from './message-recovery.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 
@@ -18,7 +18,7 @@ export class ConversationConnections {
   private readonly connections = new Map<string, Connection>();
   private tracked = new Set<string>();
 
-  constructor(private readonly transport: RemoteAgentTransport, private readonly recoveryScope?: string) {}
+  constructor(private readonly transport: RemoteAgentTransport, private readonly recoveryScope?: string, private readonly controlExtension?: (agentId: string, session?: Identity) => SessionControlExtension | undefined) {}
 
   get agentIds(): string[] { return [...this.connections.keys()]; }
 
@@ -37,7 +37,7 @@ export class ConversationConnections {
     if (!connection) {
       const key = session ? sessionKey(session) : undefined;
       connection = { agentId, key, replica, viewers: 0,
-        client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web' }),
+        client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web', handoffTarget: key, controlExtension: this.controlExtension?.(agentId, session) }),
         stopRecovery: this.recoveryScope ? recoverMessages(replica, this.recoveryScope, key ?? agentId, agentId) : () => {},
       };
       this.connections.set(agentId, connection);
@@ -57,25 +57,7 @@ export class ConversationConnections {
   }
 
   async takeControlAfterNativeResume(agentId: string): Promise<void> {
-    const connection = this.connections.get(agentId);
-    if (!connection) return;
-    await new Promise<void>((resolve, reject) => {
-      let status = '', settled = false;
-      let unwatchStatus = () => {}, unwatchReplica = () => {};
-      const finish = (error?: Error) => {
-        if (settled) return; settled = true;
-        clearTimeout(timer); unwatchStatus(); unwatchReplica();
-        error ? reject(error) : resolve();
-      };
-      const check = () => queueMicrotask(() => {
-        if (this.connections.get(agentId) !== connection) finish(new Error('The session view closed before control was acquired.'));
-        else if (status === 'ready' && !connection.replica.getState().sessionControl?.nativeOwner) finish();
-      });
-      const timer = setTimeout(() => finish(new Error('Native resume has not synchronized yet. Check the session before retrying.')), 15000);
-      unwatchStatus = connection.client.subscribeStatus(value => {status = value; check();});
-      unwatchReplica = connection.replica.subscribe(check);
-    });
-    await connection.client.takeControl();
+    await this.connections.get(agentId)?.client.takeControlAfterNativeResume();
   }
 
   clear(): void {

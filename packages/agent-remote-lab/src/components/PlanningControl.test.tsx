@@ -5,6 +5,7 @@ import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { PlanningControl } from './PlanningControl.js';
 
+const pendingInteractions = [{ kind: 'plan_approval' as const, requestId: 'plan', plan: 'Plan', allowedActions: ['approve' as const] }];
 const ready = {
   ...replicaState,
   agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, planning: true }, runtimeInfo: { ...replicaState.agent!.runtimeInfo, planning: { active: false } } },
@@ -32,7 +33,7 @@ describe('PlanningControl', () => {
   it.each([
     { label: 'running', state: { ...ready, agent: { ...ready.agent, status: 'running' as const } } },
     { label: 'active turn', state: { ...ready, agent: { ...ready.agent, activeTurn: { turnId: 'turn', startedAt: '2026-09-07T00:00:00Z' } } } },
-    { label: 'pending interaction', state: { ...ready, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'plan', plan: 'Plan', allowedActions: ['approve' as const] }] } },
+    { label: 'pending interaction', state: { ...ready, agent: { ...ready.agent, pendingInteractions }, pendingInteractions } },
     { label: 'Provider transition', state: { ...ready, agent: { ...ready.agent, runtimeInfo: { ...ready.agent.runtimeInfo, planning: { active: false, requested: true } } } } },
   ])('locks mode changes during $label', async ({ state }) => {
     const change = vi.fn();

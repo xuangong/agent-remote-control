@@ -433,7 +433,7 @@ describe('DSH projection convergence', () => {
     }
   });
 
-  it('propagates a post-boundary native sequence gap into manager failure state', async () => {
+  it('marks the native observation unavailable after a post-boundary sequence gap without inventing a turn failure', async () => {
     const initial: DshNativeObservation = {
       recordId: 'assistant-initial',
       occurredAt: 1_800_000_000_000,
@@ -491,17 +491,15 @@ describe('DSH projection convergence', () => {
 
       expect(manager.snapshot()).toMatchObject({
         payload: {
-          status: 'failed',
-          runtimeInfo: { status: 'failed' },
-          lastError: 'Provider observation stream failed.',
+          status: 'idle',
+          runtimeInfo: { status: 'idle', connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } },
         },
       });
       expect(events).toContainEqual(expect.objectContaining({
         type: 'agent_stream',
         event: expect.objectContaining({
-          type: 'turn_failed',
-          code: 'provider_observation_failed',
-          diagnostic: 'Live DSH sequence jumped from 2 to 4.',
+          type: 'runtime_updated',
+          runtimeInfo: expect.objectContaining({ connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } }),
         }),
       }));
       const entries = manager.fetchTimeline({

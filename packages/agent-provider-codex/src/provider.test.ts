@@ -113,7 +113,7 @@ describe('CodexAppServerProvider contract', () => {
     await session.dispose();
   });
 
-  it('propagates an unexpected app-server exit through manager settlement and failed state', async () => {
+  it('reports an unexpected app-server exit as observation unavailability without inventing a turn failure', async () => {
     const appServer = createScriptedAppServer({
       'thread/start': () => ({ thread: { id: 'thread-exit' }, model: 'gpt-5.4', cwd: '/workspace' }),
     });
@@ -141,17 +141,14 @@ describe('CodexAppServerProvider contract', () => {
       expect(await settlesWithin(manager.settled)).toBe(true);
       expect(manager.snapshot()).toMatchObject({
         payload: {
-          status: 'failed',
-          runtimeInfo: { status: 'failed' },
-          lastError: 'Provider observation stream failed.',
+          runtimeInfo: { connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } },
         },
       });
       expect(events).toContainEqual(expect.objectContaining({
         type: 'agent_stream',
         event: expect.objectContaining({
-          type: 'turn_failed',
-          code: 'provider_observation_failed',
-          diagnostic: expect.stringContaining('exited with code 17'),
+          type: 'runtime_updated',
+          runtimeInfo: expect.objectContaining({ connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } }),
         }),
       }));
       expect(manager.fetchTimeline({

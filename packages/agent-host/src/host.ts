@@ -1,3 +1,4 @@
+import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
 import type { HostProviderDiscovery } from './provider-discovery.js';
 import {NativeSessionOwnerError, type NativeOwnerIdentity} from './native-session-owner.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
@@ -9,7 +10,7 @@ import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } f
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
-import { createOperationCache, OperationCacheError, type OperationCacheOptions } from './operation-cache.js';
+import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
@@ -209,7 +210,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 }
 
 interface Binding { agentId: string; providerId: string; nativeSessionId: string; parentNativeSessionId?: string }
-interface Projection { agentId: string; parentNativeSessionId?: string; operation: Promise<Binding> }
 
 export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentHostRuntime {
   if (options.executionPolicy) options = { ...options, registrations: options.registrations.map(registration => ({ ...registration,
@@ -234,13 +234,15 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     resumeSession: adapter.resumeSession.bind(adapter),
   }));
-  const relay = createAgentRemoteRelay({ providers: relayAdapters, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}) });
   const operationCache = createOperationCache(options.operationCache);
+  const relay = createAgentRemoteRelay({ providers: relayAdapters, operationCache, operationLifecycle: {
+    target: agent => { const binding = bindingFor(agent); return JSON.stringify([binding.providerId, binding.nativeSessionId]); },
+    admit: () => { if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.'); },
+    retain: agent => idle.retain(bindingFor(agent).agentId),
+    uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
+  }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}) });
   const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list })]));
-  const bindingsByNative = new Map<string, Binding>();
-  const bindingsByAgent = new Map<string, Binding>();
-  const projections = new Map<string, Projection>();
-  const projectionAgents = new Map<string, string>();
+  const bindings = new SessionBindings();
   const pending = new Set<Promise<unknown>>();
   const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
   const uncertainAgents = new Set<string>();
@@ -254,7 +256,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const ids = new Set([nativeSessionId]);
     const family: Binding[] = [];
     for (;;) {
-      const found = [...bindingsByAgent.values()].filter(binding => binding.providerId === providerId && !family.includes(binding)
+      const found = [...bindings.values()].filter(binding => binding.providerId === providerId && !family.includes(binding)
         && (binding.nativeSessionId === nativeSessionId || binding.parentNativeSessionId && ids.has(binding.parentNativeSessionId)));
       if (!found.length) return family;
       for (const binding of found) {family.push(binding); ids.add(binding.nativeSessionId);}
@@ -280,7 +282,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return request.operationScope ?? 'local';
   }
   function bindingFor(agent: SessionWireAgent): Binding {
-    for (const [agentId, binding] of bindingsByAgent) {
+    for (const binding of bindings.values()) {
+      const agentId = binding.agentId;
       if (liveAgent(agentId) === agent) return binding;
     }
     throw new OperationCacheError('invalid_operation_target', 'The native session binding is unavailable.');
@@ -289,20 +292,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     try { return relay.requireAgent(agentId); } catch { return undefined; }
   }
   function executeOperation(scope: string): SessionWireOperationExecutor {
-    return async (agent, operation, work) => {
-      if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.');
-      const binding = bindingFor(agent);
-      const release = idle.retain(binding.agentId);
-      try {
-        return await operationCache.execute({
-          operationId: operation.operationId, scope, kind: operation.kind,
-          target: JSON.stringify([binding.providerId, binding.nativeSessionId]), parameters: operation.parameters,
-        }, { ...work, maximumResultBytes: operation.maximumResultBytes });
-      } catch (error) {
-        if (error instanceof OperationCacheError && ['operation_outcome_unknown', 'native_file_limit'].includes(error.code)) uncertainAgents.add(binding.agentId);
-        throw error;
-      } finally { release(); }
-    };
+    return relay.executeOperation(scope);
   }
   function lifecycle(event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled', binding: Binding) {
     try { options.onSessionLifecycleDiagnostic?.({ event, agentId: binding.agentId, providerId: binding.providerId }); }
@@ -310,11 +300,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   }
   function watch(binding: Binding) {
     idle.watch(binding.agentId, () => {
-      if (closed || uncertainAgents.has(binding.agentId) || projections.has(JSON.stringify([binding.providerId, binding.nativeSessionId]))) return false;
+      if (closed || uncertainAgents.has(binding.agentId) || bindings.isPending(binding.providerId, binding.nativeSessionId)) return false;
       const source = registration(binding.providerId).directory;
       if (!source.canReleaseSession?.(binding.nativeSessionId) || !liveAgent(binding.agentId)?.canReleaseIdle()) return false;
       // A native child projection shares its ancestor's connection, even with no browser currently attached.
-      for (const child of bindingsByAgent.values()) {
+      for (const child of bindings.values()) {
         if (child.providerId === binding.providerId && child.parentNativeSessionId === binding.nativeSessionId
           && (liveAgent(child.agentId) || idle.hasDemand(child.agentId))) return false;
       }
@@ -327,7 +317,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       const source = registration(binding.providerId).directory;
       const agent = liveAgent(binding.agentId);
       if (!source.reconcileIdleSession || !agent?.canReleaseIdle()) return false;
-      for (const child of bindingsByAgent.values()) {
+      for (const child of bindings.values()) {
         if (child.providerId === binding.providerId && child.parentNativeSessionId === binding.nativeSessionId
           && (liveAgent(child.agentId) || idle.hasDemand(child.agentId))) return false;
       }
@@ -344,13 +334,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     });
   }
   async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {
-    const binding = bindingsByAgent.get(agentId);
+    const binding = bindings.getByAgent(agentId);
     if (closed || !binding) return undefined;
     const release = idle.retain(agentId);
     let parent: RemoteHostSessionLease | undefined;
     try {
       if (binding.parentNativeSessionId) {
-        const parentBinding = bindingsByNative.get(JSON.stringify([binding.providerId, binding.parentNativeSessionId]));
+        const parentBinding = bindings.getByNative(binding.providerId, binding.parentNativeSessionId);
         if (parentBinding) {
           parent = await acquireSession(parentBinding.agentId);
           if (!parent) throw new Error('Native parent session is unavailable.');
@@ -365,30 +355,20 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     } catch (error) { release(); parent?.release(); throw error; }
   }
   async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string): Promise<Binding> {
-    const key = JSON.stringify([providerId, nativeSessionId]);
-    const existing = bindingsByNative.get(key);
-    if (existing) {
-      if (existing.parentNativeSessionId !== parentNativeSessionId) throw new HostRequestError(409, 'session_binding_conflict', 'The native session already has different ownership.');
-      proposedAgentId = existing.agentId;
-      await idle.wait(proposedAgentId);
-      if (liveAgent(proposedAgentId)) { idle.touch(proposedAgentId); return existing; }
-    }
-    const inFlight = projections.get(key);
-    if (inFlight) {
-      if (inFlight.parentNativeSessionId !== parentNativeSessionId) throw new HostRequestError(409, 'session_binding_conflict', 'The native session already has different ownership.');
-      return inFlight.operation;
-    }
-    const agentKey = projectionAgents.get(proposedAgentId);
-    if ((agentKey && agentKey !== key) || !existing && bindingsByAgent.has(proposedAgentId)) {
-      throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already bound.');
-    }
-    projectionAgents.set(proposedAgentId, key);
-    const source = registration(providerId).directory;
-    const operation = (async () => {
+    const existing = bindings.getByNative(providerId, nativeSessionId);
+    return bindings.bind({ providerId, agentId: proposedAgentId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }, {
+      discard: binding => relay.closeAgent(binding.agentId),
+      attach: async binding => {
+      proposedAgentId = binding.agentId;
+      if (existing) {
+        await idle.wait(proposedAgentId);
+        if (liveAgent(proposedAgentId)) { idle.touch(proposedAgentId); return; }
+      }
+      const source = registration(providerId).directory;
       let parent: RemoteHostSessionLease | undefined;
       try {
         if (parentNativeSessionId) {
-          const parentBinding = bindingsByNative.get(JSON.stringify([providerId, parentNativeSessionId]));
+          const parentBinding = bindings.getByNative(providerId, parentNativeSessionId);
           if (parentBinding?.agentId === proposedAgentId) throw new Error('Native parent binding is invalid.');
           if (parentBinding) {
             parent = await acquireSession(parentBinding.agentId);
@@ -412,19 +392,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           }
           throw error;
         });
-        if (response.payload.sessionId !== nativeSessionId) throw new Error('Provider returned a different native session identity.');
-        const binding = { agentId: proposedAgentId, providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
-        bindingsByNative.set(key, binding); bindingsByAgent.set(proposedAgentId, binding);
+        if (response.payload.sessionId !== nativeSessionId) { await relay.closeAgent(proposedAgentId); throw new Error('Provider returned a different native session identity.'); }
         for (const relative of nativeFamily(providerId, nativeSessionId)) relay.sessionControls?.setNativeOwner(relative.agentId, undefined);
         watch(binding);
         if (existing) lifecycle('session_idle_restored', binding);
-        return binding;
-      } finally { parent?.release(); }
-    })();
-    projections.set(key, { agentId: proposedAgentId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}), operation });
-    try { return await operation; } catch (error) {
-      prepared.delete(proposedAgentId); throw error;
-    } finally { projections.delete(key); projectionAgents.delete(proposedAgentId); }
+      } catch (error) { prepared.delete(proposedAgentId); throw error; }
+      finally { parent?.release(); }
+      },
+    });
   }
   async function create(request: RemoteHostControlRequest, payload: Record<string, unknown>): Promise<AgentRemoteHttpResult> {
     const providerId = string(payload.providerId, 'providerId');
@@ -468,7 +443,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             throw new HostRequestError(400, 'operation_rejected', error instanceof Error ? error.message : 'The selected prompt could not be verified.');
           }
         }
-        if (projectionAgents.has(proposedAgentId) || bindingsByAgent.has(proposedAgentId)) {
+        if (bindings.isReserved(proposedAgentId)) {
           throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already reserved.');
         }
       },
@@ -499,7 +474,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       const url = new URL(request.path, 'http://agent-host.local');
       const payload = request.method === 'POST' ? body(request.body) : undefined;
       const selectedProvider = request.method === 'GET' ? url.searchParams.get('providerId') : payload?.providerId;
-      const existing = request.sessionId ? bindingsByAgent.get(request.sessionId) : undefined;
+      const existing = request.sessionId ? bindings.getByAgent(request.sessionId) : undefined;
       // Uplink recovery may rebind a still-live session after its provider is disabled.
       // It must not open another native session or revive an idle released session.
       const recovering = request.method === 'POST' && (url.pathname === '/remote/attach' || url.pathname === '/remote/child/attach')
@@ -563,7 +538,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             throw new HostRequestError(400, 'invalid_request', 'Stop requires only an operation identity.');
           }
           const operationId = string(payload.operationId, 'operationId');
-          const targets = [...bindingsByAgent.keys()].filter(id => liveAgent(id));
+          const targets = [...bindings.values()].map(binding => binding.agentId).filter(id => liveAgent(id));
           const results = await operationCache.execute({
             operationId,
             scope: operationScope(request),
@@ -595,6 +570,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
       if (error instanceof WorkspaceFolderError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof OperationCacheError) return json(operationErrorStatus(error.code), { error: error.message, code: error.code });
+      if (error instanceof SessionBindingError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });
       if (request.method === 'GET') return json(503, { error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' });
@@ -642,10 +618,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     cancelControllerRestart() { if (!closed) draining = false; },
     resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },
     close(): Promise<void> { return closePromise ??= (async () => {
-      closed = true;
+      closed = true; bindings.close();
       const releasing = idle.close();
       for (const catalog of catalogs.values()) catalog.dispose();
-      const cleanup = Promise.allSettled([releasing, relay.close(), operationCache.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
+      const cleanup = Promise.allSettled([releasing, relay.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
       await bounded(cleanup, shutdownTimeoutMs);
     })(); } };
 }

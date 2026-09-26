@@ -14,6 +14,8 @@ export interface AgentRemoteHttpMutationPolicy {
   validate(request: IncomingMessage): AgentRemoteHttpMutationDecision;
 }
 export interface AgentRemoteHttpRouterOptions {
+  /** Resolve a stable authority from trusted authentication state, never from an unverified client field. */
+  operationScope?: (request: IncomingMessage) => string | Promise<string>;
   mutationPolicy?: AgentRemoteHttpMutationPolicy;
   accessPolicy?: AgentRemoteRequestAccessPolicy;
 }
@@ -53,7 +55,8 @@ export function createAgentRemoteHttpRouter(
         chunks.push(buffer);
       }
     }
-    return executeAgentRemoteHttpRequest(relay, { method, path, body: Buffer.concat(chunks).toString('utf8') });
+    return executeAgentRemoteHttpRequest(relay, { method, path, body: Buffer.concat(chunks).toString('utf8') },
+      mutation && options.operationScope ? await options.operationScope(request) : 'standalone-http');
   }
 }
 

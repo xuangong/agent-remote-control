@@ -1,4 +1,5 @@
-import {NativeSessionTakeoverScope, SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
+import { sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
+import {SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
 import { CachePrivacySettings } from './components/CachePrivacySettings.js';
@@ -217,7 +218,14 @@ function AppContent({
   const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
   useEffect(() => beginCatchUp(), [baseUrl, transport, beginCatchUp]);
   const replicas = useMemo(() => new ReplicaCache(), [baseUrl, transport]);
-  const connections = useMemo(() => new ConversationConnections(transport, baseUrl), [baseUrl, transport]);
+  const connections = useMemo(() => new ConversationConnections(transport, baseUrl, (agentId, session) => session ? {
+    async resumeNative(owner, options) {
+      if (!accessReadyRef.current) throw new SessionHandoffRejectedError('Workspace access is restoring.');
+      const target = new SessionDirectoryClient(baseUrl, undefined, session.hostId ?? 'local');
+      const result = await target.attach(session.providerId, session.nativeSessionId, options.signal, options.checkOnly ? undefined : owner.generation);
+      if (result.agentId !== agentId) throw new Error('Native resume returned a different session binding.');
+    },
+  } : undefined), [baseUrl, transport]);
   useEffect(() => () => connections.clear(), [connections]);
   const replicaFor = useCallback((agentId: string) => {
     return replicas.obtain(agentId);
@@ -254,7 +262,11 @@ function AppContent({
   const [status, setStatus] = useState<RemoteSessionStatus>(cachedState ? 'connecting' : initialSessionStatus);
   const [attachingAgentId, setAttachingAgentId] = useState<string>();
   const [transitioning, setTransitioning] = useState(false);
+  const [handoff, setHandoff] = useState<SessionHandoffState>();
+  const [, refreshOpeningHandoff] = useState(0);
   const [nativeTakeover, setNativeTakeover] = useState<{item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & {hostId?: string}; owner: NativeSessionOwner}>();
+  const openingHandoff = nativeTakeover ? sessionHandoffScope(transport).forTarget(sessionKey({ ...nativeTakeover.item, hostId: nativeTakeover.item.hostId ?? selectedHost.id })) : undefined;
+  useEffect(() => openingHandoff?.subscribe(() => refreshOpeningHandoff(version => version + 1)), [openingHandoff]);
   const [sessionNotice, setSessionNotice] = useState<SessionConnectionMessage>();
   const [failure, setFailure] = useState<string | undefined>(requested.error);
   useFeedbackToast('Session operation', failure);
@@ -416,7 +428,7 @@ function AppContent({
       const next = replica.getState();
       setState(previous => next.timeline.initialized || !previous?.timeline.initialized ? next : previous);
     });
-    const unsubscribeStatus = client.subscribeStatus((next) => { if (clientRef.current === client) setStatus(next); });
+    const unsubscribeStatus = client.subscribeSessionState((next) => { if (clientRef.current === client) { setStatus(next.connection); setHandoff(next.handoff); } });
     unsubscribeReplicaRef.current = () => { unsubscribe(); unsubscribeStatus(); lease.release(); };
     rememberAgent(agentId);
   }, [baseUrl, transport, replicas, replicaFor, beginCatchUp, connections]);
@@ -1075,7 +1087,7 @@ function AppContent({
   }
 
   const clientActions: AppActions = actions ?? {
-    takeControl: () => commandClient().takeControl(),
+    takeControl: options => commandClient().takeControl(options),
     ...(userScoped && activeOpened && activeOpened.providerId === 'codex' && !activeOpened.parentNativeSessionId && !boundFork && !promptEditPending ? { editPrompt } : {}),
     loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
     sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
@@ -1112,16 +1124,7 @@ function AppContent({
     deleteMessage: conversationActions.deleteMessage,
   };
 
-  async function takeNativeControl(agentId: string, generation: string, options?: TakeControlOptions): Promise<void> {
-    const item = openedSessionsRef.current.find(entry => entry.agentId === agentId);
-    if (!item || !accessReadyRef.current) throw new Error('Reopen this session from the Host list before taking control.');
-    const target = new SessionDirectoryClient(baseUrl, undefined, item.hostId ?? 'local');
-    const result = await target.attach(item.providerId, item.nativeSessionId, AbortSignal.timeout(20000), options?.checkOnly ? undefined : generation);
-    options?.onRestoring?.();
-    await connections.takeControlAfterNativeResume(result.agentId);
-  }
-
-  return <NativeSessionTakeoverScope.Provider value={takeNativeControl}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {accessReady ? tracking.observers : null}
     {ask.enabled && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
@@ -1296,6 +1299,7 @@ function AppContent({
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <div className="lab-primary-conversation" hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
         <LabWorkbench
+          handoff={handoff}
           draftSessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
           revealEntry={traceRequest?.view === 'workbench' ? traceRequest : undefined}
@@ -1304,9 +1308,14 @@ function AppContent({
           onExecuteConsoleCommand={(id, args) => state && status === 'ready' && !hostOffline ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('Wait for this session to finish synchronizing.'))}
           nativeTakeover={nativeTakeover ? <SessionControlNotice
             control={{access: 'read_only', available: false, nativeOwner: nativeTakeover.owner}}
+            handoff={openingHandoff?.getState(nativeTakeover.owner.generation)}
             connected={accessReady && !hostOffline && !transitioning}
             onTakeControl={async options => {
-              await openSession(nativeTakeover.item, options?.checkOnly ? undefined : nativeTakeover.owner.generation, options?.onRestoring);
+              await openingHandoff!.run(nativeTakeover.owner.generation, async progress => {
+                if (!directory || transitionRef.current || !accessReadyRef.current) throw new SessionHandoffRejectedError('Workspace access is restoring or another session is opening.');
+                const opened = await openSession(nativeTakeover.item, progress.checkOnly ? undefined : nativeTakeover.owner.generation, progress.onRestoring);
+                if (!opened) throw new Error('Session navigation changed before native restoration was confirmed.');
+              }, options);
             }} /> : undefined}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
@@ -1373,7 +1382,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></NativeSessionTakeoverScope.Provider>;
+  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

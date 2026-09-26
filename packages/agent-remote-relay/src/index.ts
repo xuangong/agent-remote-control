@@ -22,3 +22,8 @@ export type {
   AgentRemoteWebSocketAuthorizer,
 } from './transport/websocket-stream.js';
 export * from './resources/input-image-store.js';
+
+export * from './operation-cache.js';
+export * from './operation-settlement.js';
+
+export * from './session-bindings.js';

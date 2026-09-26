@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
+import { reduceSessionState, sessionOperationAvailability, type SessionOperationKind } from '@orchardworks/agent-remote-protocol';
 import { InputImageStore, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
 import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
@@ -73,16 +76,16 @@ export class InteractionResponseError extends Error {
   }
 }
 
-export class UnsupportedAgentCapabilityError extends Error {
+export class UnsupportedAgentCapabilityError extends AgentOperationRejectedError {
   constructor(readonly capability: 'image_input' | 'send_message' | 'queue_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'list_commands' | 'execute_command') {
-    super(`Provider does not support ${capability}.`);
+    super('unsupported_command', `Provider does not support ${capability}.`);
     this.name = 'UnsupportedAgentCapabilityError';
   }
 }
 
-export class AgentBusyError extends Error {
+export class AgentBusyError extends AgentOperationRejectedError {
   constructor(message = 'Planning can only change while the Agent is idle with no pending interactions.') {
-    super(message);
+    super('agent_busy', message);
     this.name = 'AgentBusyError';
   }
 }
@@ -99,7 +102,6 @@ export class AgentManager {
   private historyLoading: Promise<void> | undefined;
   private readonly seenProviderRecords = new Map<string, Set<number | null>>();
   private readonly claimedInteractionIds = new Set<string>();
-  private statusBeforeInteraction: AgentSnapshot['payload']['status'] | undefined;
   private resolveReady!: () => void;
   private rejectReady!: (error: unknown) => void;
   private readySettled = false;
@@ -174,7 +176,8 @@ export class AgentManager {
     const session = await options.adapter.createSession(options.config);
     if (options.config.planning === true && (session.capabilities.planning !== true || !session.setPlanning)) {
       await session.dispose().catch(() => undefined);
-      throw new UnsupportedAgentCapabilityError('set_planning');
+      // Disposing the handle does not undo an already persisted native creation.
+      throw new Error('Created session does not support set_planning. Native creation may already be persisted.');
     }
     return AgentManager.attachOwnedSession(options, session);
   }
@@ -279,13 +282,49 @@ export class AgentManager {
     this.emit({ type: 'timeline_replacement', agentId: this.agentId, epoch });
   }
 
+  private readonly operationContext = new AsyncLocalStorage<{ beforeDispatch?: () => void }>();
+
+  /** Keep admission attached to the operation across queues and asynchronous preparation. */
+  runOperation<T>(work: () => Promise<T>, beforeDispatch?: () => void): Promise<T> {
+    return this.operationContext.run({ beforeDispatch }, work);
+  }
+
+  private async prepareOperation<T>(prepare: (dispatch: <R>(work: () => Promise<R>) => Promise<R>) => Promise<T>): Promise<T> {
+    const context = this.operationContext.getStore();
+    let dispatched = false;
+    let nativeRejection: unknown;
+    try {
+      return await prepare(work => {
+        context?.beforeDispatch?.();
+        dispatched = true;
+        try { return work().catch(error => { nativeRejection = error; throw error; }); }
+        catch (error) { nativeRejection = error; throw error; }
+      });
+    } catch (error) {
+      if (dispatched && error instanceof AgentOperationRejectedError && error !== nativeRejection) {
+        throw new Error('Operation failed after native dispatch.', { cause: error });
+      }
+      if (!context || dispatched || error instanceof AgentOperationRejectedError) throw error;
+      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'operation_rejected';
+      throw new AgentOperationRejectedError(code, error instanceof Error ? error.message : 'Operation preparation failed.');
+    }
+  }
+
+  validateOperation(kind: SessionOperationKind, interactionId?: string): void {
+    const availability = sessionOperationAvailability(this.state.payload, kind, { synchronized: this.boundarySeen, closed: this.closed, interactionId });
+    if (!availability.allowed) throw new AgentOperationRejectedError(availability.code, availability.reason);
+  }
+
   async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
-    if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
-    return this.serializeCommand(async () => {
-      if (!this.session.capabilities.sendMessage) throw new UnsupportedAgentCapabilityError('send_message');
-      if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
-      if (options === undefined) await this.session.sendMessage(text);
-      else await this.session.sendMessage(text, options);
+    return this.prepareOperation(async dispatch => {
+      if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
+      return this.serializeCommand(async () => {
+        this.validateOperation(options?.delivery === 'next_turn' ? 'queue_message' : 'send_message');
+        if (!this.session.capabilities.sendMessage) throw new UnsupportedAgentCapabilityError('send_message');
+        if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
+        if (options === undefined) await dispatch(() => this.session.sendMessage(text));
+        else await dispatch(() => this.session.sendMessage(text, options));
+      });
     });
   }
 
@@ -322,40 +361,50 @@ export class AgentManager {
     await store.resolveAndPin(this.imageScope(scope), parts);
   }
   async sendMessageContent(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void> {
-    if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
     if (!parts.some(part => part.type === 'image')) return this.sendMessage(parts.map(part => part.type === 'text' ? part.text : '').join(''), options);
-    return this.serializeCommand(async () => {
-      const store = this.requireImageStore();
-      if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
-      const resolved = await store.resolveAndPin(this.imageScope(scope), parts);
-      await this.session.sendMessageContent!(resolved, options);
+    return this.prepareOperation(async dispatch => {
+      if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
+      return this.serializeCommand(async () => {
+        this.validateOperation(options?.delivery === 'next_turn' ? 'queue_message' : 'send_message');
+        const store = this.requireImageStore();
+        if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
+        const resolved = await store.resolveAndPin(this.imageScope(scope), parts);
+        this.validateOperation(options?.delivery === 'next_turn' ? 'queue_message' : 'send_message');
+        await dispatch(() => this.session.sendMessageContent!(resolved, options));
+      });
     });
   }
 
   async setPlanning(active: boolean): Promise<void> {
-    return this.serializeCommand(async () => {
-      if (this.session.capabilities.planning !== true || !this.session.setPlanning) {
-        throw new UnsupportedAgentCapabilityError('set_planning');
-      }
-      const state = this.state.payload;
-      if (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0) throw new AgentBusyError();
-      await this.session.setPlanning(active);
-      const runtimeInfo = await this.session.runtimeInfo();
-      this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+    return this.prepareOperation(async dispatch => {
+      return this.serializeCommand(async () => {
+        if (this.session.capabilities.planning !== true || !this.session.setPlanning) {
+          throw new UnsupportedAgentCapabilityError('set_planning');
+        }
+        const state = this.state.payload;
+        if (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0) throw new AgentBusyError();
+        this.validateOperation('set_planning');
+        await dispatch(() => this.session.setPlanning!(active));
+        const runtimeInfo = await this.session.runtimeInfo();
+        this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+      });
     });
   }
 
   async setSessionSetting(id: string, value: string): Promise<void> {
-    return this.serializeCommand(async () => {
-      if (this.session.capabilities.sessionSettings !== true || !this.session.setSessionSetting) {
-        throw new UnsupportedAgentCapabilityError('set_session_setting');
-      }
-      const state = this.state.payload;
-      if (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0) throw new AgentBusyError();
-      validateSessionSetting((await this.session.runtimeInfo()).settings, id, value);
-      await this.session.setSessionSetting(id, value);
-      const runtimeInfo = await this.session.runtimeInfo();
-      this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+    return this.prepareOperation(async dispatch => {
+      return this.serializeCommand(async () => {
+        if (this.session.capabilities.sessionSettings !== true || !this.session.setSessionSetting) {
+          throw new UnsupportedAgentCapabilityError('set_session_setting');
+        }
+        const state = this.state.payload;
+        if (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0) throw new AgentBusyError();
+        validateSessionSetting((await this.session.runtimeInfo()).settings, id, value);
+        this.validateOperation('set_session_setting');
+        await dispatch(() => this.session.setSessionSetting!(id, value));
+        const runtimeInfo = await this.session.runtimeInfo();
+        this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+      });
     });
   }
 
@@ -374,18 +423,21 @@ export class AgentManager {
   }
 
   async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
-    this.pendingCommandExecutions += 1;
-    try {
-      return await this.serializeCommand(async () => {
-        if (this.session.capabilities.commands !== true || !this.session.executeCommand) throw new UnsupportedAgentCapabilityError('execute_command');
-        const commands = await this.listCommands();
-        if (!commands.some((command) => command.id === id)) throw new Error('Native command is no longer available. Refresh the command list.');
-        const result = await this.session.executeCommand(id, args);
-        const runtimeInfo = await this.session.runtimeInfo();
-        this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
-        return result;
-      });
-    } finally { this.pendingCommandExecutions -= 1; }
+    return this.prepareOperation(async dispatch => {
+      this.pendingCommandExecutions += 1;
+      try {
+        return await this.serializeCommand(async () => {
+          if (this.session.capabilities.commands !== true || !this.session.executeCommand) throw new UnsupportedAgentCapabilityError('execute_command');
+          const commands = await this.listCommands();
+          if (!commands.some((command) => command.id === id)) throw new AgentOperationRejectedError('unsupported_command', 'Native command is no longer available. Refresh the command list.');
+          this.validateOperation('execute_command');
+          const result = await dispatch(() => this.session.executeCommand!(id, args));
+          const runtimeInfo = await this.session.runtimeInfo();
+          this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+          return result;
+        });
+      } finally { this.pendingCommandExecutions -= 1; }
+    });
   }
 
   private serializeCommand<T>(operation: () => Promise<T>): Promise<T> {
@@ -398,28 +450,40 @@ export class AgentManager {
   }
 
   async steer(text: string): Promise<void> {
-    if (!this.session.capabilities.steer || !this.session.steer) {
-      throw new UnsupportedAgentCapabilityError('steer');
-    }
-    await this.session.steer(text);
+    return this.prepareOperation(async dispatch => {
+      if (!this.session.capabilities.steer || !this.session.steer) {
+        throw new UnsupportedAgentCapabilityError('steer');
+      }
+      this.validateOperation('steer');
+      await dispatch(() => this.session.steer!(text));
+    });
   }
 
   async cancel(): Promise<void> {
-    if (!this.session.capabilities.cancel || !this.session.cancel) {
-      throw new UnsupportedAgentCapabilityError('cancel');
-    }
-    await this.session.cancel();
+    return this.prepareOperation(async dispatch => {
+      if (!this.session.capabilities.cancel || !this.session.cancel) {
+        throw new UnsupportedAgentCapabilityError('cancel');
+      }
+      this.validateOperation('cancel');
+      await dispatch(() => this.session.cancel!());
+    });
   }
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
-    this.validateInteractionResponse(requestId, response);
-    this.claimedInteractionIds.add(requestId);
-    try {
-      await this.session.respondToInteraction(requestId, response);
-    } catch (error) {
-      this.claimedInteractionIds.delete(requestId);
-      throw error;
-    }
+    return this.prepareOperation(async dispatch => {
+      this.validateOperation('interaction_response', requestId);
+      this.validateInteractionResponse(requestId, response);
+      try {
+        await dispatch(() => {
+          this.claimedInteractionIds.add(requestId);
+          return this.session.respondToInteraction(requestId, response);
+        });
+      } catch (error) {
+        // Only confirmed rejection permits another response; loss of a receipt does not.
+        if (error instanceof AgentOperationRejectedError) this.claimedInteractionIds.delete(requestId);
+        throw error;
+      }
+    });
   }
 
   validateInteractionResponse(requestId: string, response: AgentInteractionResponse): void {
@@ -553,18 +617,12 @@ export class AgentManager {
     this.rejectReady(error);
   }
 
-  private applyObservationFailure(error: unknown): void {
+  private applyObservationFailure(_error: unknown): void {
     const timestamp = this.clock().toISOString();
-    this.state.payload.runtimeInfo = {
-      ...this.state.payload.runtimeInfo,
-      status: 'failed',
-    };
-    const event: Extract<AgentStreamEvent, { type: 'turn_failed' }> = {
-      type: 'turn_failed',
-      provider: this.provider.providerId,
-      error: 'Provider observation stream failed.',
-      code: 'provider_observation_failed',
-      diagnostic: error instanceof Error ? error.message : String(error),
+    const event: Extract<AgentStreamEvent, { type: 'runtime_updated' }> = {
+      type: 'runtime_updated', provider: this.provider.providerId,
+      runtimeInfo: { ...this.state.payload.runtimeInfo,
+        connection: { state: 'unavailable', reason: 'Provider observation stream failed.' } },
     };
     this.applyStateEvent(event, timestamp);
     this.emitStream(event, timestamp);
@@ -682,78 +740,10 @@ export class AgentManager {
   }
 
   private applyStateEvent(event: Exclude<AgentStreamEvent, { type: 'timeline' }>, timestamp: string): void {
-    const state = this.state.payload;
-    state.updatedAt = timestamp;
-    switch (event.type) {
-      case 'thread_started':
-        if (state.status === 'starting') state.status = 'idle';
-        break;
-      case 'turn_started':
-        state.status = 'running';
-        state.activeTurn = event.turnId ? { turnId: event.turnId, startedAt: timestamp } : null;
-        break;
-      case 'turn_completed':
-        state.status = 'idle';
-        state.activeTurn = null;
-        if (event.usage) state.lastUsage = structuredClone(event.usage);
-        break;
-      case 'turn_failed':
-        state.status = 'failed';
-        state.activeTurn = null;
-        state.lastError = event.error;
-        break;
-      case 'turn_canceled':
-        state.status = 'idle';
-        state.activeTurn = null;
-        break;
-      case 'usage_updated':
-        state.lastUsage = structuredClone(event.usage);
-        break;
-      case 'runtime_updated':
-        state.capabilities = this.effectiveCapabilities();
-        state.runtimeInfo = structuredClone(event.runtimeInfo);
-        state.status = event.runtimeInfo.status;
-        if (event.activeTurnId === null) state.activeTurn = null;
-        else if (event.activeTurnId !== undefined && event.activeTurnId !== state.activeTurn?.turnId) {
-          state.activeTurn = { turnId: event.activeTurnId, startedAt: timestamp };
-        }
-        if (event.runtimeInfo.cwd !== undefined) state.cwd = event.runtimeInfo.cwd;
-        if (event.runtimeInfo.model !== undefined) state.model = event.runtimeInfo.model;
-        if (event.runtimeInfo.persistence !== undefined) state.persistence = structuredClone(event.runtimeInfo.persistence);
-        break;
-      case 'interaction_requested': {
-        const index = state.pendingInteractions.findIndex(({ requestId }) => requestId === event.request.requestId);
-        if (index === -1) {
-          if (state.pendingInteractions.length === 0) this.statusBeforeInteraction = state.status;
-          state.pendingInteractions.push(structuredClone(event.request));
-        }
-        else state.pendingInteractions[index] = structuredClone(event.request);
-        state.status = 'waiting';
-        break;
-      }
-      case 'interaction_resolved': {
-        this.clearPendingInteraction(event.requestId);
-        break;
-      }
-      case 'interaction_invalidated': {
-        this.clearPendingInteraction(event.requestId);
-        break;
-      }
-    }
+    if (event.type === 'interaction_resolved' || event.type === 'interaction_invalidated') this.claimedInteractionIds.delete(event.requestId);
+    this.state.payload = reduceSessionState(this.state.payload, event, timestamp);
+    if (event.type === 'runtime_updated') this.state.payload.capabilities = this.effectiveCapabilities();
     this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot(), cursor: this.timeline.cursor });
-  }
-
-  private clearPendingInteraction(requestId: string): void {
-    const state = this.state.payload;
-    this.claimedInteractionIds.delete(requestId);
-    const index = state.pendingInteractions.findIndex((request) => request.requestId === requestId);
-    if (index !== -1) state.pendingInteractions.splice(index, 1);
-    if (state.pendingInteractions.length === 0) {
-      if (state.status === 'waiting') {
-        state.status = this.statusBeforeInteraction ?? (state.activeTurn ? 'running' : 'idle');
-      }
-      this.statusBeforeInteraction = undefined;
-    }
   }
 
   private isDuplicate(observation: ProviderObservation): boolean {

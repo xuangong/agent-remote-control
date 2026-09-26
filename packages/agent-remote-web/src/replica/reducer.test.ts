@@ -483,3 +483,18 @@ it('converges live and Relay history compaction lifecycles without joining indep
   append({ type: 'compaction', status: 'completed' });
   expect(live.timeline.entries.slice(-3).map(entry => [entry.seqStart, entry.seqEnd])).toEqual([[8, 8], [9, 10], [11, 11]]);
 });
+
+
+it('maintains waiting state through native restore and returns to the latest authoritative work state', () => {
+  const request: AgentInteractionRequest = { kind: 'question', requestId: 'approval', questions: [{ id: 'q', title: 'Continue?', options: [{ value: 'yes', label: 'Yes' }] }] };
+  let state = applyAgentSnapshot(createReplicaState(), snapshot('running'));
+  state = applyInteractionRequested(state, request);
+  expect(state.agent?.status).toBe('waiting');
+  expect(state.agent?.pendingInteractions).toEqual(state.pendingInteractions);
+  state = reduceTimelineEvent(state, { protocolVersion: '1.5.0', type: 'agent_stream', payload: { agentId: 'agent-one', timestamp: '2026-09-26T00:00:00.000Z', event: { type: 'runtime_updated', providerId: 'provider-neutral', runtimeInfo: { providerId: 'provider-neutral', sessionId: 'session-one', status: 'running', connection: { state: 'restoring' } } } } }).state;
+  expect(state.agent?.status).toBe('waiting');
+  expect(state.pendingInteractions).toHaveLength(1);
+  state = applyInteractionResolved(state, request.requestId);
+  expect(state.agent?.status).toBe('running');
+  expect(state.agent?.pendingInteractions).toEqual([]);
+});

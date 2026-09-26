@@ -1,3 +1,4 @@
+import { AgentManager } from '@orchardworks/agent-remote-relay';
 import { describe, expect, it } from 'vitest';
 
 import { createRecordedLabProvider } from './recorded.js';
@@ -206,3 +207,16 @@ async function nextRequest(
       && next.value.event.request.kind === kind) return next.value.event.request;
   }
 }
+
+it('invalidates pending native questions when the fixture cancels work', async () => {
+  const { provider, controller } = createRecordedLabProvider();
+  const manager = await AgentManager.create({ agentId: 'cancel-test', adapter: provider, config: { sessionId: 'cancel-native' }, epoch: 'e' });
+  try {
+    await manager.ready;
+    controller.advance('cancel-native');
+    await expect.poll(() => manager.snapshot().payload.pendingInteractions.length).toBe(1);
+    await manager.cancel();
+    await expect.poll(() => manager.snapshot().payload.pendingInteractions.length).toBe(0);
+    expect(manager.snapshot().payload.status).toBe('idle');
+  } finally { await manager.close(); }
+});

@@ -143,10 +143,10 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       acquireSession: options.acquireSession,
       imageScope: () => { if (!operationScope) throw new Error('Image scope is unavailable before Host registration.'); return operationScope; },
       control: request => options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
-      ...(options.operationExecutor ? { executeOperation: (agent, operation, work) => {
+      executeOperation: (agent, operation, work) => {
         if (!operationScope) throw new Error('Remote Host operation scope is unavailable before registration.');
-        return options.operationExecutor!(operationScope)(agent, operation, work);
-      } } : {}),
+        return (options.operationExecutor?.(operationScope) ?? options.relay.executeOperation(operationScope))(agent, operation, work);
+      },
       send: (json) => writer.send(json), onFailure: () => retire({ reason: 'host_failure' }),
     });
     function retire(cause: DisconnectCause): void {

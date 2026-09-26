@@ -1,3 +1,4 @@
+import { reduceSessionState, withSessionInteractions } from '@orchardworks/agent-remote-protocol';
 import type {
   AgentInteractionRequest,
   AgentSnapshot,
@@ -69,7 +70,7 @@ export function applyAgentSnapshot(
 
   return {
     ...state,
-    agent: { ...clone(snapshot.payload), pendingInteractions: [...snapshotRequests.values()] },
+    agent: withSessionInteractions(clone(snapshot.payload), [...snapshotRequests.values()]),
     pendingInteractions: [...snapshotRequests.values()],
     interactionChanges,
   };
@@ -84,6 +85,7 @@ export function applyInteractionRequested(
   requests.set(request.requestId, clone(request));
   return {
     ...state,
+    agent: state.agent ? reduceSessionState(state.agent, { type: 'interaction_requested', request }, state.agent.updatedAt) : null,
     pendingInteractions: [...requests.values()],
     interactionRevision: revision,
     interactionChanges: {
@@ -97,6 +99,7 @@ export function applyInteractionResolved(state: AgentReplicaState, requestId: st
   const revision = state.interactionRevision + 1;
   return {
     ...state,
+    agent: state.agent ? reduceSessionState(state.agent, { type: 'interaction_resolved', requestId }, state.agent.updatedAt) : null,
     pendingInteractions: state.pendingInteractions.filter((request) => request.requestId !== requestId),
     interactionRevision: revision,
     interactionChanges: { ...state.interactionChanges, [requestId]: { revision } },
@@ -290,44 +293,7 @@ function applyNonTimelineEvent(state: AgentReplicaState, message: AgentStreamMes
   const event = message.payload.event;
   if (event.type === 'timeline') return state;
   if (!state.agent) return state;
-  switch (event.type) {
-    case 'thread_started':
-      return state;
-    case 'turn_started':
-      return {
-        ...state,
-        agent: {
-          ...state.agent,
-          status: 'running',
-          activeTurn: event.turnId ? { turnId: event.turnId, startedAt: message.payload.timestamp } : state.agent.activeTurn,
-        },
-      };
-    case 'turn_completed':
-      return {
-        ...state,
-        agent: { ...state.agent, status: 'idle', activeTurn: null, ...(event.usage ? { lastUsage: clone(event.usage) } : {}) },
-      };
-    case 'turn_failed':
-      return { ...state, agent: { ...state.agent, status: 'failed', activeTurn: null, lastError: event.error } };
-    case 'turn_canceled':
-      return { ...state, agent: { ...state.agent, status: 'idle', activeTurn: null } };
-    case 'usage_updated':
-      return { ...state, agent: { ...state.agent, lastUsage: clone(event.usage) } };
-    case 'runtime_updated':
-      return {
-        ...state,
-        agent: {
-          ...state.agent,
-          status: event.runtimeInfo.status,
-          runtimeInfo: clone(event.runtimeInfo),
-          ...(event.activeTurnId === undefined ? {} : { activeTurn: event.activeTurnId === null ? null
-            : state.agent.activeTurn?.turnId === event.activeTurnId ? state.agent.activeTurn
-              : { turnId: event.activeTurnId, startedAt: message.payload.timestamp } }),
-          ...(event.runtimeInfo.cwd === undefined ? {} : { cwd: event.runtimeInfo.cwd }),
-          ...(event.runtimeInfo.model === undefined ? {} : { model: event.runtimeInfo.model }),
-        },
-      };
-  }
+  return { ...state, agent: reduceSessionState(state.agent, event, message.payload.timestamp) };
 }
 
 function bufferLive(state: AgentReplicaState, message: TimelineStreamMessage): AgentReplicaState {

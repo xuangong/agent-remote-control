@@ -301,10 +301,13 @@ describe('Agent Host runtime', () => {
     const child = new Session('codex', 'child');
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
-    codex.directory.openChild = async () => { await blocked; return child; };
+    let entered!: () => void;
+    const opened = new Promise<void>(resolve => { entered = resolve; });
+    codex.directory.openChild = async () => { entered(); await blocked; return child; };
     const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: codex.directory }], shutdownTimeoutMs: 20 });
     const attaching = host.control({ method: 'POST', path: '/remote/child/attach', sessionId: 'relay',
       body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'child', parentNativeSessionId: 'parent' }) });
+    await opened;
     await host.close();
     release();
     expect((await attaching).status).toBe(503);

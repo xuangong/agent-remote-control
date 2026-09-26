@@ -152,6 +152,7 @@ export function attachAgentRemoteWebSocketStream(
     }, {
       sessionControls: relay.sessionControls,
       imageScope: () => principal.subject,
+      executeOperation: relay.executeOperation(principal.subject),
       authorize: async action => {
         try { return await options.authorizer!.authorize({ principal, agentId, action, request }); }
         catch { return false; }

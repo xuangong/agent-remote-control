@@ -19,6 +19,8 @@ export function createProtocolValidationServer(options: ProtocolValidationServer
   const directory = createSessionDirectory(options.providers, options.directories);
   const relay = createAgentRemoteRelay({ providers: directory.providers, inputImageStore: new InputImageStore({ directory: options.imageDirectory ?? join(homedir(), '.agent-remote-control', 'lab-input-images') }) });
   const http = createAgentRemoteHttpServer(relay, {
+    // The mutation policy admits both local CLI and exact-origin browser requests.
+    operationScope: () => 'local-lab',
     websocketAuthorizer: createLocalLabAuthorizer(options.labOrigin),
     mutationPolicy: createLocalLabMutationPolicy(options.labOrigin),
   });

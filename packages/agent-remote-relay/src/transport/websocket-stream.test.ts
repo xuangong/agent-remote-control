@@ -1,3 +1,5 @@
+import { createOperationCache } from '../operation-cache.js';
+import { createOperationExecutor } from '../operation-settlement.js';
 import { createServer, type Server } from 'node:http';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -142,9 +144,12 @@ async function openControlledSocket(
   agent: SessionWireAgent,
   authorize: (action: string) => boolean = () => true,
 ): Promise<WebSocket> {
+  const cache = createOperationCache();
+  closeables.push(() => cache.close());
   const server = createServer();
   const stream = attachAgentRemoteWebSocketStream(server, {
     requireAgent: () => agent,
+    executeOperation: (scope: string) => createOperationExecutor(cache, scope),
   } as AgentRemoteRelay, {
     authorizer: {
       authenticate: () => ({ subject: 'test-user' }),

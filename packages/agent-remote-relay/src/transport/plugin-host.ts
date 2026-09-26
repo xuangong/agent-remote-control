@@ -92,6 +92,7 @@ export function createAgentRemotePluginHost(
     }, {
       sessionControls: relay.sessionControls,
       authorize: () => true,
+      executeOperation: relay.executeOperation('standalone-plugin'),
       onFailure: () => closeStream(streamId, 1011, 'Plugin session delivery failed.'),
     });
     stream = { wire, receiving: Promise.resolve(), pending: 0, bytes: 0 };

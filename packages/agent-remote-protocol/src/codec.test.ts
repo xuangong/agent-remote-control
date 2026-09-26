@@ -388,6 +388,9 @@ describe('resource and session messages', () => {
 
     expect(Value.Check(CreateAgentRequest, create)).toBe(true);
     expect(Value.Check(ResumeAgentRequest, resume)).toBe(true);
+    const retainedResume = { ...resume, payload: { ...resume.payload, operationId: '00000000-0000-4000-8000-000000000001' } };
+    expect(decodeResumeAgentRequest(JSON.stringify(retainedResume))).toEqual({ status: 'ok', value: retainedResume });
+    expect(decodeResumeAgentRequest(JSON.stringify({ ...retainedResume, payload: { ...retainedResume.payload, operationId: 'invalid' } })).status).toBe('rejected');
     expect(Value.Check(AgentSessionResponse, response)).toBe(true);
     expect(decodeClientMessage(JSON.stringify(create)).status).toBe('ok');
     expect(decodeClientMessage(JSON.stringify(resume)).status).toBe('ok');

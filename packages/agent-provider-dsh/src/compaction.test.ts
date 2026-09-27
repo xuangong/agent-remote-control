@@ -77,6 +77,7 @@ describe('DSH compaction lifecycle projection', () => {
       const stream = session.observe()[Symbol.asyncIterator]();
       expect((await stream.next()).value).toMatchObject({ delivery: 'history', event: { item: { type: 'compaction', status: 'loading' } } });
       expect((await stream.next()).value).toEqual({ type: 'history_boundary' });
+      expect((await stream.next()).value).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
       expect((await stream.next()).value).toMatchObject({ delivery: 'live', event: { item: { type: 'compaction', status: 'completed' } } });
       listener?.(record(2, 'turn/end', { turn: 1, reason: { kind: 'completed' } }));
       expect((await stream.next()).value).toMatchObject({ delivery: 'live', event: { type: 'turn_completed' } });

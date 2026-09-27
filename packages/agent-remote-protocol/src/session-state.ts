@@ -13,11 +13,8 @@ export type SessionInteractionEvent =
 /** Pending interactions overlay native activity; transport loss alone never resolves them. */
 export function withSessionInteractions(state: AgentSnapshotPayload, pending: readonly AgentInteractionRequest[]): AgentSnapshotPayload {
   const nativeStatus = state.runtimeInfo.status;
-  const status: AgentStatus = state.status === 'failed' || state.status === 'closed' ? state.status
-    : pending.length ? 'waiting'
-    : state.status === 'waiting' && state.pendingInteractions.length > 0
-      ? nativeStatus === 'waiting' ? (state.activeTurn ? 'running' : 'idle') : nativeStatus
-      : state.status;
+  const status: AgentStatus = nativeStatus === 'failed' || nativeStatus === 'closed' ? nativeStatus
+    : pending.length ? 'waiting' : nativeStatus;
   return { ...state, status, pendingInteractions: Clone([...pending]) };
 }
 
@@ -27,29 +24,27 @@ export function reduceSessionState(
   timestamp: string,
 ): AgentSnapshotPayload {
   let state = { ...previous, updatedAt: timestamp };
-  const activity = (status: AgentStatus) => { state = { ...state, status, runtimeInfo: { ...state.runtimeInfo, status } }; };
+  const finishesCurrentTurn = (turnId?: string) => state.activeTurn === null || turnId === state.activeTurn.turnId;
   switch (event.type) {
     case 'thread_started':
-      if (state.runtimeInfo.status === 'starting') activity('idle');
       break;
     case 'turn_started':
-      activity('running');
       state.activeTurn = event.turnId
         ? state.activeTurn?.turnId === event.turnId ? state.activeTurn : { turnId: event.turnId, startedAt: timestamp }
         : null;
       break;
     case 'turn_completed':
-      activity('idle');
+      if (!finishesCurrentTurn(event.turnId)) break;
       state.activeTurn = null;
       if (event.usage) state.lastUsage = Clone(event.usage);
       break;
     case 'turn_failed':
-      activity('failed');
+      if (!finishesCurrentTurn(event.turnId)) break;
       state.activeTurn = null;
       state.lastError = event.error;
       break;
     case 'turn_canceled':
-      activity('idle');
+      if (!finishesCurrentTurn(event.turnId)) break;
       state.activeTurn = null;
       break;
     case 'usage_updated':

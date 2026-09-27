@@ -9,6 +9,7 @@ export function withDshChildren(source: DshChildSessions, parentId: string, base
   let children: AgentRuntimeInfo['childSessions'] = [];
   let refresh: Promise<void> | undefined;
   let dirty = false;
+  let runtimeRevision = 0;
   let lastError: string | undefined;
   const report = (error: unknown): void => {
     if (closed) return;
@@ -26,7 +27,11 @@ export function withDshChildren(source: DshChildSessions, parentId: string, base
         if (closed) return;
         const changed = JSON.stringify(next) !== JSON.stringify(children);
         children = next; lastError = undefined;
-        if (changed && live) queue.push(dshRuntimeObservation({ ...await base.runtimeInfo(), childSessions: children }));
+        if (changed && live) {
+          const revision = runtimeRevision;
+          const runtimeInfo = await base.runtimeInfo();
+          if (!closed && revision === runtimeRevision) queue.push(dshRuntimeObservation({ ...runtimeInfo, childSessions: children }));
+        }
       } catch (error) { report(error); }
     })().finally(() => {
       refresh = undefined;
@@ -47,7 +52,10 @@ export function withDshChildren(source: DshChildSessions, parentId: string, base
           for await (const item of base.observe()) {
             if (closed) break;
             if (item.type === 'history_boundary') { queue.push(item); live = true; void update(); }
-            else if (item.type === 'observation' && item.event.type === 'runtime_updated') queue.push({ ...item, event: { ...item.event, runtimeInfo: { ...item.event.runtimeInfo, childSessions: children } } });
+            else if (item.type === 'observation' && item.event.type === 'runtime_updated') {
+              runtimeRevision++;
+              queue.push({ ...item, event: { ...item.event, runtimeInfo: { ...item.event.runtimeInfo, childSessions: children } } });
+            }
             else queue.push(item);
           }
           queue.close();

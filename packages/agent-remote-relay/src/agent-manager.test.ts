@@ -862,7 +862,7 @@ describe('AgentManager interactions', () => {
   it('invalidates a pending request without fabricating a completed interaction', async () => {
     const stream = new ManualProviderStream();
     stream.push({
-      type: 'observation', sourceKey: 'question-request', occurredAt: 1, delivery: 'history',
+      type: 'observation', sourceKey: 'question-request', occurredAt: 1, delivery: 'live',
       event: { type: 'interaction_requested', provider: 'codex', turnId: 'turn-1', request: questionRequest },
     });
     stream.push({ type: 'history_boundary' });
@@ -938,7 +938,7 @@ describe('AgentManager interactions', () => {
     const stream = new ManualProviderStream();
     const request = { kind: 'plan_approval' as const, requestId: 'plan-1', plan: '# Plan\n\n1. Read files.', allowedActions: ['reject' as const, 'approve_and_resume' as const] };
     const response: AgentInteractionResponse = { kind: 'plan_approval', action: 'reject', feedback: 'Read only the named file.' };
-    stream.push({ type: 'observation', sourceKey: 'plan-request', occurredAt: 1, delivery: 'history', event: { type: 'interaction_requested', provider: 'codex', request } });
+    stream.push({ type: 'observation', sourceKey: 'plan-request', occurredAt: 1, delivery: 'live', event: { type: 'interaction_requested', provider: 'codex', request } });
     stream.push({ type: 'history_boundary' });
     const session = sessionFor(stream);
     const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
@@ -994,7 +994,7 @@ describe('AgentManager interactions', () => {
       session: sessionFor(providerStream), epoch: 'epoch-1',
     });
     providerStream.push({
-      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'history',
+      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'live',
       event: { type: 'interaction_requested', provider: 'codex', request: questionRequest },
     });
     providerStream.push({
@@ -1018,7 +1018,7 @@ describe('AgentManager interactions', () => {
       agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1',
     });
     providerStream.push({
-      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'history',
+      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'live',
       event: { type: 'interaction_requested', provider: 'codex', request: questionRequest },
     });
     providerStream.push({ type: 'history_boundary' });
@@ -1050,7 +1050,7 @@ describe('AgentManager interactions', () => {
   it('claims a pending interaction before awaiting the Provider and retains the claim until resolution', async () => {
     const providerStream = new ManualProviderStream();
     providerStream.push({
-      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'history',
+      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'live',
       event: { type: 'interaction_requested', provider: 'codex', request: questionRequest },
     });
     providerStream.push({ type: 'history_boundary' });
@@ -1094,7 +1094,7 @@ describe('AgentManager interactions', () => {
   it('releases an interaction claim only when the Provider confirms rejection', async () => {
     const providerStream = new ManualProviderStream();
     providerStream.push({
-      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'history',
+      type: 'observation', sourceKey: 'request-1', occurredAt: 1, delivery: 'live',
       event: { type: 'interaction_requested', provider: 'codex', request: questionRequest },
     });
     providerStream.push({ type: 'history_boundary' });
@@ -1123,7 +1123,7 @@ describe('AgentManager interactions', () => {
   });
   it('retains the interaction claim when native submission has an unknown outcome', async () => {
     const stream = new ManualProviderStream();
-    stream.push({ type: 'observation', sourceKey: 'request', occurredAt: 1, delivery: 'history',
+    stream.push({ type: 'observation', sourceKey: 'request', occurredAt: 1, delivery: 'live',
       event: { type: 'interaction_requested', provider: 'codex', request: questionRequest } });
     stream.push({ type: 'history_boundary' });
     let calls = 0;
@@ -1146,7 +1146,7 @@ describe('AgentManager observation lifecycle', () => {
     const stream = new ManualProviderStream();
     const request = { kind: 'form' as const, requestId: 'secret-form', title: 'Login', message: '', fields: [{ type: 'text' as const, fieldId: 'token', label: 'Token', required: true, sensitive: true }] };
     const response = { kind: 'form' as const, action: 'submit' as const, values: { token: 'provider-private-value' } };
-    stream.push({ type: 'observation', sourceKey: 'request', occurredAt: 1, delivery: 'history', event: { type: 'interaction_requested', provider: 'codex', request } });
+    stream.push({ type: 'observation', sourceKey: 'request', occurredAt: 1, delivery: 'live', event: { type: 'interaction_requested', provider: 'codex', request } });
     stream.push({ type: 'history_boundary' });
     const session = sessionFor(stream);
     const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
@@ -1357,7 +1357,7 @@ describe('AgentManager sensitive request defaults', () => {
     ] };
     const response = { kind: 'form' as const, action: 'submit' as const, values: { token: 'PRIVATE_NATIVE_ANSWER', region: 'west' } };
     stream.push({ type: 'observation', sourceKey: 'old-receipt', occurredAt: 1, delivery: 'history', event: { type: 'timeline', provider: 'codex', item: { type: 'interaction', request: { ...request, requestId: 'old-form' }, response } } });
-    stream.push({ type: 'observation', sourceKey: 'pending', occurredAt: 2, delivery: 'history', event: { type: 'interaction_requested', provider: 'codex', request } });
+    stream.push({ type: 'observation', sourceKey: 'pending', occurredAt: 2, delivery: 'live', event: { type: 'interaction_requested', provider: 'codex', request } });
     stream.push({ type: 'history_boundary' });
     const session = sessionFor(stream);
     const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
@@ -1465,7 +1465,7 @@ describe('shared session lifecycle', () => {
     const manager = await AgentManager.attach({ agentId: 'lost', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'e', session: sessionFor(stream) });
     try {
       await manager.ready;
-      stream.push({ type: 'observation', sourceKey: 'turn', occurredAt: 2, delivery: 'live', event: { type: 'turn_started', provider: 'codex', turnId: 'still-running' } });
+      stream.push({ type: 'observation', sourceKey: 'turn', occurredAt: 2, delivery: 'live', event: { type: 'runtime_updated', provider: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'running' }, activeTurnId: 'still-running' } });
       await expect.poll(() => manager.snapshot().payload.activeTurn?.turnId).toBe('still-running');
       stream.fail(new Error('transport lost'));
       await manager.settled;
@@ -1473,4 +1473,58 @@ describe('shared session lifecycle', () => {
       await expect(manager.sendMessage('unsafe')).rejects.toMatchObject({ code: 'native_runtime_unavailable' });
     } finally { await manager.close(); }
   });
+});
+
+describe('native state authority', () => {
+  it('does not use historical activity or interactions as current state', async () => {
+    const stream = new ManualProviderStream();
+    stream.push({ type: 'observation', sourceKey: 'old-runtime', occurredAt: 1, delivery: 'history', event: { type: 'runtime_updated', provider: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'failed' } } });
+    stream.push({ type: 'observation', sourceKey: 'old-question', occurredAt: 2, delivery: 'history', event: { type: 'interaction_requested', provider: 'codex', request: questionRequest } });
+    stream.push({ type: 'history_boundary' });
+    const manager = await AgentManager.attach({ agentId: 'a', provider: { providerId: 'codex', displayName: 'Codex' }, session: sessionFor(stream), epoch: 'e' });
+    try { await manager.ready; expect(manager.snapshot().payload).toMatchObject({ status: 'idle', pendingInteractions: [] }); }
+    finally { await manager.close(); }
+  });
+  it('does not let an older runtime query overwrite a newer observed state', async () => {
+    const stream = new ManualProviderStream(); stream.push({ type: 'history_boundary' });
+    let reads = 0;
+    let complete!: (value: AgentRuntimeInfo) => void;
+    const old = { providerId: 'codex', sessionId: 'session-1', status: 'idle' as const };
+    const session = sessionFor(stream, { capabilities: { ...capabilities, planning: true }, setPlanning: async () => {},
+      runtimeInfo: async () => ++reads === 1 ? old : new Promise<AgentRuntimeInfo>(resolve => { complete = resolve; }) });
+    const manager = await AgentManager.attach({ agentId: 'a', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'e' });
+    try {
+      await manager.ready;
+      const change = manager.setPlanning(true);
+      await expect.poll(() => reads).toBe(2);
+      stream.push({ type: 'observation', sourceKey: 'new-runtime', occurredAt: 3, delivery: 'live', event: { type: 'runtime_updated', provider: 'codex', runtimeInfo: { ...old, status: 'running' }, activeTurnId: 'new-turn' } });
+      await expect.poll(() => manager.snapshot().payload.status).toBe('running');
+      complete(old); await change;
+      expect(manager.snapshot().payload).toMatchObject({ status: 'running', activeTurn: { turnId: 'new-turn' } });
+    } finally { await manager.close(); }
+  });
+  it('ignores older revisions of the same native state source', async () => {
+    const stream = new ManualProviderStream(); stream.push({ type: 'history_boundary' });
+    const manager = await AgentManager.attach({ agentId: 'a', provider: { providerId: 'codex', displayName: 'Codex' }, session: sessionFor(stream), epoch: 'e' });
+    try {
+      await manager.ready;
+      for (const [revision, status] of [[2, 'running'], [1, 'idle']] as const) stream.push({ type: 'observation', sourceKey: 'native-state', nativeRevision: revision, occurredAt: revision, delivery: 'live', event: { type: 'runtime_updated', provider: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status } } });
+      await nextEventLoopTurn(); expect(manager.snapshot().payload.status).toBe('running');
+    } finally { await manager.close(); }
+  });
+});
+
+
+it('retains historical usage without replaying historical execution state', async () => {
+  const stream = new ManualProviderStream();
+  stream.push({ type: 'observation', sourceKey: 'old-turn', occurredAt: 1, delivery: 'history', event: { type: 'turn_completed', provider: 'codex', turnId: 'old', usage: { inputTokens: 10 } } });
+  stream.push({ type: 'observation', sourceKey: 'old-usage', occurredAt: 2, delivery: 'history', event: { type: 'usage_updated', provider: 'codex', usage: { inputTokens: 20 } } });
+  stream.push({ type: 'history_boundary' });
+  const manager = await AgentManager.attach({ agentId: 'a', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'e', session: sessionFor(stream, {
+    runtimeInfo: async () => ({ providerId: 'codex', sessionId: 'session-1', status: 'running' }),
+  }) });
+  try {
+    await manager.ready;
+    expect(manager.snapshot().payload).toMatchObject({ status: 'running', activeTurn: null, lastUsage: { inputTokens: 20 } });
+  } finally { await manager.close(); }
 });

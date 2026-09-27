@@ -656,7 +656,7 @@ describe('Serialized sensitive interaction recovery', () => {
 
 async function startInteraction(request: AgentInteractionRequest) {
   const context = await start([{
-    type: 'observation', sourceKey: 'request-one', occurredAt: 1, delivery: 'history',
+    type: 'observation', sourceKey: 'request-one', occurredAt: 1, delivery: 'live',
     event: { type: 'interaction_requested', provider: 'fake', request },
   }]);
   await new HttpWebSocketTransport(context.url).createAgent('agent-interaction', 'fake', { sessionId: 'session-interaction' });

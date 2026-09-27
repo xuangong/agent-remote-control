@@ -108,6 +108,7 @@ class RecordedLabSession implements AgentSession {
   private nextSource = 100;
   private readerActive = true;
   private closed = false;
+  private status: AgentRuntimeInfo['status'] = 'idle';
   private readonly deferredSteers: Array<{
     text: string;
     accepted: boolean;
@@ -178,6 +179,7 @@ class RecordedLabSession implements AgentSession {
     }
     this.pending.clear();
     this.emit({ type: 'turn_canceled', provider: PROVIDER_ID, reason: 'Canceled from the Lab.', turnId: 'recorded-turn' });
+    this.updateRuntime('idle');
   }
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
@@ -202,10 +204,14 @@ class RecordedLabSession implements AgentSession {
   }
 
   async runtimeInfo(): Promise<AgentRuntimeInfo> {
+    return this.currentRuntimeInfo();
+  }
+
+  private currentRuntimeInfo(): AgentRuntimeInfo {
     return {
       providerId: PROVIDER_ID,
       sessionId: this.sessionId,
-      status: 'idle',
+      status: this.status,
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
       model: this.config.model ?? 'recorded-model',
       mode: 'deterministic',
@@ -215,6 +221,11 @@ class RecordedLabSession implements AgentSession {
         opaque: persistenceOpaque(this.sessionId),
       },
     };
+  }
+
+  private updateRuntime(status: AgentRuntimeInfo['status']): void {
+    this.status = status;
+    this.emit({ type: 'runtime_updated', provider: PROVIDER_ID, runtimeInfo: this.currentRuntimeInfo() });
   }
 
   async dispose(): Promise<void> {
@@ -249,6 +260,7 @@ class RecordedLabSession implements AgentSession {
 
   advance(): void {
     this.assertOpen();
+    this.updateRuntime('running');
     this.emit({ type: 'turn_started', provider: PROVIDER_ID, turnId: 'recorded-turn' });
     this.emitTimeline({ type: 'assistant_message', text: 'Live recorded output.', messageId: 'live-message' }, 'recorded-turn');
     this.emitTimeline({ type: 'reasoning', text: 'Checking the deterministic fixture.' }, 'recorded-turn');
@@ -267,6 +279,7 @@ class RecordedLabSession implements AgentSession {
       ],
     }, 'recorded-turn');
     this.emit({ type: 'turn_completed', provider: PROVIDER_ID, turnId: 'recorded-turn' });
+    this.updateRuntime('idle');
     this.request(questionRequest());
   }
 
@@ -278,6 +291,7 @@ class RecordedLabSession implements AgentSession {
       error: 'Recorded deterministic failure.',
       code: 'recorded_failure',
     });
+    this.updateRuntime('failed');
   }
 
   rehydrate(): void {

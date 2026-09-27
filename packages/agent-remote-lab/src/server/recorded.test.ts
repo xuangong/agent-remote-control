@@ -100,14 +100,14 @@ describe('recorded Lab Provider', () => {
 
     controller.advance('recorded-session');
     const liveTypes = [];
-    while (liveTypes.length < 8) {
+    while (liveTypes.length < 10) {
       const next = await iterator.next();
       if (next.done || next.value.type !== 'observation') continue;
       liveTypes.push(next.value.event.type === 'timeline' ? next.value.event.item.type : next.value.event.type);
     }
     expect(liveTypes).toEqual([
-      'turn_started', 'assistant_message', 'reasoning', 'tool_call',
-      'tool_call', 'todo', 'turn_completed', 'interaction_requested',
+      'runtime_updated', 'turn_started', 'assistant_message', 'reasoning', 'tool_call',
+      'tool_call', 'todo', 'turn_completed', 'runtime_updated', 'interaction_requested',
     ]);
     await session.dispose();
   });

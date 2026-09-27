@@ -423,6 +423,8 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
   private readonly listeners = new Set<(record: DshNativeObservation) => void>();
   private readonly pending = new Map<string, PendingInteractionState>();
   private readonly stopSessionEvents: () => unknown;
+  private stopAgentStatus: (() => unknown) | undefined;
+  private statusOrdinal = 0;
   private readonly stopSharedInteractions: (() => void) | undefined;
   private interactionOrdinal = 0;
   private disposePromise: Promise<void> | undefined;
@@ -452,9 +454,15 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
       if (session === handle.agent.session) this.publish(sessionObservation(this.sessionId, event));
     });
     try {
+      this.stopAgentStatus = context.on('agent/status', ({ agent, status }) => {
+        if (agent === handle.agent) this.publish({ kind: 'agent_status',
+          recordId: `status:${++this.statusOrdinal}`, occurredAt: Date.now(),
+          payload: { ...this.runtimeInfo, status } });
+      });
       this.stopSharedInteractions = sharedInteractions?.subscribe(this.sessionId, (record) => this.publish(record));
     } catch (error) {
       this.stopSessionEvents();
+      this.stopAgentStatus?.();
       throw error;
     }
   }
@@ -598,6 +606,7 @@ class CordisDshOwnedAgent implements DshOwnedAgent {
         failure ??= error;
       }
       try {
+        this.stopAgentStatus?.();
         this.stopSharedInteractions?.();
       } catch (error) {
         failure ??= error;

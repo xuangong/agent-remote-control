@@ -15,12 +15,14 @@ export class CopilotChildSession implements AgentSession {
   private closed = false;
   private observed = false;
   private revision = 0;
+  private nativeStatus: AgentRuntimeInfo['status'];
   activityGeneration = 0;
   private taskRevision = 0;
   private lastTaskTerminal?: string;
   private deferredTask?: {info: AgentChildSession; expectedGeneration: number; nativeStatus?: string};
   constructor(private readonly parent: CopilotAgentSession, private readonly info: AgentChildSession, private readonly onDispose: () => void) {
     this.projector = new Projector(parent.cwd);
+    this.nativeStatus = info.status;
   }
   async initialize(): Promise<void> {
     let cursor: string | undefined;
@@ -35,6 +37,7 @@ export class CopilotChildSession implements AgentSession {
     this.projector.prepareHistory(history, this.info.status === 'idle' || this.info.status === 'closed');
     for (const event of history) this.project(event, 'history');
     this.stream.push({type: 'history_boundary'}); const buffered = this.buffered!; this.buffered = undefined;
+    this.emitRuntime();
     for (const event of buffered) this.project(event, 'live');
     if (this.deferredTask) {
       const snapshot = this.deferredTask; this.deferredTask = undefined;
@@ -44,18 +47,25 @@ export class CopilotChildSession implements AgentSession {
   accept(event: SessionEvent, delivery: 'history' | 'live'): void {
     const d = record(event.data); const owner = event.agentId ?? d.parentToolCallId;
     if (owner !== this.info.nativeSessionId && owner !== this.info.parentCallId) return;
-    if (event.type === 'assistant.turn_start') this.activityGeneration++;
+    if (delivery === 'live' && ['assistant.turn_start', 'assistant.idle', 'session.idle', 'abort', 'session.error'].includes(event.type)) this.activityGeneration++;
     if (this.buffered) this.buffered.push(event); else this.project(event, delivery);
   }
   private project(event: SessionEvent, delivery: 'history' | 'live') {
     if (this.closed || this.seen.has(event.id) || isNativeInteraction(event)) return; this.seen.add(event.id);
     for (const projected of this.projector.projectAll(event, delivery)) this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
+    if (delivery === 'live') {
+      if (event.type === 'assistant.turn_start') this.nativeStatus = 'running';
+      else if (event.type === 'assistant.idle' || event.type === 'session.idle' || event.type === 'abort') this.nativeStatus = 'idle';
+      else if (event.type === 'session.error') this.nativeStatus = 'failed';
+      else return;
+      this.emitRuntime();
+    }
   }
   updateTask(info: AgentChildSession, expectedGeneration?: number, nativeStatus?: string): void {
     if (this.closed || expectedGeneration !== this.activityGeneration) return;
     if (this.buffered) { this.deferredTask = {info, expectedGeneration, nativeStatus}; return; }
     const terminal = `${nativeStatus ?? info.status}:${this.activityGeneration}`;
-    if (this.lastTaskTerminal === terminal) return;
+    if (this.lastTaskTerminal === terminal) { this.nativeStatus = info.status; this.emitRuntime(); return; }
     if (info.status !== 'running' && info.status !== 'starting' && info.status !== 'waiting') this.lastTaskTerminal = terminal;
     if (nativeStatus === 'cancelled') { this.finishCanceled(); return; }
     if (nativeStatus === 'failed') {
@@ -65,6 +75,8 @@ export class CopilotChildSession implements AgentSession {
     if (info.status === 'idle' || info.status === 'closed') {
       this.project({type: 'assistant.idle', id: `task-idle:${this.info.nativeSessionId}:${++this.taskRevision}`, parentId: null, timestamp: new Date().toISOString(), ephemeral: true, data: {}} as SessionEvent, 'live');
     }
+    this.nativeStatus = info.status;
+    this.emitRuntime();
   }
   observe() { if (this.observed) throw new Error('Copilot child observation already attached.'); this.observed = true; return this.stream; }
   async sendMessage(text: string): Promise<void> {
@@ -76,8 +88,11 @@ export class CopilotChildSession implements AgentSession {
   async steer(text: string) { await this.sendMessage(text); }
   async cancel() {
     if (this.closed || this.parent.isClosed) throw new AgentOperationRejectedError('operation_rejected', 'Copilot child view is closed.');
+    const generation = this.activityGeneration;
     const result = await this.parent.call(this.parent.rpc.tasks.cancel({id: this.info.nativeSessionId}), 'Copilot child cancellation');
     if (!result.cancelled) throw new Error('Copilot child cancellation was rejected.');
+    if (generation !== this.activityGeneration) return;
+    this.activityGeneration++;
     this.finishCanceled();
   }
   private finishCanceled(): void {
@@ -85,9 +100,14 @@ export class CopilotChildSession implements AgentSession {
     this.project({type: 'abort', id: `task-canceled:${this.info.nativeSessionId}:${++this.taskRevision}`, parentId: null, timestamp: new Date().toISOString(), data: {}} as SessionEvent, 'live');
   }
   async respondToInteraction(): Promise<void> { throw new AgentOperationRejectedError('operation_rejected', 'Copilot child interactions are owned by the parent session.'); }
-  async runtimeInfo(): Promise<AgentRuntimeInfo> {
-    const parent = await this.parent.runtimeInfo(); const current = parent.childSessions?.find(child => child.nativeSessionId === this.info.nativeSessionId) ?? this.info;
-    return {providerId: 'copilot', sessionId: this.info.nativeSessionId, status: this.closed ? 'closed' : current.status, cwd: parent.cwd};
+  private infoSnapshot(): AgentRuntimeInfo {
+    return {providerId: 'copilot', sessionId: this.info.nativeSessionId, status: this.closed ? 'closed' : this.nativeStatus, cwd: this.parent.cwd};
   }
+  private emitRuntime(): void {
+    this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:runtime`, nativeRevision: ++this.revision,
+      occurredAt: Date.now(), delivery: 'live', event: {type: 'runtime_updated', provider: 'copilot', runtimeInfo: this.infoSnapshot()}});
+  }
+  get executionStatus(): AgentRuntimeInfo['status'] { return this.closed ? 'closed' : this.nativeStatus; }
+  async runtimeInfo(): Promise<AgentRuntimeInfo> { return this.infoSnapshot(); }
   async dispose(): Promise<void> { if (this.closed) return; this.closed = true; this.stream.close(); this.onDispose(); }
 }

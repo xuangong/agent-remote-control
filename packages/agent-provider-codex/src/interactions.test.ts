@@ -208,6 +208,7 @@ describe('Codex terminal interaction lifecycle', () => {
         ? await h.request(method, { ...params, turnId: null }, 'standalone') : undefined;
       h.send('turn/completed', { threadId: 'thread', turn: { id: 'owned-turn', status, error: status === 'failed' ? { message: 'Native turn failed' } : null } });
       expect((await h.iterator.next()).value).toMatchObject({ event: { type: status === 'failed' ? 'turn_failed' : 'turn_canceled', turnId: 'owned-turn' } });
+      expect((await h.iterator.next()).value).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
       expect((await h.iterator.next()).value).toMatchObject({ event: { type: 'interaction_resolved', requestId: owned.requestId } });
       await expect(h.session.respondToInteraction(owned.requestId, response)).rejects.toThrow('No pending');
       expect(h.replies).toEqual([]);

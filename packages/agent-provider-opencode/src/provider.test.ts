@@ -187,7 +187,7 @@ test('hydrates pending interactions and maps local answers and remote permission
   const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
   const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
   await waitFor(() => items.filter(i => i.type === 'observation' && i.event.type === 'interaction_requested').length === 2);
-  expect((await session.runtimeInfo()).status).toBe('waiting');
+  expect((await session.runtimeInfo()).status).toBe('idle');
   await expect(session.respondToInteraction('question_1', { kind: 'question', answers: [{ questionId: '0', selectedValues: ['Invalid'] }] })).rejects.toThrow();
   await session.respondToInteraction('question_1', { kind: 'question', answers: [{ questionId: '0', selectedValues: [], customText: 'Custom' }] });
   expect(f.requests.find(r => r.path === '/question/question_1/reply')?.body).toEqual({ answers: [['Custom']] });
@@ -672,3 +672,30 @@ test('availability probes only server health and rejects unsupported or unhealth
     expect(f.requests.map(({ method, path }) => `${method} ${path}`)).toEqual(Array(4).fill('GET /global/health'));
   } finally { await provider.close(); }
 });
+
+
+test('does not let historical failure override the current native idle state', async () => {
+  const f = await fixture(); const failed = assistant('Previous attempt');
+  Object.assign(failed.info, { error: { name: 'UnknownError', data: { message: 'Old failure' } } });
+  f.messages = [failed];
+  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
+  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
+  await waitFor(() => items.some(item => item.type === 'history_boundary'));
+  expect((await session.runtimeInfo()).status).toBe('idle');
+  expect(items.some(item => item.type === 'observation' && item.event.type === 'turn_failed')).toBe(false);
+}, 10000);
+
+test('keeps native retry active after a failed turn until native settlement', async () => {
+  const f = await fixture(); f.status = { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() }; f.messages = [assistant('Working')];
+  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
+  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
+  await waitFor(() => items.some(item => item.type === 'history_boundary'));
+  const failed = assistant('Failed attempt'); Object.assign(failed.info, { error: { name: 'UnknownError', data: { message: 'Retryable failure' } } }); f.messages = [failed];
+  f.emit('message.updated', { info: failed.info });
+  await waitFor(() => items.some(item => item.type === 'observation' && item.event.type === 'turn_failed'));
+  expect((await session.runtimeInfo()).status).toBe('running');
+  f.status = { type: 'idle' }; f.emit('session.status', { sessionID: 'ses_test', status: f.status });
+  await expect.poll(async () => (await session.runtimeInfo()).status, {timeout: 4000}).toBe('idle');
+  expect(items.filter(item => item.type === 'observation' && item.event.type === 'turn_failed')).toHaveLength(1);
+  expect(items.some(item => item.type === 'observation' && item.event.type === 'turn_completed')).toBe(false);
+}, 10000);

@@ -13,7 +13,7 @@ export interface CodexThreadSession {
   receiveRequest(method: string, params: unknown, id: string | number): Promise<unknown>;
   receiveTermination(error: Error): void;
   notifyChildrenChanged(): void;
-  childRuntimeInfo(): AgentRuntimeInfo;
+  childActivityStatus(): AgentRuntimeInfo['status'];
   prepareObservation(): Promise<void>;
   markHistoryRefreshNeeded(uncertain?: boolean): void;
   beginRecovery(reason: string): void;
@@ -113,7 +113,7 @@ export class CodexSessionRuntime {
   sessionChanged(id: string): void {
     const child = this.children.get(id);
     if (!child?.session) return;
-    const status = child.session.childRuntimeInfo().status;
+    const status = child.session.childActivityStatus();
     if (child.descriptor.status === status) return;
     child.descriptor.status = status;
     child.descriptor.observation = status === 'closed' ? 'saved_history' : 'live';
@@ -138,7 +138,7 @@ export class CodexSessionRuntime {
       entry.session = this.createChild(thread, child.history, child.notifications);
       if (child.historyState === 'uncertain' || child.requiresRefresh) entry.session.markHistoryRefreshNeeded(child.historyState === 'uncertain');
       this.sessions.set(id, entry.session);
-      descriptor.status = entry.session.childRuntimeInfo().status;
+      descriptor.status = entry.session.childActivityStatus();
     }
     this.sessions.get(parentId)?.notifyChildrenChanged();
   }

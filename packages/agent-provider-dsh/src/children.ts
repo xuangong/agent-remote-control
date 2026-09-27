@@ -103,6 +103,7 @@ export class DshChildSessions {
   watch(listener: (sessionId: string, event?: DshChildEvent, session?: { header?: DshChildHeader; snapshotEvents?(): readonly DshChildEvent[] }) => void): () => void {
     const stops = [this.context.on('session/event', (session, event) => listener(String(session.id), event, session), { global: true }),
       this.context.on('session/created', (session) => listener(String(session.id), undefined, session), { global: true }),
+      this.context.on('agent/status', ({ agent }) => listener(String(agent.session.id), undefined, agent.session), { global: true }),
       this.context.on('agent/disposed', ({ agent }) => listener(String(agent.session.id), undefined, agent.session), { global: true })];
     return () => { for (const stop of stops) stop(); };
   }

@@ -232,11 +232,11 @@ export class OpenCodeSession implements AgentSession {
     if (latestUser?.info.role === 'user') this.hydrateSelection(latestUser.info);
     const nativeStatus = statuses[this.nativeId]?.type ?? 'idle';
     if (nativeStatus === 'idle' && latestAssistant?.role === 'assistant' && latestAssistant.parentID === this.pendingInput && (latestAssistant.error || (latestAssistant.time.completed && latestAssistant.finish && !['tool-calls', 'unknown'].includes(latestAssistant.finish)))) this.pendingInput = undefined;
-    if (latestAssistant?.role === 'assistant' && latestAssistant.error && nativeStatus === 'idle' && (!latestUser || latestAssistant.parentID === latestUser.info.id)) {
+    if (this.initialized && this.active && latestAssistant?.role === 'assistant' && latestAssistant.error
+      && nativeStatus === 'idle' && (!latestUser || latestAssistant.parentID === latestUser.info.id)) {
       this.failTurn(latestAssistant.error, latestAssistant.id);
-      this.active = false; this.activeTurnId = null;
-      this.status = latestAssistant.error.name === 'MessageAbortedError' ? 'idle' : 'failed'; this.emitRuntime();
-    } else this.applyStatus(nativeStatus);
+    }
+    this.applyStatus(nativeStatus);
     if (!this.initialized) for (const message of messages) if (message.info.role === 'assistant' && message.info.time.completed) this.terminalMessages.add(message.info.id);
   }
   private orderedMessages(): NativeMessage[] { return [...this.messages.values()].sort((a, b) => a.info.time.created - b.info.time.created || a.info.id.localeCompare(b.info.id)); }
@@ -269,9 +269,9 @@ export class OpenCodeSession implements AgentSession {
     if (running && this.pendingInput && this.messages.has(this.pendingInput)) this.pendingInput = undefined;
     if (!running && this.active) {
       this.active = false;
-      this.emit({ type: 'turn_completed', provider: 'opencode', turnId: this.activeTurnId ?? undefined, usage: this.currentUsage() });
+      if (!this.activeTurnId || !this.terminalTurns.has(this.activeTurnId)) this.emit({ type: 'turn_completed', provider: 'opencode', turnId: this.activeTurnId ?? undefined, usage: this.currentUsage() });
     }
-    this.status = this.pending.size ? 'waiting' : running ? 'running' : 'idle';
+    this.status = running ? 'running' : 'idle';
     if (!running) this.activeTurnId = null;
     this.emitRuntime();
   }
@@ -281,16 +281,16 @@ export class OpenCodeSession implements AgentSession {
     if (messageId && this.terminalMessages.has(messageId)) return;
     if (messageId) this.terminalMessages.add(messageId);
     const latest = this.orderedMessages().at(-1)?.info;
-    const turnId = this.activeTurnId ?? (latest?.role === 'assistant' ? latest.parentID : latest?.id);
+    const turnId = failed?.role === 'assistant' ? failed.parentID : this.activeTurnId ?? (latest?.role === 'assistant' ? latest.parentID : latest?.id);
     if (turnId && this.terminalTurns.has(turnId)) return;
     if (turnId) this.terminalTurns.add(turnId);
     const canceled = error.name === 'MessageAbortedError';
-    this.emit(canceled ? { type: 'turn_canceled', provider: 'opencode', turnId: this.activeTurnId ?? undefined, reason: 'OpenCode turn canceled.' } : { type: 'turn_failed', provider: 'opencode', turnId: this.activeTurnId ?? undefined, error: nativeError(error) });
-    this.active = false; this.activeTurnId = null; this.status = canceled ? 'idle' : 'failed'; this.emitRuntime();
+    this.emit(canceled ? { type: 'turn_canceled', provider: 'opencode', turnId, reason: 'OpenCode turn canceled.' } : { type: 'turn_failed', provider: 'opencode', turnId, error: nativeError(error) });
+    this.emitRuntime();
   }
   private addInteraction(request: AgentInteractionRequest): void {
     if (fingerprint(this.pending.get(request.requestId) ?? null) === fingerprint(request)) return;
-    this.pending.set(request.requestId, request); this.status = 'waiting';
+    this.pending.set(request.requestId, request);
     this.emit({ type: 'interaction_requested', provider: 'opencode', request }, `interaction:${request.requestId}:request`); this.emitRuntime();
   }
   private resolveInteraction(requestId: string, response: AgentInteractionResponse): void {
@@ -299,15 +299,15 @@ export class OpenCodeSession implements AgentSession {
     this.supplemental.set(`interaction:${requestId}`, { after: this.timeline.at(-1)?.sourceKey, observation: { type: 'observation', sourceKey: `interaction:${requestId}:receipt`, occurredAt: Date.now(), delivery: 'history', event: { type: 'timeline', provider: 'opencode', item: { type: 'interaction', request, response } } } });
     // Relay creates the live receipt from interaction_resolved; replacements carry it explicitly.
     this.emit({ type: 'interaction_resolved', provider: 'opencode', requestId, response }, `interaction:${requestId}:resolved`);
-    this.status = this.pending.size ? 'waiting' : this.active ? 'running' : 'idle'; this.emitRuntime();
+    this.emitRuntime();
   }
   private emit(event: AgentStreamEvent, key?: string): void {
-    this.output.push({ type: 'observation', sourceKey: key ?? `runtime:${this.sequence + 1}`, nativeRevision: ++this.sequence, occurredAt: Date.now(), delivery: this.initialized ? 'live' : 'history', event });
+    this.output.push({ type: 'observation', sourceKey: key ?? `runtime:${this.sequence + 1}`, nativeRevision: ++this.sequence, occurredAt: Date.now(), delivery: 'live', event });
   }
   private info(): AgentRuntimeInfo {
     return { providerId: 'opencode', sessionId: this.nativeId, status: this.status, cwd: this.config.cwd, model: this.config.model ?? null, mode: this.config.agent ?? null, planning: { active: this.config.agent === 'plan' }, settings: this.controls.list(), childSessions: this.children.map(child => ({ ...child })), connection: { ...this.connection }, persistence: { providerId: 'opencode', sessionId: this.nativeId, opaque: JSON.stringify(this.config) } };
   }
-  private emitRuntime(): void { this.emit({ type: 'runtime_updated', provider: 'opencode', runtimeInfo: this.info(), activeTurnId: this.activeTurnId }); }
+  private emitRuntime(): void { this.emit({ type: 'runtime_updated', provider: 'opencode', runtimeInfo: this.info(), activeTurnId: this.activeTurnId && !this.terminalTurns.has(this.activeTurnId) ? this.activeTurnId : null }); }
   async runtimeInfo(): Promise<AgentRuntimeInfo> { return this.info(); }
   private writable(): void {
     if (this.closed) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode session is closed.');

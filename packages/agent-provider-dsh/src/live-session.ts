@@ -78,6 +78,8 @@ export class LiveDshSession implements AgentSession {
   private queue: ObservationQueue | undefined;
   private unsubscribe: (() => void) | undefined;
   private tailCursor = -1;
+  private runtimeRevision = 0;
+  private lastRuntime: string | undefined;
   private observing = false;
   private state: 'idle' | 'hydrating' | 'live' | 'closing' | 'closed' = 'idle';
   private releasePromise: Promise<void> | undefined;
@@ -132,6 +134,10 @@ export class LiveDshSession implements AgentSession {
       this.tailCursor = tail.cursor;
       for (const record of history) this.emitRecord(record, 'history');
       queue.push({ type: 'history_boundary' });
+      // Runtime-owned pending callbacks are the only callable interactions after hydration.
+      for (const request of this.pending.values()) queue.push({ type: 'observation', sourceKey: `dsh:pending:${request.requestId}`,
+        occurredAt: Date.now(), delivery: 'live', event: { type: 'interaction_requested', provider: this.persistence.providerId, request } });
+      this.emitRuntime();
       for (const record of this.buffered.splice(0)) this.receiveLive(record);
       if (this.state === 'hydrating') this.state = 'live';
     } catch (error) {
@@ -295,6 +301,17 @@ export class LiveDshSession implements AgentSession {
       this.tailCursor = cursor;
     }
     this.emitRecord(record, 'live');
+    if (record.kind !== 'agent_status') this.emitRuntime();
+  }
+
+  private emitRuntime(value = this.agent.runtimeInfo): void {
+    const runtimeInfo = { providerId: this.persistence.providerId, sessionId: this.agent.sessionId,
+      ...value, persistence: this.persistence };
+    const fingerprint = JSON.stringify(runtimeInfo);
+    if (fingerprint === this.lastRuntime) return;
+    this.lastRuntime = fingerprint;
+    this.queue?.push({ type: 'observation', sourceKey: `dsh:runtime:${this.agent.sessionId}`, nativeRevision: ++this.runtimeRevision,
+      occurredAt: Date.now(), delivery: 'live', event: { type: 'runtime_updated', provider: this.persistence.providerId, runtimeInfo } });
   }
 
   private emitRecord(record: DshNativeObservation, delivery: 'history' | 'live'): void {
@@ -302,6 +319,10 @@ export class LiveDshSession implements AgentSession {
     const fingerprint = stableFingerprint(record);
     if (this.seen.get(key) === fingerprint) return;
     this.seen.set(key, fingerprint);
+    if (record.kind === 'agent_status') {
+      if (delivery === 'live') this.emitRuntime(record.payload as typeof this.agent.runtimeInfo);
+      return;
+    }
     for (const projected of this.projector.project(record)) {
       const observation: ProviderObservation = { ...projected, delivery };
       this.trackInteraction(observation);

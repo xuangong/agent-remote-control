@@ -118,6 +118,11 @@ export interface AgentMessageOptions {
 export interface AgentSession {
   readonly capabilities: AgentCapabilities;
 
+  /** One ordered stream for this native session attachment. Publish runtime_updated whenever
+   * native execution changes, independently of turn results. Recovered callable interactions
+   * must be confirmed by the native runtime and emitted live, including during bootstrap.
+   * Fence asynchronous native reads and obsolete callbacks before publishing newer state.
+   */
   observe(): AsyncIterable<ProviderStreamItem>;
   /** Reads an older, chronological Timeline page without changing live runtime state. */
   readTimelineHistory?(cursor: string): Promise<{ observations: import('./observation.js').ProviderObservation[]; nextCursor?: string }>;
@@ -136,6 +141,7 @@ export interface AgentSession {
   listCommands?(): Promise<import('./commands.js').AgentCommand[]>;
   executeCommand?(id: string, args: string): Promise<import('./commands.js').AgentCommandResult>;
   readResource?(locator: string): Promise<AgentResourceReadResult>;
+  /** Current native execution facts, consistent with live runtime_updated observations. */
   runtimeInfo(): Promise<AgentRuntimeInfo>;
   dispose(): Promise<void>;
 }

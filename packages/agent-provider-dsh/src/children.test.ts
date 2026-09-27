@@ -11,13 +11,14 @@ function fixture(options: { interrupt?: boolean; mode?: 'continuable' | 'one-sho
   const child = { id: 'child', header: { id: 'child', parentSession: 'parent', origin: 'subagent', createdAt: 10, cwd: '/workspace' }, snapshotEvents: () => [...history] };
   let released = 0;
   let resident = true;
+  let status = 'running';
   let parent = 'parent';
   let interrupted = false;
   const mode = options.mode ?? 'continuable';
   const context = {
     get(name: string) { return (this as any)[name]; },
     on(name: string, listener: (...args: any[]) => void) { const set = listeners.get(name) ?? new Set(); set.add(listener); listeners.set(name, set); return () => set.delete(listener); },
-    agents: { get: (id: string) => resident && id === 'child' ? { status: 'running', session: child } : undefined },
+    agents: { get: (id: string) => resident && id === 'child' ? { status, session: child } : undefined },
     subagents: { listChildren: async (id: string) => id === parent ? [{ kind: 'child', id: 'child', mode, label: 'Research', activity: resident ? 'running' : 'inactive' }] : [] },
     sessionQuery: { observeSession: async () => ({ header: { ...child.header, parentSession: parent }, inheritedEventCount: 0,
       source: resident ? 'live' : 'prepared', events: [...history], projections: { values: { subagent: { mode, label: 'Research', seq: 0 } } },
@@ -37,6 +38,7 @@ function fixture(options: { interrupt?: boolean; mode?: 'continuable' | 'one-sho
     for (const listener of listeners.get('session/event') ?? []) listener(child, event);
   };
   return { children: new DshChildSessions(context), append, context, history, child, released: () => released, interrupted: () => interrupted,
+    status: (next: string) => { status = next; for (const notify of listeners.get('agent/status') ?? []) notify({ agent: { session: child, status }, status }); },
     save: () => { resident = false; }, move: () => { parent = 'other'; } };
 }
 
@@ -249,3 +251,46 @@ it('requires a synchronous native cancellation receipt without inferring turn co
   expect(await view.runtimeInfo()).toMatchObject({ status: 'running' });
   await view.dispose();
 });
+
+
+it('observes child scheduling and settlement without turn or content events', async () => {
+  const f = fixture(); const view = await f.children.open('parent', 'child');
+  const stream = view.observe()[Symbol.asyncIterator]();
+  try {
+    await stream.next(); await stream.next();
+    f.status('idle');
+    expect((await stream.next()).value).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
+    f.status('running');
+    expect((await stream.next()).value).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'running' } } });
+  } finally { await view.dispose(); }
+}, 5000);
+
+it('does not let child catalog enrichment overwrite a newer parent runtime observation', async () => {
+  const f = fixture();
+  const { DshObservationQueue } = await import('./children.js');
+  const queue = new DshObservationQueue<ProviderStreamItem>();
+  let finish!: (info: Awaited<ReturnType<AgentSession['runtimeInfo']>>) => void;
+  const base: AgentSession = {
+    capabilities: { history: true, sendMessage: true, interactions: {} },
+    observe: () => queue,
+    runtimeInfo: () => new Promise(resolve => { finish = resolve; }),
+    async sendMessage() {}, async respondToInteraction() {}, async dispose() { queue.close(); },
+  };
+  const view = f.children.decorate('parent', base);
+  const observed: ProviderStreamItem[] = [];
+  const consuming = (async () => { for await (const item of view.observe()) observed.push(item); })();
+  queue.push({ type: 'history_boundary' });
+  try {
+    await expect.poll(() => typeof finish).toBe('function');
+    queue.push({ type: 'observation', sourceKey: 'new-native-state', occurredAt: 2, delivery: 'live', event: {
+      type: 'runtime_updated', provider: 'dsh', runtimeInfo: { providerId: 'dsh', sessionId: 'parent', status: 'running' },
+    } });
+    await expect.poll(() => observed.length).toBe(2);
+    finish({ providerId: 'dsh', sessionId: 'parent', status: 'idle' });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(observed.filter(item => item.type === 'observation' && item.event.type === 'runtime_updated')
+      .map(item => (item as Extract<ProviderStreamItem, {type: 'observation'}>).event)).toMatchObject([
+        { type: 'runtime_updated', runtimeInfo: { status: 'running' } },
+      ]);
+  } finally { await view.dispose(); await consuming; }
+}, 5000);

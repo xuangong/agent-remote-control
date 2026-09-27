@@ -12,7 +12,7 @@ function fixture() {
   const listeners = new Map<string, RemoteTransportListener>();
   const closes: string[] = [];
   const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.5.0', type: 'agent_snapshot', payload: {
-    ...replicaState.agent!, id, status: 'running', runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id },
+    ...replicaState.agent!, id, status: 'running', runtimeInfo: { ...replicaState.agent!.runtimeInfo, status: 'running', sessionId: id },
   } });
   const page = (id: string): HistoryPage => ({ protocolVersion: '1.5.0', type: 'timeline_page', payload: {
     agentId: id, requestId: 'history', direction: 'tail', epoch: `epoch-${id}`, reset: false, staleCursor: false, gap: false,

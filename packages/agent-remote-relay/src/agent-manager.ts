@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { validateSessionSetting, validateCommandDirectory, type AgentCommandResult } from '@orchardworks/agent-provider-sdk';
 import { redactInteractionRequest, redactInteractionResponse, validateInteractionResponse } from '@orchardworks/agent-provider-sdk';
 import type {
+  AgentInteractionRequest,
   AgentInteractionResponse,
   AgentMessageOptions,
   AgentPersistenceHandle,
@@ -107,6 +108,9 @@ export class AgentManager {
   private readySettled = false;
   private boundarySeen = false;
   private closed = false;
+  private nativeStateRevision = 0;
+  private readonly historicalInteractions = new Map<string, AgentInteractionRequest>();
+  private readonly nativeStateVersions = new Map<string, number>();
   private commandTail: Promise<void> = Promise.resolve();
   private pendingCommandExecutions = 0;
   private readonly imageResourceScopes = new Map<string, string>();
@@ -385,8 +389,7 @@ export class AgentManager {
         if (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0) throw new AgentBusyError();
         this.validateOperation('set_planning');
         await dispatch(() => this.session.setPlanning!(active));
-        const runtimeInfo = await this.session.runtimeInfo();
-        this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+        await this.refreshRuntimeInfo();
       });
     });
   }
@@ -402,8 +405,7 @@ export class AgentManager {
         validateSessionSetting((await this.session.runtimeInfo()).settings, id, value);
         this.validateOperation('set_session_setting');
         await dispatch(() => this.session.setSessionSetting!(id, value));
-        const runtimeInfo = await this.session.runtimeInfo();
-        this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+        await this.refreshRuntimeInfo();
       });
     });
   }
@@ -432,8 +434,7 @@ export class AgentManager {
           if (!commands.some((command) => command.id === id)) throw new AgentOperationRejectedError('unsupported_command', 'Native command is no longer available. Refresh the command list.');
           this.validateOperation('execute_command');
           const result = await dispatch(() => this.session.executeCommand!(id, args));
-          const runtimeInfo = await this.session.runtimeInfo();
-          this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+          await this.refreshRuntimeInfo();
           return result;
         });
       } finally { this.pendingCommandExecutions -= 1; }
@@ -575,6 +576,7 @@ export class AgentManager {
         }
         if (item.type === 'history_boundary') {
           if (this.boundarySeen) throw new Error('Provider emitted more than one history boundary.');
+          this.historicalInteractions.clear();
           this.boundarySeen = true;
           this.olderHistoryCursor = item.olderCursor;
           for (const observation of this.bufferedLive.splice(0)) await this.applyObservation(observation);
@@ -631,6 +633,32 @@ export class AgentManager {
   private async applyObservation(observation: ProviderObservation, historical = false): Promise<void> {
     if (this.isDuplicate(observation)) return;
     let event = observation.event;
+    // Persisted lifecycle records describe the past, not callable interactions or current execution.
+    if (observation.delivery === 'history' && event.type !== 'timeline') {
+      if ((event.type === 'usage_updated' || event.type === 'turn_completed') && event.usage) {
+        this.state.payload.lastUsage = structuredClone(event.usage);
+      }
+      if (event.type === 'interaction_requested') {
+        this.historicalInteractions.set(event.request.requestId, event.request);
+        this.remember(observation);
+      } else if (event.type === 'interaction_resolved') {
+        const request = this.historicalInteractions.get(event.requestId);
+        this.historicalInteractions.delete(event.requestId);
+        if (request && request.kind === event.response.kind) {
+          await this.applyObservation({ ...observation, event: { type: 'timeline', provider: event.provider,
+            ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+            item: { type: 'interaction', request, response: event.response } } }, historical);
+        }
+      } else if (event.type === 'interaction_invalidated') {
+        this.historicalInteractions.delete(event.requestId);
+      }
+      return;
+    }
+    if (event.type !== 'timeline' && observation.nativeRevision !== undefined) {
+      const revision = this.nativeStateVersions.get(observation.sourceKey);
+      if (revision !== undefined && observation.nativeRevision <= revision) return;
+      this.nativeStateVersions.set(observation.sourceKey, observation.nativeRevision);
+    }
     if (event.type === 'timeline' && event.item.type === 'interaction') {
       event = { ...event, item: { ...event.item, request: redactInteractionRequest(event.item.request), response: redactInteractionResponse(event.item.request, event.item.response) } };
     } else if (event.type === 'interaction_requested') {
@@ -739,7 +767,15 @@ export class AgentManager {
     }
   }
 
+  private async refreshRuntimeInfo(): Promise<void> {
+    const revision = this.nativeStateRevision;
+    const runtimeInfo = await this.session.runtimeInfo();
+    if (this.closed || revision !== this.nativeStateRevision) return;
+    this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+  }
+
   private applyStateEvent(event: Exclude<AgentStreamEvent, { type: 'timeline' }>, timestamp: string): void {
+    this.nativeStateRevision += 1;
     if (event.type === 'interaction_resolved' || event.type === 'interaction_invalidated') this.claimedInteractionIds.delete(event.requestId);
     this.state.payload = reduceSessionState(this.state.payload, event, timestamp);
     if (event.type === 'runtime_updated') this.state.payload.capabilities = this.effectiveCapabilities();

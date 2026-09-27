@@ -258,3 +258,47 @@ it('streams only distinct activity over a real socket and keeps normal content s
   expect(JSON.stringify(received)).not.toContain('private output');
   tracking.close(); content.close();
 });
+
+it('preserves native execution authority across turn results and socket reattachment', async () => {
+  const values: ProviderStreamItem[] = [{ type: 'history_boundary' }];
+  let wake: (() => void) | undefined;
+  let closed = false;
+  let sequence = 0;
+  const session: AgentSession = {
+    ...boundarySession('/workspace'),
+    async *observe() {
+      while (!closed) {
+        if (values.length) yield values.shift()!;
+        else await new Promise<void>(resolve => { wake = resolve; });
+      }
+    },
+    async dispose() { closed = true; wake?.(); },
+  };
+  const push = (event: Extract<ProviderStreamItem, { type: 'observation' }>['event']) => {
+    values.push({ type: 'observation', sourceKey: `native:${++sequence}`, occurredAt: sequence, delivery: 'live', event });
+    wake?.();
+  };
+  const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'fake', displayName: 'Fake' }, session, epoch: 'e' });
+  await manager.ready;
+  const socket = await openControlledSocket(manager);
+  const inbox = socketInbox(socket);
+  try {
+    socket.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+    await inbox.next('agent_snapshot');
+    push({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { providerId: 'fake', sessionId: 'session-1', status: 'running' }, activeTurnId: 'new' });
+    expect((await inbox.next('agent_update')).payload).toMatchObject({ status: 'running', activeTurn: { turnId: 'new' } });
+    push({ type: 'turn_failed', provider: 'fake', turnId: 'old', error: 'Obsolete failure' });
+    expect((await inbox.next('agent_update')).payload).toMatchObject({ status: 'running', activeTurn: { turnId: 'new' } });
+    push({ type: 'turn_completed', provider: 'fake', turnId: 'new' });
+    expect((await inbox.next('agent_update')).payload).toMatchObject({ status: 'running', activeTurn: null });
+    socket.close();
+    const reconnected = await openControlledSocket(manager);
+    const restored = socketInbox(reconnected);
+    try {
+      reconnected.send(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+      expect((await restored.next('agent_snapshot')).payload).toMatchObject({ status: 'running', activeTurn: null, runtimeInfo: { status: 'running' } });
+      push({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { providerId: 'fake', sessionId: 'session-1', status: 'idle' }, activeTurnId: null });
+      expect((await restored.next('agent_update')).payload).toMatchObject({ status: 'idle', activeTurn: null });
+    } finally { reconnected.close(); }
+  } finally { socket.close(); await manager.close(); }
+}, 5000);

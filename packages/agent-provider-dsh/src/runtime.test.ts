@@ -32,6 +32,7 @@ class FakeContext {
     get: () => ({ ...this.planningState }),
     set: (_agent: unknown, active: boolean) => { this.planningState.active = active; return 'committed'; },
   };
+  readonly statusListeners = new Set<(payload: { agent: unknown; status: string }) => void>();
   readonly sessionListeners = new Set<(session: unknown, event: unknown) => void>();
   approvalHandler: ((request: unknown, next: () => Promise<unknown>) => Promise<unknown>) | undefined;
   questionHandler: ((request: unknown, next: () => Promise<unknown>) => Promise<unknown>) | undefined;
@@ -111,6 +112,10 @@ class FakeContext {
   }
 
   on(event: string, listener: (...args: never[]) => unknown): () => void {
+    if (event === 'agent/status') {
+      this.statusListeners.add(listener as never);
+      return () => { this.statusListeners.delete(listener as never); };
+    }
     if (event === 'session/event') {
       this.sessionListeners.add(listener as never);
       return () => {
@@ -734,3 +739,25 @@ describe('DSH native message inbox delivery', () => {
     } finally { await session.dispose(); await runtime.dispose?.(); }
   });
 });
+
+
+it('publishes native execution changes without requiring a timeline event', async () => {
+  const h = await openRuntime();
+  const session = new LiveDshSession(h.agent, { providerId: 'dsh', sessionId: 'session-1', opaque: 'dsh:session-1' }, { get: () => undefined } as never);
+  const stream = session.observe()[Symbol.asyncIterator]();
+  try {
+    expect((await stream.next()).value).toEqual({ type: 'history_boundary' });
+    expect((await stream.next()).value).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
+    h.context.agent.status = 'running';
+    for (const notify of h.context.statusListeners) notify({ agent: h.context.agent, status: 'running' });
+    expect((await stream.next()).value).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'running' } } });
+    const ended = { type: 'turn/end', seq: 0, time: 1, data: { turn: 't', reason: { kind: 'completed' } } };
+    for (const notify of h.context.sessionListeners) notify(h.context.agent.session, ended);
+    expect((await stream.next()).value).toMatchObject({ event: { type: 'turn_completed' } });
+    expect((await session.runtimeInfo()).status).toBe('running');
+    h.context.agent.status = 'idle';
+    for (const notify of h.context.statusListeners) notify({ agent: h.context.agent, status: 'idle' });
+    expect((await stream.next()).value).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
+  } finally { await session.dispose(); await h.runtime.dispose?.(); }
+  expect(h.context.statusListeners.size).toBe(0);
+}, 5000);

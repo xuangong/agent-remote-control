@@ -141,7 +141,7 @@ it('retains opened tracked content across switches without preconnecting unopene
   await f.open(other.title);
   expect(f.contentClosed).not.toHaveBeenCalledWith('live-agent');
   await act(async () => f.contentListeners.get('live-agent')!.onMessage({ protocolVersion: '1.5.0', type: 'agent_update',
-    payload: { ...replicaState.agent!, id: 'live-agent', status: 'running', runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: star.nativeSessionId } } }));
+    payload: { ...replicaState.agent!, id: 'live-agent', status: 'running', runtimeInfo: { ...replicaState.agent!.runtimeInfo, status: 'running', sessionId: star.nativeSessionId } } }));
   await f.open();
   expect(f.contentConnections).toEqual(['live-agent', 'other-agent']);
   expect(f.fetchTimeline).toHaveBeenCalledTimes(2);

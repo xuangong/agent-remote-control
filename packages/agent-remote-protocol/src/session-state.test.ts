@@ -13,7 +13,7 @@ const operations: SessionOperationKind[] = ['send_message', 'queue_message', 'st
 
 describe('session lifecycle', () => {
   it('retains native activity underneath a pending interaction across recovery', () => {
-    let state = reduceSessionState(snapshot(), { type: 'turn_started', turnId: 'turn' }, 'start');
+    let state = reduceSessionState(snapshot(), { type: 'runtime_updated', runtimeInfo: { ...snapshot().runtimeInfo, status: 'running' }, activeTurnId: 'turn' }, 'start');
     state = reduceSessionState(state, { type: 'interaction_requested', request: question }, 'question');
     expect(state.status).toBe('waiting');
     state = reduceSessionState(state, { type: 'runtime_updated', runtimeInfo: { ...state.runtimeInfo, status: 'running', connection: { state: 'restoring' } } }, 'lost');
@@ -26,11 +26,11 @@ describe('session lifecycle', () => {
   });
 
   it('applies authoritative turn completion without inventing completion from connection loss', () => {
-    let state = reduceSessionState(snapshot(), { type: 'turn_started', turnId: 'turn' }, 'start');
+    let state = reduceSessionState(snapshot(), { type: 'runtime_updated', runtimeInfo: { ...snapshot().runtimeInfo, status: 'running' }, activeTurnId: 'turn' }, 'start');
     state = reduceSessionState(state, { type: 'runtime_updated', runtimeInfo: { ...state.runtimeInfo, connection: { state: 'unavailable' } } }, 'lost');
     expect(state).toMatchObject({ status: 'running', activeTurn: { turnId: 'turn' } });
     state = reduceSessionState(state, { type: 'turn_completed', turnId: 'turn' }, 'complete');
-    expect(state).toMatchObject({ status: 'idle', activeTurn: null, runtimeInfo: { status: 'idle', connection: { state: 'unavailable' } } });
+    expect(state).toMatchObject({ status: 'running', activeTurn: null, runtimeInfo: { status: 'running', connection: { state: 'unavailable' } } });
     expect(sessionOperationAvailability(state, 'send_message')).toMatchObject({ code: 'native_runtime_unavailable' });
   });
 });
@@ -53,5 +53,32 @@ describe('operation eligibility', () => {
     }
     for (const operation of ['set_planning', 'set_session_setting'] as const) expect(sessionOperationAvailability(state, operation)).toMatchObject({ code: 'agent_busy' });
     expect(sessionOperationAvailability({ ...state, capabilities: { ...state.capabilities, queueMessage: false } }, 'queue_message')).toMatchObject({ code: 'unsupported_command' });
+  });
+});
+
+describe('native execution authority', () => {
+  const running = () => ({ ...snapshot(), status: 'running' as const, runtimeInfo: { ...snapshot().runtimeInfo, status: 'running' as const }, activeTurn: { turnId: 'current' } });
+  it.each(['turn_completed', 'turn_canceled', 'turn_failed'] as const)('%s changes the turn but does not decide session execution', type => {
+    const event = type === 'turn_failed' ? { type, turnId: 'current', error: 'attempt failed' }
+      : type === 'turn_canceled' ? { type, turnId: 'current', reason: 'aborted' } : { type, turnId: 'current' };
+    const state = reduceSessionState(running(), event, 'end');
+    expect(state).toMatchObject({ status: 'running', runtimeInfo: { status: 'running' }, activeTurn: null });
+  });
+  it('does not manufacture native activity from a turn start', () => {
+    const state = reduceSessionState(snapshot(), { type: 'turn_started', turnId: 'current' }, 'start');
+    expect(state).toMatchObject({ status: 'idle', runtimeInfo: { status: 'idle' }, activeTurn: { turnId: 'current' } });
+  });
+  it.each(['turn_completed', 'turn_canceled', 'turn_failed'] as const)('does not retire a newer turn on an older %s', type => {
+    const event = type === 'turn_failed' ? { type, turnId: 'old', error: 'old failure' }
+      : type === 'turn_canceled' ? { type, turnId: 'old', reason: 'aborted' } : { type, turnId: 'old' };
+    const state = reduceSessionState(running(), event, 'late');
+    expect(state.activeTurn?.turnId).toBe('current');
+    expect(state.lastError).toBeUndefined();
+  });
+  it('does not guess native idle when the last interaction disappears', () => {
+    let state = { ...snapshot(), status: 'waiting' as const, runtimeInfo: { ...snapshot().runtimeInfo, status: 'waiting' as const } };
+    state = reduceSessionState(state, { type: 'interaction_requested', request: question }, 'request') as typeof state;
+    state = reduceSessionState(state, { type: 'interaction_invalidated', requestId: 'q' }, 'invalidated') as typeof state;
+    expect(state.status).toBe('waiting');
   });
 });

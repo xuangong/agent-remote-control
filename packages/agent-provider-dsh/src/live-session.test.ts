@@ -140,7 +140,8 @@ describe('live DSH Provider session', () => {
       allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] };
     const session = await createLiveDshProvider({ runtime: new FakeRuntime(agent) }).createSession({ sessionId: 'session-1' });
     const iterator = session.observe()[Symbol.asyncIterator]();
-    await take(iterator);
+    expect(await take(iterator)).toEqual({ type: 'history_boundary' });
+    expect(await take(iterator)).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
     agent.emit(interaction('approval-async-record', request));
     await take(iterator);
     let resolve: ((accepted: boolean) => void) | undefined;
@@ -174,6 +175,7 @@ describe('live DSH Provider session', () => {
 
     const history = await take(iterator);
     const boundary = await take(iterator);
+    expect(await take(iterator)).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
     const liveItem = await take(iterator);
 
     expect(history).toMatchObject({ delivery: 'history', sourceKey: 'dsh:9:session-1:7:overlap' });
@@ -207,6 +209,8 @@ describe('live DSH Provider session', () => {
 
     const historicalRequest = await take(iterator);
     const boundary = await take(iterator);
+    expect(await take(iterator)).toMatchObject({ delivery: 'live', event: { type: 'interaction_requested', request } });
+    expect(await take(iterator)).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
     const liveItem = await take(iterator);
 
     expect(historicalRequest).toMatchObject({
@@ -268,7 +272,8 @@ describe('live DSH Provider session', () => {
     const session = await createLiveDshProvider({ runtime: new FakeRuntime(agent) })
       .createSession({ sessionId: 'session-1' });
     const iterator = session.observe()[Symbol.asyncIterator]();
-    await take(iterator);
+    expect(await take(iterator)).toEqual({ type: 'history_boundary' });
+    expect(await take(iterator)).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
     const request: AgentInteractionRequest = {
       kind: 'question',
       requestId: 'question-1',
@@ -297,7 +302,8 @@ describe('live DSH Provider session', () => {
     const session = await createLiveDshProvider({ runtime: new FakeRuntime(agent) })
       .createSession({ sessionId: 'session-1' });
     const iterator = session.observe()[Symbol.asyncIterator]();
-    await take(iterator);
+    expect(await take(iterator)).toEqual({ type: 'history_boundary' });
+    expect(await take(iterator)).toMatchObject({ event: { type: 'runtime_updated', runtimeInfo: { status: 'idle' } } });
     const request: AgentInteractionRequest = {
       kind: 'question',
       requestId: 'required-question',

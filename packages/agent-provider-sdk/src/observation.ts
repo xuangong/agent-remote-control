@@ -68,6 +68,7 @@ export interface AgentChildSession {
   observation: 'live' | 'saved_history';
 }
 
+/** Current native execution facts. Pending interaction presentation is projected separately. */
 export interface AgentRuntimeInfo {
   providerId: string;
   sessionId: string | null;
@@ -90,7 +91,8 @@ export type AgentStreamEvent =
   | { type: 'turn_canceled'; provider: string; reason: string; turnId?: string }
   | { type: 'timeline'; provider: string; item: AgentTimelineItem; turnId?: string }
   | { type: 'usage_updated'; provider: string; usage: AgentUsage; turnId?: string }
-  /** activeTurnId is authoritative when present; null clears it without implying how the turn ended. */
+  /** Authoritative execution state; turn events alone never change runtime status.
+   * activeTurnId is authoritative when present; null clears it without implying how the turn ended. */
   | { type: 'runtime_updated'; provider: string; runtimeInfo: AgentRuntimeInfo; activeTurnId?: string | null }
   | { type: 'interaction_requested'; provider: string; request: AgentInteractionRequest; turnId?: string }
   | { type: 'interaction_resolved'; provider: string; requestId: string; response: AgentInteractionResponse; turnId?: string }
@@ -105,7 +107,9 @@ export interface ProviderObservation {
   type: 'observation';
   sourceKey: string;
   occurredAt: number;
+  /** Monotonic for the same sourceKey within this observation stream; not a cross-process clock. */
   nativeRevision?: number;
+  /** History is for presentation, never proof of current execution or a callable interaction. */
   delivery: 'history' | 'live';
   event: AgentStreamEvent;
   resourceReferences?: ProviderResourceReference[];

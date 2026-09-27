@@ -1,7 +1,7 @@
 export interface DshNativeObservation {
   readonly recordId: string;
   readonly occurredAt: number;
-  readonly kind: 'session_event' | 'interaction_requested' | 'interaction_resolved';
+  readonly kind: 'agent_status' | 'session_event' | 'interaction_requested' | 'interaction_resolved';
   readonly payload: unknown;
 }
 

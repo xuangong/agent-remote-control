@@ -337,6 +337,13 @@ describe('ardb command surface', () => {
         event: { type: 'turn_started', providerId: 'provider-one', turnId: 'turn-one' },
       },
     });
+    h.transport.emit({
+      protocolVersion: '1.5.0', type: 'agent_stream',
+      payload: {
+        agentId: 'agent-one', timestamp: '2026-09-03T00:00:03.000Z',
+        event: { type: 'runtime_updated', providerId: 'provider-one', runtimeInfo: { ...h.transport.snapshot.payload.runtimeInfo, status: 'running' } },
+      },
+    });
     await Promise.resolve();
     expect(settled).toBe(false);
     h.transport.emit({
@@ -344,6 +351,15 @@ describe('ardb command surface', () => {
       payload: {
         agentId: 'agent-one', timestamp: '2026-09-03T00:00:03.000Z',
         event: { type: 'turn_completed', providerId: 'provider-one', turnId: 'turn-one' },
+      },
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    h.transport.emit({
+      protocolVersion: '1.5.0', type: 'agent_stream',
+      payload: {
+        agentId: 'agent-one', timestamp: '2026-09-03T00:00:03.000Z',
+        event: { type: 'runtime_updated', providerId: 'provider-one', runtimeInfo: { ...h.transport.snapshot.payload.runtimeInfo, status: 'idle' } },
       },
     });
 

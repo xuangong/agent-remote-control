@@ -19,7 +19,7 @@ async function openPlanning(available = true, planning = false, startTurn = (_pa
   const iterator = session.observe()[Symbol.asyncIterator]();
   await iterator.next();
   const notify = (method: string, params: object) => server.child.stdout.write(`${JSON.stringify({
-    method, params: { threadId: 'thread-plan', turnId: 'turn-1', ...params },
+    method, params: { threadId: 'thread-plan', turnId: (params as { turn?: { id?: string } }).turn?.id ?? 'turn-1', ...params },
   })}\n`);
   return { server, session, iterator, notify };
 }

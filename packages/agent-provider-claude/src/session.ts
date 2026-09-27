@@ -295,7 +295,7 @@ export class ClaudeAgentSession implements AgentSession {
       model: this.config.model ?? null, planning: { active: this.planning }, settings: this.settings(), childSessions: this.children.descriptors(),
       persistence: { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...this.config, planning: this.planning, permissionMode: this.resumePermissionMode }) } };
   }
-  private runtimeUpdated(): void { this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info() }); }
+  private runtimeUpdated(): void { this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info(), activeTurnId: this.turnId ?? null }); }
   private emit(event: AgentStreamEvent): void {
     this.output.push({ type: 'observation', sourceKey: `claude:${this.sourceId}:${++this.sequence}`, occurredAt: Date.now(), delivery: 'live',
       event: this.withTurn(event) });

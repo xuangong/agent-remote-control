@@ -29,7 +29,13 @@ An unopened directory target can still expose an attachment error and native-own
 
 ## Shared state and operation rules
 
-`reduceSessionState` is used by AgentManager and the client replica. Native turn events update activity and active-turn identity. Pending interactions overlay activity with `waiting`; their removal reveals the latest native activity. Runtime recovery does not resolve interactions or invent a completed turn. Observation-stream failure marks the native connection unavailable while retaining known activity and history.
+`reduceSessionState` is used by AgentManager and the client replica. Only native `runtimeInfo.status` and live `runtime_updated` observations determine execution activity. Turn events describe identity, results and usage; a completed, failed or canceled turn does not establish that the Session has stopped. A terminal event for another turn cannot clear the current turn. Pending interactions overlay activity with `waiting`; their removal reveals the latest native activity. Runtime recovery does not resolve interactions or invent a completed turn. Observation-stream failure marks the native connection unavailable while retaining known activity and history.
+
+History never changes current runtime state or reconstructs callable requests. Completed historical request/response pairs remain Timeline records through a separate presentation projection; historical usage remains available as usage metadata. Adapters confirm pending native callbacks and emit them live, including during bootstrap. Child directory activity may summarize native pending callbacks; this does not overwrite the child's execution runtime.
+
+Manager runtime queries are fenced against intervening state observations and attachment closure. Non-Timeline revisions are monotonic only within the same source key and attachment; adapters must fence their own asynchronous native reads and old callbacks. The client accepts snapshots and updates on its ordered WebSocket and rejects callbacks from replaced connections. These are attachment/process-local guarantees, not cross-restart ordering or durable operation settlement.
+
+The existing wire schema is unchanged. Recordings retain their originally observed runtime facts; old recordings and older Controllers that supplied inferred status do not gain corrected native evidence merely by using a newer renderer.
 
 | Operation | Required native capability | Additional rule |
 | --- | --- | --- |

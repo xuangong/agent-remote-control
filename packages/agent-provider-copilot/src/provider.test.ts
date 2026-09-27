@@ -69,7 +69,8 @@ describe('Copilot native adapter', () => {
     await child.sendMessage('First'); await child.sendMessage('Second'); expect(mock.native.rpc.tasks.sendMessage.mock.calls).toEqual([[{id: 'child', message: 'First'}], [{id: 'child', message: 'Second'}]]);
     expect(mock.client.resumeSession).not.toHaveBeenCalled(); mock.handler(event('assistant.message', {messageId: 'cm2', content: 'Child live'}, {agentId: 'child'}));
     await child.dispose(); await seen.done; expect(mock.native.disconnect).not.toHaveBeenCalled();
-    expect(seen.values.filter(v => v.type === 'observation')).toHaveLength(2); await provider.dispose();
+    expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'timeline')).toHaveLength(2);
+    expect(seen.values.some(v => v.type === 'observation' && v.event.type === 'runtime_updated' && v.event.runtimeInfo.status === 'idle')).toBe(true); await provider.dispose();
   }, 10000);
   it('resumes native history without creating a second root and closes pending interactions on dispose', async () => {
     const {provider, session} = await open(); const handle = (await session.runtimeInfo()).persistence!; await session.dispose();
@@ -561,3 +562,65 @@ it('rejects command dispatch when the session closes during discovery', async ()
   expect(mock.native.rpc.commands.invoke).not.toHaveBeenCalled();
   expect(mock.native.send).not.toHaveBeenCalled();
 });
+
+
+it.each(['abort', 'session.error'])('rejects a stale child listing after native %s', async type => {
+  const task = {type: 'agent', id: 'child', toolCallId: 'spawn', description: 'Child', agentType: 'explore', status: 'running', startedAt: new Date().toISOString()};
+  mock.native.rpc.tasks.list.mockResolvedValue({tasks: [task]});
+  const {provider, session} = await open(); const child = await session.openChildSession('child');
+  let finish!: (value: unknown) => void;
+  mock.native.rpc.tasks.list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const refresh = session.refreshChildren();
+  mock.handler(event(type, {message: 'Native failure'}, {agentId: 'child'}));
+  const expected = type === 'abort' ? 'idle' : 'failed';
+  expect((await child.runtimeInfo()).status).toBe(expected);
+  finish({tasks: [task]}); await refresh;
+  expect((await child.runtimeInfo()).status).toBe(expected);
+  expect((await session.runtimeInfo()).childSessions?.[0]?.status).toBe(expected);
+  await provider.dispose();
+}, 5000);
+
+it('keeps the newest child directory query when earlier requests complete later', async () => {
+  const task = {type: 'agent', id: 'child', toolCallId: 'spawn', description: 'Child', agentType: 'explore', status: 'running', startedAt: new Date().toISOString()};
+  mock.native.rpc.tasks.list.mockResolvedValue({tasks: [task]});
+  const {provider, session} = await open(); const child = await session.openChildSession('child');
+  let finish!: (value: unknown) => void;
+  mock.native.rpc.tasks.list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const old = session.refreshChildren();
+  mock.native.rpc.tasks.list.mockResolvedValue({tasks: [{...task, status: 'idle'}]});
+  await session.refreshChildren(); finish({tasks: [task]}); await old;
+  expect((await child.runtimeInfo()).status).toBe('idle');
+  expect((await session.runtimeInfo()).childSessions?.[0]?.status).toBe('idle');
+  await provider.dispose();
+}, 5000);
+
+
+it('fences a child listing that predates a confirmed cancellation', async () => {
+  const task = {type: 'agent', id: 'child', toolCallId: 'spawn', description: 'Child', agentType: 'explore', status: 'running', startedAt: new Date().toISOString()};
+  mock.native.rpc.tasks.list.mockResolvedValue({tasks: [task]});
+  const {provider, session} = await open(); const child = await session.openChildSession('child');
+  let finish!: (value: unknown) => void;
+  mock.native.rpc.tasks.list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const refresh = session.refreshChildren();
+  mock.native.rpc.tasks.cancel.mockResolvedValue({cancelled: true});
+  await child.cancel!(); finish({tasks: [task]}); await refresh;
+  expect((await child.runtimeInfo()).status).toBe('idle');
+  expect((await session.runtimeInfo()).childSessions?.[0]?.status).toBe('idle');
+  await provider.dispose();
+}, 5000);
+
+
+it('keeps pending callback presentation out of native execution snapshots', async () => {
+  const {provider, session} = await open(); const seen = await collect(session);
+  mock.handler(event('assistant.turn_start', {turnId: 'native-turn'}));
+  mock.handler(event('permission.requested', {requestId: 'native-approval', permissionRequest: {kind: 'shell', command: 'pwd'}}));
+  mock.handler(event('session.mode_changed', {newMode: 'plan'}));
+  expect((await session.runtimeInfo()).status).toBe('running');
+  mock.handler(event('permission.completed', {requestId: 'native-approval', result: {kind: 'approve-once'}}));
+  expect((await session.runtimeInfo()).status).toBe('running');
+  await provider.dispose(); await seen.done;
+  const events = seen.values.flatMap(v => v.type === 'observation' ? [v.event] : []);
+  expect(events.some(e => e.type === 'interaction_requested')).toBe(true);
+  expect(events.some(e => e.type === 'interaction_resolved')).toBe(true);
+  expect(events.filter(e => e.type === 'runtime_updated').some(e => e.runtimeInfo.status === 'waiting')).toBe(false);
+}, 5000);

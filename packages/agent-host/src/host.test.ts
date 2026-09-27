@@ -415,7 +415,7 @@ describe('Agent Host runtime', () => {
     let session: Session | undefined;
     const codex = fixture('codex', nativeSessionId => {
       session = new Session('codex', nativeSessionId, [
-        { type: 'observation', sourceKey: 'approval', occurredAt: 1, delivery: 'history',
+        { type: 'observation', sourceKey: 'approval', occurredAt: 1, delivery: 'live',
           event: { type: 'interaction_requested', provider: 'codex', request: approval } },
         { type: 'history_boundary' },
       ], { ...capabilities, interactions: { ...capabilities.interactions, planApproval: true } });
@@ -1320,7 +1320,7 @@ it('activates an owner update over the real uplink while an approval is pending'
   const stateDir = await mkdtemp(join(tmpdir(), 'host-immediate-update-'));
   const broker = await uplinkBroker('host');
   const registration = fixture('codex', id => new Session('codex', id, [
-    { type: 'observation', sourceKey: 'approval', occurredAt: 1, delivery: 'history', event: {
+    { type: 'observation', sourceKey: 'approval', occurredAt: 1, delivery: 'live', event: {
       type: 'interaction_requested', provider: 'codex', request: {
         kind: 'plan_approval', requestId: 'approval', plan: 'Continue?', allowedActions: ['approve'],
       },

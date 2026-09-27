@@ -95,7 +95,7 @@ export class CopilotAgentSession implements AgentSession {
   get cwd() { return this.config.cwd; }
   observe(): AsyncIterable<ProviderStreamItem> { if (this.observed) throw new Error('Copilot observation already attached.'); this.observed = true; return this.stream; }
   emit(event: AgentStreamEvent): void { if (this.buffered) { this.deferredEvents.push(event); return; } if (!this.closed) this.stream.push({type: 'observation', sourceKey: `copilot:local:${randomUUID()}`, occurredAt: Date.now(), delivery: 'live', event}); }
-  private emitRuntime() { this.emit({type: 'runtime_updated', provider, runtimeInfo: structuredClone({...this.info, status: this.interactions.waiting && !this.closed ? 'waiting' : this.info.status})}); }
+  private emitRuntime() { this.emit({type: 'runtime_updated', provider, runtimeInfo: structuredClone({...this.info, status: this.info.status})}); }
   private accept(event: SessionEvent, delivery: 'history' | 'live'): void {
     if (this.closed || this.seen.has(event.id)) return; this.seen.add(event.id);
     
@@ -113,6 +113,7 @@ export class CopilotAgentSession implements AgentSession {
         if (event.type === 'assistant.turn_start') this.info.status = 'running';
         if (event.type === 'assistant.idle' || event.type === 'session.idle' || event.type === 'abort') this.info.status = 'idle';
         if (event.type === 'session.error') this.info.status = 'failed';
+        if (['assistant.turn_start', 'assistant.idle', 'session.idle', 'abort', 'session.error'].includes(event.type)) this.emitRuntime();
       }
     }
     if (delivery === 'live' && event.type === 'session.permissions_changed') {
@@ -287,11 +288,14 @@ export class CopilotAgentSession implements AgentSession {
     } catch { return {status: 'unavailable' as const, reason: 'Copilot skill document is unavailable.'}; }
   }
 
+  private childDirectoryRevision = 0;
   async refreshChildren(): Promise<void> {
     try {
+      const revision = ++this.childDirectoryRevision;
       const generations = new Map([...this.children].map(([id, child]) => [id, child.activityGeneration]));
       const listing = await this.call(this.rpc.tasks.list(), 'Copilot child sessions');
-      this.info.childSessions = listing.tasks.filter(task => task.type === 'agent').map(task => ({ nativeSessionId: task.id, title: task.description || task.agentType, role: task.agentType, description: task.description, createdAt: task.startedAt, parentCallId: task.toolCallId, status: childStatus(task.status), observation: 'live' }));
+      if (this.closed || revision !== this.childDirectoryRevision) return;
+      this.info.childSessions = listing.tasks.filter(task => task.type === 'agent').map(task => ({ nativeSessionId: task.id, title: task.description || task.agentType, role: task.agentType, description: task.description, createdAt: task.startedAt, parentCallId: task.toolCallId, status: this.children.has(task.id) && generations.get(task.id) !== this.children.get(task.id)!.activityGeneration ? this.children.get(task.id)!.executionStatus : childStatus(task.status), observation: 'live' }));
       for (const info of this.info.childSessions) this.children.get(info.nativeSessionId)?.updateTask(info, generations.get(info.nativeSessionId), listing.tasks.find(task => task.id === info.nativeSessionId)?.status);
     } catch (error) { this.options.onDiagnostic?.(`Copilot child directory unavailable: ${String(error)}`); }
   }
@@ -304,7 +308,7 @@ export class CopilotAgentSession implements AgentSession {
     const child = new CopilotChildSession(this, info, () => this.children.delete(id)); this.children.set(id, child);
     try { await child.initialize(); return child; } catch (error) { await child.dispose(); throw error; }
   }
-  async runtimeInfo(): Promise<AgentRuntimeInfo> { return structuredClone({...this.info, status: this.interactions.waiting && !this.closed ? 'waiting' : this.info.status}); }
+  async runtimeInfo(): Promise<AgentRuntimeInfo> { return structuredClone({...this.info, status: this.info.status}); }
   async dispose(): Promise<void> {
     if (this.closed) return; this.interactions.dispose(); this.images.stop(); this.closed = true; this.unsubscribe?.(); await Promise.allSettled([...this.children.values()].map(child => child.dispose()));
     this.info.status = 'closed'; this.stream.close(); this.onDispose();

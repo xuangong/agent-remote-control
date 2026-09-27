@@ -183,7 +183,10 @@ export class CodexAppServerSession implements AgentSession {
   receiveNotification(method: string, params: unknown): void { this.handleNotification(method, params); }
   receiveTermination(error: Error): void { this.handleTransportTermination(error); }
   notifyChildrenChanged(): void { this.emitRuntimeUpdate(); }
-  childRuntimeInfo(): AgentRuntimeInfo { return this.currentRuntimeInfo(); }
+  childActivityStatus(): AgentRuntimeInfo['status'] {
+    return this.pendingInteractions.size > 0 && this.runtimeStatus !== 'closed' && this.runtimeStatus !== 'failed'
+      ? 'waiting' : this.runtimeStatus;
+  }
 
   beginRecovery(reason: string): void {
     if (this.disposed) return;
@@ -511,6 +514,7 @@ export class CodexAppServerSession implements AgentSession {
             this.activeTurnId = undefined;
             this.runtimeStatus = 'idle';
             this.statusRevision += 1;
+            this.emitRuntimeUpdate();
             this.assertMessageReady();
             await this.startTurn(input);
             return;
@@ -521,6 +525,7 @@ export class CodexAppServerSession implements AgentSession {
           this.activeTurnId = expectedTurnId;
           this.runtimeStatus = 'running';
           this.statusRevision += 1;
+          this.emitRuntimeUpdate();
         }
       }
     } finally { this.sendingMessage = false; }
@@ -574,6 +579,8 @@ export class CodexAppServerSession implements AgentSession {
       if (statusRevision === this.statusRevision && isRecord(result) && isRecord(result.turn) && readString(result.turn.id)) {
         this.runtimeStatus = 'running';
         this.activeTurnId = readString(result.turn.id);
+        this.statusRevision += 1;
+        this.emitRuntimeUpdate();
       }
     } finally {
       this.startingTurn = false;
@@ -753,7 +760,7 @@ export class CodexAppServerSession implements AgentSession {
     return {
       providerId: PROVIDER_ID,
       sessionId: this.threadId ?? null,
-      status: !this.ownsRuntime && this.pendingInteractions.size > 0 && this.runtimeStatus !== 'closed' && this.runtimeStatus !== 'failed' ? 'waiting' : this.runtimeStatus,
+      status: this.runtimeStatus,
       ...(this.runtime.connectionInfo() ? { connection: this.runtime.connectionInfo() } : {}),
       childSessions: this.threadId ? this.runtime.childSessions(this.threadId) : [],
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
@@ -938,6 +945,7 @@ export class CodexAppServerSession implements AgentSession {
     if (!observation) return;
     this.applyTurnObservation(observation);
     this.emit(observation);
+    if (['turn_started', 'turn_completed', 'turn_failed', 'turn_canceled'].includes(observation.event.type)) this.emitRuntimeUpdate();
     if (this.threadId) this.runtime.sessionChanged(this.threadId);
     if ((observation.event.type === 'turn_canceled' || observation.event.type === 'turn_failed') && observation.event.turnId) {
       this.resolvePendingInteractions(observation.event.turnId);
@@ -973,8 +981,9 @@ export class CodexAppServerSession implements AgentSession {
       || observation.event.type === 'turn_failed'
       || observation.event.type === 'turn_canceled'
     ) {
+      if (this.activeTurnId && observation.event.turnId !== this.activeTurnId) return;
       this.statusRevision += 1;
-      this.runtimeStatus = observation.event.type === 'turn_failed' ? 'failed' : 'idle';
+      this.runtimeStatus = 'idle';
       this.activeTurnId = undefined;
     }
   }
@@ -1084,7 +1093,7 @@ export class CodexAppServerSession implements AgentSession {
       delivery: 'live',
       event: {
         type: 'runtime_updated', provider: PROVIDER_ID, runtimeInfo: this.currentRuntimeInfo(),
-        ...(activeTurnId === undefined ? {} : { activeTurnId }),
+        activeTurnId: activeTurnId === undefined ? this.activeTurnId ?? null : activeTurnId,
       },
     });
   }

@@ -413,3 +413,15 @@ it('strips sensitive field defaults from incoming request traces without mutatin
   expect(JSON.stringify(record)).toContain('west');
   expect(message.payload.request.fields[0]!.defaultValue).toBe('PRIVATE_TRACE_DEFAULT');
 });
+
+
+it('retains input acceptance in protocol traces without inventing execution events', () => {
+  const record = createProtocolTraceRecord('agent-one', {
+    direction: 'inbound', channel: 'websocket', message: {
+      protocolVersion: '1.5.0', type: 'command_acknowledged', payload: {
+        agentId: 'agent-one', requestId: 'handled-input', command: 'send_message', inputAcceptance: { disposition: 'handled' },
+      },
+    },
+  });
+  expect(record).toMatchObject({ message: { type: 'command_acknowledged', payload: { inputAcceptance: { disposition: 'handled' } } } });
+});

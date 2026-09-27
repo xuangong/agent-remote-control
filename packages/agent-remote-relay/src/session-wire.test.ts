@@ -441,6 +441,39 @@ describe('session wire Timeline and manager-event projection', () => {
     } finally { wire.close(); }
   });
 
+  it.each(['text', 'content', 'steer'] as const)('preserves %s input acceptance in the settled operation result', async kind => {
+    const { agent } = fakeAgent();
+    const acceptance = { disposition: 'queued' as const };
+    agent.sendMessage = async () => acceptance;
+    agent.sendMessageContent = async () => acceptance;
+    agent.steer = async () => acceptance;
+    const output: any[] = [];
+    const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+    try {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+      const type = kind === 'steer' ? 'steer' : 'send_message';
+      await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type, payload: {
+        requestId: 'accepted-input', operationId: OPERATION_ID, agentId: 'agent-1',
+        ...(kind === 'content' ? { content: [{ type: 'text', text: 'later' }] } : { text: 'later' }),
+      } }));
+      expect(output.at(-1)).toMatchObject({ type: 'command_acknowledged', payload: { inputAcceptance: acceptance } });
+    } finally { wire.close(); }
+  });
+
+  it('keeps invalid evidence after dispatch uncertain instead of reporting rejection', async () => {
+    const { agent } = fakeAgent();
+    agent.sendMessage = async () => ({ disposition: 'completed' } as never);
+    const output: any[] = [];
+    const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+    try {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message', payload: {
+        requestId: 'invalid-evidence', operationId: OPERATION_ID, agentId: 'agent-1', text: 'input',
+      } }));
+      expect(output.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'operation_outcome_unknown' } });
+    } finally { wire.close(); }
+  });
+
   it('reports unsupported manager capabilities as a recoverable command error', async () => {
     const { agent } = fakeAgent();
     agent.validateOperation = () => {

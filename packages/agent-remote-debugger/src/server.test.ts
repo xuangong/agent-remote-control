@@ -241,3 +241,32 @@ it('allows retry after failed lazy startup without replacing the entry point', a
   expect((await (await fetch(`${server.url}/__ardb/session`)).json()).live).toBeUndefined();
   expect((await start()).status).toBe(200); expect(loads).toBe(2);
 }, 10000);
+
+
+it('completes a handled input over the real ARDB HTTP and WebSocket route without a run', async () => {
+  const { runCli } = await import('./cli.js');
+  const { provider } = createRecordedLabProvider();
+  let dispatches = 0;
+  const server = await createDebuggerServer({
+    assetsDirectory: fileURLToPath(new URL('../dist/web', import.meta.url)),
+    adapter: { ...provider, async createSession(config) {
+      const session = await provider.createSession(config);
+      return new Proxy(session, { get(target, key) {
+        if (key === 'sendMessage') return async () => { dispatches++; return { disposition: 'handled' }; };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      } });
+    } },
+  });
+  cleanups.push(() => server.close());
+  let output = '', errors = '';
+  const code = await runCli(['send', server.agentId, '/local', '--relay', server.url, '--origin', server.url, '--wait', 'idle', '--timeout', '3000', '--json'], {
+    stdin: async () => '', readFile: async () => '', stdout: value => { output += value; }, stderr: value => { errors += value; }, stdoutBytes: () => {},
+  });
+  expect(errors).toBe(''); expect(code).toBe(0); expect(dispatches).toBe(1);
+  expect(JSON.parse(output)).toMatchObject({ payload: { inputAcceptance: { disposition: 'handled' } } });
+  const runtime = await createDebuggerRuntime(server.agentId, { relayUrl: server.url, origin: server.url });
+  cleanups.push(() => runtime.close()); await runtime.ready(3000);
+  expect(runtime.replica.getState().agent).toMatchObject({ status: 'idle', activeTurn: null });
+  expect(JSON.stringify(runtime.replica.getState().timeline)).not.toContain('/local');
+});

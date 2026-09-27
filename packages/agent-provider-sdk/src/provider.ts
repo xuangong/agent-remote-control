@@ -115,6 +115,14 @@ export interface AgentMessageOptions {
   delivery?: 'immediate' | 'next_turn';
 }
 
+/** Evidence about this input at acceptance time, never the current session execution state.
+ * started: accepted to start a run; queued: accepted into a native queue (not guaranteed to remain there);
+ * handled: consumed without starting a run for this input. Independent work may still be active.
+ */
+export interface AgentInputAcceptance {
+  disposition: 'started' | 'queued' | 'handled';
+}
+
 export interface AgentSession {
   readonly capabilities: AgentCapabilities;
 
@@ -129,12 +137,13 @@ export interface AgentSession {
   /** Resolves when input is accepted by the adapter-owned delivery channel, not when a turn completes.
    * RPC providers require a native receipt; streaming providers may accept into their owned input queue.
    * Subsequent normalized observations report execution; resolution alone does not guarantee durable persistence.
+   * Return acceptance details only from native evidence. A void result leaves disposition unknown.
    * A rejected operation must throw AgentOperationRejectedError only with proof of no requested effect.
    */
-  sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
-  sendMessageContent?(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void>;
+  sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
+  sendMessageContent?(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
-  steer?(text: string): Promise<void>;
+  steer?(text: string): Promise<AgentInputAcceptance | void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
   setSessionSetting?(id: string, value: string): Promise<void>;

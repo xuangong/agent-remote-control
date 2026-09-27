@@ -1183,6 +1183,22 @@ async function outgoingFixture(options: ConstructorParameters<typeof RemoteSessi
   return { transport, replica, client, acknowledge, echo };
 }
 
+it.each(['started', 'queued', 'handled'] as const)('settles %s input using acceptance without inventing a timeline echo or execution state', async disposition => {
+  const f = await outgoingFixture({ requestId: () => 'send-one' });
+  try {
+    const before = f.replica.getState().agent;
+    const send = f.client.sendMessage('/local');
+    f.transport.emit({ protocolVersion: '1.5.0', type: 'command_acknowledged', payload: {
+      requestId: 'send-one', agentId: 'agent-one', command: 'send_message', inputAcceptance: { disposition },
+    } });
+    expect(await send).toMatchObject({ payload: { inputAcceptance: { disposition } } });
+    if (disposition === 'handled') expect(f.replica.getState().outgoingMessages).toEqual([]);
+    else expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
+    expect(f.replica.getState().agent).toEqual(before);
+    expect(f.replica.getState().timeline.entries).toEqual([]);
+  } finally { f.client.stop(); }
+});
+
 it('shows local sends immediately and keeps them until a new user echo, independently of acknowledgement', async () => {
   const f = await outgoingFixture({ requestId: () => 'send-one' });
   try {

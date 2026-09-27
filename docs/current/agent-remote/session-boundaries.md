@@ -54,6 +54,15 @@ A generic native error after dispatch has an unknown outcome. `AgentOperationRej
 
 A resolved input operation confirms acceptance by the adapter delivery channel, not turn completion. RPC adapters require the native receipt; streaming stdio adapters may accept into their owned input queue. Normalized events describe subsequent execution. An uncertain input or interaction remains protected from automatic resubmission until authoritative evidence resolves it.
 
+`sendMessage`, `sendMessageContent`, and `steer` may return `AgentInputAcceptance` from native evidence. Its `disposition` describes only the submitted input: `started` (accepted to start a run), `queued` (accepted into the native queue, not guaranteed to remain queued), or `handled` (consumed without starting a run for that input). Returning `void` preserves the legacy unknown disposition. No acceptance result changes execution, active turn, or interaction validity.
+
+The shared manager preserves this result, and SessionWire stores it inside the process-local operation settlement before returning `command_acknowledged.payload.inputAcceptance`. Duplicate operations receive the same acceptance; they do not re-read current runtime state or dispatch again. Invalid acceptance after dispatch is an unknown outcome, not a confirmed rejection.
+
+ARDB `send/steer --wait idle` normally requires post-command execution progress before accepting idle. For `handled` input it waits for actual session idleness without requiring a new run. Existing independent work still has to settle. The shared Remote client removes the handled input's local outgoing placeholder because a user-message echo is not required; authoritative timeline entries are unaffected.
+
+`inputAcceptance` is an optional 1.5 schema extension. Existing adapters returning `void` retain the exact legacy wire shape, and updated clients accept acknowledgements without it. Adapters emitting the extension require updated receivers along the entire route; older strict 1.5 codecs do not negotiate or ignore this field. This is not a claim of bidirectional compatibility with those codecs.
+
+
 ## Settlement and binding lifetime
 
 Host, DSH uplink, standalone WebSocket and plugin paths use the Relay-owned operation executor. A writable SessionWire without an executor rejects writes. HTTP/plugin create and explicitly identified resume operations use the same service. Trusted authority establishes scope; client fields cannot select another authority's receipt.

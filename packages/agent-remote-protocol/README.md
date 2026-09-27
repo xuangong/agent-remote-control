@@ -132,3 +132,10 @@ included only when exposed by the runtime. Node ws does not expose `wasClean`,
 so it remains absent rather than being inferred from the code. Raw close reasons
 are never logged. Server-initiated retirement retains its first cause and code;
 a later native close event does not replace it or emit a duplicate disconnect.
+
+
+### Input acceptance receipts
+
+Input acknowledgements (`send_message`, `steer`) may carry `payload.inputAcceptance: { disposition: 'started' | 'queued' | 'handled' }`. This reports native acceptance of that input, not session execution or completion. Omission leaves disposition unknown. A handled input does not require a run or timeline echo. A queued input can be transformed or removed by the native runtime. All runtime and interaction state continues to come from authoritative observations.
+
+The optional field is a 1.5 schema extension. Existing void-returning adapters emit unchanged acknowledgements. Receivers supporting this extension accept both shapes; older strict codecs reject the new shape. Update clients, intermediaries and Controller before enabling an adapter that emits it. Cached settlement preserves the acceptance across receipt loss within the existing process-local scope and lifetime.

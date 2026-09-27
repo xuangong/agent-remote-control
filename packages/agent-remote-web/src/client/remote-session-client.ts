@@ -378,7 +378,10 @@ export class RemoteSessionClient {
     const operation = this.sendOperation(message, 'command_acknowledged:send_message', (response): response is CommandAcknowledgementMessage => (
       response.type === 'command_acknowledged' && response.payload.command === 'send_message'
     ), null);
-    void operation.then(() => this.replica.updateMessage(outgoingId, 'awaiting_echo'), error => {
+    void operation.then(acknowledgement => {
+      if (acknowledgement.payload.inputAcceptance?.disposition === 'handled') this.replica.deleteMessage(outgoingId);
+      else this.replica.updateMessage(outgoingId, 'awaiting_echo');
+    }, error => {
       const uncertain = error instanceof RemoteOperationError && [
         'operation_timeout', 'connection_disconnected', 'operation_stopped', 'command_failed', 'operation_outcome_unknown',
       ].includes(error.code);

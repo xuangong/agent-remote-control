@@ -26,21 +26,21 @@ function inbox() {
     },
   };
 }
-function session(counter: () => void, nativeId = 'native'): AgentSession {
+function session(counter: () => void, nativeId = 'native', inputAcceptance?: { disposition: 'handled' }): AgentSession {
   let finish!: () => void;
   const closed = new Promise<void>(resolve => { finish = resolve; });
   return {
     capabilities: { sessionControl: 'shared', history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: false, planApproval: false, toolApproval: false } },
     async *observe() { yield { type: 'history_boundary' }; await closed; },
-    async sendMessage() { counter(); }, async respondToInteraction() {},
+    async sendMessage() { counter(); return inputAcceptance; }, async respondToInteraction() {},
     async runtimeInfo() { return { providerId: 'fixture', sessionId: nativeId, status: 'idle' }; },
     async dispose() { finish(); },
   };
 }
-async function standalone(): Promise<Fixture & { revoke(subject: string): void; bind(agentId: string, nativeId: string): Promise<void> }> {
+async function standalone(inputAcceptance?: { disposition: 'handled' }): Promise<Fixture & { revoke(subject: string): void; bind(agentId: string, nativeId: string): Promise<void> }> {
   let dispatches = 0;
   const revoked = new Set<string>();
-  const adapter: AgentProviderAdapter = { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async config => session(() => dispatches++, config.sessionId), resumeSession: async handle => session(() => dispatches++, handle.sessionId) };
+  const adapter: AgentProviderAdapter = { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async config => session(() => dispatches++, config.sessionId, inputAcceptance), resumeSession: async handle => session(() => dispatches++, handle.sessionId, inputAcceptance) };
   const relay = createAgentRemoteRelay({ providers: [adapter] });
   await relay.createAgent({ protocolVersion: version, type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'fixture', config: { sessionId: 'native' } } });
   const server = createServer();
@@ -63,7 +63,7 @@ async function standalone(): Promise<Fixture & { revoke(subject: string): void; 
   };
 }
 
-async function remote(kind: 'host' | 'dsh'): Promise<Fixture> {
+async function remote(kind: 'host' | 'dsh', inputAcceptance?: { disposition: 'handled' }): Promise<Fixture> {
   let dispatches = 0, sequence = 0, registrations = 0;
   let socket!: WebSocket;
   const streams = new Map<string, ReturnType<typeof inbox>>();
@@ -84,7 +84,7 @@ async function remote(kind: 'host' | 'dsh'): Promise<Fixture> {
   const priorHome = process.env.DSH_HOME;
   const home = await mkdtemp(join(tmpdir(), 'settlement-dsh-'));
   if (kind === 'host') {
-    const native = session(() => dispatches++);
+    const native = session(() => dispatches++, undefined, inputAcceptance);
     host = createAgentHost({ installationId: 'settlement', name: 'Fixture', uplink: { url: url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: 'test-key' }, registrations: [{
       adapter: { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async () => native, resumeSession: async () => native },
       directory: { providerId: 'fixture', list: async () => [], workspaces: async () => [], create: async () => 'native', open: async () => native, close: async () => { await native.dispose(); } },
@@ -200,3 +200,31 @@ it('checks authority before cached receipts and binds intent to native identity 
     expect(fixture.count()).toBe(2); rebound.disconnect(); other.disconnect();
   } finally { await fixture.close(); }
 }, 20000);
+
+
+it.each(['standalone', 'host'] as const)('%s retains handled acceptance across a lost receipt and reconnect', async kind => {
+  const fixture = kind === 'standalone' ? await standalone({ disposition: 'handled' }) : await remote(kind, { disposition: 'handled' });
+  const operationId = randomUUID();
+  const connect = async () => {
+    const connection = await fixture.connect();
+    connection.send({ type: 'negotiate' });
+    const snapshot = await connection.next('agent_snapshot');
+    const initial = await connection.next('session_control');
+    connection.send({ type: 'session_control_request', payload: { agentId: 'agent', requestId: 'acquire', action: 'acquire', revision: initial.payload.revision } });
+    const acquired = await connection.next('session_control', 'acquire');
+    return { ...connection, snapshot, send: (frame: Frame) => connection.send({ ...frame, controlToken: acquired.payload.token }) };
+  };
+  try {
+    const first = await connect();
+    const send = (connection: Connection, requestId: string) => connection.send({ type: 'send_message', payload: { agentId: 'agent', requestId, operationId, text: '/local' } });
+    send(first, 'lost');
+    await expect.poll(fixture.count).toBe(1);
+    first.disconnect();
+    await fixture.reconnect();
+    const second = await connect();
+    expect(second.snapshot).toMatchObject({ payload: { status: 'idle', activeTurn: null } });
+    send(second, 'retry');
+    expect(await second.next('command_acknowledged', 'retry')).toMatchObject({ payload: { inputAcceptance: { disposition: 'handled' } } });
+    expect(fixture.count()).toBe(1);
+  } finally { await fixture.close(); }
+});

@@ -21,7 +21,7 @@ import {
 import { AgentPersistenceHandle, AgentSnapshot, AgentStatus } from './snapshot.js';
 import { ProtocolVersionSchema } from './version.js';
 import { ListCommandsRequest, ExecuteCommandRequest, CommandListResponse, CommandResultResponse } from './commands.js';
-import { OperationId } from './operations.js';
+import { OperationId, AgentInputAcceptance } from './operations.js';
 import { TimelineCursor } from './cursor.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
@@ -150,6 +150,7 @@ export const CommandAcknowledgementMessage = Strict({
   payload: Strict({
     requestId: NonEmptyString,
     agentId: NonEmptyString,
+    inputAcceptance: Type.Optional(AgentInputAcceptance),
     command: Type.Union([
       Type.Literal('send_message'), Type.Literal('steer'), Type.Literal('cancel'), Type.Literal('set_planning'), Type.Literal('set_session_setting'),
       Type.Literal('interaction_response'),

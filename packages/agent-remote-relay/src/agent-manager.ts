@@ -10,6 +10,7 @@ import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
   AgentMessageOptions,
+  AgentInputAcceptance,
   AgentPersistenceHandle,
   AgentProviderAdapter,
   AgentProviderDescriptor,
@@ -319,15 +320,15 @@ export class AgentManager {
     if (!availability.allowed) throw new AgentOperationRejectedError(availability.code, availability.reason);
   }
 
-  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
+  async sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     return this.prepareOperation(async dispatch => {
       if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
       return this.serializeCommand(async () => {
         this.validateOperation(options?.delivery === 'next_turn' ? 'queue_message' : 'send_message');
         if (!this.session.capabilities.sendMessage) throw new UnsupportedAgentCapabilityError('send_message');
         if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
-        if (options === undefined) await dispatch(() => this.session.sendMessage(text));
-        else await dispatch(() => this.session.sendMessage(text, options));
+        if (options === undefined) return dispatch(() => this.session.sendMessage(text));
+        return dispatch(() => this.session.sendMessage(text, options));
       });
     });
   }
@@ -364,7 +365,7 @@ export class AgentManager {
     if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
     await store.resolveAndPin(this.imageScope(scope), parts);
   }
-  async sendMessageContent(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void> {
+  async sendMessageContent(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<AgentInputAcceptance | void> {
     if (!parts.some(part => part.type === 'image')) return this.sendMessage(parts.map(part => part.type === 'text' ? part.text : '').join(''), options);
     return this.prepareOperation(async dispatch => {
       if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
@@ -374,7 +375,7 @@ export class AgentManager {
         if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
         const resolved = await store.resolveAndPin(this.imageScope(scope), parts);
         this.validateOperation(options?.delivery === 'next_turn' ? 'queue_message' : 'send_message');
-        await dispatch(() => this.session.sendMessageContent!(resolved, options));
+        return dispatch(() => this.session.sendMessageContent!(resolved, options));
       });
     });
   }
@@ -450,13 +451,13 @@ export class AgentManager {
     return result;
   }
 
-  async steer(text: string): Promise<void> {
+  async steer(text: string): Promise<AgentInputAcceptance | void> {
     return this.prepareOperation(async dispatch => {
       if (!this.session.capabilities.steer || !this.session.steer) {
         throw new UnsupportedAgentCapabilityError('steer');
       }
       this.validateOperation('steer');
-      await dispatch(() => this.session.steer!(text));
+      return dispatch(() => this.session.steer!(text));
     });
   }
 

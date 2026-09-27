@@ -67,6 +67,7 @@ class FakeTransport implements RemoteAgentTransport {
   traceResource = false;
   resourceAttempts = 0;
   withholdCommandAcknowledgement = false;
+  inputAcceptance?: { disposition: 'started' | 'queued' | 'handled' };
   closedConnections = 0;
   listener: RemoteTransportListener | undefined;
 
@@ -128,7 +129,7 @@ class FakeTransport implements RemoteAgentTransport {
     if (!this.withholdCommandAcknowledgement && (message.type === 'send_message' || message.type === 'steer' || message.type === 'cancel' || message.type === 'set_planning')) {
       this.emit({
         protocolVersion, type: 'command_acknowledged',
-        payload: { requestId: message.payload.requestId, agentId: 'agent-one', command: this.responseKindMismatch ? 'cancel' : message.type },
+        payload: { requestId: message.payload.requestId, agentId: 'agent-one', command: this.responseKindMismatch ? 'cancel' : message.type, ...(this.inputAcceptance ? { inputAcceptance: this.inputAcceptance } : {}) },
       });
     }
     if (message.type === 'interaction_response') {
@@ -310,8 +311,34 @@ describe('ardb command surface', () => {
     expect(h.transport.sent.filter((message) => message.type === 'steer').map((message) => message.payload.text)).not.toContain('blocked');
   });
 
-  it.each(['send', 'steer'] as const)('waits for the acknowledged %s turn to start and finish before reporting idle', async (command) => {
+  it.each(['send', 'steer'] as const)('finishes %s --wait idle when input was handled without starting a run', async command => {
     const h = harness();
+    h.transport.inputAcceptance = { disposition: 'handled' };
+    expect(await runCli([command, 'agent-one', '/local', '--wait', 'idle', '--timeout', '100', '--json'], h.io, h.environment)).toBe(0);
+    expect(json(h.stdout())).toMatchObject({ payload: { inputAcceptance: { disposition: 'handled' } } });
+  });
+
+  it('does not treat handled input as proof that existing work is idle', async () => {
+    const h = harness();
+    h.transport.inputAcceptance = { disposition: 'handled' };
+    h.transport.snapshot.payload.status = 'running';
+    h.transport.snapshot.payload.runtimeInfo.status = 'running';
+    const running = runCli(['steer', 'agent-one', '/local', '--wait', 'idle', '--timeout', '200', '--json'], h.io, h.environment);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    let settled = false;
+    void running.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    h.transport.emit({ protocolVersion, type: 'agent_stream', payload: {
+      agentId: 'agent-one', timestamp: '2026-09-27T00:00:00.000Z',
+      event: { type: 'runtime_updated', providerId: 'provider-one', runtimeInfo: { ...h.transport.snapshot.payload.runtimeInfo, status: 'idle' } },
+    } });
+    expect(await running).toBe(0);
+  });
+
+  it.each((['send', 'steer'] as const).flatMap(command => ([undefined, 'started', 'queued'] as const).map(disposition => ({ command, disposition }))))('waits for $command with $disposition acceptance to start and finish before reporting idle', async ({ command, disposition }) => {
+    const h = harness();
+    h.transport.inputAcceptance = disposition ? { disposition } : undefined;
     const running = runCli([command, 'agent-one', 'hello', '--wait', 'idle', '--timeout', '100', '--json'], h.io, h.environment);
     await new Promise((resolve) => setTimeout(resolve, 0));
 

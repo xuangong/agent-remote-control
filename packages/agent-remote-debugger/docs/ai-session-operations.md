@@ -130,3 +130,10 @@ Commands always operate the real live session identified above, even while the h
 The human can use Record, Stop recording and Export JSONL in the floating controls. Recording captures shared projected session changes from both browser and CLI actions, not screen video or every command acknowledgement. Save your observer JSONL and command outcomes when diagnosing an exchange; recordings may contain conversation content. Do not claim to have started UI recording merely because `observe --jsonl` is running.
 
 In a debugging report, include the public Agent ID, timestamps, relevant epoch/sequence and request/turn/operation IDs where available, command/result, observed state before and after, and the expected versus actual behavior. Distinguish protocol evidence from unverified visual behavior.
+
+
+### Input accepted without a run
+
+Inspect `command_acknowledged.payload.inputAcceptance` when supplied. `handled` means the native runtime consumed this input without starting a run for it. Do not wait for a turn event or resend it merely because no chat message appears. `started` and `queued` are acceptance outcomes, not completion evidence; omission means disposition is unknown.
+
+`send --wait idle` and `steer --wait idle` use this result: handled inputs wait only for actual session idleness, while other or legacy inputs still require execution progress. A handled input never cancels the wait for unrelated work that is still active. The acknowledgement remains visible in command JSON output and protocol traces. Session View recordings remain state recordings and do not manufacture a turn or message from a receipt.

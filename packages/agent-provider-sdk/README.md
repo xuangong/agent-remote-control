@@ -18,3 +18,10 @@ Timeline content stays within the event-specific item structures. Generated file
 - `@orchardworks/agent-provider-sdk/testing` — reusable provider contract tests, bounded stream collection, and capability validation.
 
 An optional `olderCursor` on `history_boundary` or `timeline_replacement` advertises earlier Timeline history. Sessions implementing `readTimelineHistory(cursor)` return chronological, history-delivery Timeline observations plus an optional `nextCursor`. The Relay commits the cursor only after successful ingestion, coalesces concurrent requests, and ignores pages belonging to a replaced Timeline epoch. The reader must not mutate live runtime status, replay input, or advance its own cursor before the Relay accepts the result.
+
+
+### Input acceptance
+
+`AgentSession.sendMessage`, `sendMessageContent`, and `steer` resolve to `AgentInputAcceptance | void`. Return `{ disposition: 'started' | 'queued' | 'handled' }` only when the native receipt establishes that outcome for the submitted input. `handled` means no run starts for this input; independent work may still be active. `queued` does not promise that input remains queued. `started` does not establish current execution or completion. Return `void` if disposition is unknown; do not infer it from a successful write, timeline, or runtime snapshot.
+
+Execution remains authoritative through `runtimeInfo` and `runtime_updated`. A handled input may produce no user-message echo or turn events. Delivery uncertainty remains an unknown operation outcome, never a fabricated acceptance disposition or rejection.

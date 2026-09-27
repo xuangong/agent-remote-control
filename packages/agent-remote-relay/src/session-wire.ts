@@ -4,7 +4,7 @@ import { isSessionMutation } from '@orchardworks/agent-remote-protocol';
 import { SessionControlError, type SessionControlRegistry, type SessionControlLease } from './session-control.js';
 import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import { InputImageError, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
-import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions, AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
+import type { AgentCommandResult, AgentInteractionResponse, AgentMessageOptions, AgentInputAcceptance, AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentCommand,
@@ -34,15 +34,15 @@ export interface SessionWireAgent {
   fetchTimeline(request: TimelinePageRequest): HistoryPage;
   loadTimeline?(request: TimelinePageRequest): Promise<HistoryPage>;
   subscribe(listener: AgentManagerListener): () => void;
-  sendMessage(text: string, options?: AgentMessageOptions): Promise<void>;
-  sendMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void>;
+  sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
+  sendMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<AgentInputAcceptance | void>;
   validateMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void>;
   beginImageUpload?(input: ImageUploadDeclaration, scope?: string): Promise<ImageUploadReceipt>;
   chunkImageUpload?(input: ImageUploadChunk, scope?: string): Promise<ImageUploadReceipt>;
   finishImageUpload?(uploadId: string, scope?: string): Promise<ImageUploadReceipt>;
   validateInteractionResponse?(requestId: string, response: AgentInteractionResponse): Promise<void> | void;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
-  steer?(text: string): Promise<void>;
+  steer?(text: string): Promise<AgentInputAcceptance | void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
   setSessionSetting?(id: string, value: string): Promise<void>;
@@ -296,7 +296,7 @@ export function createSessionWire(
           if ('content' in payload && !boundAgent.sendMessageContent) throw new UnsupportedSessionCommandError('send_message_content');
           const delivery = payload.delivery === undefined ? undefined : { delivery: payload.delivery };
           const imageScope = 'content' in payload ? options.imageScope?.() : undefined;
-          await executeOperation(boundAgent, {
+          const result = await executeOperation(boundAgent, {
             operationId: payload.operationId, kind: 'send_message',
             parameters: { ...('content' in payload ? { content: payload.content } : { text: payload.text }), delivery: payload.delivery ?? null }, maximumResultBytes: 1_024,
           }, { validate: async () => {
@@ -308,21 +308,22 @@ export function createSessionWire(
               }
             }
           }, dispatch: async () => {
-            if ('content' in payload) await boundAgent.sendMessageContent!(payload.content, delivery, imageScope);
-            else if (delivery === undefined) await boundAgent.sendMessage(payload.text);
-            else await boundAgent.sendMessage(payload.text, delivery);
-            return { accepted: true };
+            const acceptance = 'content' in payload ? await boundAgent.sendMessageContent!(payload.content, delivery, imageScope)
+              : delivery === undefined ? await boundAgent.sendMessage(payload.text)
+              : await boundAgent.sendMessage(payload.text, delivery);
+            return inputOperationResult(acceptance);
           } });
-          sendMessage(commandAcknowledgement(payload.requestId, boundAgent.agentId, 'send_message'));
+          sendMessage(commandAcknowledgement(payload.requestId, boundAgent.agentId, 'send_message', result.inputAcceptance));
           return;
         }
-        case 'steer':
+        case 'steer': {
           if (!boundAgent.steer) throw new UnsupportedSessionCommandError('steer');
-          await executeOperation(boundAgent, {
+          const result = await executeOperation(boundAgent, {
             operationId: message.payload.operationId, kind: 'steer', parameters: { text: message.payload.text }, maximumResultBytes: 1_024,
-          }, { dispatch: async () => { await boundAgent.steer!(message.payload.text); return { accepted: true }; } });
-          sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'steer'));
+          }, { dispatch: async () => inputOperationResult(await boundAgent.steer!(message.payload.text)) });
+          sendMessage(commandAcknowledgement(message.payload.requestId, boundAgent.agentId, 'steer', result.inputAcceptance));
           return;
+        }
         case 'cancel':
           if (!boundAgent.cancel) throw new UnsupportedSessionCommandError('cancel');
           await executeOperation(boundAgent, {
@@ -512,15 +513,25 @@ export function createSessionWire(
   }
 }
 
+function inputOperationResult(acceptance: AgentInputAcceptance | void): { accepted: true; inputAcceptance?: AgentInputAcceptance } {
+  if (acceptance === undefined) return { accepted: true };
+  // Invalid evidence after native dispatch cannot be settled as a confirmed rejection.
+  if (!acceptance || !['started', 'queued', 'handled'].includes(acceptance.disposition)) {
+    throw new Error('Provider returned invalid input acceptance.');
+  }
+  return { accepted: true, inputAcceptance: { disposition: acceptance.disposition } };
+}
+
 function commandAcknowledgement(
   requestId: string,
   agentId: string,
   command: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'interaction_response',
+  inputAcceptance?: AgentInputAcceptance,
 ): Extract<ServerMessage, { type: 'command_acknowledged' }> {
   return {
     protocolVersion: PROTOCOL_VERSION,
     type: 'command_acknowledged',
-    payload: { requestId, agentId, command },
+    payload: { requestId, agentId, command, ...(inputAcceptance ? { inputAcceptance } : {}) },
   };
 }
 

@@ -191,7 +191,9 @@ class CommandContext {
         : kind === 'steer'
           ? await this.withinDeadline(() => runtime.client.steer(text ?? ''))
           : await this.withinDeadline(() => runtime.client.cancel());
-      if (condition) await this.withinDeadline(() => runtime.waitFor(condition, this.remainingTimeout(), progress));
+      // Handled input has no run of its own; still wait for actual session idleness.
+      const after = condition === 'idle' && acknowledgement.payload.inputAcceptance?.disposition === 'handled' ? undefined : progress;
+      if (condition) await this.withinDeadline(() => runtime.waitFor(condition, this.remainingTimeout(), after));
       this.result(acknowledgement);
     });
   }

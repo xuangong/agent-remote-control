@@ -96,8 +96,10 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const migrations = useRef({ scope: baseUrl, values: new Map<string, import('@orchardworks/agent-remote-protocol').SessionMigration>() });
   if (migrations.current.scope !== baseUrl) migrations.current = { scope: baseUrl, values: new Map() };
   function replace(migration: import('@orchardworks/agent-remote-protocol').SessionMigration) {
-    migrations.current.values.set(sessionKey(migration.from), migration);
-    const replacements = new Map(migrations.current.values);
+    if (migrations.current.values.has(migration.id)) return;
+    migrations.current.values.set(migration.id, migration);
+    const replacements = new Map([...migrations.current.values.values()]
+      .sort((a, b) => a.createdAt - b.createdAt).map(value => [sessionKey(value.from), value]));
     setSelection(value => {
       if (value.scope !== baseUrl || !value.sessions.some(item => replacements.has(sessionKey(item)))) return value;
       const next = new Map<string, SessionStar>();
@@ -120,15 +122,18 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     if (!enabled || !favorites.ready || favorites.scope !== baseUrl) return;
     const allowed = new Set(favorites.stars.map(sessionKey));
     // A migration can arrive before the refreshed favorites snapshot.
-    for (const favorite of favorites.stars) {
-      let key = sessionKey(favorite);
-      const visited = new Set<string>();
-      while (!visited.has(key)) {
-        visited.add(key);
-        const migration = migrations.current.values.get(key);
-        if (!migration) break;
-        key = sessionKey(migration.to);
-        allowed.add(key);
+    const branches = new Map<string, Set<string>>();
+    for (const migration of migrations.current.values.values()) {
+      const source = sessionKey(migration.from);
+      const targets = branches.get(source) ?? new Set<string>();
+      targets.add(sessionKey(migration.to)); branches.set(source, targets);
+    }
+    // Sibling forks remain independent while the favorites snapshot catches up.
+    const pending = [...allowed];
+    for (let index = 0; index < pending.length; index++) {
+      for (const target of branches.get(pending[index]!) ?? []) {
+        if (allowed.has(target)) continue;
+        allowed.add(target); pending.push(target);
       }
     }
     setSelection(previous => {

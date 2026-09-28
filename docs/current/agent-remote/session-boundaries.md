@@ -98,3 +98,18 @@ The public operation cache retains bounded, explicitly public validation message
 reservation. Arbitrary adapter exceptions are not retained as user-facing text.
 This preserves actionable prompt-edit rejections without changing deduplication
 scope, expiry, or uncertain-outcome handling.
+
+A source conversation may produce multiple prompt-edit branches. A completed edit
+does not retire its source or prevent another edit at the same or an earlier
+prompt. Retries retain an unfinished operation ID; an explicit edit after draft
+restoration gets a new ID, including at the same message. Existing creation
+receipts deduplicate retries within their supported retention scope.
+
+Each `session_migrated` record identifies one operation and its exact source and
+target. `A -> B` followed by `A -> C` creates siblings, not a replacement of B.
+The initiating page follows its requested operation after restoring the draft;
+other pages offer an explicit branch-opening action. Favorites move only when
+still pointing at the source. Track retains sibling edges while reconciling a
+lagging favorites snapshot, so a later fork of A cannot remove or redirect B.
+Persisted Relay state accepts several records for a source while keeping operation
+IDs unique per account. The public event shape remains unchanged.

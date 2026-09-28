@@ -357,3 +357,20 @@ it('persists drag ordering by identity without reconnecting observers or droppin
   await act(async () => tracking.reorder(sessionKey(second), 'missing', 'before'));
   expect(tracking.sessions).toEqual([star, second, hidden]);
 });
+
+it('preserves a tracked branch when its source is forked again and favorites refresh is delayed', async () => {
+  let tracking!: SessionTracking;
+  const transport = {} as RemoteAgentTransport;
+  function Fixture() { tracking = useSessionTracking('alice', transport); return null; }
+  await render(<Fixture />);
+  await act(async () => tracking.toggle(star));
+  const from = { ...star, agentId: 'source' };
+  const to = { ...from, nativeSessionId: 'first', agentId: 'first-agent' };
+  await act(async () => tracking.replace({ id: 'first-edit', from, to, createdAt: 1 }));
+  await act(async () => tracking.replace({ id: 'second-edit', from, to: { ...to, nativeSessionId: 'second', agentId: 'second-agent' }, createdAt: 2 }));
+  expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['first']);
+  await act(async () => tracking.reconcileFavorites({ scope: 'alice', ready: true, stars: [star] }));
+  expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['first']);
+  await act(async () => tracking.reconcileFavorites({ scope: 'alice', ready: true, stars: [{ ...star, nativeSessionId: 'first' }] }));
+  expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['first']);
+});

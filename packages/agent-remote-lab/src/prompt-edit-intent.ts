@@ -17,3 +17,11 @@ export function retainPromptEditReservation(scope: string, value: PromptEditRese
 export function finishPromptEditReservation(scope: string, operationId: string): void {
   try { if (readPromptEditReservation(scope)?.operationId === operationId) conversationSessionStorage.removeItem(storageKey(scope)); } catch { /* The live draft remains usable. */ }
 }
+
+/** Reuse only an unfinished operation; another edit at the same prompt is a new intent. */
+export function beginPromptEditReservation(scope: string, key: string): PromptEditReservation {
+  const pending = readPromptEditReservation(scope);
+  const reservation = pending?.key === key ? pending : { key, operationId: crypto.randomUUID() };
+  retainPromptEditReservation(scope, reservation);
+  return reservation;
+}

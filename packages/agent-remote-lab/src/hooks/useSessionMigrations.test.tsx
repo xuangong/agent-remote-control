@@ -8,7 +8,7 @@ const from = { hostId: 'host', providerId: 'codex', nativeSessionId: 'old', agen
 const to = { ...from, nativeSessionId: 'new', agentId: 'new-agent' };
 const migration: SessionMigration = { id: 'edit', from, to, createdAt: 1 };
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionStorage.clear(); });
-async function fixture(options: { fail?: boolean; block?: boolean; side?: boolean; restore?: boolean } = {}) {
+async function fixture(options: { fail?: boolean; block?: boolean; side?: boolean; restore?: boolean; defer?: boolean } = {}) {
   vi.useFakeTimers();
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ migrations: [] }) }));
   let receive!: (value: SessionMigration) => void;
@@ -17,7 +17,8 @@ async function fixture(options: { fail?: boolean; block?: boolean; side?: boolea
   const apply = vi.fn();
   const stay = vi.fn();
   let requestFollow!: (id: string) => void;
-  const follow = vi.fn(async (target: typeof from) => { if (options.fail) throw new Error('Disconnected'); select(target); return true; });
+  let finish!: () => void;
+  const follow = vi.fn(async (target: typeof from) => { if (options.defer) await new Promise<void>(resolve => { finish = resolve; }); if (options.fail) throw new Error('Disconnected'); select(target); return true; });
   const transport = { onSessionMigration: (listener: typeof receive) => { receive = listener; return () => {}; } } as RemoteAgentTransport;
   function Fixture() {
     const [current, setCurrent] = useState(from); select = setCurrent;
@@ -28,11 +29,11 @@ async function fixture(options: { fail?: boolean; block?: boolean; side?: boolea
     return migrations.notice;
   }
   const view = await render(<Fixture />);
-  return { view, apply, follow, stay, requestFollow: () => act(async () => requestFollow(migration.id)), receive: (value = migration) => act(async () => receive(value)),
+  return { view, apply, follow, stay, finish: () => act(async () => finish()), requestFollow: (id = migration.id) => act(async () => requestFollow(id)), receive: (value = migration) => act(async () => receive(value)),
     select: (value: typeof from) => act(async () => select(value)), unblock: () => { blocked = false; } };
 }
 it('replaces references once, waits five foreground seconds and retains an original-session link', async () => {
-  const f = await fixture(); await f.receive(); await f.receive();
+  const f = await fixture(); await f.receive(); await f.receive(); await f.requestFollow();
   expect(f.apply).toHaveBeenCalledOnce();
   expect(f.view.textContent).toContain('5s');
   await act(async () => vi.advanceTimersByTimeAsync(4750)); expect(f.follow).not.toHaveBeenCalled();
@@ -55,7 +56,7 @@ it('lets an interrupted edit stay in its original session without replaying the 
   expect(JSON.parse(sessionStorage.getItem('arc:prompt-edits:http://localhost/u/alice/')!)).toContain(migration.id);
 });
 it('does not describe temporary navigation pauses as an unfinished prompt edit', async () => {
-  const f = await fixture({ block: true }); await f.receive();
+  const f = await fixture({ block: true }); await f.receive(); await f.requestFollow();
   expect(f.view.textContent).toContain('Automatic switching paused.');
   expect(f.view.textContent).not.toContain('prompt edit');
 });
@@ -67,7 +68,7 @@ it('allows an explicitly retried edit to follow after choosing to stay', async (
   expect(f.follow).toHaveBeenCalledOnce();
 });
 it('pauses during mobile sleep and while the initiating draft is being restored', async () => {
-  const f = await fixture({ block: true }); await f.receive();
+  const f = await fixture({ block: true }); await f.receive(); await f.requestFollow();
   await act(async () => vi.advanceTimersByTimeAsync(10000)); expect(f.follow).not.toHaveBeenCalled();
   f.unblock();
   const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
@@ -82,14 +83,51 @@ it('honors an explicit original-session link while still updating Track and favo
   expect(f.apply).toHaveBeenCalledOnce(); expect(f.follow).not.toHaveBeenCalled();
 });
 it('keeps failures actionable and catches both automatic and manual reconnect failures', async () => {
-  const f = await fixture({ fail: true }); await f.receive();
+  const f = await fixture({ fail: true }); await f.receive(); await f.requestFollow();
   await act(async () => vi.advanceTimersByTimeAsync(5000));
   expect(f.view.textContent).toContain('could not be opened');
   await act(async () => f.view.querySelector('button')!.click());
   expect(f.follow).toHaveBeenCalledTimes(2); expect(f.view.textContent).toContain('Retry');
 });
 it('also follows a migrated session loaded in a secondary window', async () => {
-  const f = await fixture({ side: true }); await f.receive();
+  const f = await fixture({ side: true }); await f.receive(); await f.requestFollow();
   await act(async () => vi.advanceTimersByTimeAsync(5000));
   expect(f.follow).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'new' }), expect.objectContaining({ nativeSessionId: 'old' }));
+});
+
+it('offers another page a branch without changing its active conversation', async () => {
+  const f = await fixture(); await f.receive();
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(f.follow).not.toHaveBeenCalled();
+  const open = [...f.view.querySelectorAll('button')].find(button => button.textContent === 'Open edited branch');
+  expect(open).toBeDefined();
+  await act(async () => open!.click());
+  expect(f.follow).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'new' }), expect.objectContaining({ nativeSessionId: 'old' }));
+});
+it('follows its requested operation even when a sibling branch was received first', async () => {
+  const f = await fixture(); await f.receive();
+  const own = { ...migration, id: 'own-edit', to: { ...to, nativeSessionId: 'own-branch', agentId: 'own-agent' }, createdAt: 2 };
+  await f.receive(own); await f.requestFollow(own.id);
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(f.follow).toHaveBeenCalledOnce();
+  expect(f.follow).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'own-branch' }), expect.objectContaining({ nativeSessionId: 'old' }));
+  await f.receive({ ...migration, id: 'later-edit', to: { ...to, nativeSessionId: 'later-branch' }, createdAt: 3 });
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(f.follow).toHaveBeenCalledOnce();
+});
+it('waits for the requested branch instead of following a previously broadcast sibling', async () => {
+  const f = await fixture(); await f.receive(); await f.requestFollow('own-edit');
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(f.follow).not.toHaveBeenCalled();
+  await f.receive({ ...migration, id: 'own-edit', to: { ...to, nativeSessionId: 'own-branch' } });
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(f.follow).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'own-branch' }), expect.anything());
+});
+
+it('does not reopen a branch when its countdown elapses during a manual attachment', async () => {
+  const f = await fixture({ defer: true }); await f.receive(); await f.requestFollow();
+  await act(async () => [...f.view.querySelectorAll('button')].find(button => button.textContent === 'Open edited branch')!.click());
+  await act(async () => vi.advanceTimersByTimeAsync(6000));
+  expect(f.follow).toHaveBeenCalledOnce();
+  await f.finish();
 });

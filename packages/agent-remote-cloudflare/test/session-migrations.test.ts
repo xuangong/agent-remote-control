@@ -5,7 +5,7 @@ it('commits a prompt fork with favorites, broadcasts to both devices and replays
   const f = await fixture();
   const alice = await f.login('alice'); const second = await f.login('alice'); const bob = await f.login('bob');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
-  const { socket: host, hostId } = await f.host(pairing.key, true);
+  const { socket: host, hostId, key: hostKey } = await f.host(pairing.key, true);
   let creations = 0;
   host.addEventListener('message', message => {
     const frame = JSON.parse(String(message.data));
@@ -13,7 +13,7 @@ it('commits a prompt fork with favorites, broadcasts to both devices and replays
     const input = JSON.parse(frame.body ?? '{}');
     if (frame.path === '/remote/create') { creations++; expect(input).toMatchObject({ editNativeSessionId: 'old', editTurnId: 'turn', editMessageId: 'message' }); }
     send(host, { type: 'rpc_response', requestId: frame.requestId, status: 200,
-      body: JSON.stringify({ agentId: frame.sessionId, nativeSessionId: frame.path === '/remote/create' ? 'new' : input.nativeSessionId }) });
+      body: JSON.stringify({ agentId: frame.sessionId, nativeSessionId: frame.path === '/remote/create' ? (input.operationId === 'edit-1' ? 'new' : 'second-branch') : input.nativeSessionId }) });
   });
   const path = alice.basePath + `v1/remote/hosts/${hostId}/`;
   const attached = await (await f.json(path + 'attach', alice.cookie, { providerId: 'codex', nativeSessionId: 'old' })).json() as { agentId: string };
@@ -35,11 +35,34 @@ it('commits a prompt fork with favorites, broadcasts to both devices and replays
   expect(await (await f.json(alice.basePath + 'v1/stars', second.cookie)).json()).toMatchObject({ stars: [{ title: 'Keep this name', nativeSessionId: 'new' }] });
   expect(await (await f.json(bob.basePath + 'v1/session-migrations', bob.cookie)).json()).toEqual({ migrations: [] });
   expect((await f.json(path + 'create', second.cookie, input)).status).toBe(200); expect(creations).toBe(1);
-  expect((await f.json(path + 'create', second.cookie, { ...input, operationId: 'competing-edit' })).status).toBe(409);
-  expect(creations).toBe(1);
-  await f.restart();
-  expect(await (await f.json(alice.basePath + 'v1/session-migrations', second.cookie)).json()).toMatchObject({ migrations: [{ id: 'edit-1' }] });
+  const another = { ...input, operationId: 'second-edit' };
+  const secondFork = await f.json(path + 'create', second.cookie, another);
+  expect(secondFork.status).toBe(200);
+  expect(await secondFork.json()).toMatchObject({ nativeSessionId: 'second-branch' });
+  expect(creations).toBe(2);
+  expect((await f.json(path + 'create', second.cookie, another)).status).toBe(200);
+  expect(creations).toBe(2);
+  expect((await f.json(path + 'create', second.cookie, { ...another, editMessageId: 'other-message' })).status).toBe(409);
+  for (const index of [0, 1]) await expect.poll(() => received[index]!.filter(item => item.type === 'session_migrated').length).toBe(2);
   expect(await (await f.json(alice.basePath + 'v1/stars', second.cookie)).json()).toMatchObject({ stars: [{ nativeSessionId: 'new' }] });
+  await f.restart();
+  expect(await (await f.json(alice.basePath + 'v1/session-migrations', second.cookie)).json()).toMatchObject({ migrations: [{ id: 'edit-1' }, { id: 'second-edit' }] });
+  expect(await (await f.json(alice.basePath + 'v1/stars', second.cookie)).json()).toMatchObject({ stars: [{ nativeSessionId: 'new' }] });
+  // Recovery requires an online Host, but must reuse the completed creation receipt.
+  expect((await f.json(path + 'create', second.cookie, input)).status).toBe(503);
+  const reconnected = await f.host(hostKey, true);
+  let replayCreations = 0;
+  reconnected.socket.addEventListener('message', message => {
+    const frame = JSON.parse(String(message.data));
+    if (frame.type !== 'rpc_request') return;
+    if (frame.path === '/remote/create') replayCreations++;
+    const request = JSON.parse(frame.body ?? '{}');
+    send(reconnected.socket, { type: 'rpc_response', requestId: frame.requestId, status: 200,
+      body: JSON.stringify({ agentId: frame.sessionId, nativeSessionId: request.nativeSessionId }) });
+  });
+  expect((await f.json(path + 'create', second.cookie, input)).status).toBe(200);
+  expect((await f.json(path + 'create', second.cookie, another)).status).toBe(200);
+  expect(replayCreations).toBe(0);
   const replay = await f.upgrade(alice.basePath + 'v1/session-channel?observation=session&migrations=1', { cookie: second.cookie, origin });
   const replayed: any[] = [];
   replay.addEventListener('message', message => replayed.push(JSON.parse(String(message.data))));

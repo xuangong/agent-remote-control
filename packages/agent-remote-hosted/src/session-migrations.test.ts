@@ -16,7 +16,7 @@ it('atomically migrates only the initiating account favorites and replays once',
   expect(stars.list('alice')[0]?.nativeSessionId).toBe('new');
   expect(stars.list('bob')[0]?.nativeSessionId).toBe('old');
   expect(moves.list('alice')).toEqual([migration]); expect(moves.list('bob')).toEqual([]);
-  expect(() => moves.check('alice', from, 'another')).toThrow(/already edited/);
+  expect(() => moves.check('alice', from, 'another')).not.toThrow();
 });
 it('does not publish or leak a migration when access is missing or storage fails', async () => {
   const state = createRelayState(auth, { commit: async () => { throw new Error('disk'); } }, () => {}, () => {});
@@ -39,4 +39,23 @@ it('preserves the original bookmark identity and placement even if the fork targ
   expect(favorites.list('alice').stars).toHaveLength(1);
   await favorites.execute('alice', { type: 'save-session', session: { ...identity, title: 'Original again' }, folderId: null, revision: 4 });
   expect(new Set(favorites.list('alice').stars.map(star => star.favoriteId)).size).toBe(2);
+});
+
+it('allows independent edits of the same source and preserves the previously selected favorite', async () => {
+  const state = createRelayState(auth, undefined, () => {}, () => {});
+  const stars = createSessionStars(state, () => ({ online: true, hostName: 'Host' }));
+  const { agentId: _, ...identity } = from;
+  await stars.save('alice', { ...identity, title: 'Original' });
+  const moves = createSessionMigrations(state, () => true);
+  await moves.save('alice', migration);
+  const second = { ...migration, id: 'another', to: { ...to, nativeSessionId: 'second', agentId: 'second-agent' }, createdAt: 2 };
+  moves.check('alice', from, second.id);
+  await moves.save('alice', second);
+  await moves.save('alice', second);
+  expect(moves.list('alice')).toEqual([migration, second]);
+  expect(stars.list('alice').map(star => star.nativeSessionId)).toEqual(['new']);
+  const restored = createRelayState(auth, { initial: structuredClone(state.read()), commit: async () => {} }, () => {}, () => {});
+  expect(createSessionMigrations(restored, () => true).list('alice')).toEqual(moves.list('alice'));
+  await expect(moves.save('alice', { ...second, to })).rejects.toThrow(/identity|conflict|branch/);
+  expect(() => moves.check('alice', { ...from, nativeSessionId: 'different' }, second.id)).toThrow(/identity/);
 });

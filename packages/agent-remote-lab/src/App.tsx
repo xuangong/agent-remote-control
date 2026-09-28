@@ -9,7 +9,7 @@ import { conversationLocalStorage, conversationSessionStorage } from './conversa
 import { WorkspaceReady, workspaceFetch, workspaceSocket, readWorkspaceAccess } from './workspace-access.js';
 import { readWorkspaceSnapshot, saveWorkspaceSnapshot } from './workspace-cache.js';
 import { ControllerUpdates } from './components/ControllerUpdates.js';
-import { readPromptEditReservation, retainPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
+import { beginPromptEditReservation, readPromptEditReservation, retainPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
 import { preparePromptDraft, savePromptDraft } from '@orchardworks/agent-remote-web/react';
 import { useSessionMigrations } from './hooks/useSessionMigrations.js';
 import { ReplicaCache } from './replica-cache.js';
@@ -922,12 +922,10 @@ function AppContent({
         resolveResource: sourceClient.resolveResource.bind(sourceClient), requestResource: async binding => (await sourceClient.requestResource(binding.resourceId)).payload.state });
       assertActiveAccount();
       const key = JSON.stringify([sessionKey(source), entry.turnId, item.messageId]);
-      let reservation = promptEditReservation.current?.key === key ? promptEditReservation.current : undefined;
+      let reservation = promptEditReservation.current?.key === key && !promptEditReservation.current.restored ? promptEditReservation.current : undefined;
       if (!reservation) {
-        const storageKey = 'arc:prompt-edit-intent:' + baseUrl + ':' + key;
-        let operationId = crypto.randomUUID() as string;
-        try { const saved = conversationSessionStorage.getItem(storageKey); if (saved && /^[a-f0-9-]{36}$/i.test(saved)) operationId = saved; else conversationSessionStorage.setItem(storageKey, operationId); } catch { /* Preserve the same intent in memory when storage is unavailable. */ }
-        reservation = { key, operationId }; promptEditReservation.current = reservation;
+        reservation = beginPromptEditReservation(baseUrl, key);
+        promptEditReservation.current = reservation;
       }
       retainPromptEditReservation(baseUrl, reservation);
       if (!reservation.target) {

@@ -78,8 +78,7 @@ export function validateRelayState(value: unknown, auth: GatewayAuthOptions): Ho
       const { subject: _, ...migration } = item;
       const decoded = decodeSessionChannelServerMessage(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_migrated', migration }));
       return decoded.status === 'ok' && item.from.hostId === item.to.hostId && item.from.providerId === item.to.providerId && starKey(item.from) !== starKey(item.to);
-    }) || !unique(value.sessionMigrations, (item: SavedSessionMigration) => JSON.stringify([item.subject, item.id]))
-      || !unique(value.sessionMigrations, (item: SavedSessionMigration) => JSON.stringify([item.subject, starKey(item.from)]))) return invalid();
+    }) || !unique(value.sessionMigrations, (item: SavedSessionMigration) => JSON.stringify([item.subject, item.id]))) return invalid();
     const counts = new Map<string, number>();
     for (const item of value.sessionMigrations) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > 1024) return invalid(); counts.set(item.subject, count); }
   }

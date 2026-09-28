@@ -92,7 +92,7 @@ describe('Agent Host runtime', () => {
       }) };
       const result = await host.control(request);
       expect(result.status).toBe(400); expect(JSON.parse(result.body)).toMatchObject({ code: 'operation_rejected', error: 'Only the first prompt of a turn can be edited.' });
-      expect(JSON.parse((await host.control(request)).body).code).toBe('operation_rejected');
+      expect(JSON.parse((await host.control(request)).body)).toMatchObject({ code: 'operation_rejected', error: 'Only the first prompt of a turn can be edited.' });
       expect(validatePromptEdit).toHaveBeenCalledOnce(); expect(codex.createCount()).toBe(0);
     } finally { await host.close(); }
   });

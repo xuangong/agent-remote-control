@@ -39,6 +39,7 @@ export interface OperationCache {
   close(): Promise<void>;
 }
 
+/** Public, sanitized operation failure. Validation messages may be retained for duplicate requests. */
 export class OperationCacheError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
@@ -61,6 +62,7 @@ interface SettledEntry extends EntryBase {
   readonly result?: unknown;
   readonly resultUndefined?: boolean;
   readonly errorCode?: string;
+  readonly errorMessage?: string;
 }
 
 export function createOperationCache(options: OperationCacheOptions = {}): OperationCache {
@@ -104,7 +106,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       if (existing.state === 'unknown') {
         throw unknownOutcome(existing.errorCode);
       }
-      throw new OperationCacheError(existing.errorCode ?? 'operation_rejected', 'The operation was rejected before dispatch.');
+      throw new OperationCacheError(existing.errorCode ?? 'operation_rejected', existing.errorMessage ?? 'The operation was rejected before dispatch.');
     }
 
     const resultReservation = positive(work.maximumResultBytes ?? Math.min(DEFAULT_RESULT_RESERVATION_BYTES, maxResultBytes), 'maximumResultBytes');
@@ -139,8 +141,10 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       await work.validate?.();
       work.beforeDispatch?.();
     } catch (error) {
+      const messageBytes = error instanceof OperationCacheError ? Buffer.byteLength(error.message) : 0;
+      const errorMessage = messageBytes > 0 && messageBytes <= Math.min(1024, resultReservation) ? (error as OperationCacheError).message : undefined;
       settle(key, fingerprint, reservedBytes, {
-        state: 'rejected', errorCode: safeErrorCode(error), bytes: entryBytes(key, 0), settledAt: validNow(now),
+        state: 'rejected', errorCode: safeErrorCode(error), errorMessage, bytes: entryBytes(key, errorMessage ? messageBytes : 0), settledAt: validNow(now),
       });
       throw error;
     }

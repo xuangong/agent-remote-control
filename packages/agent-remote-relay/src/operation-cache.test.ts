@@ -170,3 +170,21 @@ it('retains only adapter-confirmed dispatch rejection as rejected', async () => 
     expect(dispatch).toHaveBeenCalledTimes(1);
   } finally { await cache.close(); }
 }, 10000);
+
+it('replays explicitly public validation reasons without dispatching again', async () => {
+  const cache = createOperationCache();
+  const validate = vi.fn(() => { throw new OperationCacheError('operation_rejected', 'The selected prompt is a mid-turn steer.'); });
+  const dispatch = vi.fn(async () => ({}));
+  try {
+    for (let i = 0; i < 2; i++) await expect(cache.execute(descriptor(), { validate, dispatch })).rejects.toMatchObject({ code: 'operation_rejected', message: 'The selected prompt is a mid-turn steer.' });
+    expect(validate).toHaveBeenCalledOnce(); expect(dispatch).not.toHaveBeenCalled();
+  } finally { await cache.close(); }
+});
+it.each([new Error('private native details'), new OperationCacheError('operation_rejected', 'x'.repeat(1025))])('does not retain arbitrary or oversized validation text', async error => {
+  const cache = createOperationCache();
+  const work = { validate: () => { throw error; }, dispatch: async () => ({}) };
+  try {
+    await expect(cache.execute(descriptor(), work)).rejects.toThrow(error.message);
+    await expect(cache.execute(descriptor(), work)).rejects.toThrow('The operation was rejected before dispatch.');
+  } finally { await cache.close(); }
+});

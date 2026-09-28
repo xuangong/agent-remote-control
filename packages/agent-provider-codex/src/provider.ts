@@ -140,7 +140,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
 
   async validatePromptEdit(target: CodexPromptEditTarget): Promise<void> {
     const transport = await this.createTransport();
-    try { await preparePromptEdit(transport, target, await initializeCodexTransport(transport)); }
+    try { await initializeCodexTransport(transport); await preparePromptEdit(transport, target); }
     catch (error) {
       const mapped = runtimeError(error, this.options.connectionMode === 'shared');
       if (mapped instanceof AgentRuntimeError) throw mapped;

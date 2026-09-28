@@ -80,3 +80,21 @@ Relay starts cache draining and native disposal together. Native session ownersh
 ## Validation scope
 
 Contract tests cover all three real transport compositions, lost receipts, repeated/conflicting operations, authority changes, native-state admission, binding races, native-create success followed by projection failure, shutdown during opening and renderer/live/replay parity. Native-provider certification remains separate and requires supported local CLI versions. No live daemon restart is needed for these tests.
+
+### Codex prompt-edit verification
+
+Prompt editing uses native history and result validation rather than an exact CLI
+version allowlist. The adapter validates the selected initial user message and its
+preceding persisted turn, creates a separate branch, and verifies that the branch
+ends at that preceding turn before publishing it. Editing the first prompt starts
+a fresh session. The original conversation is never rolled back or deleted.
+Missing history capabilities or an unrepresentable prompt reject before creation.
+If native fork ignores the requested boundary, the branch is not published; since
+creation was dispatched, settlement remains unknown and the same intent is not
+automatically executed again. No model turn is started by prompt editing itself.
+
+The public operation cache retains bounded, explicitly public validation messages
+(`OperationCacheError`) for duplicate requests, within the existing result byte
+reservation. Arbitrary adapter exceptions are not retained as user-facing text.
+This preserves actionable prompt-edit rejections without changing deduplication
+scope, expiry, or uncertain-outcome handling.

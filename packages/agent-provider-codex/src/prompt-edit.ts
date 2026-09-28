@@ -4,16 +4,11 @@ import { codexImagePlaceholderLabel } from './message-content.js';
 
 export interface CodexPromptEditTarget { nativeSessionId: string; turnId: string; messageId: string }
 
-/** Resolve the same persisted turn boundary used by the 0.155.1 Esc editor. */
+/** Resolve an editable persisted boundary from native history, independently of CLI version. */
 export async function preparePromptEdit(
   transport: Pick<CodexAppServerTransport, 'request'>,
   target: CodexPromptEditTarget,
-  initialization: unknown,
-): Promise<{ beforeTurnId?: string; cwd?: string; model?: string }> {
-  const userAgent = isRecord(initialization) ? readString(initialization.userAgent) : undefined;
-  if (!userAgent || !/\/0\.155\.1(?:\s|\(|$)/.test(userAgent)) {
-    throw new Error('Prompt editing has not been verified for this Codex app-server version. Use Esc in its matching CLI.');
-  }
+): Promise<{ beforeTurnId?: string; previousTurnId?: string; cwd?: string; model?: string }> {
   const metadata = await transport.request('thread/read', { threadId: target.nativeSessionId, includeTurns: false });
   if (!isRecord(metadata) || !isRecord(metadata.thread) || metadata.thread.id !== target.nativeSessionId) throw new Error('The source conversation is unavailable.');
   const thread = metadata.thread;
@@ -41,7 +36,19 @@ export async function preparePromptEdit(
           && codexImagePlaceholderLabel(part, content[index + 1]) === undefined))) {
         throw new Error('This prompt contains native input bindings that cannot be restored in the web composer. Edit it in the Codex CLI.');
       }
-      return { ...(index + 1 < result.data.length || next ? { beforeTurnId: target.turnId } : {}),
+      let previousTurn = result.data[index + 1];
+      if (!previousTurn && next) {
+        const older = await transport.request('thread/turns/list', {
+          threadId: target.nativeSessionId, limit: 1, sortDirection: 'desc', itemsView: 'full', cursor: next,
+        });
+        if (!isRecord(older) || !Array.isArray(older.data) || older.data.length !== 1
+          || !isRecord(older.data[0]) || !readString(older.data[0].id) || !Array.isArray(older.data[0].items)) {
+          throw new Error('Codex could not verify the preceding turn boundary. Reload before editing.');
+        }
+        previousTurn = older.data[0];
+      }
+      if (previousTurn?.id === target.turnId) throw new Error('Codex prompt history did not advance.');
+      return { ...(previousTurn ? { beforeTurnId: target.turnId, previousTurnId: previousTurn.id as string } : {}),
         ...(readString(thread.cwd) ? { cwd: readString(thread.cwd) } : {}),
         ...(readString(metadata.model) ? { model: readString(metadata.model) } : {}) };
     }

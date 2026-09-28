@@ -440,7 +440,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           try { await directory.validatePromptEdit?.({ nativeSessionId: settings.editNativeSessionId!, turnId: settings.editTurnId!, messageId: settings.editMessageId! }); }
           catch (error) {
             if (error instanceof HostExecutionPolicyError || error instanceof AgentRuntimeError) throw error;
-            throw new HostRequestError(400, 'operation_rejected', error instanceof Error ? error.message : 'The selected prompt could not be verified.');
+            throw new OperationCacheError('operation_rejected', error instanceof Error ? error.message : 'The selected prompt could not be verified.');
           }
         }
         if (bindings.isReserved(proposedAgentId)) {

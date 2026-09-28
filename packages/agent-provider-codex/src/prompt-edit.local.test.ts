@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerProvider } from './provider.js';
 
-it.runIf(!!process.env.ARC_PROMPT_EDIT_TEST_EXECUTABLE)('matches 0.155.1 Esc with a real isolated native runtime and preserves the original thread', async () => {
+it.runIf(!!process.env.ARC_PROMPT_EDIT_TEST_EXECUTABLE)('verifies native prompt-edit boundaries and preserves the original thread', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'arc-prompt-edit-'));
   let requests = 0;
   const server = createServer((request, response) => {
@@ -33,7 +33,7 @@ it.runIf(!!process.env.ARC_PROMPT_EDIT_TEST_EXECUTABLE)('matches 0.155.1 Esc wit
     const source = await provider.createSession({ sessionId: 'test', cwd: directory }); sessions.push(source);
     const stream = source.observe()[Symbol.asyncIterator](); await stream.next();
     const prompts: Array<{ turnId: string; messageId: string }> = [];
-    for (const text of ['Keep this prompt', 'Edit this prompt']) {
+    for (const text of ['Keep this prompt', 'Edit this prompt', 'Discard this later prompt']) {
       await source.sendMessage(text);
       for (;;) {
         const next = await stream.next(); if (next.done) throw new Error('Runtime ended');
@@ -45,6 +45,7 @@ it.runIf(!!process.env.ARC_PROMPT_EDIT_TEST_EXECUTABLE)('matches 0.155.1 Esc wit
       }
     }
     const persistence = (await source.runtimeInfo()).persistence!;
+    await provider.validatePromptEdit({ nativeSessionId: persistence.sessionId, ...prompts[1]! });
     const fork = await provider.forkForPromptEdit({ nativeSessionId: persistence.sessionId, ...prompts[1]! }); sessions.push(fork);
     expect((await fork.runtimeInfo()).sessionId).not.toBe(persistence.sessionId);
     const texts: string[] = [];
@@ -62,8 +63,8 @@ it.runIf(!!process.env.ARC_PROMPT_EDIT_TEST_EXECUTABLE)('matches 0.155.1 Esc wit
       if (value.type === 'history_boundary') break;
       if (value.event.type === 'timeline' && value.event.item.type === 'user_message') originalTexts.push(value.event.item.text);
     }
-    expect(originalTexts).toEqual(['Keep this prompt', 'Edit this prompt']);
-    expect(requests).toBe(2);
+    expect(originalTexts).toEqual(['Keep this prompt', 'Edit this prompt', 'Discard this later prompt']);
+    expect(requests).toBe(3);
   } finally {
     await Promise.allSettled(sessions.map(session => session.dispose()));
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));

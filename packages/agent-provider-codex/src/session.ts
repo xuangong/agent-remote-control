@@ -396,8 +396,8 @@ export class CodexAppServerSession implements AgentSession {
     recoveryPlan?: CodexSharedRecoveryPlan,
   ): Promise<CodexAppServerSession> {
     const session = new CodexAppServerSession(transport, {}, codexHome, undefined, restrictedNative, recoveryPlan);
-    const initialization = await session.initialize();
-    const boundary = await preparePromptEdit(transport, target, initialization);
+    await session.initialize();
+    const boundary = await preparePromptEdit(transport, target);
     const response = await transport.request(boundary.beforeTurnId ? 'thread/fork' : 'thread/start', {
       ...(boundary.beforeTurnId ? { threadId: target.nativeSessionId, beforeTurnId: boundary.beforeTurnId, excludeTurns: true } : {}),
       ...(boundary.cwd ? { cwd: boundary.cwd } : {}),
@@ -408,6 +408,11 @@ export class CodexAppServerSession implements AgentSession {
     if (session.threadId === target.nativeSessionId) throw new Error('Codex did not create an independent prompt-edit branch.');
     if (!boundary.beforeTurnId) { session.finishBootstrap([], new Map()); return session; }
     const history = await readCodexHistoryPage(transport, session.threadId!, { metadata: response });
+    // Unknown native versions may ignore optional fork fields. Verify the actual result before exposing it.
+    const turns = history.thread.turns;
+    if (!Array.isArray(turns) || turns.at(-1)?.id !== boundary.previousTurnId) {
+      throw new Error('Codex did not confirm the prompt-edit boundary. The source was not modified; inspect the new branch before retrying.');
+    }
     session.olderHistoryCursor = history.historyCursor;
     session.runtime.inspectHistory(session.threadId!, history);
     session.finishBootstrap(

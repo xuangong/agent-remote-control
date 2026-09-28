@@ -73,6 +73,8 @@ export interface AgentRuntimeInfo {
   providerId: string;
   sessionId: string | null;
   status: 'starting' | 'idle' | 'running' | 'waiting' | 'failed' | 'closed';
+  /** Native evidence explaining the current failed state; omitted when unknown or no longer failed. */
+  failure?: { message: string; turnId?: string };
   cwd?: string;
   model?: string | null;
   mode?: string | null;

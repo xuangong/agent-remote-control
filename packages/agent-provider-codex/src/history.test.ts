@@ -60,3 +60,12 @@ describe('projectCodexThreadHistory', () => {
     expect(event.item.message.length).toBeLessThanOrEqual(640);
   });
 });
+
+it('preserves failed turn reasons as historical errors without replaying lifecycle state', () => {
+  const history = projectCodexThreadHistory({ thread: { id: 'thread-1', turns: [
+    { id: 'failed', status: 'failed', completedAt: 2, error: { message: 'Encrypted output could not be decoded.' }, items: [] },
+    { id: 'completed', status: 'completed', completedAt: 3, error: null, items: [] },
+  ] } }, 'thread-1');
+  expect(history).toEqual([expect.objectContaining({ sourceKey: 'turn:failed:error', delivery: 'history', occurredAt: 2000,
+    event: { type: 'timeline', provider: 'codex', turnId: 'failed', item: { type: 'error', message: 'Encrypted output could not be decoded.' } } })]);
+});

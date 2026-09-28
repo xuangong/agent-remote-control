@@ -166,6 +166,7 @@ export class CodexEventProjector {
     if (method === 'error' && isRecord(params)) {
       const message = readErrorMessage(params.error) ?? readString(params.message);
       if (!message) return this.invalidNotification(method, params, turnId);
+      if (turnId && params.willRetry === false) return this.projectTurnFailure(message, turnId);
       return this.observation(`error:${turnId ?? this.threadId}:${message}`, {
         type: 'timeline', provider: PROVIDER_ID, turnId,
         item: { type: 'error', message },
@@ -320,6 +321,12 @@ export class CodexEventProjector {
     });
   }
 
+  projectTurnFailure(message: string, turnId: string, occurredAt?: number): ProviderObservation {
+    return this.observation(`turn:${turnId}:error`, {
+      type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'error', message: message.trim() || 'Codex turn failed without an error detail.' },
+    }, occurredAt);
+  }
+
   private projectTurnCompleted(
     params: unknown,
     turnId: string | undefined,
@@ -331,7 +338,7 @@ export class CodexEventProjector {
     if (status === 'failed') {
       return this.observation(`turn:${id}:failed`, {
         type: 'turn_failed', provider: PROVIDER_ID, turnId: id,
-        error: readErrorMessage(params.turn.error) ?? 'Codex turn failed',
+        error: readErrorMessage(params.turn.error)?.trim() || 'Codex turn failed without an error detail.',
       });
     }
     if (status === 'interrupted') {

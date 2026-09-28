@@ -289,3 +289,20 @@ The resource side may revoke its own access grant. Only the Agent Owner may sele
 ## Composer message delivery
 
 Ordinary send means immediate input: start work when idle, or supplement active work through native steering. The Provider resolves the state at delivery time. A separate busy-state action requests next-turn delivery only when the Provider exposes a native follow-up queue. Remote does not manufacture a queue for an adapter whose native API lacks it. Explicit next-turn intent remains next-turn intent when the current turn ends during submission. Native acceptance, pending input, and consumed input are distinct states; a send acknowledgement does not assert consumption. Only definite native non-delivery may permit a safe fallback, while uncertain failures retain the draft and do not automatically resubmit.
+
+### Native failure evidence
+
+`AgentRuntimeInfo.failure` optionally carries `{ message, turnId? }` explaining the
+current native `failed` state. Adapters supply native evidence and omit it when
+unknown or when the runtime is no longer failed. A historical failure must not
+be used to infer current execution state. The public snapshot and runtime update
+preserve this field across reconnects; `lastError` remains the last observed turn
+failure, not the authority for a newly restored native failure.
+
+Codex projects failed-turn errors into timeline error items with the stable key
+`turn:<turnId>:error` for both live delivery and history. Its current failure
+reason comes only from the latest native turn (or a native transport failure).
+Loading older history does not replace current failure evidence. Session View
+shows failures inline, retains errors in content-only mode, and avoids repeating
+a native failure in a transient toast or a second inline notice when its matching
+timeline error is already loaded.

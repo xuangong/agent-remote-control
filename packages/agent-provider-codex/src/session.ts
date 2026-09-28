@@ -34,7 +34,7 @@ import { mapCodexPermissions } from './permissions.js';
 import { mapCodexToolApproval } from './tool-approval.js';
 import { CodexAppServerRpcError, CodexAppServerTransport, CodexServerRequestCanceled } from './app-server-transport.js';
 import { readCodexHistoryPage } from '@orchardworks/codex-daemon-client';
-import { collectCodexThreadHistoryItems, projectCodexThreadHistory } from './history.js';
+import { collectCodexThreadHistoryItems, latestCodexTurnFailure, projectCodexThreadHistory } from './history.js';
 import { CodexImageRegistry } from './images.js';
 import { isRecord, readItem, readItemId, readString } from './native.js';
 import { CodexEventProjector } from './projector.js';
@@ -114,6 +114,7 @@ export class CodexAppServerSession implements AgentSession {
   private released = false;
   private transportFailure: Error | undefined;
   private runtimeStatus: AgentRuntimeInfo['status'] = 'starting';
+  private latestFailure: AgentRuntimeInfo['failure'];
   private runtimeRevision = 0;
   private statusRevision = 0;
   private nativeTurnRevision = 0;
@@ -251,6 +252,7 @@ export class CodexAppServerSession implements AgentSession {
     child.acceptsDirectInput = thread.canAcceptDirectInput === true && readThreadRuntimeStatus(thread.status) !== 'closed';
     child.refreshInputCapabilities();
     child.runtimeStatus = readThreadRuntimeStatus(thread.status) ?? 'starting';
+    child.latestFailure = latestCodexTurnFailure(history);
     if (child.runtimeStatus === 'closed') child.disableInteractions();
     if (Array.isArray(thread.turns)) {
       const active = [...thread.turns].reverse().find((turn) => isRecord(turn) && turn.status === 'inProgress');
@@ -466,6 +468,7 @@ export class CodexAppServerSession implements AgentSession {
       session.activeTurnId = isRecord(active) ? readString(active.id) : undefined;
       session.runtimeStatus = readThreadRuntimeStatus(thread.status)
         ?? (session.activeTurnId ? 'running' : session.runtimeStatus);
+      session.latestFailure = latestCodexTurnFailure(history);
     }
     session.runtime.inspectHistory(handle.sessionId, history);
     session.finishBootstrap(
@@ -766,6 +769,7 @@ export class CodexAppServerSession implements AgentSession {
       providerId: PROVIDER_ID,
       sessionId: this.threadId ?? null,
       status: this.runtimeStatus,
+      ...(this.runtimeStatus === 'failed' && this.latestFailure ? { failure: { ...this.latestFailure } } : {}),
       ...(this.runtime.connectionInfo() ? { connection: this.runtime.connectionInfo() } : {}),
       childSessions: this.threadId ? this.runtime.childSessions(this.threadId) : [],
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
@@ -887,6 +891,10 @@ export class CodexAppServerSession implements AgentSession {
       const observation = this.projector.projectNotification(raw.method, raw.params);
       if (observation) this.applyTurnObservation(observation);
       if (observation && !historyKeys.has(observation.sourceKey)) this.preReadyEvents.push(observation);
+      if (observation?.event.type === 'turn_failed' && observation.event.turnId) {
+        const failure = this.projector.projectTurnFailure(observation.event.error, observation.event.turnId, observation.occurredAt);
+        if (!historyKeys.has(failure.sourceKey)) this.preReadyEvents.push(failure);
+      }
     }
     this.bufferedNotifications.length = 0;
     if (replacement) {
@@ -912,6 +920,7 @@ export class CodexAppServerSession implements AgentSession {
     this.olderHistoryCursor = readString(snapshot.historyCursor);
     const status = readThreadRuntimeStatus(snapshot.thread.status);
     if (status) this.runtimeStatus = status;
+    this.latestFailure = latestCodexTurnFailure(snapshot);
     this.acceptsDirectInput = snapshot.thread.canAcceptDirectInput === true && this.runtimeStatus !== 'closed';
     this.activeTurnId = undefined;
     if (Array.isArray(snapshot.thread.turns)) {
@@ -950,6 +959,9 @@ export class CodexAppServerSession implements AgentSession {
     if (!observation) return;
     this.applyTurnObservation(observation);
     this.emit(observation);
+    if (observation.event.type === 'turn_failed' && observation.event.turnId) {
+      this.emit(this.projector.projectTurnFailure(observation.event.error, observation.event.turnId, observation.occurredAt));
+    }
     if (['turn_started', 'turn_completed', 'turn_failed', 'turn_canceled'].includes(observation.event.type)) this.emitRuntimeUpdate();
     if (this.threadId) this.runtime.sessionChanged(this.threadId);
     if ((observation.event.type === 'turn_canceled' || observation.event.type === 'turn_failed') && observation.event.turnId) {
@@ -977,6 +989,7 @@ export class CodexAppServerSession implements AgentSession {
       this.nativeTurnRevision += 1;
     }
     if (observation.event.type === 'turn_started') {
+      this.latestFailure = undefined;
       this.activeTurnId = observation.event.turnId;
       this.statusRevision += 1;
       this.runtimeStatus = 'running';
@@ -987,6 +1000,8 @@ export class CodexAppServerSession implements AgentSession {
       || observation.event.type === 'turn_canceled'
     ) {
       if (this.activeTurnId && observation.event.turnId !== this.activeTurnId) return;
+      this.latestFailure = observation.event.type === 'turn_failed'
+        ? { message: observation.event.error, ...(observation.event.turnId ? { turnId: observation.event.turnId } : {}) } : undefined;
       this.statusRevision += 1;
       this.runtimeStatus = 'idle';
       this.activeTurnId = undefined;
@@ -1144,6 +1159,7 @@ export class CodexAppServerSession implements AgentSession {
   private handleTransportTermination(error: Error): void {
     if (this.disposed || this.transportFailure) return;
     this.transportFailure = error;
+    this.latestFailure = { message: error.message };
     this.notifyRuntimeClosed();
     this.images?.stop();
     this.runtimeStatus = 'failed';

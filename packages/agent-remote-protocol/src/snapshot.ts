@@ -82,6 +82,7 @@ export const AgentRuntimeInfo = Strict({
   providerId: NonEmptyString,
   sessionId: Type.Union([NonEmptyString, Type.Null()]),
   status: AgentStatus,
+  failure: Type.Optional(Strict({ message: NonEmptyString, turnId: Type.Optional(NonEmptyString) })),
   cwd: Type.Optional(NonEmptyString),
   model: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   mode: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),

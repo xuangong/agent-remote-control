@@ -36,7 +36,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
     <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
       resources={resources} resourceBindings={entry.resources} resourceScopeKey={scopeKey}
       onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
-    {previews && agentId && isContentOnlyItem(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}
+    {previews && agentId && entry.item.type !== 'error' && isContentOnlyItem(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}
     {!contentOnly ? <>
       {extension}
       <ResourceList bindings={entry.resources} resources={resources} onRequest={onResourceRequest} />
@@ -69,4 +69,3 @@ function toolDetailText(detail: Extract<AgentReplicaState['timeline']['entries']
     case 'other': return detail.description;
   }
 }
-

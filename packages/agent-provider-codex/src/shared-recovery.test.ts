@@ -1002,3 +1002,26 @@ it.each(['normal', 'ancestor', 'malformed', 'parentage'] as const)('defers neste
   expect(await provider.reconcileIdleSession('root')).toBe(true);
   expect(provider.canReleaseSession('root')).toBe(true);
 });
+
+it('restores failed turn detail once per replacement and never promotes an older failure to current state', async () => {
+  const { server, session, iterator } = await harness();
+  server.thread.status = { type: 'systemError' };
+  server.thread.turns = [{ id: 'failed', status: 'failed', error: { message: 'Native failure detail' }, completedAt: 2, items: [] }];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    server.disconnectClients();
+    const replacement = await nextItem(iterator, 'timeline_replacement');
+    expect(replacement).toMatchObject({ type: 'timeline_replacement', observations: [
+      { sourceKey: 'turn:failed:error', event: { type: 'timeline', turnId: 'failed', item: { type: 'error', message: 'Native failure detail' } } },
+    ] });
+    if (replacement.type !== 'timeline_replacement') throw new Error('Expected replacement');
+    expect(replacement.observations).toHaveLength(1);
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+    expect(await session.runtimeInfo()).toMatchObject({ status: 'failed', failure: { message: 'Native failure detail', turnId: 'failed' } });
+  }
+  server.thread.turns.push({ id: 'newer', status: 'completed', items: [] });
+  server.disconnectClients();
+  await nextItem(iterator, 'timeline_replacement');
+  await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+  expect((await session.runtimeInfo()).status).toBe('failed');
+  expect((await session.runtimeInfo()).failure).toBeUndefined();
+});

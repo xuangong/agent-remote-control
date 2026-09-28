@@ -1,8 +1,8 @@
 import { readThread } from '@orchardworks/codex-daemon-client';
 export { collectCodexThreadHistoryItems } from '@orchardworks/codex-daemon-client';
-import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
+import type { AgentRuntimeInfo, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 
-import { isRecord, readNumber, readString } from './native.js';
+import { isRecord, readErrorMessage, readNumber, readString } from './native.js';
 import { CodexEventProjector, type CodexEventProjectorOptions } from './projector.js';
 
 export function projectCodexThreadHistory(
@@ -29,8 +29,21 @@ export function projectCodexThreadHistory(
       );
       if (observation) observations.push(observation);
     }
+    if (value.status === 'failed' && turnId) {
+      observations.push(projector.projectTurnFailure(readErrorMessage(value.error)?.trim() || 'Codex turn failed without an error detail.', turnId, completedAt));
+    }
   }
   return observations;
+}
+
+/** Only the latest turn can explain the current failure; older failures remain timeline history. */
+export function latestCodexTurnFailure(response: unknown): AgentRuntimeInfo['failure'] {
+  if (!isRecord(response) || !isRecord(response.thread) || !Array.isArray(response.thread.turns)) return undefined;
+  const turn: unknown = response.thread.turns.at(-1);
+  if (!isRecord(turn) || turn.status !== 'failed') return undefined;
+  const message = readErrorMessage(turn.error)?.trim();
+  const turnId = readString(turn.id);
+  return message ? { message, ...(turnId ? { turnId } : {}) } : undefined;
 }
 
 function secondsToMilliseconds(value: number | undefined): number | undefined {

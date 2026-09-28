@@ -190,7 +190,7 @@ describe('LabWorkbench', () => {
 
   it.each([
     ['Provider observation stream failed.', 'Provider observation stream failed.'],
-    [undefined, 'The Agent did not provide a failure reason.'],
+    [undefined, 'The Agent reported a failed runtime without error details.'],
   ])('alerts with the failed Agent reason while retaining Timeline', async (lastError, expectedReason) => {
     const agent = replicaState.agent;
     if (!agent) throw new Error('The Workbench fixture requires an Agent Snapshot.');
@@ -404,4 +404,29 @@ it('renders shared handoff recovery after the notice remounts without owning ret
   expect(container.textContent).toContain('Restoring session');
   expect(calls).toEqual([false, true]);
   await act(async () => finish());
+});
+
+it('shows a restored native failure inline without a runtime toast or duplicate historical error', async () => {
+  const reason = 'Encrypted function output content could not be decrypted or decoded.';
+  const agent = replicaState.agent!;
+  const state = { ...replicaState, agent: { ...agent, status: 'failed' as const,
+    runtimeInfo: { ...agent.runtimeInfo, status: 'failed' as const, failure: { message: reason, turnId: 'failed-turn' } } },
+    timeline: { ...replicaState.timeline, entries: [{ providerId: 'codex', turnId: 'failed-turn', seqStart: 1, seqEnd: 1,
+      timestamp: '2026-09-28T00:00:00Z', sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
+      item: { type: 'error' as const, message: reason } }] } };
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" actions={{}} /></ToastProvider>);
+  expect(container.querySelector('[aria-label="Agent timeline"]')?.textContent).toContain(reason);
+  expect(container.querySelectorAll('.agent-error')).toHaveLength(1);
+  expect(container.querySelector('.lab-timeline-scroll .lab-error')).toBeNull();
+  expect(document.querySelector('.lab-toast')).toBeNull();
+  expect(container.textContent).not.toContain('The Agent did not provide a failure reason.');
+});
+
+it('shows native failure evidence inline when its timeline page is not loaded', async () => {
+  const agent = replicaState.agent!;
+  const state = { ...replicaState, agent: { ...agent, status: 'failed' as const,
+    runtimeInfo: { ...agent.runtimeInfo, status: 'failed' as const, failure: { message: 'Native failure detail', turnId: 'failed-turn' } } } };
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" actions={{}} /></ToastProvider>);
+  expect(container.querySelector('.lab-timeline-scroll [role="alert"]')?.textContent).toContain('Native failure detail');
+  expect(document.querySelector('.lab-toast')).toBeNull();
 });

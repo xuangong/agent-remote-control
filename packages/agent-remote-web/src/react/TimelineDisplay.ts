@@ -8,7 +8,7 @@ const planTools = new Set(['update_plan', 'TodoWrite', 'todo_write', 'EnterPlanM
 
 /** Content includes requirements, plans, progress, and user decisions. */
 export function isContentOnlyItem(item: AgentTimelineItem): boolean {
-  if (item.type === 'user_message' || item.type === 'assistant_message' || item.type === 'todo' || item.type === 'interaction') return true;
+  if (item.type === 'user_message' || item.type === 'assistant_message' || item.type === 'todo' || item.type === 'interaction' || item.type === 'error') return true;
   return item.type === 'tool_call' && planTools.has(item.name.split('.').at(-1) ?? item.name);
 }
 

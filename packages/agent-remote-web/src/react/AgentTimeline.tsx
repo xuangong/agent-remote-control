@@ -82,6 +82,21 @@ export function AgentTimeline({
   const inspectEntry = useTimelineAction(scopeKey, onInspectEntry);
   const resolveResource = useTimelineAction(scopeKey, onResourceResolve);
   const requestResource = useTimelineAction(scopeKey, onResourceRequest);
+  const editablePrompts = useMemo(() => {
+    const prompts = new Set<import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry>();
+    const turns = new Set<string>();
+    // Inspect the unfiltered timeline: hidden activity still proves a prompt is mid-turn.
+    for (const entry of state.timeline.entries) {
+      if (!entry.turnId) continue;
+      const turn = JSON.stringify([entry.providerId, entry.turnId]);
+      if (turns.has(turn)) continue;
+      const incompleteBoundary = state.timeline.hasOlder && turns.size === 0;
+      turns.add(turn);
+      // The first loaded turn may start on an older page. Keep its edit action hidden until known.
+      if (!incompleteBoundary && entry.item.type === 'user_message' && entry.item.messageId) prompts.add(entry);
+    }
+    return prompts;
+  }, [state.timeline.entries, state.timeline.hasOlder]);
   const entries = useMemo(() => contentOnly ? state.timeline.entries.filter(({ item }) => isContentOnlyItem(item)) : state.timeline.entries, [contentOnly, state.timeline.entries]);
   const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
@@ -135,7 +150,7 @@ export function AgentTimeline({
         : renderModel.map(({ entry, key, messageGroup }) => <ConversationEntry key={key} entry={entry} entryKey={key}
             messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
             scopeKey={scopeKey} resources={state.resources}
-            onEditPrompt={entry.item.type === 'user_message' ? editPrompt : undefined}
+            onEditPrompt={editablePrompts.has(entry) ? editPrompt : undefined}
             onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}
             resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
             onResourceResolve={resolveResource} onResourceRequest={requestResource}

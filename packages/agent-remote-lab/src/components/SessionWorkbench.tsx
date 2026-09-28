@@ -54,9 +54,12 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
   const connectionFailure = sessionStatus === 'connecting'
     ? state?.diagnostics.find((diagnostic) => !diagnostic.recoverable)
     : undefined;
+  const nativeFailure = state?.agent?.runtimeInfo.failure;
   const agentFailure = state?.agent?.status === 'failed'
-    ? state.agent.lastError?.trim() || 'The Agent did not provide a failure reason.'
+    ? nativeFailure?.message.trim() || state.agent.lastError?.trim() || 'The Agent reported a failed runtime without error details.'
     : undefined;
+  const failureInTimeline = !!nativeFailure?.turnId && state?.timeline.entries.some(entry =>
+    entry.turnId === nativeFailure.turnId && entry.item.type === 'error' && entry.item.message === nativeFailure.message);
   const runtimeConnection = session.runtime;
   const runtimeMutationDisabled = !session.operations.interaction_response.allowed;
   const runtimeNotice = runtimeConnection?.state === 'reconnecting'
@@ -66,12 +69,12 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
       : runtimeConnection?.state === 'unavailable'
         ? 'Native runtime is unavailable. Changes are unavailable.'
         : undefined;
-  const runtimeError = agentFailure ?? connectionFailure?.message
+  const runtimeError = connectionFailure?.message
     ?? (runtimeConnection?.state === 'unavailable' ? runtimeNotice : undefined);
   const recoveryNoticeDue = useRecoveryNotice(
     draftSessionKey ?? attachingAgentId ?? state?.agent?.id ?? '', sessionStatus,
     runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring',
-    visible && !readOnly && !runtimeError,
+    visible && !readOnly && !runtimeError && !agentFailure,
   );
   useFeedbackToast('Session runtime', visible && !readOnly ? runtimeError
     ?? (recoveryNoticeDue ? runtimeNotice ?? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
@@ -107,7 +110,7 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
     <WorkbenchTimeline nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
-      agentFailure={agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
+      agentFailure={failureInTimeline ? undefined : agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
       questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} />
     <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover} data-collapsed={composerHidden || undefined}>

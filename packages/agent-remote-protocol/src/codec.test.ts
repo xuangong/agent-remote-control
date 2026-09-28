@@ -653,3 +653,13 @@ it('round-trips an activity content cursor and rejects invalid cursor values', (
     expect(decodeServerMessage(JSON.stringify({ ...message, payload: { ...message.payload, cursor } })).status).toBe('rejected');
   }
 });
+
+it('round-trips native failure evidence independently of historical lastError', () => {
+  const failed = { ...snapshot, payload: { ...snapshot.payload, status: 'failed' as const,
+    runtimeInfo: { ...snapshot.payload.runtimeInfo, status: 'failed' as const,
+      failure: { message: 'Native request failed', turnId: 'failed-turn' } } } };
+  const encoded = encodeAgentSnapshot(failed);
+  expect(encoded.status).toBe('ok');
+  if (encoded.status !== 'ok') throw new Error('Expected a valid failure snapshot');
+  expect(decodeAgentSnapshot(encoded.json)).toEqual({ status: 'ok', value: failed });
+});

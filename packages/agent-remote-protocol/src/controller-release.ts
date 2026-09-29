@@ -1,5 +1,4 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { PROTOCOL_VERSION } from './version.js';
 import { Value } from '@sinclair/typebox/value';
 const object = { additionalProperties: false } as const;
 export const CONTROLLER_REPOSITORY = 'xuangong/agent-remote-control';
@@ -29,7 +28,8 @@ export function compareControllerVersions(a: string, b: string): number {
   return 0;
 }
 export function releaseCoversHost(release: ControllerRelease, host: Pick<ControllerIdentity, 'platform' | 'arch' | 'nodeMajor'>): boolean {
-  return release.protocolVersion === PROTOCOL_VERSION && host.nodeMajor >= release.nodeMajor && release.platforms.includes(`${host.platform}-${host.arch}`);
+  // Installation compatibility is independent of the running session protocol.
+  return host.nodeMajor >= release.nodeMajor && release.platforms.includes(`${host.platform}-${host.arch}`);
 }
 export type ControllerUpdatePhase = 'idle' | 'downloading' | 'waiting' | 'restarting' | 'succeeded' | 'failed';
 export interface ControllerUpdateStatus { phase: ControllerUpdatePhase; version?: string; operationId?: string; message?: string; updatedAt: number }

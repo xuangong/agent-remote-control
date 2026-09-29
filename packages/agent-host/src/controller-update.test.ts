@@ -156,3 +156,16 @@ it('clean install activates fresh files immediately even for the current version
     expect((await updater.status()).phase).toBe('restarting');
   } finally { await updater.close(); }
 });
+
+it('installs across a session protocol change while retaining platform checks', async () => {
+  const stateDir = await directory();
+  const restart = vi.fn();
+  const updater = createControllerUpdater({ stateDir, identity,
+    release: async () => ({ ...release, protocolVersion: '1.6.0' }),
+    install: async () => {}, beginRestart: () => true, restart });
+  try {
+    await updater.request(release.version, 'protocol-upgrade');
+    await expect.poll(async () => (await updater.status()).phase).toBe('restarting');
+    expect(restart).toHaveBeenCalledWith(release.version);
+  } finally { await updater.close(); }
+});

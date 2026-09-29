@@ -23,7 +23,7 @@ export async function runControllerUpdate(args: string[], options: {
   const compatible = identity.remoteUpdate && !!release && releaseCoversHost(release, identity);
   const available = compatible && compareControllerVersions(release.version, identity.version) > 0;
   const canClean = info.cleanInstall === true && compatible && compareControllerVersions(release.version, identity.version) >= 0;
-  const message = !identity.remoteUpdate ? 'This Controller needs a published stable launcher before it can update.' : available ? undefined : 'No compatible newer release for this Controller platform, Node runtime and protocol.';
+  const message = !identity.remoteUpdate ? 'This Controller needs a published stable launcher before it can update.' : available ? undefined : 'No compatible newer release for this Controller platform and Node runtime.';
   if (check) {
     options.print(JSON.stringify({ current: identity.version, version: release?.version, available, canClean, message }) + '\n');
     return;

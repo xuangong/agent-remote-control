@@ -18,7 +18,7 @@ export function CommunicationLetter({ entry, resourceContext }: { entry: Project
     if (!navigation || inFlight.current) return;
     inFlight.current = true; setPending(true); setFailure(undefined);
     try { await navigation.open(entry); }
-    catch (error) { setFailure(error instanceof Error ? error.message : 'The receiving session could not be opened.'); }
+    catch (error) { setFailure(error instanceof Error ? error.message : 'The linked session could not be opened.'); }
     finally { inFlight.current = false; setPending(false); }
   }
   return <div className="agent-letter-position"><article className="agent-communication-letter" aria-label="Agent communication" data-direction={direction} aria-busy={pending}
@@ -29,7 +29,7 @@ export function CommunicationLetter({ entry, resourceContext }: { entry: Project
     }}>
     <header className="agent-letter-heading">
       <button type="button" className="agent-letter-open" disabled={!navigation || pending} onClick={() => void open()}
-        aria-label={`Open letter from ${item.sender} to ${item.recipient}`} title="Go to the receiving session at this message">
+        aria-label={`Open letter from ${item.sender} to ${item.recipient}`} title="Go to the linked session at this message">
         <svg className="agent-letter-envelope" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></svg>
         <span className="agent-letter-participants">{item.sender} → {item.recipient}</span>
         {direction ? <span className="agent-letter-direction" aria-label={`Recipient on the ${direction}`}>{direction === 'left' ? '←' : '→'}</span> : null}
@@ -37,7 +37,7 @@ export function CommunicationLetter({ entry, resourceContext }: { entry: Project
       <time dateTime={entry.timestamp} title={time ? `${time.date} ${time.time}` : entry.timestamp}>{time?.time ?? entry.timestamp}</time>
     </header>
     <div className="agent-letter-body"><MarkdownContent markdown={item.text} resourceContext={resourceContext} /></div>
-    {pending ? <small role="status">Opening receiving session…</small> : null}
+    {pending ? <small role="status">Opening linked session…</small> : null}
     {failure ? <small role="alert">{failure}</small> : null}
   </article></div>;
 }

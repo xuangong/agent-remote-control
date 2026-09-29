@@ -53,31 +53,31 @@ export function communicationDirection(recipient: SessionEntry | undefined, sour
   if (from < 0 || to < 0 || Math.abs(from - to) !== 1) return;
   return to < from ? 'left' : 'right';
 }
-export function findReceivedCommunication(state: AgentReplicaState, entry: ProjectedTimelineEntry): ProjectedTimelineEntry | undefined {
+export function findSessionCommunication(state: AgentReplicaState, entry: ProjectedTimelineEntry, endpoint: 'sender' | 'recipient' = 'recipient'): ProjectedTimelineEntry | undefined {
   const message = entry.item;
   if (message.type !== 'agent_communication') return;
-  return state.timeline.entries.find(record => record.turnId && record.item.type === 'agent_communication'
+  return state.timeline.entries.find(record => (endpoint === 'recipient' ? !!record.turnId : !record.turnId) && record.item.type === 'agent_communication'
     && record.item.messageId === message.messageId && record.item.sender === message.sender && record.item.recipient === message.recipient);
 }
 
-/** Load by native message identity, preserving receiver order even when timestamps coincide. */
-export async function loadReceivedCommunication(
+/** Load by native message identity, preserving local timeline order even when timestamps coincide. */
+export async function loadSessionCommunication(
   connection: { client: import('@orchardworks/agent-remote-web').RemoteSessionClient; replica: import('@orchardworks/agent-remote-web').AgentReplica },
-  entry: ProjectedTimelineEntry, signal: AbortSignal,
+  entry: ProjectedTimelineEntry, signal: AbortSignal, endpoint: 'sender' | 'recipient' = 'recipient',
 ): Promise<{ key: string }> {
   await waitForCommunicationSession(connection.client, signal);
   const epoch = connection.replica.getState().timeline.epoch;
   for (;;) {
     signal.throwIfAborted();
     const state = connection.replica.getState();
-    if (state.timeline.epoch !== epoch) throw new Error('The receiving conversation changed. Open the letter again.');
-    const received = findReceivedCommunication(state, entry);
+    if (state.timeline.epoch !== epoch) throw new Error('The target conversation changed. Open the letter again.');
+    const received = findSessionCommunication(state, entry, endpoint);
     if (received) return { key: timelineEntryKey(epoch, received) };
     const before = state.timeline.entries[0]?.seqStart;
-    if (!state.timeline.hasOlder || before === undefined) throw new Error('The receiving history does not contain this letter. Refresh the session and retry.');
+    if (!state.timeline.hasOlder || before === undefined) throw new Error('The target history does not contain this letter. Refresh the session and retry.');
     await connection.client.loadOlder();
     signal.throwIfAborted();
-    if (connection.replica.getState().timeline.entries[0]?.seqStart === before) throw new Error('Earlier receiving history could not be loaded. Retry the letter.');
+    if (connection.replica.getState().timeline.entries[0]?.seqStart === before) throw new Error('Earlier target history could not be loaded. Retry the letter.');
     await new Promise(resolve => setTimeout(resolve, 0));
   }
 }

@@ -1,4 +1,4 @@
-import { communicationResolver, communicationDirection, loadReceivedCommunication, waitForCommunicationSession, type CommunicationSnapshot } from './session-communication.js';
+import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from './session-communication.js';
 import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { SessionEntry } from './session-tree.js';
@@ -1119,18 +1119,23 @@ function AppContent({
       if (!pair.sender || !pair.recipient || sessionKey(pair.sender) === sessionKey(pair.recipient)) {
         throw new Error('This history does not identify both sessions unambiguously. Load their agent activity and retry.');
       }
-      const recipient = await attachParticipant(pair.recipient);
-      const receiver = await observe(recipient);
       if (compactLayoutRef.current) {
-        const target = await loadReceivedCommunication(receiver, entry, controller.signal);
+        const sourceKey = sessionKey(source);
+        const endpoint = sourceKey === sessionKey(pair.sender) ? 'recipient' : sourceKey === sessionKey(pair.recipient) ? 'sender' : undefined;
+        if (!endpoint) throw new Error('This conversation is not an endpoint of the letter.');
+        const destination = await attachParticipant(endpoint === 'sender' ? pair.sender : pair.recipient);
+        const observation = await observe(destination);
+        const target = await loadSessionCommunication(observation, entry, controller.signal, endpoint);
         check();
-        if (!await openSession(recipient, undefined, undefined, true)) throw new Error('The receiving session could not be opened.');
-        // Opening the recipient intentionally advances the navigation generation.
+        if (!await openSession(destination, undefined, undefined, true)) throw new Error('The linked session could not be opened.');
+        // Opening the other endpoint intentionally advances the navigation generation.
         controller.signal.throwIfAborted();
-        setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
+        setLetterReveals(values => ({ ...values, [destination.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
         await new Promise(resolve => setTimeout(resolve, 0));
         return;
       }
+      const recipient = await attachParticipant(pair.recipient);
+      const receiver = await observe(recipient);
       const sender = await attachParticipant(pair.sender);
       check();
       const present = [sender, recipient].every(session => stackPath.slice(stackRange.start, stackRange.end + 1).some(visible => sessionKey(visible) === sessionKey(session)));
@@ -1147,7 +1152,7 @@ function AppContent({
         }
       }
       setSideFocus(sessionKey(recipient)); setActiveView('workbench');
-      const target = await loadReceivedCommunication(receiver, entry, controller.signal);
+      const target = await loadSessionCommunication(receiver, entry, controller.signal);
       check();
       setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
       // Mounted panes acquire their own leases before this temporary navigation lease is released.

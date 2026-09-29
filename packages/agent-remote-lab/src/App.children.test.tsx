@@ -420,9 +420,8 @@ it('replaces the current mobile conversation with the letter recipient and prese
   });
   expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Child draft stays');
 });
-it('keeps the mobile recipient open when clicking a letter already received here', async () => {
+it('opens the sender when the mobile view already belongs to the recipient', async () => {
   const f = await setup(false, { live: true, letters: true });
-  const before = f.connections();
   const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
   await act(async () => {
     primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
@@ -430,6 +429,12 @@ it('keeps the mobile recipient open when clicking a letter already received here
   });
   expect(primary.hidden).toBe(false);
   expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
-  expect(f.connections()).toBe(before);
+  await waitForSession(f.container, 'child');
+  expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
+  await act(async () => {
+    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
+  await waitForSession(f.container, 'parent');
   expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
 });

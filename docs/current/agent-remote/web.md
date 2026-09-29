@@ -198,6 +198,8 @@ Desktop layouts expand the latest two windows; compact layouts expand one. Earli
 
 Visited side views remain mounted while hidden, preserving replicas, reading positions, question drafts and composer drafts during branch changes. Per-parent request ordering prevents a slow older attachment from replacing a newer selection. The existing browser-local fork ledger persists the parent/side relationships; expanded windows and selected routes belong to the current mounted workbench and reset on reload. This is a client layout feature, without changes to native subagent ownership, fork semantics or the public Remote protocol (`packages/agent-remote-lab/src/side-tree.ts`, `components/CollapsedConversations.tsx`, `components/SideConversation.tsx`).
 
+Switching through the floating tracked-session list restores each track's last primary conversation, selected side path, expanded pair and focused pane. On compact layouts this includes a native child that replaced its tracked parent in the primary view. Explicitly closing a side or returning to the parent updates the remembered view. Navigation memory is page-local, scoped to the account/transport, and discarded when an item is untracked; it does not preconnect sessions or treat saved runtime IDs as live bindings. Restoration uses the existing connection and native-attachment path, retaining its error and takeover behavior.
+
 The conversation Sessions menu highlights running subagent rows and reports the working subagent count for the current native family even while collapsed. Parent activity and unrelated families do not affect this count. Indicators follow status changes and disappear when no subagents are running.
 
 ## Ordered image input

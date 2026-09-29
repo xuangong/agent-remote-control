@@ -25,6 +25,7 @@ import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
 import { FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
+import { TrackedSessionViews, type TrackedSessionView } from './tracked-session-views.js';
 import { ToastProvider, useFeedbackToast } from './components/Toast.js';
 import { SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
@@ -216,6 +217,7 @@ function AppContent({
   const [sideFocus, setSideFocus] = useState<string>();
   // Navigation chooses the visible pair; focusing either visible pane keeps that pair.
   const [sideAnchor, setSideAnchor] = useState<string>();
+  const trackedViews = useMemo(() => new TrackedSessionViews(), [baseUrl, transport]);
   function navigateSide(key: string | undefined): void {
     setSideAnchor(key);
     setSideFocus(key);
@@ -546,14 +548,30 @@ function AppContent({
     setOpenedSessions(next);
   }
 
-  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false): Promise<boolean> {
+  function rememberTrackedView(): void {
+    if (!stackRoot) return;
+    trackedViews.remember({ primary: stackRoot, focus: sideFocus, anchor: sideAnchor,
+      selections: Object.fromEntries(stackPath.map(session => [sessionKey(session), sideSelections[sessionKey(session)] ?? null])),
+    }, tracking.sessions, sessionEntries);
+  }
+
+  async function openTrackedSession(item: SessionEntry): Promise<void> {
+    if (!directory || transitionRef.current) return;
+    rememberTrackedView();
+    const view = trackedViews.get(item);
+    const primary = view ? sessionEntries.find(session => sessionKey(session) === sessionKey(view.primary)) ?? view.primary : item;
+    if (await openSession(primary, undefined, undefined, false, view)) trackedViews.select(item);
+  }
+
+  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false, view?: TrackedSessionView): Promise<boolean> {
     if (!letterNavigation) letterRequest.current?.abort();
     if (!directory || transitionRef.current) return false;
+    rememberTrackedView();
     const hostId = item.hostId ?? selectedHost.id;
     const key = sessionKey({ ...item, hostId });
     const visible = stackPath.find(entry => sessionKey(entry) === key);
     // Existing windows keep their connections; live tracking can also supply a confirmed binding.
-    if (!takeOver && !onRestoring && visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner && (visible.agentId !== activeAgentId || status === 'ready')) {
+    if (!view && !takeOver && !onRestoring && visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner && (visible.agentId !== activeAgentId || status === 'ready')) {
       const observation = tracking.observations[key];
       beginCatchUp(replicaFor(visible.agentId), observation?.connection === 'ready' && observation.agentId === visible.agentId ? observation.cursor : undefined);
       setSideFocus(key);
@@ -588,7 +606,11 @@ function AppContent({
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
       rememberSession({ ...prior, ...item, hostId, agentId });
       setProviderName(providerConnectionName(hostId, item.providerId));
-      navigateSide(undefined);
+      if (view) {
+        setSideSelections(current => ({ ...current, ...view.selections }));
+        setSideFocus(view.focus);
+        setSideAnchor(view.anchor);
+      } else navigateSide(undefined);
       attach(agentId, observation?.connection === 'ready' && observation.agentId === agentId ? observation.cursor : undefined);
       if (takeOver || onRestoring) {
         onRestoring?.();
@@ -886,6 +908,7 @@ function AppContent({
   const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
     liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, askEntry?.record?.target, askEntry?.attached, askVisible]);
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady);
+  useEffect(() => trackedViews.retain(tracking.sessions), [trackedViews, tracking.sessions]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const remove = transport.onSessionTitle?.(session => {
@@ -1296,7 +1319,7 @@ function AppContent({
       entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
       onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draftBinding={{ store: ask.drafts, key: askKey! }} onClose={ask.close} onToggleEnabled={ask.toggle} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
       : null}</> : null}
-    {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openSession(item)} /> : null}
+    {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       {userScoped ? <FavoritesMenu onScan={directory ? () => setScanOpen(true) : undefined} status={addressSession?.agentId === state?.agent?.id ? state?.agent?.status : sessionEntries.find(entry => addressSession && sessionKey(entry) === sessionKey(addressSession))?.status} currentSession={addressSession} title={addressSession?.title || activeOpened?.title || 'Agent Remote'} favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /> : stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>

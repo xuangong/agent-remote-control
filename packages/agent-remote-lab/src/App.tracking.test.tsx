@@ -5,21 +5,24 @@ import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { SessionStarsClient, type SessionStar } from './session-stars-client.js';
 import { readTrackedSessions, saveTrackedSessions } from './tracking-state.js';
+import { ForkStore, referenceForkContext } from './session-forks.js';
 import { replicaState } from './test/fixtures.js';
 import { render } from './test/setup.js';
 
 const baseUrl = 'http://localhost/u/alice/';
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
-async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[]) {
+async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[], navigation?: { compact: boolean }) {
+  if (navigation) vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: navigation.compact && query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {} })));
+  if (navigation) vi.spyOn(SessionDirectoryClient.prototype, 'attachChild').mockImplementation(async (_provider, _parent, id) => ({ agentId: id + '-agent', nativeSessionId: id }));
   saveTrackedSessions(baseUrl, [target, ...(other ? [other] : [])]);
   // Remembered runtime IDs are not evidence of a live binding.
   localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...target, agentId: 'stale-agent' }]));
   vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:(savedFavorites ?? [target, ...(other ? [other] : [])]).map((item, order) => ({ ...item, favoriteId: item.nativeSessionId, folderId: null, order, available: true, online: true }))});
   vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
-  const attach = vi.spyOn(SessionDirectoryClient.prototype, target.parentNativeSessionId ? 'attachChild' : 'attach').mockImplementation(async (_provider: string, id: string) => ({ agentId: other && id === other.nativeSessionId ? 'other-agent' : 'live-agent' }));
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, target.parentNativeSessionId ? 'attachChild' : 'attach').mockImplementation(async (_provider: string, id: string) => ({ agentId: other && id === other.nativeSessionId ? 'other-agent' : id === 'side' ? 'side-agent' : 'live-agent' }));
   let activity!: RemoteTransportListener;
   const contentConnections: string[] = [];
   const activityClosed = vi.fn();
@@ -27,7 +30,12 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
   const contentListeners = new Map<string, RemoteTransportListener>();
   const snapshot = { protocolVersion: '1.6.0' as const, type: 'agent_snapshot' as const,
     payload: { ...replicaState.agent!, id: 'live-agent', providerId: target.providerId,
-      runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: target.providerId, sessionId: target.nativeSessionId } } };
+      runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: target.providerId, sessionId: target.nativeSessionId, ...(navigation ? { childSessions: [{ nativeSessionId: 'child', title: 'Tracked child', status: 'idle' as const, observation: 'live' as const, createdAt: '2026-09-20T00:00:00Z' }] } : {}) } } };
+  const snapshotFor = (agentId: string) => {
+    const sessionId = agentId === 'other-agent' ? other!.nativeSessionId : agentId === 'child-agent' ? 'child' : agentId === 'grandchild-agent' ? 'grandchild' : agentId === 'side-agent' ? 'side' : target.nativeSessionId;
+    const childSessions = agentId === 'live-agent' ? snapshot.payload.runtimeInfo.childSessions : agentId === 'child-agent' ? [{ nativeSessionId: 'grandchild', title: 'Nested child', status: 'idle' as const, observation: 'live' as const, createdAt: '2026-09-20T00:00:00Z' }] : [];
+    return { ...snapshot, payload: { ...snapshot.payload, id: agentId, runtimeInfo: { ...snapshot.payload.runtimeInfo, sessionId, childSessions } } };
+  };
   const fetchTimeline = vi.fn<LabTransport['fetchTimeline']>(async agentId => ({
     protocolVersion: '1.6.0', type: 'timeline_page', payload: {
       requestId: 'history', agentId, direction: 'tail', epoch: 'tracked-epoch', reset: false, staleCursor: false, gap: false,
@@ -39,7 +47,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
   }));
   const transport: LabTransport = {
     listProviders: async () => [], createAgent: async () => { throw new Error('Unexpected creation'); }, resumeAgent: async () => { throw new Error('Unexpected resume'); },
-    fetchSnapshot: async () => snapshot, fetchTimeline,
+    fetchSnapshot: async agentId => snapshotFor(agentId), fetchTimeline,
     onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
     connect(agentId, listener) {
       let observing = false;
@@ -51,7 +59,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
           if (message.observation === 'activity') {
             observing = true; activity = listener;
             if (activityReady) listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId, status: 'idle' } });
-          } else { contentConnections.push(agentId); contentListeners.set(agentId, listener); listener.onMessage({ ...snapshot, payload: { ...snapshot.payload, id: agentId, runtimeInfo: { ...snapshot.payload.runtimeInfo, sessionId: agentId === 'other-agent' ? other!.nativeSessionId : target.nativeSessionId } } }); }
+          } else { contentConnections.push(agentId); contentListeners.set(agentId, listener); listener.onMessage(snapshotFor(agentId)); }
         } else if (message.type === 'session_control_request') {
           listener.onMessage({ protocolVersion: '1.6.0', type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
         } else if (message.type === 'timeline_subscription') {
@@ -176,4 +184,96 @@ it('recovers a delayed fork migration before removing a tracking identity missin
   await act(async () => release(Response.json({ migrations: [] })));
   expect(reads).toBeGreaterThanOrEqual(2);
   expect(readTrackedSessions(baseUrl).map(s => s.nativeSessionId)).toEqual(['fork']);
+});
+
+
+async function openChild(container: HTMLElement, id: string) {
+  const button = container.querySelector<HTMLButtonElement>(`[data-child-session-id="${id}"]`);
+  expect(button).not.toBeNull();
+  await act(async () => button!.click());
+}
+
+it('restores the tracked desktop pair and its focused pane instead of expanding the last child', async () => {
+  const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
+  const f = await fixture(star, true, other, undefined, { compact: false });
+  await f.open();
+  await openChild(f.container, 'child');
+  await openChild(f.container, 'grandchild');
+  // Show the first pair again while retaining a collapsed descendant.
+  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-collapsed-window')!.click());
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Expand window 2: Tracked child"]')!.click());
+  const firstSide = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  await act(async () => firstSide.click());
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  expect(primary.hidden).toBe(false);
+  expect(new URLSearchParams(location.search).get('session')).toBe('child');
+  const visibleBefore = [...f.container.querySelectorAll<HTMLElement>('.lab-side-conversation')].map(pane => !pane.hidden);
+  expect(visibleBefore).toEqual([true, false]);
+  await f.open(other.title);
+  await f.open();
+  expect(primary.hidden).toBe(false);
+  expect([...f.container.querySelectorAll<HTMLElement>('.lab-side-conversation')].map(pane => !pane.hidden)).toEqual([true, false]);
+  expect(new URLSearchParams(location.search).get('session')).toBe('child');
+  expect(f.contentConnections).toEqual(['live-agent', 'child-agent', 'grandchild-agent', 'other-agent']);
+});
+
+it('restores the child being read on mobile when returning to its tracked parent', async () => {
+  const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
+  const f = await fixture(star, true, other, undefined, { compact: true });
+  await f.open();
+  await openChild(f.container, 'child');
+  expect(new URLSearchParams(location.search).get('session')).toBe('child');
+  const input = f.container.querySelector<HTMLTextAreaElement>('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Unsent child draft');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await f.open(other.title);
+  await f.open();
+  expect(new URLSearchParams(location.search).get('session')).toBe('child');
+  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Unsent child draft');
+});
+
+
+it.each([false, true])('restores a side view and remembers when it was explicitly closed (compact: %s)', async compact => {
+  const store = new ForkStore(baseUrl);
+  const source = { ...star, agentId: 'live-agent' };
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  store.bind(record.id, { ...source, nativeSessionId: 'side', agentId: 'side-agent', title: 'Side discussion' });
+  store.markConfigured(record.id);
+  const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
+  const f = await fixture(star, true, other, undefined, { compact });
+  await f.open();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Forked sessions"] button')!.click());
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  if (!compact) await act(async () => primary.click());
+  expect(side.hidden).toBe(false);
+  expect(primary.hidden).toBe(compact);
+  expect(new URLSearchParams(location.search).get('session')).toBe(compact ? 'side' : 'tracked');
+  await f.open(other.title);
+  await f.open();
+  expect(side.hidden).toBe(false);
+  expect(primary.hidden).toBe(compact);
+  expect(new URLSearchParams(location.search).get('session')).toBe(compact ? 'side' : 'tracked');
+  await act(async () => side.querySelector<HTMLButtonElement>('.lab-side-close')!.click());
+  await f.open(other.title);
+  await f.open();
+  expect(side.hidden).toBe(true);
+  expect(primary.hidden).toBe(false);
+  expect(new URLSearchParams(location.search).get('session')).toBe('tracked');
+});
+
+it('remembers an explicit return to the mobile parent instead of reviving the previous child', async () => {
+  const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
+  const f = await fixture(star, true, other, undefined, { compact: true });
+  await f.open();
+  await openChild(f.container, 'child');
+  await f.open(other.title);
+  await f.open();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
+  expect(new URLSearchParams(location.search).get('session')).toBe('tracked');
+  await f.open(other.title);
+  await f.open();
+  expect(new URLSearchParams(location.search).get('session')).toBe('tracked');
 });

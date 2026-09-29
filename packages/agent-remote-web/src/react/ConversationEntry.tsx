@@ -2,7 +2,6 @@ import { memo, type ReactNode } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
 import type { AgentTimelineProps } from './AgentTimeline.js';
-import { AgentChildSessionList, type AgentChildSessionView } from './AgentChildSessionList.js';
 import { TimelineEntry } from './TimelineEntry.js';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
 import { ResourceList } from './ResourceList.js';
@@ -11,7 +10,7 @@ import { isContentOnlyItem } from './TimelineDisplay.js';
 import type { MessageGroupPosition } from './timeline-render-model.js';
 
 interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt' | 'onInspectEntry' | 'resolveSessionLink'
-  | 'onResourceResolve' | 'onResourceRequest' | 'childrenFor' | 'onOpenChildSession'> {
+  | 'onResourceResolve' | 'onResourceRequest'> {
   entry: ProjectedTimelineEntry;
   entryKey: string;
   messageGroup?: MessageGroupPosition;
@@ -22,13 +21,12 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
   inspected: boolean;
   previews?: PreviewController;
   extension?: ReactNode;
-  childSessions: readonly AgentChildSessionView[];
 }
 
 // Unchanged history stays mounted without rebuilding its controls on every delta.
 export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, contentOnly, agentId,
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, resolveSessionLink, onResourceResolve, onResourceRequest,
-  previews, extension, childSessions, childrenFor, onOpenChildSession }: ConversationEntryProps) {
+  previews, extension }: ConversationEntryProps) {
   return <TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
@@ -40,7 +38,6 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
     {!contentOnly ? <>
       {extension}
       <ResourceList bindings={entry.resources} resources={resources} onRequest={onResourceRequest} />
-      <AgentChildSessionList childrenFor={childrenFor} children={childSessions} onOpenChildSession={onOpenChildSession} />
     </> : null}
   </TimelineEntry>;
 });

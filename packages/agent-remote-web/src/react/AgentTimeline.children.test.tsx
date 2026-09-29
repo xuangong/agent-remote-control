@@ -29,20 +29,31 @@ function state(children: AgentChildSession[], entries: ProjectedTimelineEntry[])
 }
 
 describe('AgentTimeline child sessions', () => {
-  it('places children once below the last reply of their originating turn and opens the selected native chat', async () => {
+  it('keeps children from every turn in one collapsible tail list and opens the selected native chat', async () => {
     const selected: string[] = [];
     const entries = [entry(1, 'turn-one', 'Starting review'), entry(2, 'turn-one', 'Review underway'), entry(3, 'turn-two', 'Other reply')];
-    const container = await render(<AgentTimeline state={state([child('one', 'turn-one')], entries)} onOpenChildSession={(item) => { selected.push(item.nativeSessionId); }} />);
+    const children = [child('one', 'turn-one'), child('two', 'turn-two'), child('unassociated')];
+    const container = await render(<AgentTimeline state={state(children, entries)} onOpenChildSession={(item) => { selected.push(item.nativeSessionId); }} />);
     const rows = container.querySelectorAll<HTMLButtonElement>('[data-child-session-id]');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.closest('details')).toBeNull();
-    expect(rows[0]!.closest('[data-entry-key]')?.textContent).toContain('Review underway');
+    expect(rows).toHaveLength(3);
+    expect(container.querySelectorAll('.agent-child-sessions')).toHaveLength(1);
+    expect(container.querySelector('.agent-timeline-entries [data-child-session-id]')).toBeNull();
+    const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]')!;
+    expect(container.querySelector('.agent-timeline-entries')!.nextElementSibling).toBe(details);
+    expect(details.open).toBe(false);
+    expect([...rows].every(row => row.closest('details') === details)).toBe(true);
     expect(rows[0]!.textContent).toContain('Reviewer');
+    await act(async () => details.querySelector('summary')!.click());
+    expect(details.open).toBe(true);
     await act(async () => rows[0]!.click());
     expect(selected).toEqual(['one']);
-    await rerender(container, <AgentTimeline state={state([child('one', 'turn-one')], [...entries, entry(4, 'turn-one', 'Review finished')])} />);
-    expect(container.querySelectorAll('[data-child-session-id]')).toHaveLength(1);
-    expect(container.querySelector('[data-child-session-id]')?.closest('[data-entry-key]')?.textContent).toContain('Review finished');
+    await rerender(container, <AgentTimeline state={state(children, [...entries, entry(4, 'turn-one', 'Review finished')])} />);
+    expect(container.querySelectorAll('[data-child-session-id]')).toHaveLength(3);
+    expect(container.querySelector('details')).toBe(details);
+    expect(details.open).toBe(true);
+    expect(container.querySelector('.agent-timeline-entries [data-child-session-id]')).toBeNull();
+    await act(async () => details.querySelector('summary')!.click());
+    expect(details.open).toBe(false);
   });
 
   it('starts session subagents collapsed, preserves expansion during updates, and resets for another session', async () => {
@@ -64,7 +75,7 @@ describe('AgentTimeline child sessions', () => {
     expect(container.querySelector<HTMLDetailsElement>('details')!.open).toBe(false);
   });
 
-  it('keeps unknown or unloaded origins separate and preserves creation order as statuses change', async () => {
+  it('preserves creation order as statuses change regardless of origin availability', async () => {
     const first = child('first', 'unloaded');
     const second = { ...child('second'), createdAt: '2026-09-10T00:00:01Z' };
     const container = await render(<AgentTimeline state={state([second, first], [entry(1, 'other', 'Unrelated reply')])} />);
@@ -74,25 +85,30 @@ describe('AgentTimeline child sessions', () => {
     expect([...container.querySelectorAll('[data-child-session-id]')].map((row) => row.getAttribute('data-child-session-id'))).toEqual(['first', 'second']);
     expect(container.querySelector('[aria-label="Session subagents"]')?.textContent).toContain('Waiting for response');
   });
-  it('uses the recorded creation call as origin without associating later calls with the child', async () => {
+  it('keeps children with a recorded creation call at the tail as their status changes', async () => {
     const spawned = { ...child('review'), parentCallId: 'spawn-review' };
     const spawn = { ...entry(2, 'creation-turn', ''), item: { type: 'tool_call' as const, callId: 'spawn-review', name: 'spawn_agent', status: 'completed' as const, error: null, detail: { type: 'other' as const, description: 'Native collaboration' } } };
     const send = { ...entry(4, 'later-turn', ''), item: { type: 'tool_call' as const, callId: 'send-review', name: 'send_input', status: 'completed' as const, error: null, detail: { type: 'other' as const, description: 'Native collaboration' } } };
     const entries = [entry(1, 'creation-turn', 'Delegating review'), spawn, entry(3, 'later-turn', 'Checking progress'), send];
     const container = await render(<AgentTimeline state={state([spawned], entries)} />);
-    expect(container.querySelector('[data-child-session-id]')?.closest('[data-entry-key]')?.textContent).toContain('Delegating review');
+    expect(container.querySelector('[data-entry-key] [data-child-session-id]')).toBeNull();
+    expect(container.querySelector('details [data-child-session-id]')?.textContent).toContain('Review review');
     await rerender(container, <AgentTimeline state={state([{ ...spawned, status: 'waiting' }], entries)} />);
-    expect(container.querySelector('[data-child-session-id]')?.closest('[data-entry-key]')?.textContent).toContain('Delegating review');
+    expect(container.querySelectorAll('.agent-child-sessions')).toHaveLength(1);
+    expect(container.querySelector('[data-entry-key] [data-child-session-id]')).toBeNull();
+    expect(container.querySelector('details [data-child-session-id]')?.textContent).toContain('Waiting for response');
   });
 
-  it('moves an unloaded origin from the session area to its reply after older history arrives', async () => {
+  it('keeps the same tail list and its expansion when older origin history arrives', async () => {
     const children = [child('first', 'old-turn'), child('second', 'old-turn')];
     const container = await render(<AgentTimeline state={state(children, [entry(3, 'new-turn', 'New reply')])} />);
-    expect(container.querySelector('[aria-label="Session subagents"]')).not.toBeNull();
+    const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]')!;
+    await act(async () => details.querySelector('summary')!.click());
     await rerender(container, <AgentTimeline state={state([...children].reverse(), [entry(1, 'old-turn', 'Original reply'), entry(3, 'new-turn', 'New reply')])} />);
-    expect(container.querySelector('[aria-label="Session subagents"]')).toBeNull();
+    expect(container.querySelector('details')).toBe(details);
+    expect(details.open).toBe(true);
     expect([...container.querySelectorAll('[data-child-session-id]')].map((row) => row.getAttribute('data-child-session-id'))).toEqual(['first', 'second']);
-    expect(container.querySelector('[data-child-session-id]')?.closest('[data-entry-key]')?.textContent).toContain('Original reply');
+    expect(container.querySelector('[data-entry-key] [data-child-session-id]')).toBeNull();
   });
 
   it('opens a closed child with saved history and labels the observation honestly', async () => {
@@ -126,4 +142,16 @@ it('retains known children when the active snapshot has no direct child metadata
   const container = await render(<AgentTimeline state={state([], [])} childrenFor={id => id === 'native-parent' ? [child('known')] : []} />);
   expect(container.querySelector('[data-child-session-id="known"]')?.textContent).toContain('Review known');
   expect(container.querySelector('summary')?.textContent).toContain('1 working');
+});
+
+it('merges directory and runtime children once while retaining the live status', async () => {
+  const container = await render(<AgentTimeline
+    state={state([child('shared', 'turn-one')], [entry(1, 'turn-one', 'Working on review')])}
+    childrenFor={id => id === 'native-parent' ? [{ ...child('shared'), status: 'closed' }, child('recorded')] : []} />);
+  const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]')!;
+  expect(container.querySelectorAll('.agent-child-sessions')).toHaveLength(1);
+  expect(details.querySelectorAll('[data-child-session-id]')).toHaveLength(2);
+  expect(details.querySelectorAll('[data-child-session-id="shared"]')).toHaveLength(1);
+  expect(details.querySelector('[data-child-session-id="shared"]')?.textContent).toContain('Working');
+  expect(details.querySelector('summary')?.textContent).toContain('2 working');
 });

@@ -19,8 +19,6 @@ import { OutgoingMessageItem } from './OutgoingMessageItem.js';
 import { TimelineDisplay, isContentOnlyItem } from './TimelineDisplay.js';
 import { useTimelineAction } from './useTimelineAction.js';
 
-const noChildren: readonly AgentChildSessionView[] = [];
-
 export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
@@ -111,21 +109,6 @@ export function AgentTimeline({
   }
   children.sort((a, b) => (Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''))
     || discovered.current.order.get(a.nativeSessionId)! - discovered.current.order.get(b.nativeSessionId)!);
-  const replies = new Map<string, string>();
-  const calls = new Map<string, string>();
-  for (const { entry, key } of renderModel) {
-    if (!entry.turnId) continue;
-    if (entry.item.type === 'assistant_message') replies.set(entry.turnId, key);
-    if (entry.item.type === 'tool_call') calls.set(entry.item.callId, entry.turnId);
-  }
-  const childrenByReply = new Map<string, AgentChildSessionView[]>();
-  const unassociated: AgentChildSessionView[] = [];
-  for (const child of children) {
-    const turnId = child.parentTurnId ?? (child.parentCallId ? calls.get(child.parentCallId) : undefined);
-    const key = turnId ? replies.get(turnId) : undefined;
-    if (key) childrenByReply.set(key, [...(childrenByReply.get(key) ?? []), child]);
-    else unassociated.push(child);
-  }
   return <section className="agent-remote-surface" aria-label="Agent timeline">
     {showHeader ? <header className="agent-surface-header">
       <div>
@@ -154,14 +137,11 @@ export function AgentTimeline({
             onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}
             resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
             onResourceResolve={resolveResource} onResourceRequest={requestResource}
-            previews={previews} extension={!contentOnly ? registry?.render(entry.item) : undefined}
-            childSessions={!contentOnly ? childrenByReply.get(key) ?? noChildren : noChildren}
-            childrenFor={!contentOnly && childrenByReply.has(key) ? childrenFor : undefined}
-            onOpenChildSession={!contentOnly && childrenByReply.has(key) ? onOpenChildSession : undefined} />)}
+            previews={previews} extension={!contentOnly ? registry?.render(entry.item) : undefined} />)}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
     </div>
 
-    {!contentOnly ? <AgentChildSessionList childrenFor={childrenFor} key={identity} children={unassociated} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} /> : null}
+    {!contentOnly ? <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} /> : null}
 
     {state.pendingInteractions.length > 0 ? <aside className="agent-interactions" aria-label="Pending interactions">
       {state.pendingInteractions.map((request) => <fieldset

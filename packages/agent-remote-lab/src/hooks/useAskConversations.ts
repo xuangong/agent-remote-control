@@ -15,6 +15,9 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
   const [enabled, setEnabledState] = useState(() => {
     try { return localStorage.getItem('agent-remote-ask-enabled') === 'true'; } catch { return false; }
   });
+  const [hiddenByPreference, setHiddenByPreference] = useState(() => {
+    try { return localStorage.getItem('agent-remote-ask-enabled') === 'false'; } catch { return false; }
+  });
   const enabledRef = useRef(enabled);
   const preparations = useRef(new Map<string, AbortController>());
   const resumeRequested = useRef(new Set<string>());
@@ -26,6 +29,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
   function setEnabled(next: boolean) {
     enabledRef.current = next;
     setEnabledState(next);
+    setHiddenByPreference(!next);
     try { localStorage.setItem('agent-remote-ask-enabled', String(next)); } catch { /* Keep the preference for this page. */ }
     if (!next) {
       setOpenKey(undefined);
@@ -33,8 +37,8 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       for (const preparation of preparations.current.values()) preparation.abort();
     }
   }
-  function toggle() {
-    const next = !enabledRef.current;
+  function toggle(hasRelated = false) {
+    const next = !(enabledRef.current || !hiddenByPreference && hasRelated === true);
     setEnabled(next);
   }
   // A tab-local ledger keeps retries idempotent without populating the normal fork list.
@@ -88,13 +92,21 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       entry = { source, inputs: savedInputs(key), record: saved.find(record => record.target && !record.creationKey), pending: saved.find(record => !!record.creationKey) };
       entries.set(key, entry);
     }
+    if (!entry.busy && (!entry.attached || openKeyRef.current !== key) && !entry.pending) {
+      const latest = store.all().filter(record => record.target && !record.creationKey && sessionKey(record.source) === key).at(-1);
+      if (latest) {
+        if (entry.record?.id !== latest.id) entry.attached = false;
+        entry.record = latest;
+      }
+      else if (entry.record?.remote) entry.record = undefined;
+    }
     return entry;
   }
   async function open(sourceState: AgentReplicaState, source: OpenedSession, args = '', clean = false) {
     setEnabled(true);
     const key = sessionKey(source);
-    setOpenKey(key);
     const entry = entryFor(source);
+    setOpenKey(key);
     if (entry.busy) {
       if (preparations.current.get(key)?.signal.aborted && !args.trim() && !clean) {
         resumeRequested.current.add(key);
@@ -120,7 +132,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     try {
       let record = entry.pending ?? (!clean ? entry.record : undefined);
       if (!record) {
-        const options: CreateSessionOptions = { sourceNativeSessionId: source.nativeSessionId,
+        const options: CreateSessionOptions = { conversationKind: 'ask', sourceNativeSessionId: source.nativeSessionId,
           ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model ? { model: agent.model } : {}),
           ...(agent.capabilities.planning ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
         const settings = (agent.runtimeInfo.settings ?? []).filter(setting => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
@@ -152,5 +164,5 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       }
     }
   }
-  return { enabled, toggle, store, entries, entryFor, openKey, drafts, setDraft, sendInput, open, close: () => setOpenKey(undefined) };
+  return { enabled, hiddenByPreference, toggle, store, entries, entryFor, openKey, drafts, setDraft, sendInput, open, close: () => setOpenKey(undefined) };
 }

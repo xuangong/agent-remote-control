@@ -448,6 +448,22 @@ export function createHostedRelay(options: HostedRelayOptions) {
       }
       if (path === '/v1/remote/pairings' && request.method === 'POST' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
     }
+    if (path === '/v1/session-relations') {
+      const list = () => [...tenants.values()].flatMap(value => value.broker.sessionRelations(grant.subject));
+      if (request.method === 'GET') return json(200, { relations: list() });
+      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+      try {
+        const input = await readJson(request);
+        if (!input) return json(400, { error: 'A session relation is required.' });
+        const target = [...tenants.values()].find(value => typeof input.hostId === 'string' && value.broker.hasHost(input.hostId));
+        if (!target) return json(403, { error: 'Session access is unavailable.' });
+        await target.broker.importSessionRelation(grant.subject, input);
+        return json(200, { relations: list() });
+      } catch (error) {
+        if (error instanceof SharingError) return json(error.status, { code: error.code, error: error.message });
+        throw error;
+      }
+    }
     if (path === '/v1/session-migrations' && request.method === 'GET') return json(200, { migrations: migrations.list(grant.subject) });
     if (path === '/v1/favorites') {
       try {

@@ -1,3 +1,4 @@
+import { useSessionRelations } from './hooks/useSessionRelations.js';
 import { remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
 import {SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
@@ -206,6 +207,12 @@ function AppContent({
   }, []);
   const [sideSelections, setSideSelections] = useState<SideSelections>({});
   const [sideFocus, setSideFocus] = useState<string>();
+  // Navigation chooses the visible pair; focusing either visible pane keeps that pair.
+  const [sideAnchor, setSideAnchor] = useState<string>();
+  function navigateSide(key: string | undefined): void {
+    setSideAnchor(key);
+    setSideFocus(key);
+  }
   const sideRequests = useRef(new Map<string, number>());
   const forkReservation = useRef<{ key: string; record: SessionFork }>();
   const forkBusy = useRef(false);
@@ -542,6 +549,7 @@ function AppContent({
       const observation = tracking.observations[key];
       beginCatchUp(replicaFor(visible.agentId), observation?.connection === 'ready' && observation.agentId === visible.agentId ? observation.cursor : undefined);
       setSideFocus(key);
+      if (!expandedKeys.has(key)) setSideAnchor(key);
       setFailure(undefined); setSessionNotice(undefined);
       setActiveView('workbench');
       if (compactLayoutRef.current) { setContextOpen(false); setInspectorOpen(false); }
@@ -572,7 +580,7 @@ function AppContent({
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
       rememberSession({ ...prior, ...item, hostId, agentId });
       setProviderName(providerConnectionName(hostId, item.providerId));
-      setSideFocus(undefined);
+      navigateSide(undefined);
       attach(agentId, observation?.connection === 'ready' && observation.agentId === agentId ? observation.cursor : undefined);
       if (takeOver || onRestoring) {
         onRestoring?.();
@@ -811,17 +819,18 @@ function AppContent({
   const stackPath = sidePath(stackRoot, sideSessions, sideSelections).map((session) => ({
     ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title,
   }));
-  const stackRange = expandedSideRange(stackPath, sideFocus, compactLayout ? 1 : 2);
+  const stackRange = expandedSideRange(stackPath, compactLayout ? sideFocus : sideAnchor, compactLayout ? 1 : 2);
   const expandedKeys = new Set(stackPath.slice(stackRange.start, stackRange.end + 1).map(sessionKey));
-  const focusedWindow = stackPath[stackRange.end];
+  const focusedWindow = stackPath.find(session => sessionKey(session) === sideFocus) ?? stackPath[stackRange.end];
   const primaryExpanded = stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
+  const refreshRelations = useSessionRelations(baseUrl, userScoped && accessReady, forkStore, ask.store, addressSession ? sessionKey(addressSession) : undefined);
   const askKey = addressSession ? sessionKey(addressSession) : undefined;
   const askEntry = addressSession ? ask.entryFor(addressSession) : undefined;
   const askVisible = ask.enabled && ask.openKey === askKey && !!askEntry && activeView === 'workbench' && !supportingRailOpen;
   const askSourceState = addressSession?.agentId === state?.agent?.id ? state : addressSession ? replicas.get(addressSession.agentId)?.getState() : undefined;
   function openAsk(clean = false) {
-    if (addressSession && askSourceState) void ask.open(askSourceState, addressSession, '', clean).catch(() => {});
+    if (addressSession && askSourceState) void refreshRelations().then(() => ask.open(askSourceState, addressSession, '', clean)).catch(error => setFailure(message(error, 'Ask could not open.')));
   }
   useEffect(() => focusCatchUp(addressSession ? replicas.get(addressSession.agentId) : undefined), [addressSession?.agentId, replicas, focusCatchUp]);
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
@@ -896,6 +905,7 @@ function AppContent({
       setSideSessions(values => values.map(item => sessionKey(item) === sessionKey(source) ? target : item));
       setSideSelections(values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === sessionKey(source) ? sessionKey(target) : value])));
       setSideFocus(value => value === sessionKey(source) ? sessionKey(target) : value);
+      setSideAnchor(value => value === sessionKey(source) ? sessionKey(target) : value);
       return true;
     },
   });
@@ -962,7 +972,7 @@ function AppContent({
       if (item && !isContentOnlyItem(item)) setTimelineDisplay('simple');
     }
     setTraceNavigation({ scope: traceScope, key, view, requestId: ++traceRequestCounter.current });
-    if (view === 'workbench') setSideFocus(stackRoot ? sessionKey(stackRoot) : undefined);
+    if (view === 'workbench' && stackRoot) revealSession(stackRoot);
     setActiveView(view);
   }
 
@@ -985,10 +995,13 @@ function AppContent({
     nextSideRequest(source);
     setSideSessions((current) => [...current.filter((entry) => sessionKey(entry) !== sessionKey(session)), session]);
     setSideSelections((current) => ({ ...current, [sessionKey(source)]: sessionKey(session) }));
-    setSideFocus(sessionKey(session));
+    navigateSide(sessionKey(session));
   }
   function revealSession(session: OpenedSession): void {
-    if (stackPath.some((entry) => sessionKey(entry) === sessionKey(session))) setSideFocus(sessionKey(session));
+    if (stackPath.some((entry) => sessionKey(entry) === sessionKey(session))) {
+      setSideFocus(sessionKey(session));
+      if (!expandedKeys.has(sessionKey(session))) setSideAnchor(sessionKey(session));
+    }
     else void openSession(session);
   }
   function closeSide(session: OpenedSession): void {
@@ -996,14 +1009,15 @@ function AppContent({
     if (!record) return;
     nextSideRequest(record.source);
     setSideSelections((current) => ({ ...current, [sessionKey(record.source)]: null }));
-    setSideFocus(sessionKey(record.source));
+    navigateSide(sessionKey(record.source));
   }
   useEffect(() => {
-    if (stackRange.end === 0 && sideFocus && activeView === 'workbench') {
-      if (workbenchPanelRef.current?.querySelector('[data-inspected="true"]:focus')) return;
-      workbenchPanelRef.current?.querySelector<HTMLTextAreaElement>('.lab-primary-conversation textarea')?.focus({ preventScroll: true });
+    if (primaryExpanded && stackRoot && sideFocus === sessionKey(stackRoot) && activeView === 'workbench') {
+      const primary = workbenchPanelRef.current?.querySelector('.lab-primary-conversation');
+      if (primary?.contains(document.activeElement)) return;
+      primary?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
     }
-  }, [sideFocus, stackRange.end, activeView]);
+  }, [sideFocus, primaryExpanded, stackRoot?.agentId, activeView]);
 
   async function openFork(record: SessionFork): Promise<void> {
     if (!record.target || !directory) return;
@@ -1023,10 +1037,10 @@ function AppContent({
   }
 
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
-    if (id === 'console:ask' && !args.trim()) { ask.toggle(); return {}; }
+    if (id === 'console:ask' && !args.trim()) { ask.toggle(!!saved && !!ask.entryFor(saved).record?.remote); return {}; }
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
-    if (id === 'console:ask') return ask.open(sourceState, saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }, args);
+    if (id === 'console:ask') { await refreshRelations(); return ask.open(sourceState, saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }, args); }
     if (forkBusy.current) throw new Error('A session fork is already being created.');
     forkBusy.current = true;
     try {
@@ -1047,7 +1061,7 @@ function AppContent({
           options = workspace ? { workspaceId: workspace.id } : {};
         } else options = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}),
           ...(agent.capabilities.planning && source.providerId !== 'dsh' ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
-        if (context.mode === 'reference') options.sourceNativeSessionId = source.nativeSessionId;
+        if (context.mode === 'reference') { options.sourceNativeSessionId = source.nativeSessionId; options.conversationKind = 'side'; }
         record = forkStore.prepare(context, options, settings, key);
         forkReservation.current = { key, record };
       }
@@ -1126,7 +1140,7 @@ function AppContent({
   return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {accessReady ? tracking.observers : null}
-    {ask.enabled && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
+    {(ask.enabled || !ask.hiddenByPreference && askEntry?.record?.remote) && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
       observation={askEntry?.record?.target ? tracking.observations[sessionKey(askEntry.record.target)] : undefined} onOpen={() => openAsk()} />
       {askVisible ? <AskConversation positionRef={askPositionRef} triggerRef={askTriggerRef} simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
       entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
@@ -1296,7 +1310,7 @@ function AppContent({
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
-        <div className="lab-primary-conversation" hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
+        <div className="lab-primary-conversation" tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }} onClickCapture={() => { if (stackRoot && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
         <LabWorkbench
           sessionState={!accessReady || hostOffline ? remoteSessionState(state, !accessReady ? 'connecting' : 'disconnected') : sessionState}
           handoff={handoff}

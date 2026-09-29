@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { captureForkContext, ForkStore, contextPrefix } from './session-forks.js';
+import { captureForkContext, ForkStore, contextPrefix, referenceForkContext } from './session-forks.js';
 import { RemoteOperationError } from '@orchardworks/agent-remote-web';
 
 const source = { agentId: 'parent', nativeSessionId: 'native-parent', providerId: 'codex', title: 'Parent', hostId: 'local' };
@@ -144,4 +144,39 @@ it('stores lightweight source references and sends only reference metadata with 
   expect(contextPrefix(record)).toContain('native-parent');
   expect(contextPrefix(record)).not.toContain('history');
   expect(JSON.stringify(restored).length).toBeLessThan(1000);
+});
+
+
+it('restores shared navigation without replaying input or replacing the local delivery ledger', async () => {
+  const store = new ForkStore('shared');
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  const target = { ...source, nativeSessionId: 'child', agentId: 'child' };
+  store.bind(record.id, target);
+  await expect(store.send(record.id, 'uncertain question', async () => { throw new Error('lost'); }, async () => false)).rejects.toThrow();
+  const relation = { kind: 'side' as const, id: record.id, createdAt: record.capturedAt, source, target };
+  store.setSharedRelations([relation]);
+  expect(store.all()).toHaveLength(1);
+  expect(store.get(record.id).delivery).toBe('uncertain');
+  const mobile = new ForkStore('mobile');
+  mobile.setSharedRelations([relation]);
+  const restored = mobile.find(target)!;
+  expect(restored.remote).toBe(true);
+  const send = vi.fn(async () => {});
+  await mobile.send(restored.id, 'follow up', send, async () => false);
+  expect(send).toHaveBeenCalledExactlyOnceWith('follow up');
+  expect(localStorage.getItem('agent-remote-forks:mobile:record:' + record.id)).toBeNull();
+  mobile.bind(record.id, { ...target, agentId: 'reattached' });
+  expect(mobile.find(target)?.target?.agentId).toBe('reattached');
+  mobile.setSharedRelations([]);
+  expect(mobile.all()).toEqual([]);
+});
+
+
+it('opens shared navigation when browser storage is unavailable', () => {
+  const storage = { getItem() { throw new Error('Storage denied'); } } as unknown as Storage;
+  const store = new ForkStore('denied', storage);
+  store.setSharedRelations([{ id: 'shared', kind: 'side', createdAt: '2026-09-29T00:00:00.000Z', source,
+    target: { ...source, agentId: 'child', nativeSessionId: 'child' } }]);
+  store.bind('shared', { ...source, agentId: 'attached', nativeSessionId: 'child' });
+  expect(store.get('shared').target?.agentId).toBe('attached');
 });

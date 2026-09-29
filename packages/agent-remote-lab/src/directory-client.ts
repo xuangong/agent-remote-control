@@ -17,7 +17,7 @@ export interface SessionSummary {
 export interface SessionCatalogPage { items: SessionSummary[]; hasMore: boolean; nextCursor?: string; revision: string }
 export interface SessionWorkspace { id: string; name: string; path: string }
 export interface WorkspaceFolderPage { path: string; parentPath: string | null; roots: string[]; folders: Array<{ name: string; path: string }>; nextOffset: number | null }
-export interface CreateSessionOptions { editNativeSessionId?: string; editTurnId?: string; editMessageId?: string; sourceNativeSessionId?: string; workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
+export interface CreateSessionOptions { conversationKind?: 'side' | 'ask'; editNativeSessionId?: string; editTurnId?: string; editMessageId?: string; sourceNativeSessionId?: string; workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
 export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string; createdAt?: string }
 export class DirectoryError extends Error {
   constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
@@ -57,7 +57,7 @@ export class SessionDirectoryClient {
     return this.request('workspace-folders/create', { providerId, parentPath, name }, signal);
   }
   attachChild(providerId: string, parentNativeSessionId: string, nativeSessionId: string, signal?: AbortSignal): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('child/attach', { providerId, parentNativeSessionId, nativeSessionId }, signal); }
-  create(providerId: string, operationId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('create', { providerId, operationId, ...options }); }
+  create(providerId: string, operationId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { const { conversationKind, ...native } = options; return this.request('create', { providerId, operationId, ...native, ...(this.hostId !== 'local' && conversationKind ? { conversationKind } : {}) }); }
 }
 
 export class RemoteHostClient implements HostPairingService {

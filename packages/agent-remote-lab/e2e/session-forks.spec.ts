@@ -14,12 +14,64 @@ async function start(page: import('@playwright/test').Page) {
   return primary;
 }
 
+test('clicking either side-by-side conversation changes focus without moving the windows', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'Requires two visible conversation windows.');
+  const primary = await start(page);
+  const sourceUrl = page.url();
+  await primary.getByTestId('prompt-input').fill('/side Stable side');
+  await primary.getByTestId('prompt-input').press('Enter');
+  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  await expect(side.locator('.agent-message-assistant').last()).toContainText('Stable side');
+  const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
+  if (await takeControl.isVisible()) await takeControl.click();
+  await side.getByTestId('prompt-input').fill('Side draft');
+  const sideUrl = page.url();
+  const primaryBox = await primary.boundingBox();
+  const sideBox = await side.boundingBox();
+
+  await primary.getByTestId('prompt-input').click();
+  await expect(primary.getByTestId('prompt-input')).toBeFocused();
+  await expect(side).toBeVisible();
+  await expect(page).toHaveURL(sourceUrl);
+  expect(await primary.boundingBox()).toEqual(primaryBox);
+  expect(await side.boundingBox()).toEqual(sideBox);
+  await primary.getByTestId('prompt-input').fill('Main draft');
+
+  // Non-input content selects the conversation without stealing focus into its composer.
+  await side.locator('.agent-message-assistant').last().click();
+  await expect(page).toHaveURL(sideUrl);
+  await expect(side.getByTestId('prompt-input')).not.toBeFocused();
+  expect(await primary.boundingBox()).toEqual(primaryBox);
+  expect(await side.boundingBox()).toEqual(sideBox);
+  await side.getByTestId('prompt-input').click();
+  await expect(side.getByTestId('prompt-input')).toBeFocused();
+  await expect(side.getByTestId('prompt-input')).toHaveValue('Side draft');
+  await expect(primary.getByTestId('prompt-input')).toHaveValue('Main draft');
+
+  await side.getByTestId('prompt-input').fill('/side Nested side');
+  await side.getByTestId('prompt-input').press('Enter');
+  const nested = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: 'Nested side' }) });
+  const parent = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: 'Stable side' }) });
+  await expect(nested.locator('.agent-message-assistant').last()).toContainText('Nested side');
+  await expect(primary).toBeHidden();
+  const parentBox = await parent.boundingBox();
+  const nestedBox = await nested.boundingBox();
+  await parent.getByTestId('prompt-input').click();
+  await expect(parent.getByTestId('prompt-input')).toBeFocused();
+  await expect(page).toHaveURL(sideUrl);
+  await expect(primary).toBeHidden();
+  expect(await parent.boundingBox()).toEqual(parentBox);
+  expect(await nested.boundingBox()).toEqual(nestedBox);
+});
+
 test('selecting an opened side in discovery focuses its existing window', async ({ page }) => {
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/side Keep this branch');
   await primary.getByTestId('prompt-input').press('Enter');
   const side = page.getByRole('complementary', {name: 'Side conversation'});
-  await expect(side.getByTestId('prompt-input')).toBeEnabled();
+  await expect(side.locator('.agent-message-assistant').last()).toContainText('Keep this branch');
+  const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
+  if (await takeControl.isVisible()) await takeControl.click();
   await side.getByTestId('prompt-input').fill('Keep the side draft');
   const discovery = page.getByRole('region', {name: 'Discover sessions'});
   if (!await discovery.isVisible()) await toggleViewPanel(page, 'Sidebar');
@@ -163,6 +215,8 @@ test('keeps a tree of side routes with stacked ancestors and independent drafts'
     const result = sides.filter({ has: page.locator('.agent-message-user').filter({ hasText: text }) });
     await expect(result).toBeVisible();
     await expect(result.locator('.agent-message-assistant').last()).toContainText(text);
+    const takeControl = result.getByRole('button', { name: 'Take control', exact: true });
+    if (await takeControl.isVisible()) await takeControl.click();
     return result;
   }
   const b = await branch(primary, 'Branch B');

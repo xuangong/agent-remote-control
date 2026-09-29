@@ -606,7 +606,12 @@ test('/ask is off by default and toggles UI and subscriptions without losing the
   await expect.poll(() => activity.size).toBe(1);
   await expect.poll(() => content.size).toBe(1);
   await page.reload();
-  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+  // Reload may retain the previous page's control lease; Ask recovery does not bypass it.
+  const restoredInput = primary.getByTestId('prompt-input');
+  const takeControl = primary.getByRole('button', { name: 'Take control', exact: true });
+  await expect.poll(async () => await restoredInput.isEditable() && await restoredInput.isVisible() || await takeControl.isVisible()).toBe(true);
+  if (await takeControl.isVisible()) await takeControl.click();
+  await expect(restoredInput).toBeEditable();
   await expect(button).toHaveCount(0);
   await toggle();
   await expect(button).toBeVisible();
@@ -615,6 +620,11 @@ test('/ask is off by default and toggles UI and subscriptions without losing the
   await expect(ask.getByTestId('prompt-input')).toHaveValue('Preserve this draft while disabled');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Remember this answer');
   expect(creations).toBe(1);
+  const askInput = ask.getByTestId('prompt-input');
+  const takeAskControl = ask.getByRole('button', { name: 'Take control', exact: true });
+  await expect.poll(async () => await askInput.isEditable() || await takeAskControl.isVisible()).toBe(true);
+  if (await takeAskControl.isVisible()) await takeAskControl.click();
+  await expect(askInput).toBeEditable();
   await ask.getByTestId('prompt-input').fill('/ask');
   await ask.getByTestId('prompt-input').press('Enter');
   await expect(button).toHaveCount(0);

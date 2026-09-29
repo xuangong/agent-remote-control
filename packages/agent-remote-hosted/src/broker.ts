@@ -1,3 +1,4 @@
+import { validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
 import { isHostProviderChange } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { isCodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
@@ -30,7 +31,7 @@ type Host = {
   streams: Map<string, { socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
 };
 type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
-  creatorSubject?: string; parentNativeSessionId?: string; recovery?: Promise<void> };
+  creatorSubject?: string; parentNativeSessionId?: string; sourceRelation?: SourceRelation; recovery?: Promise<void> };
 class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
@@ -524,6 +525,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         const actualNativeSessionId = host.legacyDsh ? nativeSessionId : requiredHostIdentity(returned.nativeSessionId, 'nativeSessionId');
         const agentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
         if (attaching && actualNativeSessionId !== nativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
+        if (body.conversationKind && actualNativeSessionId === body.sourceNativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The new conversation cannot be its own source.');
         const nativeKey = JSON.stringify([host.id, providerId, actualNativeSessionId]);
         return commit(draft => {
           if (hosts.get(host.id) !== host || host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
@@ -533,7 +535,8 @@ export function createHostBroker(options: HostBrokerOptions) {
           }
           if (!byAgent && !byNative && bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.');
           const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
-            generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}) };
+            generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}),
+            ...(action === 'create' && body.conversationKind ? { sourceRelation: { id: String(body.conversationId), kind: body.conversationKind as 'side' | 'ask', sourceNativeSessionId: String(body.sourceNativeSessionId), createdAt: new Date(now()).toISOString() } } : {}) };
           if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
           if (creatorSubject && binding.creatorSubject !== creatorSubject) throw new BrokerError(409, 'session_binding_conflict', 'The native session belongs to another user.');
           const { generation: _generation, recovery: _recovery, ...saved } = binding;
@@ -560,7 +563,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       await recoverBinding(host, binding); return binding;
     }
     const fingerprint = JSON.stringify({ providerId, cwd: body.cwd ?? null, workspaceId: body.workspaceId ?? null,
-      model: body.model ?? null, reasoningEffort: body.reasoningEffort ?? null, planning: body.planning ?? null, ...optionalSettings(body, ['sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
+      model: body.model ?? null, reasoningEffort: body.reasoningEffort ?? null, planning: body.planning ?? null, ...optionalSettings(body, ['conversationKind', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
     let existing = creations.get(key);
     if (existing && existing.fingerprint !== fingerprint) throw new BrokerError(409, 'request_conflict', 'This request identity was already used with different settings.');
     if (!existing) {
@@ -583,6 +586,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     await recoverBinding(host, binding); return binding;
   }
   async function userMutation(host: Host, action: string, body: Record<string, unknown>, subject?: string): Promise<Binding> {
+    if (action === 'create' && body.conversationKind !== undefined && (!['side', 'ask'].includes(String(body.conversationKind)) || typeof body.sourceNativeSessionId !== 'string' || body.editNativeSessionId !== undefined)) {
+      throw new BrokerError(400, 'invalid_request', 'A Side or Ask requires a source session.');
+    }
+    if (action === 'create') body = { ...body, conversationId: body.operationId };
     if (action === 'create' && ['editNativeSessionId', 'editTurnId', 'editMessageId'].some(key => body[key] !== undefined)) {
       if (body.sourceNativeSessionId !== undefined || ['editNativeSessionId', 'editTurnId', 'editMessageId'].some(key => typeof body[key] !== 'string' || !(body[key] as string).trim())) throw new BrokerError(400, 'invalid_request', 'A complete native prompt identity is required.');
       if (!host.providers.some(provider => provider.providerId === body.providerId && provider.promptEditing)) throw new BrokerError(400, 'unsupported_configuration', 'Prompt editing is unavailable on this Host. Update the Controller.');
@@ -623,7 +630,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!host.providers.some(provider => provider.providerId === providerId)) throw new SharingError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
     if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
     const operationId = required(body.operationId, 'operationId');
-    const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
+    const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['conversationKind', 'cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
     const reservation = await changeSharing(draft => draft.reserve(host.id, subject!, providerId, operationId, fingerprint));
     if (!reservation.fresh) {
       const completedId = reservation.agentId ?? completedCreations.get(JSON.stringify([host.id, providerId, reservation.nativeRequestId]))?.agentId;
@@ -1073,6 +1080,44 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!hostAllowed(item.hostId, subject) || !host?.providers.some(provider => provider.providerId === item.providerId)) return false;
       const binding = nativeBindings.get(JSON.stringify([item.hostId, item.providerId, item.nativeSessionId]));
       return owner(subject) || !!binding && sessionAllowed(binding, subject);
+    },
+    sessionRelations(subject: string): SessionRelation[] {
+      const result: SessionRelation[] = [];
+      for (const binding of bindings.values()) {
+        const relation = binding.sourceRelation;
+        if (!relation || !sessionAllowed(binding, subject)) continue;
+        const source = nativeBindings.get(JSON.stringify([binding.hostId, binding.providerId, relation.sourceNativeSessionId]));
+        if (!source || !sessionAllowed(source, subject)) continue;
+        const identity = (value: Binding, title: string) => ({ hostId: value.hostId, providerId: value.providerId, nativeSessionId: value.nativeSessionId, agentId: value.agentId, title });
+        result.push({ id: relation.id, kind: relation.kind, createdAt: relation.createdAt,
+          source: identity(source, 'Source session'), target: identity(binding, relation.kind === 'ask' ? 'Ask' : 'Side') });
+      }
+      return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    },
+    async importSessionRelation(subject: string, input: Record<string, unknown>): Promise<void> {
+      if (!validSourceRelation(input) || typeof input.hostId !== 'string' || typeof input.providerId !== 'string' || typeof input.nativeSessionId !== 'string') {
+        throw new SharingError(400, 'invalid_relation', 'A complete session relation is required.');
+      }
+      const binding = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.nativeSessionId]));
+      const source = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.sourceNativeSessionId]));
+      const allowed = () => binding && source && binding !== source && sessionAllowed(binding, subject) && sessionAllowed(source, subject);
+      if (!allowed()) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      const proven = [...completedCreations.values()].some(value => {
+        if (value.agentId !== binding!.agentId) return false;
+        try { return JSON.parse(value.fingerprint).sourceNativeSessionId === input.sourceNativeSessionId; } catch { return false; }
+      });
+      if (!proven) throw new SharingError(403, 'unverified_relation', 'The source relationship could not be verified.');
+      const relation: SourceRelation = { id: input.id, kind: input.kind, sourceNativeSessionId: input.sourceNativeSessionId, createdAt: input.createdAt };
+      await commit(draft => {
+        if (!allowed() || bindings.get(binding!.agentId) !== binding) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+        const prior = binding!.sourceRelation;
+        if (prior && (prior.kind !== relation.kind || prior.id !== relation.id || prior.sourceNativeSessionId !== relation.sourceNativeSessionId)) {
+          throw new SharingError(409, 'relation_conflict', 'This session already has a different relationship.');
+        }
+        const saved = draft.bindings.find(item => item.agentId === binding!.agentId)!;
+        saved.sourceRelation = prior ?? relation;
+        return { value: undefined, publish() { binding!.sourceRelation = saved.sourceRelation; } };
+      });
     },
     canAccessSession: (agentId: string, subject: string) => { const binding = bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },
     async manageShares(subject: string, hostId: string, action: 'shares' | 'share' | 'revoke-share', targetSubject?: string, targetLabel?: string, sessionLimit?: number) {

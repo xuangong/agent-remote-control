@@ -1,3 +1,4 @@
+import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
 import { conversationLocalStorage } from './conversation-storage.js';
 import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
@@ -18,6 +19,8 @@ export interface SourceReferenceContext { mode: 'reference'; source: OpenedSessi
 export type ForkContext = SnapshotForkContext | SourceReferenceContext;
 export type SessionFork = ForkContext & ForkDelivery;
 interface ForkDelivery {
+  /** Shared navigation only; this browser does not own the creation or first-input ledger. */
+  remote?: boolean;
   id: string;
   target?: OpenedSession;
   configured?: boolean;
@@ -80,9 +83,10 @@ export function forkDisplayState(state: AgentReplicaState | undefined, record?: 
       ? { ...entry, item: { ...entry.item, text: entry.item.text.replace(prefix, ''), ...(entry.item.type === 'user_message' && entry.item.content ? { content: entry.item.content.map(part => part.type === 'text' ? { ...part, text: part.text.replace(prefix, '') } : part) } : {}) } } : entry) } };
 }
 
-/** Browser-local attachment ledger, independent of the disposable opened-session list. */
+/** Local creation/delivery ledger with an independent shared navigation overlay. */
 export class ForkStore {
   private readonly key: string;
+  private shared = new Map<string, SessionFork>();
   private readonly listeners = new Set<() => void>();
   private readonly storage?: Storage;
   constructor(baseUrl: string, storage?: Storage) {
@@ -105,10 +109,23 @@ export class ForkStore {
         if (validRecord(value)) records.push(value);
       }
     } catch { /* Unavailable browser storage must not hide the ordinary conversation. */ }
+    const localIds = new Set(records.map(record => record.id));
+    const localTargets = new Set(records.flatMap(record => record.target ? [sessionKey(record.target)] : []));
+    for (const record of this.shared.values()) if (!localIds.has(record.id) && !localTargets.has(sessionKey(record.target!))) records.push(record);
     return records.sort((left, right) => left.capturedAt.localeCompare(right.capturedAt));
   }
+  setSharedRelations(relations: readonly SessionRelation[]): void {
+    const records = relations.map((relation): SessionFork => ({ id: relation.id, mode: 'reference', source: relation.source, target: relation.target,
+      capturedAt: relation.createdAt, remote: true, delivery: 'pending', options: { sourceNativeSessionId: relation.source.nativeSessionId }, settings: [] }));
+    if (JSON.stringify([...this.shared.values()]) === JSON.stringify(records)) return;
+    this.shared = new Map(records.map(record => [record.id, record]));
+    for (const listener of this.listeners) listener();
+  }
   get(id: string): SessionFork {
-    const value: unknown = JSON.parse(this.storage?.getItem(this.key + id) ?? 'null');
+    let value: unknown;
+    try { value = JSON.parse(this.storage?.getItem(this.key + id) ?? 'null'); }
+    catch { /* Shared navigation remains usable without browser persistence. */ }
+    if (!validRecord(value) && this.shared.has(id)) return this.shared.get(id)!;
     if (!validRecord(value)) throw new Error('The fork context is unavailable.');
     return value;
   }
@@ -125,11 +142,13 @@ export class ForkStore {
   bind(id: string, target: OpenedSession): void { this.update(id, { target }); }
   private update(id: string, change: Partial<ForkDelivery>): void { this.save({ ...this.get(id), ...change }); }
   private save(record: SessionFork): void {
+    if (record.remote) { this.shared.set(record.id, record); for (const listener of this.listeners) listener(); return; }
     try { if (!this.storage) throw new Error('Storage unavailable'); this.storage.setItem(this.key + record.id, JSON.stringify(record)); }
     catch { throw new Error('The fork context could not be saved. Free browser storage before continuing.'); }
     for (const listener of this.listeners) listener();
   }
   async send<T>(id: string, text: string, send: (input: string) => Promise<T>, delivered: () => Promise<boolean>, identity = text): Promise<T | undefined> {
+    if (this.get(id).remote) return send(text);
     const started = this.get(id).delivery;
     const run = () => {
       const latest = this.get(id);

@@ -22,12 +22,16 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
 }) {
   const { state, sessionState, handoff, status, questions, setQuestions, actions } = useConversationSession(session, transport, cachedReplica, initialInput?.pending);
   const panel = useRef<HTMLElement>(null);
-  useEffect(() => { if (status === 'ready' && focused && expanded && visible) panel.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true }); }, [session.agentId, status, focused, expanded, visible]);
+  useEffect(() => {
+    if (status === 'ready' && focused && expanded && visible && !panel.current?.contains(document.activeElement)) {
+      panel.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
+    }
+  }, [session.agentId, status, focused, expanded, visible]);
   const activity = state?.agent?.status;
   useEffect(() => { onActivityChange?.(session.agentId, activity); }, [session.agentId, activity, onActivityChange]);
   const record = store.find(session);
   const title = record?.firstInput?.trim().slice(0, 72) || session.title;
-  return <aside className="lab-side-conversation" aria-label="Side conversation" ref={panel} onFocusCapture={onFocus} hidden={!expanded} style={{ order: position }}>
+  return <aside className="lab-side-conversation" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
     <LabWorkbench sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}

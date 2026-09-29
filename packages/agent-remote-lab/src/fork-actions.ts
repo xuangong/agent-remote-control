@@ -11,7 +11,7 @@ export const forkCommands = [
 ];
 
 export function forkActions(actions: LabWorkbenchActions, store: ForkStore, record: SessionFork | undefined, transport: RemoteAgentTransport): LabWorkbenchActions {
-  if (!record?.target) return actions;
+  if (!record?.target || record.remote) return actions;
   const target = record.target;
   async function withContext<T>(text: string, send: (input: string) => Promise<T>, identity?: string): Promise<T | undefined> {
     await inheritSettings(actions, store, record!, transport);
@@ -56,7 +56,7 @@ async function inheritSettings(actions: LabWorkbenchActions, store: ForkStore, r
 
 export async function configureFork(transport: RemoteAgentTransport, store: ForkStore, record: SessionFork, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
-  if (store.get(record.id).configured) return;
+  if (record.remote || store.get(record.id).configured) return;
   if (!record.settings.length) { store.markConfigured(record.id); return; }
   await withForkClient(transport, record, (client) => inheritSettings(clientActions(client), store, record, transport), signal);
 }

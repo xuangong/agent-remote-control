@@ -1102,6 +1102,8 @@ function AppContent({
   const clientActions: AppActions = actions ?? {
     takeControl: options => commandClient().takeControl(options),
     ...(userScoped && activeOpened && activeOpened.providerId === 'codex' && !activeOpened.parentNativeSessionId && !boundFork && !promptEditPending ? { editPrompt } : {}),
+    searchTimeline: submittedClient ? (query, options) => commandClient().searchTimeline(query, options) : undefined,
+    loadSearchMatch: submittedClient ? (match, options) => commandClient().loadSearchMatch(match, options) : undefined,
     loadOlder: clientRef.current?.loadOlder.bind(clientRef.current),
     sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
     sendMessageContent: async (content, options) => { await commandClient().sendMessageContent(content, options); },

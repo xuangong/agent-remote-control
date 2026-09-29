@@ -1,3 +1,4 @@
+import type { TimelineSearchOptions, TimelineSearchProgress, TimelineSearchMatch } from '../client/timeline-search.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
 import type {
@@ -11,6 +12,8 @@ export type { SessionTakeControlOptions } from '../client/session-control-extens
 export interface SessionViewActions {
   takeControl?(options?: SessionTakeControlOptions): Promise<void>;
   editPrompt?(entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry): Promise<void>;
+  searchTimeline?(query: string, options?: TimelineSearchOptions): Promise<TimelineSearchProgress>;
+  loadSearchMatch?(match: TimelineSearchMatch, options?: { signal?: AbortSignal }): Promise<void>;
   loadOlder?(): void | Promise<void>;
   retryMessage?(id: string): Promise<void>;
   deleteMessage?(id: string): void;

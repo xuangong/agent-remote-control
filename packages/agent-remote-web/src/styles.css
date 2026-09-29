@@ -825,3 +825,22 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
   .agent-timeline-entry[data-prompt-editable] > .agent-entry-time { width: 160px; flex-direction: row; justify-content: center; }
   .agent-entry-time .agent-edit-prompt { flex: 0 0 44px; width: 44px; height: 44px; }
 }
+
+.agent-session-search { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--agent-rule); border-radius: 8px; color: var(--agent-ink); background: var(--agent-panel); box-shadow: 0 4px 16px color-mix(in oklab, var(--agent-ink) 12%, transparent); font-size: 12px; }
+.agent-session-search-input { display: flex; align-items: center; gap: 4px; min-width: 0; flex: none; }
+.agent-session-search-input input { flex: 1; min-width: 0; width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid var(--agent-rule); border-radius: 5px; color: inherit; background: var(--agent-panel); font: inherit; font-size: 16px; }
+.agent-session-search-input button { display: inline-grid; place-items: center; flex: none; width: 32px; min-height: 34px; padding: 0; font-size: 18px; }
+.agent-session-search > select { align-self: flex-start; max-width: 100%; flex: none; min-height: 28px; border: 1px solid var(--agent-rule); border-radius: 4px; color: var(--agent-muted); background: var(--agent-panel); font: inherit; }
+.agent-session-search-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--agent-muted); }
+.agent-session-search-status button { padding: 2px; min-height: 24px; border-color: transparent; background: transparent; font: inherit; color: var(--agent-action-text); }
+.agent-session-search-note, .agent-session-search .agent-history-error { margin: 0; font-size: 12px; }
+.agent-session-search-note { color: var(--agent-muted); }
+.agent-session-search-results { min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
+.agent-session-search-results li + li { border-top: 1px solid var(--agent-rule); }
+.agent-session-search-results button { display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 48px; padding: 8px; border: 0; border-radius: 4px; text-align: left; overflow-wrap: anywhere; color: inherit; background: transparent; font: inherit; line-height: 1.5; }
+.agent-session-search-results button:hover, .agent-session-search-results button[aria-current] { background: var(--agent-surface-selected); }
+.agent-session-search-meta { display: flex; justify-content: space-between; gap: 12px; width: 100%; color: var(--agent-muted); font-size: 11px; }
+.agent-session-search mark { background: color-mix(in oklab, var(--agent-signal) 22%, var(--agent-panel)); color: inherit; }
+.agent-session-search :is(button, input, select):focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 1px; }
+.agent-session-search button:disabled { opacity: .5; cursor: default; }
+@media (pointer: coarse) { .agent-session-search-input button { min-height: 40px; width: 36px; } }

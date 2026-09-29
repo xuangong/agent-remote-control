@@ -17,11 +17,13 @@ import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
 import { TimelineDisplay, isContentOnlyItem } from './TimelineDisplay.js';
+import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import { useTimelineAction } from './useTimelineAction.js';
 
 export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
+  readonly searchEntryKey?: string;
   readonly onEditPrompt?: (entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry) => Promise<void>;
   readonly state: AgentReplicaState;
   readonly onRetryMessage?: (id: string) => Promise<void>;
@@ -49,6 +51,7 @@ export interface AgentTimelineProps {
 
 export function AgentTimeline({
   state,
+  searchEntryKey,
   onEditPrompt,
   onRetryMessage,
   onDeleteMessage,
@@ -95,7 +98,7 @@ export function AgentTimeline({
     }
     return prompts;
   }, [state.timeline.entries, state.timeline.hasOlder]);
-  const entries = useMemo(() => contentOnly ? state.timeline.entries.filter(({ item }) => isContentOnlyItem(item)) : state.timeline.entries, [contentOnly, state.timeline.entries]);
+  const entries = useMemo(() => contentOnly ? state.timeline.entries.filter(entry => isContentOnlyItem(entry.item) || (searchEntryKey !== undefined && timelineEntryKey(state.timeline.epoch, entry) === searchEntryKey)) : state.timeline.entries, [contentOnly, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
   const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
@@ -131,7 +134,7 @@ export function AgentTimeline({
       {renderModel.length === 0 && outgoing.length === 0
         ? <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
         : renderModel.map(({ entry, key, messageGroup }) => <ConversationEntry key={key} entry={entry} entryKey={key}
-            messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
+            searchSelected={key === searchEntryKey} messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
             scopeKey={scopeKey} resources={state.resources}
             onEditPrompt={editablePrompts.has(entry) ? editPrompt : undefined}
             onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}

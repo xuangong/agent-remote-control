@@ -1,5 +1,6 @@
 import { createContext, useContext, useState } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
+export const TimelineSearchReveal = createContext(false);
 
 export type TimelineDisplayMode = 'preview' | 'simple' | 'content';
 export const TimelineDisplay = createContext<TimelineDisplayMode>('preview');
@@ -15,10 +16,14 @@ export function isContentOnlyItem(item: AgentTimelineItem): boolean {
 /** Explicit choices survive item updates and changes to the default display mode. */
 export function useItemDisclosure() {
   const mode = useContext(TimelineDisplay);
-  const [choice, setChoice] = useState<boolean>();
+  const revealed = useContext(TimelineSearchReveal);
+  const [disclosure, setDisclosure] = useState<{ revealed: boolean; choice?: boolean }>({ revealed });
+  // A newly selected search result opens once; readers can still collapse it.
+  if (disclosure.revealed !== revealed) setDisclosure({ revealed, choice: revealed ? true : disclosure.choice });
+  const choice = disclosure.revealed === revealed ? disclosure.choice : revealed ? true : disclosure.choice;
   return {
-    expanded: choice === true,
-    preview: choice === undefined && mode !== 'simple',
-    toggle: () => setChoice(current => current !== true),
+    expanded: choice ?? revealed,
+    preview: !revealed && choice === undefined && mode !== 'simple',
+    toggle: () => setDisclosure({ revealed, choice: !(choice ?? revealed) }),
   };
 }

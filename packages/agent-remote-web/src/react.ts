@@ -58,3 +58,5 @@ export { preparePromptDraft, savePromptDraft } from './react/prompt-draft.js';
 export { useSessionView } from './react/useSessionView.js';
 export type { SessionConnectionLease, SessionConnectionSource } from './react/useSessionView.js';
 export type { SessionViewActions, SessionTakeControlOptions } from './react/session-view-actions.js';
+
+export { TimelineSearch } from './react/TimelineSearch.js';

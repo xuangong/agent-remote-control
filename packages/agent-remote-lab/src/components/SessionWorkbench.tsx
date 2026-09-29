@@ -10,7 +10,7 @@ import type {
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, PreviewDock, TimelineDisplay, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import { AgentCommandDetails, AgentTimeline, TimelineSearch, PreviewDock, TimelineDisplay, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 
 
 import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-remote-web/react';
@@ -31,7 +31,7 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
   const controlReadOnly = !!nativeTakeover || session.readOnly;
   const readOnly = recordingReadOnly || controlReadOnly;
   const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id, isAuthenticationError);
-  const actions: LabWorkbenchActions = readOnly ? { loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : session.synchronized ? { ...suppliedFeedbackActions,
+  const actions: LabWorkbenchActions = readOnly ? { searchTimeline: suppliedFeedbackActions.searchTimeline, loadSearchMatch: suppliedFeedbackActions.loadSearchMatch, loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : session.synchronized ? { ...suppliedFeedbackActions,
     retryMessage: session.operations.send_message.allowed ? suppliedFeedbackActions.retryMessage : undefined,
     editPrompt: session.operations.send_message.allowed ? suppliedFeedbackActions.editPrompt : undefined,
     cancel: session.operations.cancel.allowed ? suppliedFeedbackActions.cancel : undefined,
@@ -207,6 +207,13 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; agentFailure?: string;
     connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
+  const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
+  const [openSearchScope, setOpenSearchScope] = useState<string>();
+  const [searchSelection, setSearchSelection] = useState<{ scope: string; key: string; request: number }>();
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const searchOpen = visible && !!state?.timeline.initialized && openSearchScope === searchScope;
+  const selectedSearchKey = searchSelection?.scope === searchScope ? searchSelection.key : undefined;
+  function closeSearch() { setOpenSearchScope(undefined); setSearchSelection(undefined); requestAnimationFrame(() => searchTrigger.current?.focus()); }
   const display = useContext(TimelineDisplay);
   const contentRevision = useMemo(() => ({}), [state, display, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
@@ -217,9 +224,28 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     const request = JSON.stringify([state?.agent?.id, state?.timeline.epoch, revealEntry.requestId]);
     if (consumedReveal.current !== request && scroll.revealEntry(revealEntry.key)) consumedReveal.current = request;
   }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries]);
+  useLayoutEffect(() => {
+    if (visible && selectedSearchKey) scroll.revealEntry(selectedSearchKey);
+  }, [visible, selectedSearchKey, searchSelection?.request]);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
-  return <div className="lab-timeline-stage">
+  return <div className="lab-timeline-stage" onKeyDownCapture={event => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && state?.timeline.initialized) {
+        event.preventDefault(); event.stopPropagation(); setOpenSearchScope(searchScope);
+      }
+    }}>
+      {state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
+        hidden={searchOpen} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
+        onClick={() => setOpenSearchScope(searchScope)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
+      </button> : null}
+      {searchOpen && state ? <TimelineSearch key={searchScope} state={state} search={actions.searchTimeline} onClose={closeSearch} onClearSelection={() => setSearchSelection(undefined)}
+        onSelect={async (match, signal) => {
+          if (actions.loadSearchMatch) await scroll.loadOlder(() => actions.loadSearchMatch!(match, { signal }));
+          else if (!state.timeline.entries.some(entry => entry.seqStart === match.seq)) throw new Error('Reconnect to load this result.');
+          signal.throwIfAborted();
+          setSearchSelection(previous => ({ scope: searchScope, key: match.key, request: (previous?.request ?? 0) + 1 }));
+        }} /> : null}
       <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
         <div className="lab-conversation-content" ref={scroll.contentRef}>
           {hasReplica ? <>
@@ -234,6 +260,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
               onDeleteMessage={actions.deleteMessage}
               onInspectEntry={onInspectEntry}
               inspectedEntryKey={revealEntry?.key}
+              searchEntryKey={selectedSearchKey}
               showHeader={false}
               historyLoading={scroll.historyLoading}
               historyError={scroll.historyError}

@@ -32,7 +32,7 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, in
   const timeContext = useMemo(() => localTime ? { ...localTime, timestamp, visible: timeVisible, toggle: toggleTimelineTime } : undefined, [localTime, timestamp, timeVisible]);
   const { ref, reveal } = useTimelineTimeSwipe(!!localTime, sent ? -1 : 1, !!onEdit);
   return <div ref={ref} className="agent-timeline-entry" data-entry-key={entryKey}
-    data-inspected={inspected || undefined} tabIndex={inspect ? -1 : undefined}
+    data-inspected={inspected || undefined} tabIndex={inspect || inspected ? -1 : undefined}
     data-prompt-editable={!!onEdit || undefined}
     data-time-side={sent ? 'right' : 'left'} data-time-revealed={reveal.offset !== 0 || undefined}
     data-time-dragging={reveal.dragging || undefined}

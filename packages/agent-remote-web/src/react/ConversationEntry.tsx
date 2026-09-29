@@ -6,7 +6,7 @@ import { TimelineEntry } from './TimelineEntry.js';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
 import { ResourceList } from './ResourceList.js';
 import { PreviewActions, type PreviewController } from './PreviewActions.js';
-import { isContentOnlyItem } from './TimelineDisplay.js';
+import { isContentOnlyItem, TimelineSearchReveal } from './TimelineDisplay.js';
 import type { MessageGroupPosition } from './timeline-render-model.js';
 
 interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt' | 'onInspectEntry' | 'resolveSessionLink'
@@ -19,18 +19,19 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
   scopeKey: string;
   resources: AgentReplicaState['resources'];
   inspected: boolean;
+  searchSelected?: boolean;
   previews?: PreviewController;
   extension?: ReactNode;
 }
 
 // Unchanged history stays mounted without rebuilding its controls on every delta.
 export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, contentOnly, agentId,
-  scopeKey, resources, onEditPrompt, onInspectEntry, inspected, resolveSessionLink, onResourceResolve, onResourceRequest,
+  scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
   previews, extension }: ConversationEntryProps) {
-  return <TimelineEntry entryKey={entryKey}
+  return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
-    inspected={inspected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}>
+    inspected={inspected || !!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}>
     <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
       resources={resources} resourceBindings={entry.resources} resourceScopeKey={scopeKey}
       onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
@@ -39,7 +40,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
       {extension}
       <ResourceList bindings={entry.resources} resources={resources} onRequest={onResourceRequest} />
     </> : null}
-  </TimelineEntry>;
+  </TimelineEntry></TimelineSearchReveal.Provider>;
 });
 
 function previewText(item: AgentReplicaState['timeline']['entries'][number]['item']): string {

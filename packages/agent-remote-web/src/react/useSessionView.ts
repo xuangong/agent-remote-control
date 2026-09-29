@@ -47,6 +47,8 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
     takeControl: options => active.takeControl(options),
     uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
     retryMessage: sessionState.operations.send_message.allowed ? async id => { await active.retryMessage(id); } : undefined,
+    searchTimeline: (query, options) => active.searchTimeline(query, options),
+    loadSearchMatch: (match, options) => active.loadSearchMatch(match, options),
     loadOlder: () => active.loadOlder(), cancel: sessionState.operations.cancel.allowed ? async () => { await active.cancel(); } : undefined,
     setPlanning: sessionState.operations.set_planning.allowed ? async value => { await active.setPlanning(value); } : undefined, setSessionSetting: sessionState.operations.set_session_setting.allowed ? async (id, value) => { await active.setSessionSetting(id, value); } : undefined,
     listCommands: () => active.listCommands(), executeCommand: sessionState.operations.execute_command.allowed ? (id, args) => active.executeCommand(id, args) : undefined,

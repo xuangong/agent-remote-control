@@ -1,3 +1,5 @@
+import { scanTimelineHistory, type TimelineSearchOptions, type TimelineSearchMatch } from './timeline-search.js';
+import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import { sessionHandoffScope, type SessionHandoffScope, type SessionHandoff, type SessionControlExtension, type SessionTakeControlOptions } from './session-control-extension.js';
 import { remoteSessionState, type RemoteSessionState } from './session-state.js';
 import { watchPageResume } from './page-resume.js';
@@ -274,6 +276,35 @@ export class RemoteSessionClient {
       ...(action === 'acquire' && (controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken)
         ? { resumeToken: controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken } : {}),
     } }, 'session_control', (message): message is SessionControlMessage => message.type === 'session_control' && message.payload.agentId === this.agentId);
+  }
+
+  searchTimeline(query: string, options: TimelineSearchOptions = {}) {
+    const timeline = this.replica.getState().timeline;
+    const epoch = timeline.epoch;
+    const generation = this.generation;
+    if (!timeline.initialized || !epoch) return Promise.reject(new Error('Wait for the conversation to synchronize before searching.'));
+    return scanTimelineHistory({ ...options, epoch, entries: timeline.entries, hasOlder: timeline.hasOlder, query,
+      assertCurrent: () => {
+        if (generation !== this.generation || epoch !== this.replica.getState().timeline.epoch) throw new Error('Conversation changed. Search again.');
+      },
+      fetchBefore: seq => this.transport.fetchTimeline(this.agentId, 'before', { epoch, seq }, this.historyPageSize, { signal: options.signal }),
+    });
+  }
+
+  /** Load contiguous history only when a reader chooses a search result. */
+  async loadSearchMatch(match: TimelineSearchMatch, options: { signal?: AbortSignal } = {}): Promise<void> {
+    const generation = this.generation;
+    while (true) {
+      options.signal?.throwIfAborted();
+      const timeline = this.replica.getState().timeline;
+      if (generation !== this.generation || timeline.epoch !== match.epoch) throw new Error('Conversation changed. Search again.');
+      if (timeline.entries.some(entry => timelineEntryKey(timeline.epoch, entry) === match.key)) return;
+      const before = timeline.entries[0]?.seqStart;
+      if (!timeline.hasOlder || !before || before <= match.seq) throw new Error('This search result is no longer available. Search again.');
+      await this.loadOlder();
+      if (this.replica.getState().timeline.entries[0]?.seqStart === before) throw new Error('Earlier activity could not be loaded. Retry the jump.');
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
   }
 
   loadOlder(): Promise<void> {

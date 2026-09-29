@@ -16,3 +16,5 @@ export { clearImageDraftScope, configureImageDraftPersistence, clearPersistedIma
 export * from './client/session-state.js';
 
 export * from './client/session-control-extension.js';
+
+export * from './client/timeline-search.js';

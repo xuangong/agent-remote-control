@@ -10,6 +10,7 @@ import { CodexAppServerTransport } from '../../codex-daemon-client/src/app-serve
 import { createCodexHostRegistration } from './codex.js';
 import { createAgentHostRuntime } from './host.js';
 import { createHostExecutionPolicy } from './execution-policy.js';
+import { prepareSharedCodex } from './codex-shared-startup.js';
 
 const exec = promisify(execFile);
 const wsPath = createRequire(import.meta.url).resolve('ws');
@@ -51,7 +52,7 @@ server.on('connection', socket=>socket.on('message', raw=>{
   const run = (args: string[]) => exec(process.execPath, [resolve('dist/cli.js'), 'codex', ...args], { env, timeout: 35000, windowsHide: true });
   let first: CodexAppServerTransport | undefined; let second: CodexAppServerTransport | undefined;
   try {
-    expect((await run(['daemon', 'start'])).stdout).toContain('started');
+    await prepareSharedCodex(env.AGENT_HOST_STATE_DIR, env, resolve('dist/cli.js'));
     const state = (await readWindowsCodexDaemon(home))!;
     expect((await run(['daemon', 'start'])).stdout).toContain('already running');
     expect(JSON.parse((await run(['daemon', 'status'])).stdout)).toMatchObject({ running: true, pid: state.pid });
@@ -107,6 +108,18 @@ server.on('connection', socket=>socket.on('message', raw=>{
     }
     await run(['daemon', 'stop']);
     expect(await readWindowsCodexDaemon(home)).toBeUndefined();
+    const unavailable = createAgentHostRuntime({ registrations: [await createCodexHostRegistration({
+      executable: native ?? fake, env, connectionMode: 'shared', restrictedNative: false,
+    })] });
+    try {
+      const catalog = await unavailable.control({ method: 'GET', path: '/remote/catalog?providerId=codex' });
+      expect(catalog.status).toBe(503);
+      expect(JSON.parse(catalog.body)).toMatchObject({ code: 'native_runtime_unavailable', error: expect.stringContaining('codex daemon start') });
+      const attach = await unavailable.control({ method: 'POST', path: '/remote/attach', sessionId: 'missing-daemon',
+        body: JSON.stringify({ providerId: 'codex', nativeSessionId: created.thread.id }) });
+      expect(attach.status).toBe(503);
+      expect(JSON.parse(attach.body)).toMatchObject({ code: 'native_runtime_unavailable' });
+    } finally { await unavailable.close(); }
     expect(() => process.kill(restarted.nativePid, 0)).toThrow();
   } finally {
     await first?.dispose(); await second?.dispose();

@@ -256,7 +256,7 @@ directory. Windows Script Host and Windows PowerShell must be available. Windows
 login startup does not provide automatic crash restart or pre-login boot startup.
 
 Shared Codex and managed VS Code tunnels are supported on Windows as described
-below. The Host defaults to shared Codex mode; start the shared daemon before opening sessions.
+below. The Host defaults to shared Codex mode and checks/starts its daemon during Controller startup.
 Native sandbox availability remains provider-specific. Claude's restricted command
 sandbox still fails closed on unsupported platforms; Windows support does not
 automatically enable trusted full control or weaken local execution policy.
@@ -495,7 +495,7 @@ Shared mode accepts the daemon's native permissions for Codex only. It never
 starts a replacement writer or stops the daemon when a Remote connection closes.
 Shared mode defaults to accepting daemon permissions (`AGENT_HOST_CODEX_TRUST_SHARED=1`).
 An explicit `0` retains the permission rejection unless full control is enabled.
-Controller sessions always use shared Codex. Legacy private configurations and managed Gateway homes check/start their daemon during startup, without restarting an existing daemon. `AGENT_HOST_CODEX_AUTO_START=1` enables the same behavior for other Hosts and is set in the Docker image. The legacy `AGENT_HOST_CODEX_CONNECTION=private` setting is accepted but no longer starts isolated Controller sessions. The standalone Provider SDK still supports private runtimes for embedding and debugging.
+Controller sessions always use shared Codex. On Windows, macOS, and Linux, the Controller checks its local daemon at startup and starts it if missing, including login startup after a reboot. No extra environment setting is required. An already running daemon is reused without interruption. Set `AGENT_HOST_CODEX_AUTO_START=0` to opt out for ordinary shared homes; legacy migration and managed Gateway homes retain their startup requirements. Custom socket endpoints retain their external lifecycle owner and are not started automatically. `AGENT_HOST_CODEX_AUTO_START=1` remains supported as an explicit startup requirement. The legacy `AGENT_HOST_CODEX_CONNECTION=private` setting is accepted but no longer starts isolated Controller sessions. The standalone Provider SDK still supports private runtimes for embedding and debugging.
 Existing private CLI or desktop sessions can be moved into the shared daemon from
 the chatbox with **Interrupt & take over**. The Controller first attempts normal
 resume; a native writer conflict only offers takeover when the original process

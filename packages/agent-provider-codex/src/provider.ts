@@ -255,7 +255,7 @@ function runtimeError(error: unknown, shared: boolean): unknown {
       'The shared Codex daemon reached its file descriptor limit. Consider restarting it on the Host computer after checking active work. All sessions connected to that daemon will disconnect, and running work may be interrupted.');
   }
   if (error instanceof CodexTransportUnavailableError) return new AgentRuntimeError('native_runtime_unavailable',
-    'The Codex runtime connection is unavailable. Check the native daemon and the configured local socket, then reopen the session.');
+    'The Codex runtime connection is unavailable. Check the local daemon configuration, or run agent-remote-controller codex daemon start on the Host with the matching CODEX_HOME, then retry.');
   if (error instanceof CodexRequestTimeoutError) {
     if (error.method === 'thread/resume') return new AgentRuntimeError('native_resume_timeout',
       'Codex did not finish resuming the session before the native request deadline. Check the Controller log, then reopen the session.');

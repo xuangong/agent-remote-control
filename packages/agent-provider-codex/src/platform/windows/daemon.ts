@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createConnection, createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { CodexAppServerTransport } from '../../app-server-transport.js';
+import { CodexAppServerTransport, CodexTransportUnavailableError } from '../../app-server-transport.js';
 
 export interface WindowsCodexDaemonState { pid: number; nativePid: number; token: string; pipe: string; url: string; version: string }
 export const windowsCodexDaemonDirectory = (home: string) => join(resolve(home), 'agent-remote-daemon');
@@ -29,11 +29,15 @@ export async function requestWindowsCodexDaemon(state: WindowsCodexDaemonState, 
 }
 
 export async function windowsCodexSharedEndpoint(home: string): Promise<{ url: string; token: string }> {
-  const state = await readWindowsCodexDaemon(home);
-  if (!state) throw new Error('Shared Codex daemon is not running. Run agent-remote-controller codex daemon start with the matching CODEX_HOME.');
-  const status = await requestWindowsCodexDaemon(state, 'status');
-  if (status.pid !== state.pid || status.url !== state.url) throw new Error('Shared Codex daemon identity changed. Retry the connection.');
-  return { url: state.url, token: state.token };
+  try {
+    const state = await readWindowsCodexDaemon(home);
+    if (!state) throw new Error('Shared Codex daemon is not running.');
+    const status = await requestWindowsCodexDaemon(state, 'status');
+    if (status.pid !== state.pid || status.url !== state.url) throw new Error('Shared Codex daemon identity changed.');
+    return { url: state.url, token: state.token };
+  } catch (cause) {
+    throw new CodexTransportUnavailableError('The Windows shared Codex daemon is unavailable. Run agent-remote-controller codex daemon start with the matching CODEX_HOME, then retry.', { cause });
+  }
 }
 
 /** Owns one independent native app-server; Host connections never own this lifecycle. */

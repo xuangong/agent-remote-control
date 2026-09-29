@@ -18,7 +18,7 @@ process.exit(existsSync(root+'/running')?0:1);`);
     expect(await readFile(join(root, 'actions'), 'utf8')).toBe('status\nstart\nstatus\n');
     await prepareSharedCodex(root, {AGENT_HOST_CODEX_CONNECTION: 'private'}, cli);
     expect(await readFile(join(root, 'actions'), 'utf8')).toBe('status\nstart\nstatus\nstatus\n');
-    await prepareSharedCodex(root, {AGENT_HOST_CODEX_CONNECTION: 'shared'}, cli);
+    await prepareSharedCodex(root, {AGENT_HOST_CODEX_CONNECTION: 'shared', AGENT_HOST_CODEX_AUTO_START: '0'}, cli, 'darwin');
     expect(await readFile(join(root, 'actions'), 'utf8')).toBe('status\nstart\nstatus\nstatus\n');
     await prepareSharedCodex(root, {AGENT_HOST_CODEX_CONNECTION: 'shared', AGENT_HOST_CODEX_AUTO_START: '1'}, cli);
     expect(await readFile(join(root, 'actions'), 'utf8')).toBe('status\nstart\nstatus\nstatus\nstatus\n');
@@ -27,4 +27,29 @@ process.exit(existsSync(root+'/running')?0:1);`);
 it('does not migrate an explicitly restricted or custom-daemon configuration by starting another writer', async () => {
   await expect(prepareSharedCodex('/unused', {AGENT_HOST_CODEX_CONNECTION: 'private', AGENT_HOST_CODEX_TRUST_SHARED: '0'}, '/missing')).rejects.toThrow(/trust/i);
   await expect(prepareSharedCodex('/unused', {AGENT_HOST_CODEX_CONNECTION: 'private', AGENT_HOST_CODEX_SOCKET: '/custom/socket'}, '/missing')).rejects.toThrow(/custom/i);
+});
+
+it.each(['win32', 'darwin', 'linux'] as const)('restores the shared daemon on %s without replacing a live daemon', async platform => {
+  const root = await mkdtemp(join(tmpdir(), 'arc-shared-startup-'));
+  try {
+    const cli = join(root, 'cli.mjs');
+    await writeFile(cli, `import {appendFileSync,existsSync,writeFileSync} from 'node:fs';
+const action=process.argv.at(-1),root=process.env.AGENT_HOST_STATE_DIR;
+appendFileSync(root+'/actions',action+'\\n');
+if(action==='start')writeFileSync(root+'/running','yes');
+process.exit(existsSync(root+'/running')?0:3);`);
+    await prepareSharedCodex(root, {AGENT_HOST_CODEX_CONNECTION: 'shared'}, cli, platform);
+    expect(await readFile(join(root, 'actions'), 'utf8')).toBe('status\nstart\nstatus\n');
+    await prepareSharedCodex(root, {}, cli, platform);
+    expect(await readFile(join(root, 'actions'), 'utf8')).toBe('status\nstart\nstatus\nstatus\n');
+  } finally { await rm(root, {recursive: true, force: true}); }
+});
+it.each(['win32', 'darwin', 'linux'] as const)('respects auto-start opt-out and local restrictions on %s', async platform => {
+  await expect(prepareSharedCodex('/unused', {AGENT_HOST_CODEX_AUTO_START: '0'}, '/missing', platform)).resolves.toBeUndefined();
+  await expect(prepareSharedCodex('/unused', {AGENT_HOST_CODEX_TRUST_SHARED: '0'}, '/missing', platform)).rejects.toThrow(/trust/i);
+  await expect(prepareSharedCodex('/unused', {AGENT_HOST_CODEX_AUTO_START: '1', AGENT_HOST_CODEX_SOCKET: '/custom/socket'}, '/missing', platform)).rejects.toThrow(/custom/i);
+});
+
+it.each(['darwin', 'linux'] as const)('leaves an externally managed custom socket alone on %s', async platform => {
+  await expect(prepareSharedCodex('/unused', {AGENT_HOST_CODEX_SOCKET: '/external/codex.sock'}, '/missing', platform)).resolves.toBeUndefined();
 });

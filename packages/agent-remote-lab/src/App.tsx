@@ -1119,10 +1119,20 @@ function AppContent({
       if (!pair.sender || !pair.recipient || sessionKey(pair.sender) === sessionKey(pair.recipient)) {
         throw new Error('This history does not identify both sessions unambiguously. Load their agent activity and retry.');
       }
-      const sender = await attachParticipant(pair.sender);
       const recipient = await attachParticipant(pair.recipient);
-      check();
       const receiver = await observe(recipient);
+      if (compactLayoutRef.current) {
+        const target = await loadReceivedCommunication(receiver, entry, controller.signal);
+        check();
+        if (!await openSession(recipient, undefined, undefined, true)) throw new Error('The receiving session could not be opened.');
+        // Opening the recipient intentionally advances the navigation generation.
+        controller.signal.throwIfAborted();
+        setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        return;
+      }
+      const sender = await attachParticipant(pair.sender);
+      check();
       const present = [sender, recipient].every(session => stackPath.slice(stackRange.start, stackRange.end + 1).some(visible => sessionKey(visible) === sessionKey(session)));
       if (!present) {
         const root = stackRoot && [sender, recipient].find(session => sessionKey(session) === sessionKey(stackRoot));

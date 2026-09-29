@@ -90,3 +90,33 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     expect(errors).toEqual([]);
   } finally { await browser.close(); }
 },30000);
+
+for (const engine of [chromium, webkit]) it(`navigates mobile letters in the current view in ${engine.name()}`, async () => {
+  const browser = await engine.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true });
+    page.setDefaultTimeout(8000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(url);
+    const primary = page.locator('.lab-primary-conversation');
+    await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
+    await browserExpect(primary).toBeVisible();
+    await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
+    await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
+    await browserExpect(page).toHaveURL(/session=child/);
+    const receipt = primary.locator('[data-entry-key$=":task"]');
+    const viewport = primary.locator('.lab-timeline-scroll');
+    await browserExpect.poll(async () => {
+      const entry = await receipt.boundingBox(), scroll = await viewport.boundingBox();
+      return Math.abs(entry!.y - scroll!.y - 12);
+    }).toBeLessThan(3);
+    await primary.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true }).click();
+    await browserExpect(page).toHaveURL(/session=parent/);
+    await browserExpect(primary).toBeVisible();
+    await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
+    await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /reply$/);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+  } finally { await browser.close(); }
+}, 30000);

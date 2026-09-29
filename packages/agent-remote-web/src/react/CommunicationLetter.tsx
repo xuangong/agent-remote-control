@@ -29,7 +29,7 @@ export function CommunicationLetter({ entry, resourceContext }: { entry: Project
     }}>
     <header className="agent-letter-heading">
       <button type="button" className="agent-letter-open" disabled={!navigation || pending} onClick={() => void open()}
-        aria-label={`Open letter from ${item.sender} to ${item.recipient}`} title="Open both sessions at this message">
+        aria-label={`Open letter from ${item.sender} to ${item.recipient}`} title="Go to the receiving session at this message">
         <svg className="agent-letter-envelope" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></svg>
         <span className="agent-letter-participants">{item.sender} → {item.recipient}</span>
         {direction ? <span className="agent-letter-direction" aria-label={`Recipient on the ${direction}`}>{direction === 'left' ? '←' : '→'}</span> : null}

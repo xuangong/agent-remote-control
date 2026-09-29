@@ -390,3 +390,46 @@ it('opens nested desktop subagents next to their direct parent', async () => {
   expect(sides.every(pane => !pane.hidden)).toBe(true);
   expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-child', nativeSessionId: 'native-grandchild' } });
 });
+
+it('replaces the current mobile conversation with the letter recipient and preserves both drafts', async () => {
+  const f = await setup(false, { live: true, letters: true });
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  await draft(primary, 'Parent draft stays');
+  await act(async () => {
+    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root to /root/review"]')!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
+  expect(primary.hidden).toBe(false);
+  expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
+  expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('task-letter');
+  await waitForSession(f.container, 'child');
+  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).not.toBe('Parent draft stays');
+  await draft(primary, 'Child draft stays');
+  await act(async () => {
+    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
+  await waitForSession(f.container, 'parent');
+  expect(primary.hidden).toBe(false);
+  expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
+  expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
+  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Parent draft stays');
+  await act(async () => {
+    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root to /root/review"]')!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
+  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Child draft stays');
+});
+it('keeps the mobile recipient open when clicking a letter already received here', async () => {
+  const f = await setup(false, { live: true, letters: true });
+  const before = f.connections();
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  await act(async () => {
+    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
+  expect(primary.hidden).toBe(false);
+  expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
+  expect(f.connections()).toBe(before);
+  expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
+});

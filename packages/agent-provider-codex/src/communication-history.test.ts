@@ -147,3 +147,98 @@ it('fails closed on a mismatched file identity and retains usable native history
   result = await f.reader.supplement(snapshot, original);
   expect(result).toContainEqual(original[0]);
 });
+
+function paginated(text: string, start = 0): string {
+  return text.trimEnd().split('\n').map((line, index) => JSON.stringify({ ...JSON.parse(line), ordinal: start + index }) + '\n').join('');
+}
+
+function forkMeta(id: string, source: string, prefix: string, end: number): string {
+  return paginated(row('session_meta', { id, history_mode: 'paginated', history_base: {
+    thread_id: source, end_ordinal_exclusive: end, end_byte_offset: Buffer.byteLength(prefix),
+  } }), end);
+}
+
+it('recovers a lazy fork prefix in native order without reading post-fork messages or leaking a full-log cache', async () => {
+  const f = await fixture();
+  const prefix = paginated(meta('child', '/root/review', 'parent')
+    + message('task', '/root', '/root/review', 'ct', 'Inherited 中文 task', 1100)
+    + completed('child', 'ct', 'cmd', 1200));
+  await writeFile(f.childPath, prefix + paginated(message('excluded', '/root', '/root/review', 'ct', 'After fork', 1400), 3));
+  // Warm the unrestricted reader before requesting two different immutable prefixes.
+  await f.reader.supplement({ thread: f.child }, []);
+  const forkPath = path.join(path.dirname(f.childPath), 'fork.jsonl');
+  await writeFile(forkPath, forkMeta('fork', 'child', prefix, 3));
+  const snapshot = { thread: { id: 'fork', path: forkPath, turns: f.child.turns } };
+  const result = await f.reader.supplement(snapshot, projectCodexThreadHistory(snapshot, 'fork'));
+  expect(result.map(o => o.sourceKey)).toEqual(['item:task:completed', 'item:cmd:completed']);
+  expect(communications(result)[0]).toMatchObject({ event: { turnId: 'ct', item: { text: 'Inherited 中文 task' } } });
+  await appendFile(f.childPath, paginated(message('newer', '/root', '/root/review', 'ct', 'Source grew', 1500), 4));
+  expect(await f.reader.supplement(snapshot, result)).toEqual(result);
+});
+
+it('follows nested lazy forks and keeps inherited receipts before the local tail', async () => {
+  const f = await fixture();
+  const prefix = paginated(meta('child', '/root/review') + message('first', '/root', '/root/review', 'ct', 'First', 1300));
+  await writeFile(f.childPath, prefix);
+  const dir = path.dirname(f.childPath), middlePath = path.join(dir, 'middle.jsonl'), leafPath = path.join(dir, 'leaf.jsonl');
+  const middle = forkMeta('middle', 'child', prefix, 2) + paginated(message('second', '/root', '/root/review', 'ct', 'Second', 1200), 3);
+  await writeFile(middlePath, middle + paginated(message('excluded', '/root', '/root/review', 'ct', 'After nested fork'), 4));
+  await writeFile(leafPath, forkMeta('leaf', 'middle', middle, 4) + paginated(message('third', '/root', '/root/review', 'ct', 'Third', 1100), 5));
+  f.reader.rememberThread({ id: 'middle', path: middlePath });
+  const result = await f.reader.supplement({ thread: { id: 'leaf', path: leafPath, turns: f.child.turns } }, []);
+  expect(communications(result).map(o => o.sourceKey)).toEqual(['item:first:completed', 'item:second:completed', 'item:third:completed']);
+});
+
+it.each(['missing', 'cycle', 'partial-line', 'past-end', 'ordinal-mismatch'])('keeps local history and reports an unavailable %s base', async kind => {
+  const f = await fixture();
+  const prefix = paginated(meta('child', '/root/review') + message('secret', '/root', '/root/review', 'ct', 'INVALID_BASE'));
+  await writeFile(f.childPath, prefix);
+  const forkPath = path.join(path.dirname(f.childPath), 'fork.jsonl');
+  const end = kind === 'ordinal-mismatch' ? 1 : 2;
+  const source = kind === 'cycle' ? 'fork' : kind === 'missing' ? 'absent' : 'child';
+  const boundary = kind === 'partial-line' ? prefix.slice(0, -2) : kind === 'past-end' ? prefix + 'extra' : prefix;
+  await writeFile(forkPath, forkMeta('fork', source, boundary, end) + paginated(message('local', '/root', '/root/review', 'ct', 'Local tail'), end + 1));
+  const snapshot = { thread: { id: 'fork', path: forkPath, turns: f.child.turns } };
+  const native = projectCodexThreadHistory(snapshot, 'fork');
+  const result = await f.reader.supplement(snapshot, native);
+  expect(communications(result).map(o => o.sourceKey)).toEqual(['item:local:completed']);
+  expect(result).toContainEqual(native[0]);
+  expect(result.some(o => o.event.type === 'timeline' && o.event.item.type === 'error')).toBe(true);
+});
+
+it('mirrors inherited outgoing tasks only within the source prefix and preserves their reply direction', async () => {
+  const f = await fixture();
+  const prefix = paginated(meta('parent', '/root')
+    + row('turn_context', { turn_id: 'pt' }, 1000)
+    + message('reply', '/root/review', '/root', 'pt', 'Inherited reply', 1250));
+  await writeFile(f.parentPath, prefix + paginated(completed('parent', 'pt', 'after', 1600), 3));
+  const forkPath = path.join(path.dirname(f.parentPath), 'fork.jsonl');
+  await writeFile(forkPath, forkMeta('fork', 'parent', prefix, 3));
+  const snapshot = { thread: { id: 'fork', path: forkPath, turns: f.parent.turns } };
+  const result = await f.reader.supplement(snapshot, []);
+  expect(communications(result).map(o => o.sourceKey)).toEqual(['item:task:completed', 'item:reply:completed']);
+  expect(communications(result)[0]?.event).not.toHaveProperty('turnId');
+  expect(communications(result)[1]?.event).toMatchObject({ turnId: 'pt' });
+});
+
+it('accepts native ordinal gaps inside a byte-bounded history prefix', async () => {
+  const f = await fixture();
+  const prefix = paginated(meta('child', '/root/review'))
+    + paginated(message('task', '/root', '/root/review', 'ct', 'After skipped ordinal'), 3);
+  await writeFile(f.childPath, prefix);
+  const forkPath = path.join(path.dirname(f.childPath), 'fork.jsonl');
+  await writeFile(forkPath, forkMeta('fork', 'child', prefix, 4));
+  const result = await f.reader.supplement({ thread: { id: 'fork', path: forkPath, turns: f.child.turns } }, []);
+  expect(communications(result).map(o => o.sourceKey)).toEqual(['item:task:completed']);
+});
+
+it('retains the source agent identity for a lazy fork with outgoing tasks but no received messages', async () => {
+  const f = await fixture();
+  const prefix = paginated(meta('parent', '/root')
+    + row('turn_context', { turn_id: 'pt' }, 1000) + completed('parent', 'pt', 'cmd', 1200));
+  await writeFile(f.parentPath, prefix);
+  const forkPath = path.join(path.dirname(f.parentPath), 'fork.jsonl');
+  await writeFile(forkPath, forkMeta('fork', 'parent', prefix, 3));
+  const result = await f.reader.supplement({ thread: { id: 'fork', path: forkPath, turns: f.parent.turns } }, []);
+  expect(communications(result).map(o => o.sourceKey)).toEqual(['item:task:completed']);
+});

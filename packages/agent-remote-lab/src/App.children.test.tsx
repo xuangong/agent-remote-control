@@ -14,7 +14,7 @@ const snapshots = {
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; directChild?: boolean } = {}) {
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; rootReference?: boolean; directChild?: boolean } = {}) {
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: options.desktop ? query.includes('min-width: 1181px') : query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   let connections = 0;
   let releaseChild: (() => void) | undefined;
@@ -49,7 +49,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     fetchSnapshot: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] }),
     fetchTimeline: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
       requestId: 'page', agentId, epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false,
-      window: { minSeq: 1, maxSeq: options.letters ? 3 : options.navigation ? 1 : 0, nextSeq: options.letters ? 4 : options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.letters ? letterEntries(agentId) : options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
+      window: { minSeq: 1, maxSeq: options.letters ? (options.rootReference && agentId === 'child' ? 4 : 3) : options.navigation ? 1 : 0, nextSeq: options.letters ? (options.rootReference && agentId === 'child' ? 5 : 4) : options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.letters ? letterEntries(agentId, options.rootReference) : options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
     } }),
     connect: (agentId, listener) => {
       connections++;
@@ -320,7 +320,9 @@ it('shows known grandchildren in the parent timeline and attaches through their 
   expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-child', nativeSessionId: 'native-grandchild' } });
 });
 
-function letterEntries(agent: string): import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry[] {
+function letterEntries(agent: string, rootReference = false): import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry[] {
+  const reference = activityEntry('native-parent');
+  reference.item.detail.sessionReference.title = '/root';
   return [
     { providerId: 'codex', seqStart: 1, seqEnd: 1, timestamp: '2026-09-29T00:00:00Z', resources: [], collapsed: [], sourceSeqRanges: [{startSeq: 1, endSeq: 1}],
       ...(agent === 'child' ? { turnId: 'child-turn' } : {}),
@@ -330,6 +332,7 @@ function letterEntries(agent: string): import('@orchardworks/agent-remote-protoc
     { providerId: 'codex', seqStart: 3, seqEnd: 3, timestamp: '2026-09-29T00:00:02Z', resources: [], collapsed: [], sourceSeqRanges: [{startSeq: 3, endSeq: 3}],
       ...(agent === 'parent' ? { turnId: 'parent-turn' } : {}),
       item: { type: 'agent_communication', messageId: 'reply-letter', sender: '/root/review', recipient: '/root', text: 'The transport review is complete.' } },
+    ...(rootReference && agent === 'child' ? [{ ...reference, timestamp: '2026-09-29T00:00:03Z', seqStart: 4, seqEnd: 4, sourceSeqRanges: [{ startSeq: 4, endSeq: 4 }] }] : []),
   ];
 }
 it('opens desktop subagents side by side and preserves both drafts when focusing or closing a pane', async () => {
@@ -437,4 +440,21 @@ it('opens the sender when the mobile view already belongs to the recipient', asy
   });
   await waitForSession(f.container, 'parent');
   expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
+});
+
+it.each([false, true])('keeps the main session title when a child letter uses its native /root path (desktop=%s)', async desktop => {
+  window.localStorage.setItem('agent-remote-opened:http://localhost/', JSON.stringify([
+    { hostId: 'local', providerId: 'codex', nativeSessionId: 'native-parent', agentId: 'parent', title: 'Main project conversation' },
+  ]));
+  const f = await setup(false, { live: true, letters: true, rootReference: true, directChild: true, desktop });
+  await waitForSession(f.container, 'child');
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  await act(async () => {
+    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+  });
+  if (!desktop) await waitForSession(f.container, 'parent');
+  const destination = desktop ? f.container.querySelector('.lab-side-conversation')! : primary;
+  expect(f.container.querySelector(desktop ? '.lab-side-title-text' : '.lab-mobile-session-title')?.textContent).toBe('Main project conversation');
+  expect(destination.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
 });

@@ -67,6 +67,46 @@ it('supplements both sides of child communication over Unix WebSocket and preser
   expect(server.requests.filter(r => r.method === 'turn/start')).toHaveLength(0);
 });
 
+it('restores lazy-fork letters over Unix WebSocket without importing later source activity on reconnect', async () => {
+  const { server, provider } = await harness();
+  const dir = await mkdtemp(join(tmpdir(), 'arc-fork-communication-wire-')); roots.push(dir);
+  const row = (ordinal: number, type: string, payload: unknown, time = 1000) =>
+    JSON.stringify({ ordinal, type, payload, timestamp: new Date(time).toISOString() }) + '\n';
+  const message = (ordinal: number, id: string, author: string, recipient: string, turn: string, text: string, time: number) =>
+    row(ordinal, 'response_item', { type: 'agent_message', id, author, recipient, content: [{ type: 'input_text', text }],
+      internal_chat_message_metadata_passthrough: { turn_id: turn } }, time);
+  const basePath = join(dir, 'base.jsonl'), forkPath = join(dir, 'fork.jsonl'), childPath = join(dir, 'child.jsonl');
+  const prefix = row(0, 'session_meta', { id: 'base', agent_path: '/root' })
+    + row(1, 'turn_context', { turn_id: 'pt' })
+    + message(2, 'reply', '/root/review', '/root', 'pt', 'Inherited reply', 1300);
+  await writeFile(basePath, prefix);
+  await writeFile(forkPath, row(3, 'session_meta', { id: 'root', history_mode: 'paginated', history_base: {
+    thread_id: 'base', end_ordinal_exclusive: 3, end_byte_offset: Buffer.byteLength(prefix),
+  } }));
+  await writeFile(childPath, row(0, 'session_meta', { id: 'child', agent_path: '/root/review', parent_thread_id: 'base' })
+    + message(1, 'task', '/root', '/root/review', 'ct', 'Inherited task', 1100)
+    + message(2, 'later-task', '/root', '/root/review', 'ct', 'Source task after fork', 1400));
+  Object.assign(server.thread, { path: forkPath, turns: [{ id: 'pt', startedAt: 1, status: 'completed',
+    items: [{ type: 'subAgentActivity', id: 'spawn', kind: 'started', agentThreadId: 'child', agentPath: '/root/review' }] }] });
+  server.children.set('base', { ...server.thread, id: 'base', path: basePath });
+  server.children.set('child', { id: 'child', path: childPath, parentThreadId: 'base', agentPath: '/root/review',
+    status: { type: 'idle' }, canAcceptDirectInput: false, turns: [] });
+  const session = await provider.resumeSession({ providerId: 'codex', sessionId: 'root', opaque: '{}' }); sessions.push(session);
+  const iterator = session.observe()[Symbol.asyncIterator]();
+  const initial: ProviderStreamItem[] = [];
+  for (;;) { const next = await iterator.next(); if (next.done || next.value.type === 'history_boundary') break; initial.push(next.value); }
+  const texts = (items: ProviderStreamItem[]) => items.flatMap(item => item.type === 'observation' && item.event.type === 'timeline'
+    && item.event.item.type === 'agent_communication' ? [item.event.item.text] : []);
+  expect(texts(initial)).toEqual(['Inherited task', 'Inherited reply']);
+  await appendFile(basePath, message(3, 'later-reply', '/root/review', '/root', 'pt', 'Source reply after fork', 1500));
+  server.disconnectClients();
+  const replacement = await nextItem(iterator, 'timeline_replacement');
+  if (replacement.type !== 'timeline_replacement') throw new Error('Expected replacement');
+  expect(texts(replacement.observations)).toEqual(['Inherited task', 'Inherited reply']);
+  expect(server.requests.filter(r => r.method === 'thread/resume' && r.params.threadId !== 'root')).toHaveLength(0);
+  expect(server.requests.filter(r => r.method === 'turn/start')).toHaveLength(0);
+});
+
 interface RpcRequestContext {
   socket: WebSocket;
   connection: number;

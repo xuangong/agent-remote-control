@@ -1,7 +1,11 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { isRecord, readString } from './native.js';
 import { CodexEventProjector } from './projector.js';
-import { readCommunicationLog, type CommunicationLog, type CommunicationRecord } from './communication-log.js';
+import { readCommunicationLog, type CommunicationLog, type CommunicationRecord, type CommunicationHistoryBase } from './communication-log.js';
+
+interface ResolvedCommunicationLog extends CommunicationLog {
+  sources: Array<{ id: string; parentId?: string; endTime: number }>;
+}
 
 /** Local compatibility fallback. RPC history remains authoritative whenever it supplies a message. */
 export class CodexCommunicationHistory {
@@ -32,7 +36,7 @@ export class CodexCommunicationHistory {
     this.rememberThread(thread);
     const filePath = readString(this.metadata.get(id)?.path);
     if (!filePath) return observations;
-    let log: CommunicationLog;
+    let log: ResolvedCommunicationLog;
     try { log = await this.load(id, filePath); }
     catch { return diagnostic(observations, id); }
     const turns = Array.isArray(thread.turns) ? thread.turns.filter(isRecord) : [];
@@ -49,6 +53,7 @@ export class CodexCommunicationHistory {
     const peers = new Set<string>();
     const parent = readString(thread.parentThreadId) ?? log.parentId;
     if (parent) peers.add(parent);
+    for (const source of log.sources) if (source.parentId) peers.add(source.parentId);
     for (const turn of turns) for (const item of Array.isArray(turn.items) ? turn.items : []) {
       if (!isRecord(item)) continue;
       if (item.type === 'subAgentActivity' && readString(item.agentThreadId)) peers.add(item.agentThreadId as string);
@@ -75,10 +80,14 @@ export class CodexCommunicationHistory {
             const peerPath = readString(metadata.path);
             if (!peerPath) return;
             const peer = await this.load(peerId, peerPath);
-            if (peerId !== parent && (readString(metadata.parentThreadId) ?? peer.parentId) !== id) return;
+            const peerParent = readString(metadata.parentThreadId) ?? peer.parentId;
+            const sources = log.sources.filter(source => peerParent === source.id
+              || peerId === source.parentId || source.id === id && peerId === parent);
+            if (!sources.length) return;
             const targetPath = agentPath(metadata, peer);
             for (const message of peer.messages.values()) {
-              if (message.sender === selfPath && message.recipient === targetPath && inPage(message.time)) messages.push({ message, local: false });
+              if (message.sender === selfPath && message.recipient === targetPath && inPage(message.time)
+                && sources.some(source => message.time <= source.endTime)) messages.push({ message, local: false });
             }
             incomplete ||= peer.incomplete;
           } catch { incomplete = true; }
@@ -126,12 +135,42 @@ export class CodexCommunicationHistory {
     return incomplete ? diagnostic(result, id) : result;
   }
 
-  private async load(id: string, filePath: string): Promise<CommunicationLog> {
-    const log = await readCommunicationLog(filePath, id, this.logs.get(id));
-    this.logs.delete(id); this.logs.set(id, log);
+  private async load(id: string, filePath: string, end?: CommunicationHistoryBase, ancestors = new Set<string>()): Promise<ResolvedCommunicationLog> {
+    if (ancestors.has(id) || ancestors.size >= 32) throw new Error('Invalid communication history lineage');
+    const key = JSON.stringify([id, end?.endOrdinalExclusive, end?.endByteOffset]);
+    const log = await readCommunicationLog(filePath, id, this.logs.get(key), end);
+    this.logs.delete(key); this.logs.set(key, log);
     // Readers belong to a session view. Bound the working set of large parent/child histories.
     if (this.logs.size > 32) this.logs.delete(this.logs.keys().next().value!);
-    return log;
+    const resolved: ResolvedCommunicationLog = { ...log, sources: [{ id, parentId: log.parentId, endTime: end ? log.latestTime : Infinity }] };
+    if (!log.historyBase) return resolved;
+    // A lazy fork owns only its tail. Expand the immutable prefix before projecting its turns.
+    // Keep raw cache entries separate from composed histories and from other fork boundaries.
+    const base = log.historyBase;
+    try {
+      let metadata = this.metadata.get(base.threadId);
+      if (!metadata) {
+        const response = await this.readThread(base.threadId);
+        if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== base.threadId) {
+          throw new Error('Communication history base identity mismatch');
+        }
+        metadata = response.thread;
+        this.rememberThread(metadata);
+      }
+      const basePath = readString(metadata.path);
+      if (!basePath) throw new Error('Communication history base path is unavailable');
+      const inherited = await this.load(base.threadId, basePath, base, new Set([...ancestors, id]));
+      const shift = inherited.lines;
+      return { ...resolved, incomplete: log.incomplete || inherited.incomplete, lines: shift + log.lines,
+        agentPath: log.agentPath ?? inherited.agentPath,
+        sources: [...inherited.sources, ...resolved.sources],
+        messages: new Map([...inherited.messages, ...[...log.messages].map(([key, message]) =>
+          [key, { ...message, position: shift + message.position }] as const)]),
+        anchors: new Map([...inherited.anchors, ...[...log.anchors].map(([key, anchor]) =>
+          [key, { ...anchor, position: shift + anchor.position }] as const)]),
+        turns: new Map([...inherited.turns, ...log.turns]),
+      };
+    } catch { return { ...resolved, incomplete: true }; }
   }
 }
 

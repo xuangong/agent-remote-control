@@ -1084,15 +1084,17 @@ function AppContent({
     const attachParticipant = async (identity: SessionEntry): Promise<OpenedSession> => {
       check();
       const known = [...openWindows, ...openedSessionsRef.current].find(session => sessionKey(session) === sessionKey(identity));
+      // Native agent addresses identify letter endpoints; they must not rename a saved conversation.
+      const title = favorites.stars.find(session => sessionKey(session) === sessionKey(identity))?.title ?? known?.title ?? identity.title;
       const active = connections.find(identity);
-      if (active) return { ...known, ...identity, agentId: active.agentId };
-      if (known && known.agentId === state?.agent?.id && status === 'ready') return known;
+      if (active) return { ...known, ...identity, title, agentId: active.agentId };
+      if (known && known.agentId === state?.agent?.id && status === 'ready') return { ...known, title };
       const target = (identity.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, identity.hostId);
       const result = identity.parentNativeSessionId
         ? await target.attachChild(identity.providerId, identity.parentNativeSessionId, identity.nativeSessionId, controller.signal)
         : await target.attach(identity.providerId, identity.nativeSessionId, controller.signal);
       check();
-      const opened = { ...known, ...identity, agentId: result.agentId };
+      const opened = { ...known, ...identity, title, agentId: result.agentId };
       rememberSession(opened); return opened;
     };
     const observe = async (session: OpenedSession) => {

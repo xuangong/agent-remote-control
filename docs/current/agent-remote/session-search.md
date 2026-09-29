@@ -3,6 +3,8 @@
 Every product and ARDB Session View shares the same search panel. The search button
 is in the timeline's top-right corner. Ctrl/Cmd+F also opens it when the timeline
 has focus. Searches belong to one view and one timeline epoch.
+The panel floats over its view without resizing the timeline or moving its reading
+position when opened or when search results change.
 
 The default scope is **User / Assistant messages**. Readers can choose **All
 activity**, **Tool calls**, or **Reasoning**. These scopes apply to loaded entries

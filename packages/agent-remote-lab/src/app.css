@@ -1544,5 +1544,5 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 .lab-timeline-search-trigger { position: absolute; z-index: 7; top: 8px; right: 12px; display: inline-grid; place-items: center; width: 34px; min-height: 34px; padding: 0; color: var(--obs-text-secondary); background: var(--obs-surface); border: 1px solid var(--obs-border); border-radius: 8px; }
 .lab-timeline-search-trigger[hidden] { display: none; }
-.lab-timeline-stage > .agent-session-search { flex: none; align-self: flex-end; margin: 6px; width: min(440px, calc(100% - 12px)); max-height: min(50%, 360px); overflow: auto; }
+.lab-timeline-stage > .agent-session-search { position: absolute; z-index: 7; top: 6px; right: 6px; width: min(440px, calc(100% - 12px)); max-height: min(50%, 360px); overflow: auto; }
 @media (pointer: coarse) { .lab-timeline-search-trigger { width: 40px; min-height: 40px; } }

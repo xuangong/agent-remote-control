@@ -83,12 +83,21 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       await page.goto(url);
       const view = page.locator('[data-view="one"]');
       const second = page.locator('[data-view="two"]');
+      const timeline = view.locator('.lab-timeline-scroll');
+      const readingGeometry = () => timeline.evaluate(element => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top, height: box.height, scrollTop: element.scrollTop };
+      });
+      await browserExpect(view.locator('[data-entry-key]')).toHaveCount(20);
+      const beforeSearch = await readingGeometry();
       await view.getByRole('button', { name: 'Search this session', exact: true }).click();
+      expect(await readingGeometry()).toEqual(beforeSearch);
       await view.getByRole('searchbox').fill('中文 needle');
       await browserExpect(view.getByRole('status')).toContainText('All available history searched');
       await browserExpect(view.getByLabel('Search scope')).toHaveValue('messages');
       await browserExpect(view.locator('.agent-session-search-results li')).toHaveCount(2);
       await browserExpect(view.locator('[data-entry-key]')).toHaveCount(20);
+      expect(await readingGeometry()).toEqual(beforeSearch);
       expect(requests.length).toBeGreaterThanOrEqual(5);
       expect(requests.every(path => path.includes('/one/'))).toBe(true);
       if (width > 900) { await browserExpect(second.locator('[data-entry-key]')).toHaveCount(20); await browserExpect(second.getByRole('searchbox')).toHaveCount(0); }

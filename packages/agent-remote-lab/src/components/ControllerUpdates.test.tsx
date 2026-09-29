@@ -122,3 +122,27 @@ it('keeps newer Hosts actionable when the legacy bridge is unavailable', () => {
   const modern = { ...host, controller: { ...host.controller!, version: '0.2.31' } };
   expect(controllerUpdateCoverage(latest, [legacy, modern]).eligible).toEqual([modern]);
 });
+
+it('updates to a standalone bridge and stops after the Host reconnects', async () => {
+  const latest = { ...release, version: '0.2.32', protocolVersion: '1.5.0', asset: 'orchardworks-agent-remote-controller-0.2.32.tgz' };
+  const managed = { ...host, controller: { ...host.controller!, version: '0.2.30' } };
+  expect(controllerUpdateCoverage(latest, [managed]).covered).toBe(true);
+  const requests: Array<{ version: string; operationId: string }> = [];
+  const service: HostPairingService = { hosts: async () => ({ hosts: [managed] }), pair: async () => { throw new Error('unused'); },
+    controllerRelease: async () => ({ release: latest }),
+    controllerUpdate: async (_id, input) => { if (!input) return { phase: 'idle', updatedAt: 0 }; requests.push(input); return { ...input, phase: 'succeeded', updatedAt: 1 }; } };
+  function Hosts() {
+    const [running, setRunning] = useState(managed);
+    return <><ControllerUpdates service={service} hosts={[running]} /><button onClick={() => setRunning({ ...managed, controller: { ...managed.controller, version: latest.version, revision: latest.revision } })}>Reconnect</button></>;
+  }
+  const container = await render(<Hosts />);
+  await act(async () => container.querySelector('button')!.click());
+  await act(async () => button(container, 'Update Host').click());
+  await act(async () => button(container, 'Confirm update').click());
+  expect(requests.map(r => r.version)).toEqual(['0.2.32']);
+  await act(async () => button(container, 'Reconnect').click());
+  expect(container.textContent).toContain('Updated');
+  expect(container.textContent).not.toContain('Update Host');
+  expect(container.textContent).not.toContain('0.2.33');
+  expect(container.textContent).not.toContain('not compatible');
+});

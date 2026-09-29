@@ -8,8 +8,8 @@ export function controllerUpdateCoverage(release: ControllerRelease | null, host
   const owned = hosts.filter(host => host.access !== 'shared');
   const covered = !!release && owned.length > 0 && owned.every(host => {
     const platform = host.controller ?? (host.environment ? { platform: host.environment.os.platform, arch: host.environment.os.arch, nodeMajor: release.nodeMajor } : undefined);
-    return platform && release.protocolVersion === PROTOCOL_VERSION && releaseCoversHost(release, platform)
-      && (!host.controller || !!controllerUpdateTarget(release, host.controller, bridge));
+    return host.controller ? !!controllerUpdateTarget(release, host.controller, bridge)
+      : platform && release.protocolVersion === PROTOCOL_VERSION && releaseCoversHost(release, platform);
   });
   const outdated = release ? owned.filter(host => !host.controller || compareControllerVersions(release.version, host.controller.version) > 0) : [];
   return { owned, covered, outdated, eligible: outdated.filter(host => host.online && host.controller?.remoteUpdate && controllerUpdateTarget(release!, host.controller, bridge)) };

@@ -73,3 +73,21 @@ it('reports an unavailable bridge without hiding the final release or forwarding
   expect(result.status).toBeGreaterThanOrEqual(400);
   expect(rpc).toHaveLength(0);
 }, 30000);
+
+it.each(['0.2.29', '0.2.30'])('allows %s to install a staged bridge while the final release is disabled', async version => {
+  const release = { protocolVersion: '1.5.0', version: '0.2.32', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.32.tgz', nodeMajor: 22, platforms: ['win32-x64'] };
+  const f = await fixture({ controllerRelease: release });
+  const alice = await f.login('alice');
+  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
+  const host = await f.host(pairing.key, false, { version, revision: 'c'.repeat(40), platform: 'win32', arch: 'x64', nodeMajor: 22, remoteUpdate: true });
+  const rpc: any[] = [];
+  host.socket.addEventListener('message', event => { const request = JSON.parse(String(event.data)); if (request.type !== 'rpc_request') return;
+    rpc.push(request); send(host.socket, { type: 'rpc_response', requestId: request.requestId, status: 202,
+      body: JSON.stringify({ phase: 'downloading', ...JSON.parse(request.body), updatedAt: Date.now() }) }); });
+  const path = alice.basePath + `v1/remote/hosts/${host.hostId}/controller-update`;
+  expect(await (await f.json(alice.basePath + 'v1/remote/controller-release', alice.cookie)).json()).toEqual({ release });
+  expect((await f.json(path, alice.cookie, { version: '0.2.33', operationId: 'disabled-final' })).status).toBe(409);
+  expect((await f.json(path, alice.cookie, { version: release.version, operationId: 'install-staged' })).status).toBe(202);
+  expect(rpc).toHaveLength(1);
+  expect(JSON.parse(rpc[0].body).version).toBe('0.2.32');
+}, 30000);

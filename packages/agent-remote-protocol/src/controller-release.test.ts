@@ -31,3 +31,15 @@ it('offers the final release after bridging, without downgrading current protoco
   expect(controllerUpdateTarget({ ...target, protocolVersion: '99.0.0' }, host, bridge)).toBeNull();
   expect(controllerUpdateTarget(target, { ...host, nodeMajor: 20 }, bridge)).toBeNull();
 });
+
+it('supports a staged bridge release without reopening the final release', () => {
+  for (const version of ['0.2.0', '0.2.29', '0.2.30', '0.2.32']) {
+    expect(controllerUpdateTarget(bridge, { ...host, version })).toEqual(bridge);
+  }
+  for (const version of ['0.1.0', '0.2.31', '0.2.33']) {
+    expect(controllerUpdateTarget(bridge, { ...host, version })).toBeNull();
+  }
+  expect(controllerUpgradeBridgeVersion(bridge, host)).toBeUndefined();
+  expect(controllerUpdateTarget({ ...bridge, version: '0.2.34' }, host)).toBeNull();
+  expect(controllerUpdateTarget(bridge, { ...host, platform: 'win32' })).toBeNull();
+});

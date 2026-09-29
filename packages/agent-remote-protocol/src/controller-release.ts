@@ -37,15 +37,23 @@ export function releaseCoversHost(release: ControllerRelease, host: Pick<Control
 const LEGACY_UPDATER_LAST_VERSION = '0.2.30';
 const LEGACY_UPDATER_BRIDGE_VERSION = '0.2.32';
 type UpdateHost = Pick<ControllerIdentity, 'version' | 'platform' | 'arch' | 'nodeMajor'>;
-export function controllerUpgradeBridgeVersion(release: ControllerRelease, host: Pick<ControllerIdentity, 'version'>): string | undefined {
+function hasLegacyUpdater(host: Pick<ControllerIdentity, 'version'>): boolean {
   return compareControllerVersions(host.version, '0.2.0') >= 0
-    && compareControllerVersions(host.version, LEGACY_UPDATER_LAST_VERSION) <= 0
-    && release.protocolVersion !== '1.5.0' ? LEGACY_UPDATER_BRIDGE_VERSION : undefined;
+    && compareControllerVersions(host.version, LEGACY_UPDATER_LAST_VERSION) <= 0;
+}
+export function controllerUpgradeBridgeVersion(release: ControllerRelease, host: Pick<ControllerIdentity, 'version'>): string | undefined {
+  return hasLegacyUpdater(host) && release.protocolVersion !== '1.5.0' ? LEGACY_UPDATER_BRIDGE_VERSION : undefined;
 }
 export function controllerUpdateTarget(release: ControllerRelease, host: UpdateHost, bridge?: ControllerRelease | null): ControllerRelease | null {
+  if (!releaseCoversHost(release, host)) return null;
+  // A staged rollout may publish only the bridge. Its old runtime is intentional;
+  // Controller 0.2.31 cannot install it because its updater requires protocol 1.6.
+  if (release.version === LEGACY_UPDATER_BRIDGE_VERSION && release.protocolVersion === '1.5.0') {
+    return hasLegacyUpdater(host) || host.version === LEGACY_UPDATER_BRIDGE_VERSION ? release : null;
+  }
   // The Relay must understand the final runtime. A bridge only repairs the updater
   // over the independent Host management uplink; it does not serve new session views.
-  if (release.protocolVersion !== PROTOCOL_VERSION || !releaseCoversHost(release, host)) return null;
+  if (release.protocolVersion !== PROTOCOL_VERSION) return null;
   const bridgeVersion = controllerUpgradeBridgeVersion(release, host);
   if (!bridgeVersion) return release;
   return bridge?.version === bridgeVersion && bridge.protocolVersion === '1.5.0'

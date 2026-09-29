@@ -32,7 +32,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
     onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
     inspected={inspected || !!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}>
-    <TimelineItemRenderer item={entry.item} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
+    <TimelineItemRenderer item={entry.item} entry={entry} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
       resources={resources} resourceBindings={entry.resources} resourceScopeKey={scopeKey}
       onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
     {previews && agentId && entry.item.type !== 'error' && isContentOnlyItem(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}

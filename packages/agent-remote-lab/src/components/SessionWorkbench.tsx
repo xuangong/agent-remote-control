@@ -222,7 +222,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   useLayoutEffect(() => {
     if (!visible || !revealEntry) return;
     const request = JSON.stringify([state?.agent?.id, state?.timeline.epoch, revealEntry.requestId]);
-    if (consumedReveal.current !== request && scroll.revealEntry(revealEntry.key)) consumedReveal.current = request;
+    if (consumedReveal.current !== request && scroll.revealEntry(revealEntry.key, revealEntry.align)) consumedReveal.current = request;
   }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries]);
   useLayoutEffect(() => {
     if (visible && selectedSearchKey) scroll.revealEntry(selectedSearchKey);

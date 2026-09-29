@@ -1,3 +1,5 @@
+import { CommunicationLetter } from './CommunicationLetter.js';
+import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentTimelineItem, ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
@@ -14,6 +16,7 @@ import { ToolCallItem, type SessionLinkResolver } from './items/ToolCallItem.js'
 
 export interface TimelineItemRendererProps {
   readonly item: AgentTimelineItem;
+  readonly entry?: ProjectedTimelineEntry;
   readonly resolveSessionLink?: SessionLinkResolver;
   readonly messageGroup?: MessageGroupPosition;
   readonly resources?: AgentReplicaState['resources'];
@@ -23,7 +26,7 @@ export interface TimelineItemRendererProps {
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
 }
 
-export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest }: TimelineItemRendererProps) {
+export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, entry, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest }: TimelineItemRendererProps) {
   const markdownResources = useMemo(() => (
     resources && resourceBindings && resourceScopeKey && onResourceResolve && onResourceRequest
       ? { scopeKey: resourceScopeKey, resources, bindings: resourceBindings, resolveResource: onResourceResolve, requestResource: onResourceRequest }
@@ -32,7 +35,7 @@ export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, m
   switch (item.type) {
     case 'user_message': return <UserMessageItem item={item} messageGroup={messageGroup} resourceContext={markdownResources} />;
     case 'assistant_message': return <AssistantMessageItem item={item} messageGroup={messageGroup} resourceContext={markdownResources} />;
-    case 'agent_communication': return <AgentCommunicationItem item={item} resourceContext={markdownResources} />;
+    case 'agent_communication': return entry ? <CommunicationLetter entry={entry} resourceContext={markdownResources} /> : <AgentCommunicationItem item={item} resourceContext={markdownResources} />;
     case 'reasoning': return <ReasoningItem item={item} />;
     case 'tool_call': return <ToolCallItem item={item} resolveSessionLink={resolveSessionLink} />;
     case 'todo': return <TodoItem item={item} />;

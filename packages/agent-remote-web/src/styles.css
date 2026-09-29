@@ -844,3 +844,40 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-session-search :is(button, input, select):focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 1px; }
 .agent-session-search button:disabled { opacity: .5; cursor: default; }
 @media (pointer: coarse) { .agent-session-search-input button { min-height: 40px; width: 36px; } }
+
+/* Letters keep their timeline footprint while moving toward the receiving pane. */
+.agent-letter-position { container-type: inline-size; padding-block: 12px; }
+.agent-communication-letter {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: min(65ch, calc(100% - 32px));
+  margin-inline: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--agent-rule);
+  border-radius: var(--agent-radius);
+  background: var(--agent-panel);
+  min-width: 0;
+  transform: translateX(0);
+  transition: transform 220ms cubic-bezier(.22, 1, .36, 1);
+}
+.agent-communication-letter[data-direction="left"] { transform: translateX(calc((100% - 100cqw) / 2)); }
+.agent-communication-letter[data-direction="right"] { transform: translateX(calc((100cqw - 100%) / 2)); }
+.agent-letter-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.agent-letter-heading time { font-size: 11px; color: var(--agent-muted); white-space: nowrap; }
+.agent-letter-open {
+  display: inline-flex; flex: 1; align-items: center; gap: 8px; min-width: 0; padding: 0;
+  border: 0; background: transparent; color: var(--agent-action-text); text-align: left; font: inherit; cursor: pointer;
+}
+.agent-letter-open:disabled { cursor: default; color: var(--agent-muted); }
+.agent-letter-open:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 4px; border-radius: 2px; }
+.agent-letter-envelope, .agent-letter-direction { flex: none; }
+.agent-letter-participants { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.agent-letter-body { margin-top: 10px; font-size: 13px; }
+.agent-communication-letter:has(.agent-letter-open:not(:disabled)) { cursor: pointer; }
+.agent-communication-letter:has(.agent-letter-open:not(:disabled)):hover { border-color: var(--agent-signal); }
+.agent-communication-letter > small { display: block; margin-top: 8px; color: var(--agent-muted); }
+.agent-communication-letter > [role="alert"] { color: var(--agent-danger); }
+@media (prefers-reduced-motion: reduce) { .agent-communication-letter { transition: none; } }
+@media (max-width: 1180px) {
+  .agent-communication-letter { max-width: 100%; margin-inline: 0; transform: none !important; }
+}

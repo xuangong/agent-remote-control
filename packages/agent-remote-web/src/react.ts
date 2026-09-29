@@ -60,3 +60,5 @@ export type { SessionConnectionLease, SessionConnectionSource } from './react/us
 export type { SessionViewActions, SessionTakeControlOptions } from './react/session-view-actions.js';
 
 export { TimelineSearch } from './react/TimelineSearch.js';
+
+export { CommunicationNavigationContext, type CommunicationNavigation } from './react/CommunicationNavigation.js';

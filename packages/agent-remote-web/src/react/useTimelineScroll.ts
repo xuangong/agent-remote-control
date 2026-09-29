@@ -211,14 +211,14 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     updatePosition();
   }
 
-  function revealEntry(key: string): boolean {
+  function revealEntry(key: string, align: 'center' | 'start' = 'center'): boolean {
     const viewport = viewportRef.current;
     const entry = viewport ? entryIndex.current.refresh(viewport).get(key) : undefined;
     if (!viewport || !entry || !isVisible.current) return false;
     pauseFollowing();
     historyIntent.current = false;
     const bounds = entry.getBoundingClientRect();
-    viewport.scrollTop += bounds.top - viewport.getBoundingClientRect().top - Math.max(0, (viewport.clientHeight - (bounds.bottom - bounds.top)) / 2);
+    viewport.scrollTop += bounds.top - viewport.getBoundingClientRect().top - (align === 'start' ? 12 : Math.max(0, (viewport.clientHeight - (bounds.bottom - bounds.top)) / 2));
     lastScrollTop.current = viewport.scrollTop;
     expectedScroll.current = viewport.scrollTop;
     captureAnchor();

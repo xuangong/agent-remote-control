@@ -1,3 +1,7 @@
+import { communicationResolver, communicationDirection, loadReceivedCommunication, waitForCommunicationSession, type CommunicationSnapshot } from './session-communication.js';
+import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
+import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import type { SessionEntry } from './session-tree.js';
 import { useSessionRelations } from './hooks/useSessionRelations.js';
 import { remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
 import {SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
@@ -201,6 +205,9 @@ function AppContent({
   const [, setForkRevision] = useState(0);
   useEffect(() => forkStore.subscribe(() => setForkRevision((value) => value + 1)), [forkStore]);
   const [sideSessions, setSideSessions] = useState<OpenedSession[]>([]);
+  const [letterReveals, setLetterReveals] = useState<Record<string, { key: string; requestId: number; align: 'start' }>>({});
+  const letterRequest = useRef<AbortController>();
+  useEffect(() => () => letterRequest.current?.abort(), [baseUrl, transport]);
   const [sideActivity, setSideActivity] = useState<Record<string, import('@orchardworks/agent-remote-protocol').AgentStatus | undefined>>({});
   const observeSideActivity = useCallback((agentId: string, activity: import('@orchardworks/agent-remote-protocol').AgentStatus | undefined) => {
     setSideActivity(current => current[agentId] === activity ? current : { ...current, [agentId]: activity });
@@ -539,7 +546,8 @@ function AppContent({
     setOpenedSessions(next);
   }
 
-  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void): Promise<boolean> {
+  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false): Promise<boolean> {
+    if (!letterNavigation) letterRequest.current?.abort();
     if (!directory || transitionRef.current) return false;
     const hostId = item.hostId ?? selectedHost.id;
     const key = sessionKey({ ...item, hostId });
@@ -602,7 +610,37 @@ function AppContent({
     finally { transitionRef.current = false; setTransitioning(false); }
   }
 
-  async function openChildSession(child: AgentChildSessionView): Promise<void> {
+  async function openChildSession(child: AgentChildSessionView, source?: OpenedSession, sourceState?: AgentReplicaState): Promise<void> {
+    letterRequest.current?.abort();
+    if (!compactLayoutRef.current) {
+      const parentState = sourceState ?? state;
+      const parentId = parentState?.agent?.runtimeInfo.sessionId;
+      const parentAgent = parentState?.agent;
+      if (!parentAgent || !parentId || !directory) throw new Error('The parent session is unavailable.');
+      let origin: OpenedSession = source ?? activeOpened ?? { agentId: parentAgent.id, providerId: parentAgent.providerId, nativeSessionId: parentId, hostId: 'local', title: 'Parent conversation' };
+      const knownChild = sessionEntries.find(entry => entry.nativeSessionId === child.nativeSessionId && entry.providerId === origin.providerId && (entry.hostId ?? 'local') === (origin.hostId ?? 'local'));
+      if (knownChild?.parentNativeSessionId && knownChild.parentNativeSessionId !== origin.nativeSessionId) {
+        const actualParent = openWindows.find(session => session.nativeSessionId === knownChild.parentNativeSessionId && session.providerId === origin.providerId && (session.hostId ?? 'local') === (origin.hostId ?? 'local'));
+        if (!actualParent) throw new Error('Open the direct parent session before opening this nested subagent.');
+        origin = actualParent;
+      }
+      const cached = connections.find({ ...origin, nativeSessionId: child.nativeSessionId });
+      if (cached) {
+        selectSide(origin, { ...child, agentId: cached.agentId, providerId: origin.providerId, hostId: origin.hostId, parentAgentId: origin.agentId, parentNativeSessionId: origin.nativeSessionId });
+        return;
+      }
+      const generation = navigationGeneration.current;
+      const request = nextSideRequest(origin);
+      const target = (origin.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, origin.hostId);
+      try {
+        const result = await target.attachChild(origin.providerId, origin.nativeSessionId, child.nativeSessionId);
+        if (navigationGeneration.current !== generation || sideRequests.current.get(sessionKey(origin)) !== request) return;
+        const opened = { ...child, agentId: result.agentId, providerId: origin.providerId, hostId: origin.hostId, parentAgentId: origin.agentId, parentNativeSessionId: origin.nativeSessionId };
+        rememberSession(origin); rememberSession(opened); setSessionNotice(undefined);
+        selectSide(origin, opened);
+      } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); throw error; }
+      return;
+    }
     const known = currentSession && sessionEntries.find(entry => entry.nativeSessionId === child.nativeSessionId
       && entry.providerId === currentSession.providerId && (entry.hostId ?? 'local') === (currentSession.hostId ?? 'local'));
     if (known && currentSession && sessionRootKey(known, sessionEntries) === sessionRootKey(currentSession, sessionEntries)) {
@@ -971,6 +1009,7 @@ function AppContent({
       const item = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries).find(entry => entry.key === key)?.entry.item;
       if (item && !isContentOnlyItem(item)) setTimelineDisplay('simple');
     }
+    if (activeAgentId) setLetterReveals(values => { const next = { ...values }; delete next[activeAgentId]; return next; });
     setTraceNavigation({ scope: traceScope, key, view, requestId: ++traceRequestCounter.current });
     if (view === 'workbench' && stackRoot) revealSession(stackRoot);
     setActiveView(view);
@@ -1005,11 +1044,13 @@ function AppContent({
     else void openSession(session);
   }
   function closeSide(session: OpenedSession): void {
+    letterRequest.current?.abort();
     const record = forkStore.find(session);
-    if (!record) return;
-    nextSideRequest(record.source);
-    setSideSelections((current) => ({ ...current, [sessionKey(record.source)]: null }));
-    navigateSide(sessionKey(record.source));
+    const source = record?.source ?? stackPath.find(candidate => sideSelections[sessionKey(candidate)] === sessionKey(session));
+    if (!source) return;
+    nextSideRequest(source);
+    setSideSelections((current) => ({ ...current, [sessionKey(source)]: null }));
+    navigateSide(sessionKey(source));
   }
   useEffect(() => {
     if (primaryExpanded && stackRoot && sideFocus === sessionKey(stackRoot) && activeView === 'workbench') {
@@ -1019,7 +1060,96 @@ function AppContent({
     }
   }, [sideFocus, primaryExpanded, stackRoot?.agentId, activeView]);
 
+  function communicationSnapshots(source: OpenedSession, sourceState?: AgentReplicaState): CommunicationSnapshot[] {
+    const snapshots = openWindows.map(session => ({ session, state: session.agentId === state?.agent?.id ? state : replicas.get(session.agentId)?.getState() }));
+    return [...snapshots.filter(snapshot => sessionKey(snapshot.session) !== sessionKey(source)), { session: source, state: sourceState }];
+  }
+  function letterNavigation(source: OpenedSession, sourceState?: AgentReplicaState): CommunicationNavigation {
+    const participants = communicationResolver(source, communicationSnapshots(source, sourceState));
+    const visible = compactLayout ? [] : stackPath.slice(stackRange.start, stackRange.end + 1);
+    return {
+      direction: entry => communicationDirection(participants(entry).recipient, source, visible),
+      open: entry => openCommunication(entry, source, sourceState),
+    };
+  }
+  async function openCommunication(entry: ProjectedTimelineEntry, source: OpenedSession, sourceState?: AgentReplicaState): Promise<void> {
+    if (!directory || entry.item.type !== 'agent_communication') throw new Error('Session navigation is unavailable in this view.');
+    letterRequest.current?.abort();
+    const controller = new AbortController(); letterRequest.current = controller;
+    const deadline = setTimeout(() => controller.abort(new Error('Opening the letter timed out. Retry when the Host is connected.')), 60000);
+    const generation = navigationGeneration.current;
+    const check = () => { controller.signal.throwIfAborted(); if (generation !== navigationGeneration.current) throw new Error('The workspace changed. Open the letter again.'); };
+    const leases = new Map<string, ReturnType<ConversationConnections['acquire']>>();
+    const snapshots = communicationSnapshots(source, sourceState);
+    const attachParticipant = async (identity: SessionEntry): Promise<OpenedSession> => {
+      check();
+      const known = [...openWindows, ...openedSessionsRef.current].find(session => sessionKey(session) === sessionKey(identity));
+      const active = connections.find(identity);
+      if (active) return { ...known, ...identity, agentId: active.agentId };
+      if (known && known.agentId === state?.agent?.id && status === 'ready') return known;
+      const target = (identity.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, identity.hostId);
+      const result = identity.parentNativeSessionId
+        ? await target.attachChild(identity.providerId, identity.parentNativeSessionId, identity.nativeSessionId, controller.signal)
+        : await target.attach(identity.providerId, identity.nativeSessionId, controller.signal);
+      check();
+      const opened = { ...known, ...identity, agentId: result.agentId };
+      rememberSession(opened); return opened;
+    };
+    const observe = async (session: OpenedSession) => {
+      let lease = leases.get(session.agentId);
+      if (!lease) { lease = connections.acquire(session.agentId, replicaFor(session.agentId), session); leases.set(session.agentId, lease); }
+      await waitForCommunicationSession(lease.client, controller.signal); check(); return lease;
+    };
+    try {
+      let pair = communicationResolver(source, snapshots)(entry);
+      // A child opened directly may not have its parent's native reference in view yet.
+      if ((!pair.sender || !pair.recipient) && source.parentNativeSessionId) {
+        const parent = await attachParticipant({ hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.parentNativeSessionId, title: 'Parent conversation' });
+        const lease = await observe(parent);
+        for (;;) {
+          check();
+          const parentState = lease.replica.getState();
+          pair = communicationResolver(source, [...snapshots, { session: parent, state: parentState }])(entry);
+          if (pair.sender && pair.recipient || !parentState.timeline.hasOlder) break;
+          const before = parentState.timeline.entries[0]?.seqStart;
+          await lease.client.loadOlder();
+          if (before === lease.replica.getState().timeline.entries[0]?.seqStart) break;
+        }
+      }
+      if (!pair.sender || !pair.recipient || sessionKey(pair.sender) === sessionKey(pair.recipient)) {
+        throw new Error('This history does not identify both sessions unambiguously. Load their agent activity and retry.');
+      }
+      const sender = await attachParticipant(pair.sender);
+      const recipient = await attachParticipant(pair.recipient);
+      check();
+      const receiver = await observe(recipient);
+      const present = [sender, recipient].every(session => stackPath.slice(stackRange.start, stackRange.end + 1).some(visible => sessionKey(visible) === sessionKey(session)));
+      if (!present) {
+        const root = stackRoot && [sender, recipient].find(session => sessionKey(session) === sessionKey(stackRoot));
+        if (root) selectSide(root, sessionKey(root) === sessionKey(sender) ? recipient : sender);
+        else if ([sender, recipient].every(session => stackPath.some(visible => sessionKey(visible) === sessionKey(session)))) {
+          const last = Math.max(...[sender, recipient].map(session => stackPath.findIndex(visible => sessionKey(visible) === sessionKey(session))));
+          setSideAnchor(sessionKey(stackPath[last]!));
+        } else {
+          const origin = sessionKey(source) === sessionKey(recipient) ? recipient : sender;
+          if (!await openSession(origin, undefined, undefined, true)) throw new Error('The sending session could not be opened.');
+          selectSide(origin, sessionKey(origin) === sessionKey(sender) ? recipient : sender);
+        }
+      }
+      setSideFocus(sessionKey(recipient)); setActiveView('workbench');
+      const target = await loadReceivedCommunication(receiver, entry, controller.signal);
+      check();
+      setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
+      // Mounted panes acquire their own leases before this temporary navigation lease is released.
+      await new Promise(resolve => setTimeout(resolve, 0));
+    } finally {
+      clearTimeout(deadline); for (const lease of leases.values()) lease.release();
+      if (letterRequest.current === controller) letterRequest.current = undefined;
+    }
+  }
+
   async function openFork(record: SessionFork): Promise<void> {
+    letterRequest.current?.abort();
     if (!record.target || !directory) return;
     const saved = record.target;
     const request = nextSideRequest(record.source);
@@ -1037,6 +1167,7 @@ function AppContent({
   }
 
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
+    letterRequest.current?.abort();
     if (id === 'console:ask' && !args.trim()) { ask.toggle(!!saved && !!ask.entryFor(saved).record?.remote); return {}; }
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
@@ -1313,12 +1444,12 @@ function AppContent({
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <div className="lab-primary-conversation" tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }} onClickCapture={() => { if (stackRoot && sideFocus !== sessionKey(stackRoot)) setSideFocus(sessionKey(stackRoot)); }}>
-        <LabWorkbench
+        <CommunicationNavigationContext.Provider value={stackRoot ? letterNavigation(stackRoot, state) : undefined}><LabWorkbench
           sessionState={!accessReady || hostOffline ? remoteSessionState(state, !accessReady ? 'connecting' : 'disconnected') : sessionState}
           handoff={handoff}
           draftSessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
-          revealEntry={traceRequest?.view === 'workbench' ? traceRequest : undefined}
+          revealEntry={activeAgentId && letterReveals[activeAgentId] || (traceRequest?.view === 'workbench' ? traceRequest : undefined)}
           state={forkDisplayState(state, boundFork)} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : availableConversationActions} visible={activeView === 'workbench' && primaryExpanded}
           consoleCommands={status === 'ready' && !hostOffline && directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
           onExecuteConsoleCommand={(id, args) => state && status === 'ready' && !hostOffline ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('Wait for this session to finish synchronizing.'))}
@@ -1348,16 +1479,18 @@ function AppContent({
           </nav> : null}
           resolveSessionLink={resolveSessionLink}
           childrenFor={currentSession ? nativeSessionId => sessionChildren({ ...currentSession, nativeSessionId }, sessionEntries) : undefined}
-          onOpenChildSession={directory && !hostOffline && !transitioning ? openChildSession : undefined}
+          onOpenChildSession={directory && !hostOffline && !transitioning ? child => openChildSession(child) : undefined}
           draftBinding={activeAgentId ? { store: messageDrafts, key: activeAgentId } : undefined}
           questionDrafts={activeAgentId ? questionDrafts[activeAgentId] ?? {} : undefined}
           onQuestionDraftChange={activeAgentId ? (requestId, draft) => setQuestionDrafts((current) => ({
             ...current, [activeAgentId]: { ...current[activeAgentId], [requestId]: draft },
           })) : undefined}
-        />
+        /></CommunicationNavigationContext.Provider>
         </div>
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
-          key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
+          key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)}
+          communication={sideState => letterNavigation(session, sideState)} revealEntry={letterReveals[session.agentId]}
+          onOpenChildSession={(child, sideState) => openChildSession(child, session, sideState)} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
           position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}
           expanded={expandedKeys.has(sessionKey(session))}
           focused={focusedWindow !== undefined && sessionKey(focusedWindow) === sessionKey(session)}

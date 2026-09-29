@@ -13,8 +13,9 @@ const snapshots = {
   parent,
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
-afterEach(() => { vi.restoreAllMocks(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean } = {}) {
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; directChild?: boolean } = {}) {
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: options.desktop ? query.includes('min-width: 1181px') : query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   let connections = 0;
   let releaseChild: (() => void) | undefined;
   const childReady = options.deferChild ? new Promise<void>((resolve) => { releaseChild = resolve; }) : Promise.resolve();
@@ -24,8 +25,9 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   if (options.nested) sessionSnapshots.child = { ...sessionSnapshots.child, runtimeInfo: Object.assign({}, sessionSnapshots.child.runtimeInfo, { childSessions: [{ ...child, nativeSessionId: 'native-grandchild', title: '/root/review/evidence', status: 'running' as const }] }) };
   if (options.images) sessionSnapshots.parent = { ...sessionSnapshots.parent, capabilities: { ...sessionSnapshots.parent.capabilities, imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } };
   Object.assign(sessionSnapshots, { grandchild: { ...snapshots.child, id: 'grandchild', runtimeInfo: { providerId: 'codex', sessionId: 'native-grandchild', status: 'idle' } } });
+  if (options.letters) sessionSnapshots.parent = { ...sessionSnapshots.parent, runtimeInfo: { ...sessionSnapshots.parent.runtimeInfo, childSessions: [{ ...child, title: '/root/review' }] } };
   const attachments: unknown[] = [];
-  const directory = new SessionDirectoryClient('http://localhost/', async (input, init) => {
+  const directoryFetch: typeof fetch = async (input, init) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith('/catalog')) return Response.json({ items: options.discover ? [{providerId: 'codex', nativeSessionId: 'native-parent', title: 'Discovered parent', state: 'unknown', createdAt: '2026-09-10', updatedAt: '2026-09-10'}] : [], hasMore: false, revision: '1' });
     if (path.endsWith('/workspaces')) return Response.json({ workspaces: [] });
@@ -37,7 +39,9 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
       return Response.json({ agentId: nativeSessionId.replace('native-', ''), nativeSessionId });
     }
     throw new Error(`Unexpected directory path: ${path}`);
-  });
+  };
+  const directory = new SessionDirectoryClient('http://localhost/', directoryFetch);
+  if (options.directChild) vi.stubGlobal('fetch', directoryFetch);
   const resumeAgent = vi.fn(async () => { throw new Error('Native runtime must not be recreated.'); });
   const transport: LabTransport = {
     listProviders: async () => [{ providerId: 'codex', displayName: 'Codex' }],
@@ -45,7 +49,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     fetchSnapshot: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] }),
     fetchTimeline: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
       requestId: 'page', agentId, epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false,
-      window: { minSeq: 1, maxSeq: options.navigation ? 1 : 0, nextSeq: options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
+      window: { minSeq: 1, maxSeq: options.letters ? 3 : options.navigation ? 1 : 0, nextSeq: options.letters ? 4 : options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.letters ? letterEntries(agentId) : options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
     } }),
     connect: (agentId, listener) => {
       connections++;
@@ -65,13 +69,13 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   };
   const sendMessage = vi.fn(async () => {});
   const respondToInteraction = vi.fn(async () => {});
-  if (options.live) window.history.replaceState(null, '', '/?agent=parent');
+  if (options.live) window.history.replaceState(null, '', options.directChild ? '/?host=local&agent=child&provider=codex&session=native-child&parent=native-parent' : '/?agent=parent');
   function Harness() {
     const [activeTransport, setActiveTransport] = useState(transport);
     return <><button data-testid="replace-transport" onClick={() => setActiveTransport({ ...transport })}>Replace connection</button>
       <App baseUrl="http://localhost/" directory={directory} transport={activeTransport}
         hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Not used'); } }}
-        initialState={options.live ? undefined : { ...replicaState, agent: sessionSnapshots.parent, timeline: { ...replicaState.timeline, hasOlder: false, entries: options.navigation ? [activityEntry('native-child')] : [] } }} initialSessionStatus="ready"
+        initialState={options.live ? undefined : { ...replicaState, agent: sessionSnapshots.parent, timeline: { ...replicaState.timeline, hasOlder: false, entries: options.letters ? letterEntries('parent') : options.navigation ? [activityEntry('native-child')] : [] } }} initialSessionStatus="ready"
         actions={{ sendMessage, respondToInteraction, uploadImage: async () => ({ attachmentId: 'parent-image', sha256: 'a'.repeat(64), mediaType: 'image/png', byteLength: 1, imageDimensions: { width: 1, height: 1 } }), listCommands: async () => [{ id: 'inspect', name: 'inspect', kind: 'skill', description: 'Inspect code' }] }} />
     </>;
   }
@@ -80,7 +84,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
 
 }
 it('focuses the current discovered session without another attachment or stream connection', async () => {
-  const f = await setup(false, {live: true, discover: true});
+  const f = await setup(false, {live: true, discover: true, desktop: true});
   await draft(f.container, 'Keep current draft');
   const before = f.connections();
   for (let index = 0; index < 2; index++) {
@@ -212,20 +216,17 @@ it('releases view and delivery-persistence subscriptions while revisiting parent
   expect(activeSubscriptions).toBe(0);
 });
 
-it('offers persistence resume only for the parent and keeps child navigation on child attachment', async () => {
-  const f = await setup();
+it('keeps desktop parent controls and uses child attachment without recreating a runtime', async () => {
+  const f = await setup(false, { desktop: true });
   expect(f.container.querySelector<HTMLButtonElement>('[data-testid="session-resume"]')?.disabled).toBe(false);
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
-  const resume = f.container.querySelector<HTMLButtonElement>('[data-testid="session-resume"]')!;
-  expect(resume.disabled).toBe(true);
-  await act(async () => resume.click());
-  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('child');
-  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
-  expect(f.container.querySelector<HTMLButtonElement>('[data-testid="session-resume"]')?.disabled).toBe(false);
+  expect(f.container.querySelector('.lab-side-conversation .lab-side-title')?.textContent).toContain('Review transport');
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('parent');
+  expect(f.resumeAgent).not.toHaveBeenCalled();
 });
 
 it('reattaches a resumable directory parent without creating another native runtime', async () => {
-  const f = await setup();
+  const f = await setup(false, { desktop: true });
   await draft(f.container, 'Keep the root draft');
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-testid="session-resume"]')!.click());
   expect(f.attachments).toEqual([{ path: '/v1/remote/attach', body: { providerId: 'codex', nativeSessionId: 'native-parent' } }]);
@@ -234,11 +235,11 @@ it('reattaches a resumable directory parent without creating another native runt
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('parent');
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
   expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } });
-  expect(f.container.querySelector('[aria-label="Conversation path"]')?.textContent).toContain('Review transport');
+  expect(f.container.querySelector('.lab-side-conversation .lab-side-title')?.textContent).toContain('Review transport');
 });
 
 it('navigates through the chat session manager and keeps sibling discovery after switching', async () => {
-  const f = await setup(false, { live: true });
+  const f = await setup(false, { live: true, desktop: true });
   const manager = () => f.container.querySelector('[aria-label="Chat sessions"]')!;
   expect(manager().querySelector('.lab-session-tree')).toBeNull();
   expect(manager().querySelector('[aria-expanded="false"]')).not.toBeNull();
@@ -316,5 +317,76 @@ it('shows known grandchildren in the parent timeline and attaches through their 
   expect(nested).not.toBeNull();
   await act(async () => nested.click());
   await waitForSession(f.container, 'grandchild');
+  expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-child', nativeSessionId: 'native-grandchild' } });
+});
+
+function letterEntries(agent: string): import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry[] {
+  return [
+    { providerId: 'codex', seqStart: 1, seqEnd: 1, timestamp: '2026-09-29T00:00:00Z', resources: [], collapsed: [], sourceSeqRanges: [{startSeq: 1, endSeq: 1}],
+      ...(agent === 'child' ? { turnId: 'child-turn' } : {}),
+      item: { type: 'agent_communication', messageId: 'task-letter', sender: '/root', recipient: '/root/review', text: 'Review the transport.' } },
+    { providerId: 'codex', seqStart: 2, seqEnd: 2, timestamp: '2026-09-29T00:00:01Z', resources: [], collapsed: [], sourceSeqRanges: [{startSeq: 2, endSeq: 2}], turnId: agent + '-turn',
+      item: { type: 'assistant_message', messageId: 'work-' + agent, text: 'Working after receiving the letter.' } },
+    { providerId: 'codex', seqStart: 3, seqEnd: 3, timestamp: '2026-09-29T00:00:02Z', resources: [], collapsed: [], sourceSeqRanges: [{startSeq: 3, endSeq: 3}],
+      ...(agent === 'parent' ? { turnId: 'parent-turn' } : {}),
+      item: { type: 'agent_communication', messageId: 'reply-letter', sender: '/root/review', recipient: '/root', text: 'The transport review is complete.' } },
+  ];
+}
+it('opens desktop subagents side by side and preserves both drafts when focusing or closing a pane', async () => {
+  const f = await setup(false, { desktop: true, live: true });
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  await draft(primary, 'Parent stays');
+  await act(async () => primary.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
+  const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  expect(primary.hidden).toBe(false); expect(side.hidden).toBe(false);
+  await draft(side, 'Child stays');
+  await act(async () => primary.click());
+  expect(side.hidden).toBe(false);
+  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Parent stays');
+  expect(side.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Child stays');
+  await act(async () => side.querySelector<HTMLButtonElement>('.lab-side-close')!.click());
+  expect(side.hidden).toBe(true); expect(primary.hidden).toBe(false);
+});
+it('opens a letter from its original position, docks toward the receiver and reveals either direction without replacing the pair', async () => {
+  const f = await setup(false, { desktop: true, live: true, letters: true });
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  expect(primary.querySelector('.agent-communication-letter')?.getAttribute('data-direction')).toBeNull();
+  const open = primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root to /root/review"]')!;
+  await act(async () => { open.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  expect(side).not.toBeNull(); expect(primary.hidden).toBe(false); expect(side.hidden).toBe(false);
+  expect(primary.querySelector('.agent-communication-letter')?.getAttribute('data-direction')).toBe('right');
+  expect(side.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('task-letter');
+  const connections = f.connections();
+  await act(async () => { side.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
+  expect(side.querySelectorAll('.agent-communication-letter')[1]?.getAttribute('data-direction')).toBe('left');
+  expect(f.connections()).toBe(connections);
+  expect(primary.hidden).toBe(false); expect(side.hidden).toBe(false);
+});
+
+it('opens a directly linked child letter with its previously unobserved parent', async () => {
+  const f = await setup(false, { desktop: true, live: true, letters: true, directChild: true });
+  await waitForSession(f.container, 'child');
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  await act(async () => {
+    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+  });
+  const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  expect(primary.hidden).toBe(false);
+  expect(side).not.toBeNull();
+  expect(side.hidden).toBe(false);
+  expect(side.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
+  expect(f.container.querySelector('.agent-communication-letter [role="alert"]')).toBeNull();
+});
+it('opens nested desktop subagents next to their direct parent', async () => {
+  const f = await setup(false, { desktop: true, live: true, nested: true });
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id="native-child"]')!.click());
+  const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  await act(async () => side.querySelector<HTMLButtonElement>('[data-child-session-id="native-grandchild"]')!.click());
+  const sides = [...f.container.querySelectorAll<HTMLElement>('.lab-side-conversation')];
+  expect(sides).toHaveLength(2);
+  expect(sides.every(pane => !pane.hidden)).toBe(true);
   expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-child', nativeSessionId: 'native-grandchild' } });
 });

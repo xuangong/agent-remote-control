@@ -1,6 +1,6 @@
 import type { AgentTimelineItem, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 
-export interface TraceEntryRequest { readonly key: string; readonly requestId: number }
+export interface TraceEntryRequest { readonly key: string; readonly requestId: number; readonly align?: 'start' | 'center' }
 
 export const traceItemLabels: Record<AgentTimelineItem['type'], string> = {
   agent_communication: 'Agent communication', user_message: 'User message', assistant_message: 'Assistant message', reasoning: 'Reasoning update',

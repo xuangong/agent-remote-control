@@ -1,3 +1,5 @@
+import { CommunicationNavigationContext, type CommunicationNavigation, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
+import type { TraceEntryRequest } from '../trace-model.js';
 import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
 import { useEffect, useRef } from 'react';
@@ -11,7 +13,10 @@ import { ForkEntries, ForkReference } from './ForkReference.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, communication, revealEntry, onOpenChildSession }: {
+  communication?(state: AgentReplicaState | undefined): CommunicationNavigation;
+  revealEntry?: TraceEntryRequest;
+  onOpenChildSession?(child: AgentChildSessionView, state: AgentReplicaState | undefined): Promise<void>;
   replica?: AgentReplica;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
   initialInput?: { pending: boolean; error?: string };
@@ -32,7 +37,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   const record = store.find(session);
   const title = record?.firstInput?.trim().slice(0, 72) || session.title;
   return <aside className="lab-side-conversation" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
-    <LabWorkbench sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
+    <CommunicationNavigationContext.Provider value={communication?.(state)}><LabWorkbench revealEntry={revealEntry} onOpenChildSession={onOpenChildSession ? child => onOpenChildSession(child, state) : undefined} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       conversationPath={<span className="lab-side-title" title={title}><span className="lab-window-number">{position + 1}</span><span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}
@@ -43,6 +48,6 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
       composerContext={record ? <ForkReference fork={record} onOpen={onOpenSource} /> : undefined}
       composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.all().filter((fork) => fork.target && sessionKey(fork.source) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} /></>}
       consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
-      onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} />
+      onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
   </aside>;
 }

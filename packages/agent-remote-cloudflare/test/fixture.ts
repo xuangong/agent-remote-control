@@ -25,7 +25,7 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; workerVersionId?: string } = {}) {
+export async function fixture(options: { previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; workerVersionId?: string } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: `
@@ -63,8 +63,14 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },
       outboundService: async request => {
         if (options.controllerRelease && ['api.github.com', 'github.com'].includes(new URL(request.url).hostname)) {
-          const manifest = options.controllerRelease;
-          return Response.json(new URL(request.url).pathname.endsWith('controller-release.json') ? manifest : [{ tag_name: `controller-v${manifest.version}`, draft: false, prerelease: false, published_at: '2026-09-22', assets: [{ name: 'controller-release.json' }, { name: manifest.asset }] }]);
+          const path = new URL(request.url).pathname;
+          const candidates = [options.controllerRelease, ...(options.controllerBridge ? [options.controllerBridge] : [])];
+          const entry = (manifest: Record<string, unknown>) => ({ tag_name: `controller-v${manifest.version}`, draft: false, prerelease: false, published_at: '2026-09-22', assets: [{ name: 'controller-release.json' }, { name: manifest.asset }] });
+          const requested = /controller-v([^/]+)/.exec(path)?.[1];
+          if (!requested) return Response.json(candidates.map(entry));
+          const manifest = candidates.find(item => item.version === requested);
+          if (!manifest) return new Response('Not found', { status: 404 });
+          return Response.json(path.endsWith('controller-release.json') ? manifest : entry(manifest));
         }
         authorityCalls++;
         const operation = new URL(request.url).pathname.split('/').at(-1)!;

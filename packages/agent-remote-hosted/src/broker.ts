@@ -5,7 +5,7 @@ import { isCodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { DiagnosticJournal } from './diagnostic-journal.js';
 import { relayDiagnosticsForVersion, RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from './relay-diagnostics.js';
 import { controllerReleases } from './controller-releases.js';
-import { decodeClientMessage, PROTOCOL_VERSION, releaseCoversHost, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
+import { decodeClientMessage, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
@@ -48,7 +48,7 @@ export interface HostBrokerOptions {
   diagnostics?: DiagnosticJournal;
   ownerSubject?: string;
   userStreamCount?(subject: string): number;
-  controllerReleases?: Pick<typeof controllerReleases, 'latest'>;
+  controllerReleases?: Pick<typeof controllerReleases, 'latest'> & Partial<Pick<typeof controllerReleases, 'version'>>;
   origin: string;
   rpcTimeoutMs?: number;
   heartbeatIntervalMs?: number;
@@ -689,6 +689,17 @@ export function createHostBroker(options: HostBrokerOptions) {
     return { status: 200, body: JSON.stringify({ items, hasMore: next < owned.length, ...(next < owned.length ? { nextCursor: String(next) } : {}), revision }) };
   }
 
+  let bridgeLookup: Promise<ControllerRelease> | undefined;
+  function readUpgradeBridge(version: string, refresh = false): Promise<ControllerRelease> {
+    if (refresh) bridgeLookup = undefined;
+    if (!bridgeLookup) {
+      const releases = options.controllerReleases ?? controllerReleases;
+      if (!releases.version) return Promise.reject(new Error('Upgrade component release discovery is unavailable.'));
+      bridgeLookup = releases.version(version).catch(error => { bridgeLookup = undefined; throw error; });
+    }
+    return bridgeLookup;
+  }
+
   async function handle(request: Request, context: BrokerRequestContext, url: URL) {
     assertAvailable();
     if (!await permitted(context)) throw new BrokerError(403, 'forbidden', 'This endpoint is available only to the local application.');
@@ -699,7 +710,16 @@ export function createHostBroker(options: HostBrokerOptions) {
     const subject = principal(context);
     if (url.pathname === '/v1/remote/controller-release' && request.method === 'GET') {
       requireOwner(subject);
-      return json(200, { release: await (options.controllerReleases ?? controllerReleases).latest({ refresh: url.searchParams.get('refresh') === '1' }) });
+      const refresh = url.searchParams.get('refresh') === '1';
+      const release = await (options.controllerReleases ?? controllerReleases).latest({ refresh });
+      const legacy = release && [...hosts.values()].find(host => host.controller?.remoteUpdate && controllerUpgradeBridgeVersion(release, host.controller));
+      if (!release || !legacy?.controller) return json(200, { release });
+      try {
+        const bridgeRelease = await readUpgradeBridge(controllerUpgradeBridgeVersion(release, legacy.controller)!, refresh);
+        return json(200, { release, bridgeRelease });
+      } catch {
+        return json(200, { release, bridgeError: 'The upgrade component for older Controllers is unavailable. Refresh and retry after it is published.' });
+      }
     }
     const controllerUpdate = /^\/v1\/remote\/hosts\/([^/]+)\/controller-update$/.exec(url.pathname);
     if (controllerUpdate) {
@@ -711,9 +731,12 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (request.method === 'POST') {
         const input = await readBody(request);
         const release = await (options.controllerReleases ?? controllerReleases).latest();
-        if (!release || input.version !== release.version || !releaseCoversHost(release, host.controller)
+        const bridgeVersion = release && controllerUpgradeBridgeVersion(release, host.controller);
+        const bridge = bridgeVersion ? await readUpgradeBridge(bridgeVersion) : undefined;
+        const target = release && controllerUpdateTarget(release, host.controller, bridge);
+        if (!target || input.version !== target.version
           || typeof input.operationId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(input.operationId)) return json(409, { error: 'Refresh the Controller release and Host list before confirming this update.' });
-        body = JSON.stringify({ version: release.version, operationId: input.operationId });
+        body = JSON.stringify({ version: target.version, operationId: input.operationId });
       }
       const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/controller-update', undefined, body);
       return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });

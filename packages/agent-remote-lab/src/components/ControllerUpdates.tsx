@@ -1,21 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import { compareControllerVersions, releaseCoversHost, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
+import { compareControllerVersions, releaseCoversHost, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { watchPagePolling } from '@orchardworks/agent-remote-web';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 import { hostDisplayLabel } from './host-environment.js';
 
-export function controllerUpdateCoverage(release: ControllerRelease | null, hosts: readonly RemoteHost[]) {
+export function controllerUpdateCoverage(release: ControllerRelease | null, hosts: readonly RemoteHost[], bridge?: ControllerRelease) {
   const owned = hosts.filter(host => host.access !== 'shared');
   const covered = !!release && owned.length > 0 && owned.every(host => {
     const platform = host.controller ?? (host.environment ? { platform: host.environment.os.platform, arch: host.environment.os.arch, nodeMajor: release.nodeMajor } : undefined);
-    return platform && releaseCoversHost(release, platform);
+    return platform && release.protocolVersion === PROTOCOL_VERSION && releaseCoversHost(release, platform)
+      && (!host.controller || !!controllerUpdateTarget(release, host.controller, bridge));
   });
   const outdated = release ? owned.filter(host => !host.controller || compareControllerVersions(release.version, host.controller.version) > 0) : [];
-  return { owned, covered, outdated, eligible: outdated.filter(host => host.online && host.controller?.remoteUpdate && releaseCoversHost(release!, host.controller)) };
+  return { owned, covered, outdated, eligible: outdated.filter(host => host.online && host.controller?.remoteUpdate && controllerUpdateTarget(release!, host.controller, bridge)) };
 }
 const labels: Record<ControllerUpdateStatus['phase'], string> = { idle: 'Ready', downloading: 'Downloading and installing…', waiting: 'Waiting for a safe restart…', restarting: 'Restarting…', succeeded: 'Updated', failed: 'Update failed' };
 export function ControllerUpdates({ service, hosts }: { service: HostPairingService; hosts: readonly RemoteHost[] }) {
   const [release, setRelease] = useState<ControllerRelease | null>(null);
+  const [bridge, setBridge] = useState<ControllerRelease>();
+  const [bridgeError, setBridgeError] = useState<string>();
   const [error, setError] = useState<string>();
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState<string[] | null>(null);
@@ -26,16 +29,16 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
   const current = useRef({ service, hosts }); current.current = { service, hosts };
   const mutationEpoch = useRef(0);
   const requests = useRef(new Map<string, { version: string; operationId: string }>());
-  const { owned, covered, outdated, eligible } = controllerUpdateCoverage(release, hosts);
+  const { owned, covered, outdated, eligible } = controllerUpdateCoverage(release, hosts, bridge);
   const actionable = eligible.filter(host => !['downloading', 'waiting', 'restarting'].includes(statuses[host.id]?.phase ?? 'idle'));
   const available = eligible.length > 0;
   useEffect(() => {
     let retired = false, loading = false;
-    setRelease(null); setStatuses({}); setError(undefined); requests.current.clear(); setBusy(false); setConfirm(null);
+    setRelease(null); setBridge(undefined); setBridgeError(undefined); setStatuses({}); setError(undefined); requests.current.clear(); setBusy(false); setConfirm(null);
     const discover = async (refresh = false) => {
       if (retired || loading || !service.controllerRelease) return;
       loading = true; setChecking(true);
-      try { const result = await service.controllerRelease({ refresh }); if (!retired && current.current.service === service) { setRelease(result.release); setError(undefined); } }
+      try { const result = await service.controllerRelease({ refresh }); if (!retired && current.current.service === service) { setRelease(result.release); setBridge(result.bridgeRelease); setBridgeError(result.bridgeError); setError(undefined); } }
       catch (cause) { if (!retired) setError(cause instanceof Error ? cause.message : 'Could not check Controller updates.'); }
       finally { loading = false; if (!retired) setChecking(false); }
     };
@@ -66,8 +69,10 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
     try {
       for (const host of targets) {
         if (current.current.service !== service) return;
+        const target = host.controller && controllerUpdateTarget(release, host.controller, bridge);
+        if (!target) continue;
         const previous = requests.current.get(host.id);
-        const input = previous?.version === release.version ? previous : { version: release.version, operationId: crypto.randomUUID() };
+        const input = previous?.version === target.version ? previous : { version: target.version, operationId: crypto.randomUUID() };
         requests.current.set(host.id, input);
         try {
           const status = await service.controllerUpdate(host.id, input);
@@ -84,15 +89,20 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
     <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>Controller updates{available ? ` · ${release!.version} available` : ''}</button>
     {expanded ? <div>
       {error ? <p role="alert">{error}</p> : null}
+      {bridgeError ? <p role="alert">{bridgeError}</p> : null}
       <p className="lab-controller-release">{release ? <span>Latest version: <strong>{release.version}</strong></span> : <span>{checking ? 'Checking latest version…' : 'No published Controller release is available yet.'}</span>}
         <button type="button" disabled={checking} onClick={() => refreshRelease.current()}>{checking ? 'Refreshing…' : 'Refresh'}</button>
       </p>
       {release && !covered ? <p>Some Hosts are not compatible with this release. Compatible Hosts can still update independently.</p> : null}
       <ul>{owned.map(host => {
         const status = statuses[host.id]; const needs = outdated.includes(host);
+        const target = release && host.controller && controllerUpdateTarget(release, host.controller, bridge);
+        const needsBridge = release && host.controller && controllerUpgradeBridgeVersion(release, host.controller);
+        const continueUpdate = needs && status?.phase === 'succeeded' && status.version === host.controller?.version && status.version !== release?.version && host.online;
         const completed = status?.version === host.controller?.version && host.controller?.revision === release?.revision && host.online;
         return <li key={host.id}><div className="lab-controller-host-name" title={hostDisplayLabel(host)} role="region" aria-label="Host name" tabIndex={0}><strong>{host.name}</strong></div><span>{host.controller?.version ?? 'Version not reported'} · {host.online ? 'Online' : 'Offline'}</span>
-          {status && status.phase !== 'idle' ? <small role="status">{completed ? 'Updated' : labels[status.phase]}{!completed && status.message ? ` ${status.message}` : ''}</small> : null}
+          {status && status.phase !== 'idle' ? <small role="status">{completed ? 'Updated' : continueUpdate ? `Continue update to ${release?.version}` : status.phase === 'succeeded' && status.version !== release?.version ? 'Upgrade component installed; waiting for Host confirmation…' : labels[status.phase]}{!completed && status.message ? ` ${status.message}` : ''}</small> : null}
+          {needsBridge ? <small>{target ? `Upgrade component: ${target.version}. Reconnect, then continue to ${release?.version}.` : 'A compatible upgrade component is required before this Host can update.'}</small> : null}
           {!host.controller?.remoteUpdate ? <small>Install the release launcher once on this Host to enable remote updates.</small> : null}
           {needs && eligible.includes(host) ? <button type="button" disabled={busy || (!!status && ['downloading', 'waiting', 'restarting'].includes(status.phase))} onClick={() => setConfirm([host.id])}>{status?.phase === 'failed' ? 'Retry update' : 'Update Host'}</button> : null}
         </li>;
@@ -100,6 +110,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
       {release ? <a href={`https://github.com/xuangong/agent-remote-control/releases/tag/controller-v${release.version}`} target="_blank" rel="noreferrer">Release notes and manual installation</a> : null}
       {actionable.length > 1 ? <button type="button" disabled={busy} onClick={() => setConfirm(actionable.map(host => host.id))}>Update {actionable.length} Hosts</button> : null}
       {confirm?.length ? <div role="group" aria-label="Confirm Controller update"><p>Update {confirm.length} online {confirm.length === 1 ? 'Host' : 'Hosts'} to {release?.version}? The Controller restarts as soon as the download is verified. Remote connections briefly reconnect. Shared Codex daemon tasks keep running; private agent tasks and Controller-hosted tool calls may be interrupted. Offline Hosts are skipped.</p>
+        {eligible.some(host => confirm.includes(host.id) && host.controller && controllerUpgradeBridgeVersion(release!, host.controller)) ? <p>Older Controllers first install upgrade component {bridge?.version}. After they reconnect, confirm again to continue to {release?.version}.</p> : null}
         <button type="button" disabled={busy} onClick={() => void update(eligible.filter(host => confirm.includes(host.id)))}>Confirm update</button><button type="button" onClick={() => setConfirm(null)}>Cancel</button>
       </div> : null}
     </div> : null}

@@ -1,4 +1,4 @@
-import type { HostProviderChange, HostProviderSettings, CodexDaemonRestart, CodexDaemonStatus, ControllerIdentity, ControllerRelease, ControllerUpdateStatus, HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
+import type { HostProviderChange, HostProviderSettings, CodexDaemonRestart, CodexDaemonStatus, ControllerIdentity, ControllerReleaseDiscovery, ControllerUpdateStatus, HostEnvironment, PairingPurpose } from '@orchardworks/agent-remote-protocol';
 import { hostDisplayLabel, hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
@@ -21,7 +21,7 @@ export interface HostStopResult { agentId: string; status: 'cancelled' | 'unsupp
 export interface HostPairingService {
   providerSettings?(hostId: string, input?: HostProviderChange): Promise<HostProviderSettings>;
   codexDaemon?(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus>;
-  controllerRelease?(options?: { refresh?: boolean }): Promise<{ release: ControllerRelease | null }>;
+  controllerRelease?(options?: { refresh?: boolean }): Promise<ControllerReleaseDiscovery>;
   controllerUpdate?(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus>;
   invitation?: PairingInvitation;
   hosts(): Promise<{ hosts: RemoteHost[] }>;

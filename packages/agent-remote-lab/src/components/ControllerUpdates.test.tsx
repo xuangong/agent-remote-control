@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { ControllerUpdates, controllerUpdateCoverage } from './ControllerUpdates.js';
@@ -88,4 +88,37 @@ it.each(['win32-x64', 'linux-x64', 'linux-arm64'])('discovers %s updates and con
   await act(async () => button(container, 'Confirm update').click());
   expect(service.controllerUpdate).toHaveBeenCalledWith(platform, { version: '0.2.0', operationId: expect.any(String) });
   expect(container.textContent).toContain('Waiting for a safe restart');
+});
+
+it('offers a bridge first and a separately confirmed final update after reconnection', async () => {
+  const latest = { ...release, version: '0.2.33', asset: 'orchardworks-agent-remote-controller-0.2.33.tgz' };
+  const bridgeRelease = { ...release, version: '0.2.32', protocolVersion: '1.5.0', revision: 'd'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.32.tgz' };
+  const managed = { ...host, controller: { ...host.controller!, version: '0.2.30' } };
+  const requests: Array<{ version: string; operationId: string }> = [];
+  const service: HostPairingService = { hosts: async () => ({ hosts: [managed] }), pair: async () => { throw new Error('unused'); },
+    controllerRelease: async () => ({ release: latest, bridgeRelease }),
+    controllerUpdate: async (_id, input) => { if (!input) return { phase: 'idle', updatedAt: 0 }; requests.push(input); return { ...input, phase: 'succeeded', updatedAt: 1 }; } };
+  function Hosts() {
+    const [running, setRunning] = useState(managed);
+    return <><ControllerUpdates service={service} hosts={[running]} /><button onClick={() => setRunning({ ...managed, controller: { ...managed.controller, version: bridgeRelease.version, revision: bridgeRelease.revision } })}>Reconnect bridge</button></>;
+  }
+  const container = await render(<Hosts />);
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.textContent).toContain('Upgrade component: 0.2.32');
+  await act(async () => button(container, 'Update Host').click());
+  expect(container.textContent).toContain('continue to 0.2.33');
+  await act(async () => button(container, 'Confirm update').click());
+  expect(requests[0]?.version).toBe('0.2.32');
+  await act(async () => button(container, 'Reconnect bridge').click());
+  expect(container.textContent).toContain('Continue update to 0.2.33');
+  await act(async () => button(container, 'Update Host').click());
+  await act(async () => button(container, 'Confirm update').click());
+  expect(requests.map(r => r.version)).toEqual(['0.2.32', '0.2.33']);
+  expect(requests[1]!.operationId).not.toBe(requests[0]!.operationId);
+});
+it('keeps newer Hosts actionable when the legacy bridge is unavailable', () => {
+  const latest = { ...release, version: '0.2.33' };
+  const legacy = { ...host, id: 'old', controller: { ...host.controller!, version: '0.2.30' } };
+  const modern = { ...host, controller: { ...host.controller!, version: '0.2.31' } };
+  expect(controllerUpdateCoverage(latest, [legacy, modern]).eligible).toEqual([modern]);
 });

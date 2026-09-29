@@ -2,7 +2,7 @@ import { isHostProviderSettings, type HostProviderChange, type HostProviderSetti
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from './workspace-access.js';
 import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
-import type { ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
+import type { ControllerReleaseDiscovery, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './components/HostPairing.js';
 export interface SessionSummary {
   nativeSessionId: string;
@@ -73,7 +73,7 @@ export class RemoteHostClient implements HostPairingService {
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
     return this.request<{ hosts: RemoteHost[] }>('hosts');
   }
-  controllerRelease(options: { refresh?: boolean } = {}): Promise<{ release: ControllerRelease | null }> { return this.request(`controller-release${options.refresh ? '?refresh=1' : ''}`, 'GET', undefined, 35000); }
+  controllerRelease(options: { refresh?: boolean } = {}): Promise<ControllerReleaseDiscovery> { return this.request(`controller-release${options.refresh ? '?refresh=1' : ''}`, 'GET', undefined, 35000); }
   async providerSettings(hostId: string, input?: HostProviderChange): Promise<HostProviderSettings> {
     const value = await this.request(`hosts/${encodeURIComponent(hostId)}/provider-settings`, input ? 'POST' : 'GET', input, 50000);
     if (!isHostProviderSettings(value)) throw new Error('The Host provider result could not be verified. Refresh before changing settings.');

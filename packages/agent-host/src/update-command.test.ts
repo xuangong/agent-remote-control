@@ -17,7 +17,7 @@ it('checks compatibility against the running Host without scheduling an update',
   expect(JSON.parse(f.output.join(''))).toMatchObject({ current:'0.1.0', version:'0.2.0', available:true });
   expect(f.calls).toEqual([{action:'controller-info'}]);
 });
-it.each([{...release,nodeMajor:24},{...release,platforms:['darwin-arm64']},{...release,version:'0.1.0'},{...release,protocolVersion:'99.0.0'}])('does not offer incompatible or older releases', async candidate => {
+it.each([{...release,nodeMajor:24},{...release,platforms:['darwin-arm64']},{...release,version:'0.1.0'}])('does not offer incompatible or older releases', async candidate => {
   const f=fixture({release:async()=>candidate});await runControllerUpdate(['--check'],f.deps);
   expect(JSON.parse(f.output.join('')).available).toBe(false);
 });
@@ -47,4 +47,11 @@ it('offers explicit clean reinstall for an up-to-date managed launcher',async()=
  expect(JSON.parse(f.output.join(''))).toMatchObject({available:false,canClean:true});
  await runControllerUpdate(['--version',identity.version,'--yes','--clean'],f.deps);
  expect(f.calls.at(-1)).toMatchObject({action:'controller-update',clean:true,version:identity.version});
+});
+
+it('can check an upgrade across session protocol versions', async () => {
+  const f = fixture({ release: async () => ({ ...release, protocolVersion: '1.7.0' }) });
+  await runControllerUpdate(['--check'], f.deps);
+  expect(JSON.parse(f.output.join(''))).toMatchObject({ available: true });
+  expect(f.calls).toEqual([{ action: 'controller-info' }]);
 });

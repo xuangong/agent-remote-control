@@ -29,7 +29,32 @@ export function compareControllerVersions(a: string, b: string): number {
   return 0;
 }
 export function releaseCoversHost(release: ControllerRelease, host: Pick<ControllerIdentity, 'platform' | 'arch' | 'nodeMajor'>): boolean {
-  return release.protocolVersion === PROTOCOL_VERSION && host.nodeMajor >= release.nodeMajor && release.platforms.includes(`${host.platform}-${host.arch}`);
+  // Installation compatibility is independent of the running session protocol.
+  return host.nodeMajor >= release.nodeMajor && release.platforms.includes(`${host.platform}-${host.arch}`);
+}
+// Controllers through 0.2.30 require a protocol 1.5 release even for their updater.
+// The bridge retains that runtime and removes the updater's protocol equality gate.
+const LEGACY_UPDATER_LAST_VERSION = '0.2.30';
+const LEGACY_UPDATER_BRIDGE_VERSION = '0.2.32';
+type UpdateHost = Pick<ControllerIdentity, 'version' | 'platform' | 'arch' | 'nodeMajor'>;
+export function controllerUpgradeBridgeVersion(release: ControllerRelease, host: Pick<ControllerIdentity, 'version'>): string | undefined {
+  return compareControllerVersions(host.version, '0.2.0') >= 0
+    && compareControllerVersions(host.version, LEGACY_UPDATER_LAST_VERSION) <= 0
+    && release.protocolVersion !== '1.5.0' ? LEGACY_UPDATER_BRIDGE_VERSION : undefined;
+}
+export function controllerUpdateTarget(release: ControllerRelease, host: UpdateHost, bridge?: ControllerRelease | null): ControllerRelease | null {
+  // The Relay must understand the final runtime. A bridge only repairs the updater
+  // over the independent Host management uplink; it does not serve new session views.
+  if (release.protocolVersion !== PROTOCOL_VERSION || !releaseCoversHost(release, host)) return null;
+  const bridgeVersion = controllerUpgradeBridgeVersion(release, host);
+  if (!bridgeVersion) return release;
+  return bridge?.version === bridgeVersion && bridge.protocolVersion === '1.5.0'
+    && compareControllerVersions(bridge.version, release.version) < 0 && releaseCoversHost(bridge, host) ? bridge : null;
+}
+export interface ControllerReleaseDiscovery {
+  release: ControllerRelease | null;
+  bridgeRelease?: ControllerRelease;
+  bridgeError?: string;
 }
 export type ControllerUpdatePhase = 'idle' | 'downloading' | 'waiting' | 'restarting' | 'succeeded' | 'failed';
 export interface ControllerUpdateStatus { phase: ControllerUpdatePhase; version?: string; operationId?: string; message?: string; updatedAt: number }

@@ -20,6 +20,38 @@ The first installation of this launcher is manual for legacy Controllers. Updati
 
 The stable launcher itself remains at its bootstrap version and supervises versioned Controller children. A future incompatible launcher contract requires an explicit local bootstrap. Package dependencies are installed with npm without lifecycle scripts; updates need registry access as well as GitHub access.
 
+## Session protocol transitions
+
+Installation compatibility checks the target's Node minimum and OS/architecture, not
+whether the old Controller speaks the target session protocol. The website and Relay
+separately require the final release to match the Relay's session protocol. The stable
+Host management uplink and launcher activation remain independent of session messages.
+A successful registration proves activation, not that historical sessions were restored.
+
+Controllers 0.2.0 through 0.2.30 contain a protocol-equality check in their updater.
+They cannot download protocol 1.6 releases directly. Website discovery supplies a
+verified **0.2.32 upgrade component**, built from `controller-v0.2.30` with only the
+updater fix, regression tests, version and generated compatibility metadata changed.
+It truthfully retains session protocol 1.5. After it registers, the owner confirms a
+second update to **0.2.33 or newer**. Controller 0.2.31 goes directly to the final
+release. Each step has its own operation ID, checksum verification, activation and
+rollback. A missing or incompatible bridge blocks only legacy Hosts. No browser can
+skip the bridge by claiming a different installed version.
+
+Release both artifacts before deploying the website path. Reserve `controller-v0.2.32`
+for the protocol 1.5 bridge; do not build that tag from main or merge its older runtime
+into main. Publish the bridge as a stable, non-latest release, then publish the protocol
+1.6 final release as latest. Do not rewrite old release manifests or relabel the new
+runtime as protocol 1.5. The normal release manifest format stays unchanged so strict
+old decoders can read it. If GitHub rate limits an old Controller, its existing
+latest-only fallback cannot verify the non-latest bridge; retry after that limit clears.
+This limitation cannot be repaired in the old running updater from the website.
+
+The website does not silently start the second update or update offline Hosts. Reopen
+Controller updates after reconnecting and choose **Update Host** to continue. Reloading
+the page does not lose the upgrade path: the running Host identity determines its step.
+Native Codex and other agent executables are not upgraded by this process.
+
 ## Windows
 
 Windows x64 uses the same release discovery, owner confirmation, checksum verification,

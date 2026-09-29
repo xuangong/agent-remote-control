@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { isControllerRelease, compareControllerVersions, releaseCoversHost } from './controller-release.js';
 it('binds a stable release to its asset, revision and supported platforms', () => {
-  const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64', 'linux-x64'] };
+  const release = { protocolVersion: '1.6.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64', 'linux-x64'] };
   expect(isControllerRelease(release)).toBe(true);
   expect(releaseCoversHost({ ...release, protocolVersion: '99.0.0' }, { platform: 'darwin', arch: 'arm64', nodeMajor: 22 })).toBe(false);
   expect(isControllerRelease({ ...release, asset: '../../other.tgz' })).toBe(false);

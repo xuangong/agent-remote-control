@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { runControllerUpdate } from './update-command.js';
 const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: 'linux', arch: 'arm64', nodeMajor: 22, remoteUpdate: true };
-const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'b'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', sha256: 'c'.repeat(64), nodeMajor: 22, platforms: ['linux-arm64'] };
+const release = { protocolVersion: '1.6.0', version: '0.2.0', revision: 'b'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', sha256: 'c'.repeat(64), nodeMajor: 22, platforms: ['linux-arm64'] };
 function fixture(overrides = {}) {
   const calls: Record<string, unknown>[] = [], output: string[] = [];
   const deps = { print: (s: string) => { output.push(s); }, release: async () => release,

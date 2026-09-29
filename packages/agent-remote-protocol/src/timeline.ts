@@ -52,6 +52,7 @@ export const AgentTimelineItem = Type.Union([
     text: Type.String(),
     messageId: Type.Optional(NonEmptyString),
   }),
+  Strict({ type: Type.Literal('agent_communication'), messageId: NonEmptyString, sender: NonEmptyString, recipient: NonEmptyString, text: Type.String() }),
   Strict({ type: Type.Literal('reasoning'), text: Type.String() }),
   AgentToolCallTimelineItem,
   Strict({ type: Type.Literal('todo'), items: Type.Array(AgentTaskItem) }),

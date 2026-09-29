@@ -44,6 +44,7 @@ it('keeps a native Codex session usable when an independent Host pairs to a rest
     });
     expect(attached).toEqual(created);
     const recovered = await connect(backendUrl, origin, attached.agentId, clients);
+    await recovered.client.takeControl();
     expect((await recovered.client.sendMessage('Message after backend restart')).type).toBe('command_acknowledged');
   } finally {
     for (const client of clients) client.stop();

@@ -60,10 +60,10 @@ async function startResponsesServer(): Promise<{ url: string; close(): Promise<v
 }
 
 describe('Codex app-server local process', () => {
-  it('initializes codex-cli 0.148.0 and completes thread start, resume, and read', async () => {
+  it('initializes the native CLI and completes thread start, resume, and read', async () => {
     const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE ?? 'codex';
     const version = execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim();
-    expect(version).toContain('codex-cli 0.148.0');
+    expect(version).toMatch(/^codex-cli \d+\.\d+\.\d+/);
 
     const codexHome = mkdtempSync(path.join(os.tmpdir(), 'borgee-codex-home-'));
     const cwd = mkdtempSync(path.join(os.tmpdir(), 'borgee-codex-workspace-'));

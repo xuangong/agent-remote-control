@@ -69,3 +69,14 @@ function MessageImageTag({ label, locator, context }: { label: string; locator: 
     {error ? <span role="alert">{error}</span> : null}
     {blob ? <ImagePreview blob={blob} label={label} onClose={() => setBlob(undefined)} /> : null}</>;
 }
+
+/** Received agent messages are conversation content, never editable user prompts. */
+export function AgentCommunicationItem({ item, resourceContext }: {
+  item: Extract<AgentTimelineItem, { type: 'agent_communication' }>;
+  resourceContext?: MarkdownResourceContext;
+}) {
+  return <article className="agent-timeline-item agent-message agent-message-assistant agent-message-group-single" aria-label="Agent communication">
+    <header className="agent-item-header"><TimelineTitle className="agent-item-kicker">{item.sender} → {item.recipient}</TimelineTitle></header>
+    <MarkdownContent markdown={item.text} resourceContext={resourceContext} />
+  </article>;
+}

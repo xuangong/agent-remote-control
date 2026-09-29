@@ -12,7 +12,7 @@ import { attachAgentRemoteWebSocketStream } from '../../agent-remote-relay/src/t
 import { createAgentHost } from '../../agent-host/src/host.js';
 import { startDshAgentRemote } from '../../agent-remote-dsh/src/agent-remote.js';
 
-const version = '1.5.0';
+const version = '1.6.0';
 type Frame = { type: string; payload?: any; [key: string]: any };
 interface Connection { send(frame: Frame): void; next(type: string, requestId?: string): Promise<Frame>; disconnect(): void }
 interface Fixture { connect(agentId?: string, subject?: string): Promise<Connection>; count(): number; reconnect(): Promise<void>; close(): Promise<void> }

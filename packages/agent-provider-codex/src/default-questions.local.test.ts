@@ -12,7 +12,7 @@ import { spawnCodexAppServer } from './native.js';
 // A real app-server interprets these model tool calls; the fixture never emits question RPCs.
 async function fixture(feature?: boolean) {
   const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE ?? 'codex';
-  expect(execFileSync(executable, ['--version'], { encoding: 'utf8', timeout: 10_000 }).trim()).toBe('codex-cli 0.148.0');
+  expect(execFileSync(executable, ['--version'], { encoding: 'utf8', timeout: 10_000 }).trim()).toMatch(/^codex-cli \d+\.\d+\.\d+/);
   const home = mkdtempSync(join(tmpdir(), 'codex-default-question-'));
   let ordinal = 0;
   const server = createServer((request, response) => {

@@ -29,10 +29,10 @@ export async function readSessionHistoryPage(transport: Pick<CodexAppServerTrans
     if (observation?.event.type !== 'timeline') continue;
     const item = observation.event.item;
     // Binary media is not copied into text tool results.
-    const text = item.type === 'user_message' || item.type === 'assistant_message' ? item.text
+    const text = item.type === 'agent_communication' ? `${item.sender} → ${item.recipient}: ${item.text}` : item.type === 'user_message' || item.type === 'assistant_message' ? item.text
       : item.type === 'tool_call' ? JSON.stringify({ name: item.name, status: item.status, detail: item.detail, result: item.result, error: item.error }) : undefined;
     if (text === undefined) continue;
-    entries.push({ id: readString(value.item.id) ?? '', turnId, role: item.type === 'user_message' ? 'user' : item.type === 'assistant_message' ? 'assistant' : 'tool',
+    entries.push({ id: readString(value.item.id) ?? '', turnId, role: item.type === 'agent_communication' ? 'agent' : item.type === 'user_message' ? 'user' : item.type === 'assistant_message' ? 'assistant' : 'tool',
       text: text.slice(textOffset, textOffset + 6000), textOffset, totalChars: text.length });
   }
   return { entries, ...(readString(response.nextCursor) ? { nextCursor: readString(response.nextCursor) } : {}) };

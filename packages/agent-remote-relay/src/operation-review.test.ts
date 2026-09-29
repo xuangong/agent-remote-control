@@ -30,7 +30,7 @@ function provider(commands = false) {
 
 it('closes native sessions while settlement drains and shares shutdown completion', async () => {
   const native = provider(), relay = createAgentRemoteRelay({ providers: [native.adapter] });
-  await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
+  await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   let started!: () => void; const dispatching = new Promise<void>(resolve => { started = resolve; });
   const pending = relay.executeOperation('owner')(relay.requireAgent('agent'), { operationId: randomUUID(), kind: 'send_message', parameters: {}, maximumResultBytes: 1024 }, { dispatch: async () => { started(); await native.sessions[0]!.sendMessage('hello'); } });
   await dispatching;
@@ -45,7 +45,7 @@ it.each(['create_agent', 'resume_agent'] as const)('settles HTTP %s across corre
   const { url } = await server.listen(); const operationId = randomUUID();
   const payload = type === 'create_agent' ? { providerId: 'test', config: { sessionId: 'native' } } : { persistence: { providerId: 'test', sessionId: 'native', opaque: '{}' } };
   const post = async (requestId: string, agentId = 'agent', scope = 'owner', id = operationId, override = {}) => {
-    const response = await fetch(url + (type === 'create_agent' ? '/v1/sessions' : '/v1/sessions/resume'), { method: 'POST', headers: { 'x-owner': scope }, body: JSON.stringify({ protocolVersion: '1.5.0', type, payload: { ...payload, agentId, requestId, operationId: id, ...override } }) });
+    const response = await fetch(url + (type === 'create_agent' ? '/v1/sessions' : '/v1/sessions/resume'), { method: 'POST', headers: { 'x-owner': scope }, body: JSON.stringify({ protocolVersion: '1.6.0', type, payload: { ...payload, agentId, requestId, operationId: id, ...override } }) });
     return { status: response.status, body: await response.json() };
   };
   const count = type === 'create_agent' ? native.creates : native.resumes;
@@ -79,7 +79,7 @@ it('rebuilds correlation for retained plugin creation receipts', async () => {
   const output: any[] = [];
   const host = createAgentRemotePluginHost(relay, { agentId: 'agent', send: json => output.push(JSON.parse(json)), onFailure: error => { throw error; } });
   const operationId = randomUUID();
-  const request = (id: string, sessionId = 'native') => host.receive(JSON.stringify({ uplinkVersion: 1, type: 'rpc_request', requestId: id, method: 'POST', path: '/v1/sessions', body: JSON.stringify({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId: id, operationId, agentId: 'agent', providerId: 'test', config: { sessionId } } }) }));
+  const request = (id: string, sessionId = 'native') => host.receive(JSON.stringify({ uplinkVersion: 1, type: 'rpc_request', requestId: id, method: 'POST', path: '/v1/sessions', body: JSON.stringify({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: id, operationId, agentId: 'agent', providerId: 'test', config: { sessionId } } }) }));
   try {
     request('first'); request('retry');
     await expect.poll(() => output.length).toBe(2);
@@ -93,14 +93,14 @@ it('rebuilds correlation for retained plugin creation receipts', async () => {
 it.each([new UnsupportedAgentCapabilityError('queue_message'), new AgentBusyError()])('keeps both public validation receipts classified consistently', async error => {
   const { createSessionWire } = await import('./session-wire.js');
   const native = provider(), relay = createAgentRemoteRelay({ providers: [native.adapter] });
-  await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
+  await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   const manager = relay.requireAgent('agent');
   manager.validateMessageContent = async () => { throw error; };
   const output: any[] = []; const operationId = randomUUID();
   const wire = createSessionWire(manager, json => output.push(JSON.parse(json)), { executeOperation: relay.executeOperation('owner') });
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
-    for (const requestId of ['first', 'retry']) await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message', payload: { agentId: 'agent', requestId, operationId, delivery: 'next_turn', content: [{ type: 'text', text: 'hello' }] } }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    for (const requestId of ['first', 'retry']) await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'send_message', payload: { agentId: 'agent', requestId, operationId, delivery: 'next_turn', content: [{ type: 'text', text: 'hello' }] } }));
     expect(output.filter(frame => frame.type === 'protocol_error').map(frame => ({ code: frame.payload.code, recoverable: frame.payload.recoverable }))).toEqual([{ code: error.code, recoverable: true }, { code: error.code, recoverable: true }]);
   } finally { wire.close(); await relay.close(); }
 }, 5000);
@@ -120,7 +120,7 @@ it.each(['create_agent', 'resume_agent'] as const)('owns %s sessions before thei
     };
     const open = async () => { returned(); if (late) await allowed; return session; };
     const relay = createAgentRemoteRelay({ providers: [{ descriptor: { providerId: 'test', displayName: 'Test' }, createSession: open, resumeSession: open }] });
-    const request = { protocolVersion: '1.5.0' as const, type, payload: { requestId: 'open', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' }, persistence: { providerId: 'test', sessionId: 'native', opaque: '{}' } } };
+    const request = { protocolVersion: '1.6.0' as const, type, payload: { requestId: 'open', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' }, persistence: { providerId: 'test', sessionId: 'native', opaque: '{}' } } };
     const opening = relay.executeSessionOperation(request, 'owner').catch(error => error);
     await nativeReturned; await new Promise<void>(resolve => setImmediate(resolve));
     const closing = relay.close(); release();
@@ -132,7 +132,7 @@ it('retains definite HTTP missing-provider and reserved-binding rejection withou
   const native = provider(), relay = createAgentRemoteRelay({ providers: [native.adapter] });
   const server = createAgentRemoteHttpServer(relay); const { url } = await server.listen();
   const post = async (providerId: string, operationId: string, requestId: string) => {
-    const response = await fetch(url + '/v1/sessions', { method: 'POST', body: JSON.stringify({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId, operationId, agentId: 'agent', providerId, config: { sessionId: 'native' } } }) });
+    const response = await fetch(url + '/v1/sessions', { method: 'POST', body: JSON.stringify({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId, operationId, agentId: 'agent', providerId, config: { sessionId: 'native' } } }) });
     return { status: response.status, code: (await response.json()).payload.code };
   };
   try {
@@ -154,7 +154,7 @@ it('classifies atomic creation reservation conflicts before any second native di
   const create = native.adapter.createSession.bind(native.adapter);
   native.adapter.createSession = async config => { started(); await allowed; return create(config); };
   const relay = createAgentRemoteRelay({ providers: [native.adapter] });
-  const request = (operationId: string) => ({ protocolVersion: '1.5.0' as const, type: 'create_agent' as const, payload: { requestId: 'create', operationId, agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
+  const request = (operationId: string) => ({ protocolVersion: '1.6.0' as const, type: 'create_agent' as const, payload: { requestId: 'create', operationId, agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   const first = relay.executeSessionOperation(request(randomUUID()), 'owner');
   await opening;
   try {
@@ -170,7 +170,7 @@ it('retains unknown creation when post-create planning validation fails', async 
   const operationId = randomUUID();
   try {
     for (const requestId of ['first', 'retry']) {
-      await expect(relay.executeSessionOperation({ protocolVersion: '1.5.0', type: 'create_agent', payload: {
+      await expect(relay.executeSessionOperation({ protocolVersion: '1.6.0', type: 'create_agent', payload: {
         requestId, operationId, agentId: 'agent', providerId: 'test', config: { sessionId: 'native', planning: true },
       } }, 'owner')).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
     }
@@ -182,7 +182,7 @@ it('retains unknown creation when post-create planning validation fails', async 
 
 it('settles preparation failures as rejected and rechecks authority after the Manager queue', async () => {
   const native = provider(), relay = createAgentRemoteRelay({ providers: [native.adapter] });
-  await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
+  await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   const manager = relay.requireAgent('agent'), session = native.sessions[0]!;
   let release!: () => void, started!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -208,7 +208,7 @@ it('settles preparation failures as rejected and rechecks authority after the Ma
 
 it('distinguishes missing commands from failures after native command dispatch', async () => {
   const native = provider(true), relay = createAgentRemoteRelay({ providers: [native.adapter] });
-  await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
+  await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   const manager = relay.requireAgent('agent'), session = native.sessions[0]!;
   Object.assign(session.capabilities, { commands: true });
   session.listCommands = async () => [];
@@ -232,7 +232,7 @@ it.each(['exclusive', 'shared'] as const)('checks queued %s operations at native
   const create = native.adapter.createSession.bind(native.adapter);
   native.adapter.createSession = async config => { const session = await create(config); Object.assign(session.capabilities, { sessionControl: mode }); return session; };
   const relay = createAgentRemoteRelay({ providers: [native.adapter] });
-  await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
+  await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   const server = createAgentRemoteHttpServer(relay, { websocketAuthorizer: { authenticate: () => ({ subject: 'owner' }), authorize: () => true } });
   const { url } = await server.listen();
   const clients: WebSocket[] = [];
@@ -241,7 +241,7 @@ it.each(['exclusive', 'shared'] as const)('checks queued %s operations at native
     const messages: any[] = [];
     socket.on('message', data => messages.push(JSON.parse(data.toString())));
     await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
-    const send = (type: string, payload?: unknown, controlToken?: string) => socket.send(JSON.stringify({ protocolVersion: '1.5.0', type, payload, controlToken }));
+    const send = (type: string, payload?: unknown, controlToken?: string) => socket.send(JSON.stringify({ protocolVersion: '1.6.0', type, payload, controlToken }));
     const next = async (type: string, requestId?: string) => {
       await expect.poll(() => messages.find(message => message.type === type && (!requestId || message.payload?.requestId === requestId)), { timeout: 1500 }).toBeDefined();
       return messages.findLast(message => message.type === type && (!requestId || message.payload?.requestId === requestId));
@@ -290,7 +290,7 @@ it.each(['exclusive', 'shared'] as const)('checks queued %s operations at native
 
 it.each(['text-content', 'post-command-refresh'] as const)('keeps %s failures after native dispatch uncertain', async scenario => {
   const native = provider(true), relay = createAgentRemoteRelay({ providers: [native.adapter] });
-  await relay.createAgent({ protocolVersion: '1.5.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
+  await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   const manager = relay.requireAgent('agent'), session = native.sessions[0]!;
   let calls = 0;
   session.sendMessage = async () => { calls++; throw new Error('Lost native reply'); };

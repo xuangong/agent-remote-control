@@ -236,6 +236,7 @@ export class CodexEventProjector {
       if (lifecycle === 'started') return null;
       return this.projectCompletedTextItem(item, itemId, turnId);
     }
+    if (itemType === 'agentCommunication' && lifecycle === 'started') return null;
     if (itemType === 'userMessage') {
       if (this.emittedUserItems.has(itemId)) return null;
       const projected = this.projectUserMessage(item, itemId, `item:${itemId}:user`, turnId);
@@ -398,6 +399,10 @@ export class CodexEventProjector {
     if (type === 'agentMessage') {
       const text = readString(item.text);
       return text ? { type: 'assistant_message', text, messageId: id } : null;
+    }
+    if (type === 'agentCommunication') {
+      const sender = readString(item.sender), recipient = readString(item.recipient), text = readString(item.text);
+      return sender && recipient && text !== undefined ? { type: 'agent_communication', messageId: id, sender, recipient, text } : null;
     }
     if (type === 'reasoning') {
       const text = this.readReasoningText(item);

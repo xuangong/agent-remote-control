@@ -93,3 +93,16 @@ it.each(['shared', 'exclusive'] as const)('preserves %s adapter control semantic
   expect(player.state.agent?.capabilities.sessionControl).toBe(mode);
   expect(player.state.sessionControl).toBeUndefined();
 });
+
+it('records and replays agent communication without turning it into an editable prompt', () => {
+  const replica = new AgentReplica();
+  replica.applySnapshot(snapshot);
+  const history = page('task');
+  history.payload.entries[0]!.item = { type: 'agent_communication', messageId: 'amsg-task', sender: '/root', recipient: '/root/review', text: 'Review this change.' };
+  replica.applyHistory(history);
+  const records: DebuggerRecord[] = [];
+  const stop = observeReplica('demo', replica, { subscribeStatus(listener: (s: RemoteSessionStatus) => void) { listener('ready'); return () => {}; } }, record => records.push(record));
+  stop();
+  const player = new RecordingPlayer(parseRecording(jsonl(records)));
+  expect(player.state.timeline.entries[0]!.item).toEqual(history.payload.entries[0]!.item);
+});

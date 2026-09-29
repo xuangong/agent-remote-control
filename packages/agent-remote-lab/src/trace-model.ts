@@ -3,7 +3,7 @@ import type { AgentTimelineItem, ProjectedTimelineEntry } from '@orchardworks/ag
 export interface TraceEntryRequest { readonly key: string; readonly requestId: number }
 
 export const traceItemLabels: Record<AgentTimelineItem['type'], string> = {
-  user_message: 'User message', assistant_message: 'Assistant message', reasoning: 'Reasoning update',
+  agent_communication: 'Agent communication', user_message: 'User message', assistant_message: 'Assistant message', reasoning: 'Reasoning update',
   tool_call: 'Tool call', todo: 'Task list', interaction: 'Completed interaction', error: 'Agent error', compaction: 'Context compacted',
 };
 
@@ -14,6 +14,7 @@ export function traceItemLabel(item: AgentTimelineItem): string {
 export function traceItemSummary(item: AgentTimelineItem): string {
   switch (item.type) {
     case 'assistant_message': case 'user_message': case 'reasoning': return item.text;
+    case 'agent_communication': return `${item.sender} → ${item.recipient}: ${item.text}`;
     case 'error': return item.message;
     case 'todo': return item.items.map(task => task.text).join(' · ');
     case 'compaction': return item.status;

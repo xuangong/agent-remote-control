@@ -1,6 +1,6 @@
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,8 @@ import { createSessionWire } from '../../agent-remote-relay/dist/session-wire.js
 import { decodeServerMessage } from '../../agent-remote-protocol/dist/index.js';
 
 interface NativeThread {
+  path?: string;
+  agentPath?: string;
   source?: string;
   id: string;
   status: { type: string; activeFlags?: string[] };
@@ -23,6 +25,47 @@ interface NativeThread {
   parentThreadId?: string;
   approvalPolicy?: string;
 }
+
+it('supplements both sides of child communication over Unix WebSocket and preserves them across reconnect', async () => {
+  const { server, provider } = await harness();
+  const dir = await mkdtemp(join(tmpdir(), 'arc-communication-wire-')); roots.push(dir);
+  const row = (type: string, payload: unknown, time = 1000) => JSON.stringify({ type, payload, timestamp: new Date(time).toISOString() }) + '\n';
+  const message = (id: string, author: string, recipient: string, turn: string, text: string, time: number) => row('response_item', {
+    type: 'agent_message', id, author, recipient, content: [{ type: 'input_text', text }], internal_chat_message_metadata_passthrough: { turn_id: turn },
+  }, time);
+  const parentPath = join(dir, 'parent.jsonl'), childPath = join(dir, 'child.jsonl');
+  await writeFile(parentPath, row('session_meta', { id: 'root', agent_path: '/root' })
+    + message('reply', '/root/review', '/root', 'pt', 'Subagent reply', 1300));
+  await writeFile(childPath, row('session_meta', { id: 'child', agent_path: '/root/review', parent_thread_id: 'root' })
+    + message('task', '/root', '/root/review', 'ct', 'Full delegated task', 1100)
+    + row('event_msg', { type: 'item_completed', thread_id: 'child', turn_id: 'ct', item: { type: 'CommandExecution', id: 'cmd' } }, 1200));
+  Object.assign(server.thread, { path: parentPath, agentPath: '/root', turns: [{ id: 'pt', startedAt: 1, status: 'completed',
+    items: [{ type: 'subAgentActivity', id: 'spawn', kind: 'started', agentThreadId: 'child', agentPath: '/root/review' }] }] });
+  server.children.set('child', { id: 'child', path: childPath, agentPath: '/root/review', parentThreadId: 'root',
+    status: { type: 'idle' }, canAcceptDirectInput: false, turns: [{ id: 'ct', startedAt: 1, status: 'completed',
+      items: [{ id: 'cmd', type: 'commandExecution', command: 'pwd', status: 'completed' }] }] });
+  const parent = await provider.resumeSession({ providerId: 'codex', sessionId: 'root', opaque: '{}' }); sessions.push(parent);
+  const rootIterator = parent.observe()[Symbol.asyncIterator]();
+  const initial: ProviderStreamItem[] = [];
+  for (;;) { const next = await rootIterator.next(); if (next.done || next.value.type === 'history_boundary') break; initial.push(next.value); }
+  const texts = (items: ProviderStreamItem[]) => items.flatMap(item => item.type === 'observation' && item.event.type === 'timeline'
+    && item.event.item.type === 'agent_communication' ? [item.event.item.text] : []);
+  expect(texts(initial)).toEqual(['Full delegated task', 'Subagent reply']);
+  const child = await parent.openChildSession!('root', 'child'); sessions.push(child);
+  const childIterator = child.observe()[Symbol.asyncIterator]();
+  const childInitial: ProviderStreamItem[] = [];
+  for (;;) { const next = await childIterator.next(); if (next.done || next.value.type === 'history_boundary') break; childInitial.push(next.value); }
+  expect(texts(childInitial)).toEqual(['Full delegated task', 'Subagent reply']);
+  expect(childInitial[0]).toMatchObject({ sourceKey: 'item:task:completed' });
+  await appendFile(parentPath, message('new-reply', '/root/review', '/root', 'pt', 'Reply while disconnected', 1500));
+  server.disconnectClients();
+  const replacement = await nextItem(childIterator, 'timeline_replacement');
+  if (replacement.type !== 'timeline_replacement') throw new Error('Expected replacement');
+  expect(texts(replacement.observations)).toEqual(['Full delegated task', 'Subagent reply', 'Reply while disconnected']);
+  expect(new Set(replacement.observations.map(o => o.sourceKey)).size).toBe(replacement.observations.length);
+  expect(server.requests.filter(r => r.method === 'thread/resume' && r.params.threadId === 'child')).toHaveLength(0);
+  expect(server.requests.filter(r => r.method === 'turn/start')).toHaveLength(0);
+});
 
 interface RpcRequestContext {
   socket: WebSocket;
@@ -256,12 +299,12 @@ describe('shared Codex recovery', () => {
     const activityWire = createSessionWire(manager, json => activity.push(json));
     managerCleanups.push(async () => { contentWire.close(); activityWire.close(); await manager.close(); });
     await manager.ready;
-    await contentWire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
-    await activityWire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' }));
+    await contentWire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await activityWire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
     expect(content.map(json => JSON.parse(json))).toContainEqual(expect.objectContaining({ type: 'agent_snapshot', payload: expect.objectContaining({ status: 'running' }) }));
     expect(activity.map(json => JSON.parse(json))).toEqual([
-      { protocolVersion: '1.5.0', type: 'negotiated' },
-      { protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running', cursor: { epoch: 'initial', seq: 0 } } },
+      { protocolVersion: '1.6.0', type: 'negotiated' },
+      { protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running', cursor: { epoch: 'initial', seq: 0 } } },
     ]);
     server.notify('turn/completed', { threadId: 'root', turn: { id: 'existing-turn', status: 'completed' } });
     await expect.poll(() => manager.snapshot().payload.status).toBe('idle');
@@ -359,7 +402,7 @@ describe('shared Codex recovery', () => {
     const wire = createSessionWire(manager, json => wireOutput.push(json));
     managerCleanups.push(async () => { wire.close(); await manager.close(); });
     await manager.ready;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
     const events: string[] = [];
     const connections: string[] = [];
     manager.subscribe(message => {
@@ -790,15 +833,15 @@ it('restores ten latest turns over Unix WebSocket and serves older history throu
   const output: ReturnType<typeof decodeServerMessage>[] = [];
   const wire = createSessionWire(manager, json => output.push(decodeServerMessage(json)));
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'timeline_request', payload: {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'timeline_request', payload: {
       agentId: 'paged', requestId: 'older', direction: 'before', cursor: tail.payload.startCursor, limit: 100,
     } }));
     const response = output.at(-1);
     expect(response).toMatchObject({ status: 'ok', value: { type: 'timeline_page', payload: {
       requestId: 'older', hasOlder: true, startCursor: { epoch: cursor.epoch, seq: -9 }, endCursor: { epoch: cursor.epoch, seq: 0 },
     } } });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'timeline_request', payload: {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'timeline_request', payload: {
       agentId: 'paged', requestId: 'oldest', direction: 'before', cursor: { epoch: cursor.epoch, seq: -9 }, limit: 100,
     } }));
     expect(output.at(-1)).toMatchObject({ status: 'ok', value: { type: 'timeline_page', payload: { requestId: 'oldest', hasOlder: false, entries: [{ turnId: 'page-turn-1' }, { turnId: 'page-turn-2' }, { turnId: 'page-turn-3' }] } } });
@@ -1024,4 +1067,45 @@ it('restores failed turn detail once per replacement and never promotes an older
   await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
   expect((await session.runtimeInfo()).status).toBe('failed');
   expect((await session.runtimeInfo()).failure).toBeUndefined();
+});
+
+it('keeps child tasks and follow-up messages through Unix transport recovery without duplicating them', async () => {
+  const { server, provider, session } = await harness({ initialDelayMs: 150, maximumDelayMs: 150 });
+  const task = { type: 'agentCommunication', id: 'amsg-task', sender: '/root', recipient: '/root/review', text: 'Review the change.' };
+  const reply = { type: 'agentMessage', id: 'reply', text: 'Reviewed.' };
+  server.children.set('child', { id: 'child', parentThreadId: 'root', status: { type: 'idle' }, canAcceptDirectInput: false,
+    turns: [{ id: 'child-turn', status: 'completed', items: [task, reply] }] });
+  const spawn = { type: 'collabAgentToolCall', id: 'spawn', tool: 'spawnAgent', receiverThreadIds: ['child'], status: 'completed' };
+  server.thread.turns = [{ id: 'turn', items: [spawn] }];
+  server.notify('item/completed', { threadId: 'root', turnId: 'turn', item: spawn });
+  await expect.poll(async () => (await session.runtimeInfo()).childSessions?.length).toBe(1);
+  const child = await provider.openChildSession('root', 'child'); sessions.push(child);
+  const manager = await AgentManager.attach({ agentId: 'observed-child', provider: provider.descriptor, session: child, epoch: 'initial' });
+  const output: string[] = [];
+  const wire = createSessionWire(manager, json => output.push(json));
+  managerCleanups.push(async () => { wire.close(); await manager.close(); });
+  await manager.ready;
+  await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+  const read = async () => {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'timeline_request', payload: {
+      agentId: 'observed-child', requestId: 'history', direction: 'tail', limit: 100,
+    } }));
+    const decoded = decodeServerMessage(output.at(-1)!);
+    if (decoded.status !== 'ok' || decoded.value.type !== 'timeline_page') throw new Error('Expected decoded history');
+    return decoded.value.payload.entries.map(entry => entry.item);
+  };
+  expect(await read()).toEqual([
+    { type: 'agent_communication', messageId: 'amsg-task', sender: '/root', recipient: '/root/review', text: 'Review the change.' },
+    { type: 'assistant_message', messageId: 'reply', text: 'Reviewed.' },
+  ]);
+  const followup = { ...task, id: 'amsg-followup', text: 'Check the tests too.' };
+  server.children.get('child')!.turns.push({ id: 'followup', status: 'completed', items: [followup] });
+  server.notify('item/completed', { threadId: 'child', turnId: 'followup', item: followup });
+  server.notify('item/completed', { threadId: 'child', turnId: 'followup', item: followup });
+  await expect.poll(async () => (await read()).length).toBe(3);
+  const before = await read();
+  server.disconnectClients();
+  await expect.poll(async () => (await child.runtimeInfo()).connection?.state).toBe('reconnecting');
+  await expect.poll(async () => (await child.runtimeInfo()).connection?.state).toBe('connected');
+  expect(await read()).toEqual(before);
 });

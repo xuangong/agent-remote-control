@@ -130,12 +130,18 @@ it('debounces native recovery through restoring and dismisses it when connected'
 
 it.each([
   { state: runtime('unavailable'), message: 'Native runtime is unavailable.' },
-  { state: { ...replicaState, agent: { ...replicaState.agent!, status: 'failed' as const, lastError: 'Permission denied.' } }, message: 'Permission denied.' },
   { state: { ...replicaState, diagnostics: [{ code: 'unauthorized', message: 'Access denied.', recoverable: false }] }, sessionStatus: 'connecting' as const, message: 'Access denied.' },
 ])('reports $message immediately', async ({ message, ...props }) => {
   const view = await workbench(props);
   expect(view.toast()?.textContent).toContain(message);
   expect(view.toast()?.getAttribute('data-tone')).toBe('error');
+});
+
+it('shows agent failures inline without a runtime toast', async () => {
+  const view = await workbench({ state: { ...replicaState,
+    agent: { ...replicaState.agent!, status: 'failed', lastError: 'Permission denied.' } } });
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('Agent failed: Permission denied.');
+  expect(view.toast()).toBeNull();
 });
 
 it('reports send failures immediately', async () => {

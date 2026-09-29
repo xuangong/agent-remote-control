@@ -6,7 +6,7 @@ import { createSessionWire, type SessionWireAgent } from './session-wire.js';
 function agent(nativeId: string | null = 'native'): SessionWireAgent {
   return {
     agentId: 'agent',
-    snapshot: () => ({ protocolVersion: '1.5.0', type: 'agent_snapshot', payload: {
+    snapshot: () => ({ protocolVersion: '1.6.0', type: 'agent_snapshot', payload: {
       id: 'agent', providerId: 'fixture', createdAt: '2026-09-26T00:00:00Z', updatedAt: '2026-09-26T00:00:00Z', status: 'idle', activeTurn: null, pendingInteractions: [],
       capabilities: { history: false, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: false, toolApproval: false, planApproval: false } },
       runtimeInfo: { providerId: 'fixture', sessionId: nativeId, status: 'idle' },
@@ -51,8 +51,8 @@ it('rejects writable public wires without a runtime settlement service', async (
   const output: any[] = [];
   const wire = createSessionWire(target, json => output.push(JSON.parse(json)));
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'negotiate' }));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.5.0', type: 'send_message', payload: { requestId: 'send', agentId: 'agent', operationId: operation.operationId, text: 'hello' } }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'send_message', payload: { requestId: 'send', agentId: 'agent', operationId: operation.operationId, text: 'hello' } }));
     expect(output.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'operation_settlement_unavailable' } });
     expect(dispatch).not.toHaveBeenCalled();
   } finally { wire.close(); }

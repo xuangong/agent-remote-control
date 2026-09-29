@@ -36,7 +36,7 @@ it.each([undefined, null, 'old-turn', 'actual-turn'])('reconciles authoritative 
   const original = snapshot('running');
   original.payload.activeTurn = { turnId: 'old-turn', startedAt: '2026-09-10T00:00:00.000Z' };
   const message: AgentStreamMessage = {
-    protocolVersion: '1.5.0', type: 'agent_stream', payload: {
+    protocolVersion: '1.6.0', type: 'agent_stream', payload: {
       agentId: 'agent-one', timestamp: '2026-09-10T01:00:00.000Z', event: {
         type: 'runtime_updated', providerId: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'root', status: activeTurnId ? 'running' : 'idle' },
         ...(activeTurnId === undefined ? {} : { activeTurnId }),
@@ -54,7 +54,7 @@ it.each([undefined, null, 'old-turn', 'actual-turn'])('reconciles authoritative 
 it('retains the source turn start through live delivery and repeated snapshot handoff', () => {
   const initial = applyAgentSnapshot(createReplicaState(), snapshot());
   const started: AgentStreamMessage = {
-    protocolVersion: '1.5.0', type: 'agent_stream',
+    protocolVersion: '1.6.0', type: 'agent_stream',
     payload: { agentId: 'agent-one', timestamp: '2026-09-10T00:00:00.000Z',
       event: { type: 'turn_started', providerId: 'provider-neutral', turnId: 'turn-one' } },
   };
@@ -69,7 +69,7 @@ function snapshot(
   pendingInteractions: AgentInteractionRequest[] = [],
 ): AgentSnapshot {
   return {
-    protocolVersion: '1.5.0',
+    protocolVersion: '1.6.0',
     type: 'agent_snapshot',
     payload: {
       id: 'agent-one',
@@ -96,7 +96,7 @@ function stream(
   resources: ResourceBinding[] = [],
 ): AgentStreamMessage {
   return {
-    protocolVersion: '1.5.0',
+    protocolVersion: '1.6.0',
     type: 'agent_stream',
     payload: {
       agentId: 'agent-one',
@@ -129,7 +129,7 @@ function page(
   const start = entries[0]?.seqStart ?? 0;
   const end = entries.at(-1)?.seqEnd ?? 0;
   return {
-    protocolVersion: '1.5.0',
+    protocolVersion: '1.6.0',
     type: 'timeline_page',
     payload: {
       requestId: 'timeline-request',
@@ -386,7 +386,7 @@ describe('agent replica reducer', () => {
     ).state;
 
     liveState = applyTimelineResourceBindingReplacement(liveState, {
-      protocolVersion: '1.5.0',
+      protocolVersion: '1.6.0',
       type: 'timeline_resource_binding_replaced',
       payload: {
         agentId: 'agent-one', epoch: 'epoch-one', seq: 1,
@@ -394,7 +394,7 @@ describe('agent replica reducer', () => {
       },
     });
     liveState = applyResourceUpdate(liveState, {
-      protocolVersion: '1.5.0',
+      protocolVersion: '1.6.0',
       type: 'resource_update',
       payload: { agentId: 'agent-one', resourceId: replacement.resourceId, state: terminal },
     });
@@ -491,7 +491,7 @@ it('maintains waiting state through native restore and returns to the latest aut
   state = applyInteractionRequested(state, request);
   expect(state.agent?.status).toBe('waiting');
   expect(state.agent?.pendingInteractions).toEqual(state.pendingInteractions);
-  state = reduceTimelineEvent(state, { protocolVersion: '1.5.0', type: 'agent_stream', payload: { agentId: 'agent-one', timestamp: '2026-09-26T00:00:00.000Z', event: { type: 'runtime_updated', providerId: 'provider-neutral', runtimeInfo: { providerId: 'provider-neutral', sessionId: 'session-one', status: 'running', connection: { state: 'restoring' } } } } }).state;
+  state = reduceTimelineEvent(state, { protocolVersion: '1.6.0', type: 'agent_stream', payload: { agentId: 'agent-one', timestamp: '2026-09-26T00:00:00.000Z', event: { type: 'runtime_updated', providerId: 'provider-neutral', runtimeInfo: { providerId: 'provider-neutral', sessionId: 'session-one', status: 'running', connection: { state: 'restoring' } } } } }).state;
   expect(state.agent?.status).toBe('waiting');
   expect(state.pendingInteractions).toHaveLength(1);
   state = applyInteractionResolved(state, request.requestId);

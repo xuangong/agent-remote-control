@@ -75,3 +75,17 @@ it('shows a single explicit wait target and does not invent targets from returne
   expect(event).toMatchObject({ item: { detail: { description: 'Waiting for updates from any sub-agent' } } });
   expect(event).not.toHaveProperty('item.detail.sessionReferences');
 });
+
+it('preserves received agent tasks as attributed messages in history and live delivery', () => {
+  const item = { type: 'agentCommunication', id: 'amsg-1', sender: '/root', recipient: '/root/review', text: 'Review the change.' };
+  const projector = new CodexEventProjector('child');
+  const live = projector.projectNotification('item/completed', { threadId: 'child', turnId: 'turn', item });
+  expect(live?.event).toEqual({ type: 'timeline', provider: 'codex', turnId: 'turn', item: {
+    type: 'agent_communication', messageId: 'amsg-1', sender: '/root', recipient: '/root/review', text: 'Review the change.',
+  } });
+  const history = projector.projectHistoryItem(item, 'turn');
+  expect(history?.event).toEqual(live?.event);
+  expect(history?.sourceKey).toBe(live?.sourceKey);
+  expect(projector.projectNotification('item/started', { threadId: 'child', turnId: 'turn', item })).toBeNull();
+  expect(projector.projectNotification('item/completed', { threadId: 'other', item })).toBeNull();
+});

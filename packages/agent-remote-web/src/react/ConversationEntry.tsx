@@ -45,6 +45,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
 
 function previewText(item: AgentReplicaState['timeline']['entries'][number]['item']): string {
   switch (item.type) {
+    case 'agent_communication':
     case 'user_message':
     case 'assistant_message':
     case 'reasoning': return item.text;

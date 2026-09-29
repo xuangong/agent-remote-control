@@ -21,13 +21,14 @@ export interface TimelineSearchOptions {
 }
 
 const labels: Record<AgentTimelineItem['type'], string> = {
-  user_message: 'You', assistant_message: 'Assistant', reasoning: 'Reasoning', tool_call: 'Tool',
+  agent_communication: 'Agent communication', user_message: 'You', assistant_message: 'Assistant', reasoning: 'Reasoning', tool_call: 'Tool',
   todo: 'Tasks', interaction: 'Interaction', error: 'Error', compaction: 'Compaction',
 };
 
 /** Search normalized, readable content rather than serialized protocol identities. */
 export function timelineSearchText(item: AgentTimelineItem): string {
   switch (item.type) {
+    case 'agent_communication': return `${item.sender} ${item.recipient} ${item.text}`;
     case 'user_message': case 'assistant_message': case 'reasoning': return item.text;
     case 'error': return item.message;
     case 'todo': return item.items.map(task => task.text).join('\n');

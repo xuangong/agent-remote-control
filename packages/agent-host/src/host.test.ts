@@ -437,21 +437,21 @@ describe('Agent Host runtime', () => {
       })).status).toBe(200);
       broker.openStream('lost', 'agent');
       await expect.poll(() => broker.streamOpened('lost')).toBe(true);
-      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'negotiate' });
+      broker.sendStream('lost', { protocolVersion: '1.6.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('lost', 'agent_snapshot')).toBeDefined();
 
       const claim = async (streamId: string, resumeToken?: string): Promise<string> => {
         const initial = broker.streamMessage(streamId, 'session_control')!.payload as {revision: string};
-        broker.sendStream(streamId, {protocolVersion: '1.5.0', type: 'session_control_request', payload: {agentId: 'agent', requestId: 'claim-'+streamId, action: 'acquire', revision: initial.revision, resumeToken}});
+        broker.sendStream(streamId, {protocolVersion: '1.6.0', type: 'session_control_request', payload: {agentId: 'agent', requestId: 'claim-'+streamId, action: 'acquire', revision: initial.revision, resumeToken}});
         await expect.poll(() => broker.streamMessage(streamId, 'session_control', 'claim-'+streamId)).toBeDefined();
         return (broker.streamMessage(streamId, 'session_control', 'claim-'+streamId)!.payload as {token: string}).token;
       };
       const firstToken = await claim('lost');
       expect(typeof firstToken).toBe('string');
-      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'send_message', controlToken: firstToken, payload: {
+      broker.sendStream('lost', { protocolVersion: '1.6.0', type: 'send_message', controlToken: firstToken, payload: {
         requestId: 'send-lost', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('lost', { protocolVersion: '1.5.0', type: 'interaction_response', controlToken: firstToken, payload: {
+      broker.sendStream('lost', { protocolVersion: '1.6.0', type: 'interaction_response', controlToken: firstToken, payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-lost',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -459,7 +459,7 @@ describe('Agent Host runtime', () => {
       await expect.poll(() => session?.interactionResponses.length).toBe(1);
       await expect.poll(() => broker.streamMessage('lost', 'interaction_resolved', approval.requestId)).toBeDefined();
 
-      const fullCacheRead = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.5.0', 'agent');
+      const fullCacheRead = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.6.0', 'agent');
       expect(fullCacheRead.status).toBe(200);
       expect(JSON.parse(fullCacheRead.body).payload.pendingInteractions).toEqual([]);
       broker.issueCredential('rotated-key');
@@ -468,13 +468,13 @@ describe('Agent Host runtime', () => {
       await host.replaceUplink({ url: broker.url, remoteKey: 'rotated-key', async onCredential(credential) { savedCredentials.push(credential); } });
       broker.openStream('retry', 'agent');
       await expect.poll(() => broker.streamOpened('retry')).toBe(true);
-      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'negotiate' });
+      broker.sendStream('retry', { protocolVersion: '1.6.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('retry', 'agent_snapshot')).toBeDefined();
       const retryToken = await claim('retry', firstToken);
-      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', controlToken: retryToken, payload: {
+      broker.sendStream('retry', { protocolVersion: '1.6.0', type: 'send_message', controlToken: retryToken, payload: {
         requestId: 'send-retry', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'interaction_response', controlToken: retryToken, payload: {
+      broker.sendStream('retry', { protocolVersion: '1.6.0', type: 'interaction_response', controlToken: retryToken, payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-retry',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -483,7 +483,7 @@ describe('Agent Host runtime', () => {
       expect(session?.sentMessages).toEqual(['Run once.']);
       expect(session?.interactionResponses).toHaveLength(1);
 
-      broker.sendStream('retry', { protocolVersion: '1.5.0', type: 'send_message', controlToken: retryToken, payload: {
+      broker.sendStream('retry', { protocolVersion: '1.6.0', type: 'send_message', controlToken: retryToken, payload: {
         requestId: 'capacity', operationId: operationId('capacity-send'), agentId: 'agent', text: 'Do not dispatch.',
       } });
       await expect.poll(() => broker.streamMessage('retry', 'protocol_error', 'capacity')).toMatchObject({
@@ -985,8 +985,8 @@ it('releases an idle shared projection after grace and restores the same binding
     expect((await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
     broker.openStream('main', 'agent'); broker.openStream('track', 'agent');
     await expect.poll(() => broker.streamOpened('track')).toBe(true);
-    broker.sendStream('main', { protocolVersion: '1.5.0', type: 'negotiate' });
-    broker.sendStream('track', { protocolVersion: '1.5.0', type: 'negotiate', observation: 'activity' });
+    broker.sendStream('main', { protocolVersion: '1.6.0', type: 'negotiate' });
+    broker.sendStream('track', { protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' });
     await expect.poll(() => !!broker.streamMessage('track', 'agent_activity')).toBe(true);
     const original = registration.sessions.get('native')!;
     broker.closeStream('main');
@@ -1004,7 +1004,7 @@ it('releases an idle shared projection after grace and restores the same binding
     broker.openStream('restore', 'agent');
     await expect.poll(() => broker.streamOpened('restore')).toBe(true);
     expect(registration.sessions.get('native')).not.toBe(original);
-    expect((await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.5.0', 'agent')).status).toBe(200);
+    expect((await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.6.0', 'agent')).status).toBe(200);
     expect(JSON.parse((await broker.rpc('POST', '/remote/attach', 'new-proposal', { providerId: 'codex', nativeSessionId: 'native' })).body).agentId).toBe('agent');
   } finally { await host.close(); await broker.close(); }
 });
@@ -1328,7 +1328,7 @@ it('activates an owner update over the real uplink while an approval is pending'
     { type: 'history_boundary' },
   ]));
   const identity = { version: '0.1.0', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true };
-  const release = { protocolVersion: '1.5.0', version: '0.2.0', revision: 'b'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', sha256: 'c'.repeat(64), nodeMajor: 22, platforms: ['darwin-arm64'] };
+  const release = { protocolVersion: '1.6.0', version: '0.2.0', revision: 'b'.repeat(40), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', sha256: 'c'.repeat(64), nodeMajor: 22, platforms: ['darwin-arm64'] };
   const staged = join(stateDir, 'controller-updates/packages/0.2.0/node_modules/@orchardworks/agent-remote-controller');
   await mkdir(staged, { recursive: true });
   await writeFile(join(staged, 'build-info.json'), JSON.stringify({ version: release.version, revision: release.revision, dirty: false }));
@@ -1341,7 +1341,7 @@ it('activates an owner update over the real uplink while an approval is pending'
     expect((await broker.rpc('POST', '/remote/create', 'agent', {
       providerId: 'codex', operationId: operationId('update-live-create'),
     })).status).toBe(200);
-    const snapshot = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.5.0', 'agent');
+    const snapshot = await broker.rpc('GET', '/v1/sessions/agent/snapshot?protocolVersion=1.6.0', 'agent');
     expect(JSON.parse(snapshot.body).payload.pendingInteractions).toHaveLength(1);
     expect((await broker.rpc('POST', '/remote/controller-update', undefined, {
       version: '0.2.0', operationId: 'confirmed-update',
@@ -1551,7 +1551,7 @@ it('discovers providers and persists owner preferences over a real uplink withou
     previous.terminate();
     await expect.poll(() => [...server.clients].some(socket => socket !== previous) && host.state === 'registered').toBe(true);
     expect(providers()).toEqual(['claude']);
-    const recovered = await broker.handleRequest(new Request(`http://relay.test/v1/sessions/${agentId}/snapshot?protocolVersion=1.5.0`), owner);
+    const recovered = await broker.handleRequest(new Request(`http://relay.test/v1/sessions/${agentId}/snapshot?protocolVersion=1.6.0`), owner);
     expect(recovered?.status, await recovered?.text()).toBe(200);
     expect(codex.sessions.get('active')?.disposed).toBe(false);
   } finally { await discovery.stop(); await host.close(); await broker.close(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(stateDir, { recursive: true, force: true }); }

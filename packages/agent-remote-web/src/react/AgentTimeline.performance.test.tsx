@@ -30,7 +30,7 @@ describe('incremental timeline rendering', () => {
     });
     const container = await render(<AgentTimeline state={initial} onInspectEntry={inspect} {...callbacks()} />);
     renders.mockClear();
-    const next = reduceTimelineEvent(initial, { protocolVersion: '1.5.0', type: 'agent_stream', payload: {
+    const next = reduceTimelineEvent(initial, { protocolVersion: '1.6.0', type: 'agent_stream', payload: {
       agentId: 'agent', epoch: 'test', seq: 21, timestamp: '2026-09-24T00:00:01Z',
       event: { type: 'timeline', providerId: 'codex', turnId: 'turn-19', resources: [], item: { type: 'assistant_message', messageId: '19', text: ' continued' } },
     } }).state;

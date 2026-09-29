@@ -289,7 +289,7 @@ function validManifest(overrides: {
   ];
   return {
     schemaVersion: 1,
-    protocolVersion: '1.5.0',
+    protocolVersion: '1.6.0',
     borgee: {
       release: 'unreleased',
       sourceState: 'working_tree',

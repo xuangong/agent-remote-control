@@ -6,6 +6,7 @@ export function timelineEntryKey(epoch: string | null, entry: ProjectedTimelineE
 
 function itemIdentity(item: AgentTimelineItem): string {
   switch (item.type) {
+    case 'agent_communication': return item.messageId;
     case 'user_message': return item.messageId ?? item.clientMessageId ?? 'user';
     case 'assistant_message': return item.messageId ?? 'assistant';
     case 'tool_call': return item.callId;

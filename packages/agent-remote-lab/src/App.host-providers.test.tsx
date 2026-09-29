@@ -19,7 +19,7 @@ async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', disc
     }
     if (url.pathname === '/v1/providers') return Response.json(localProviders === 'error'
       ? { error: 'Local providers unavailable' }
-      : { protocolVersion: '1.5.0', type: 'provider_list', payload: { providers: localProviders === 'empty' ? [] : [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }] } }, { status: localProviders === 'error' ? 503 : 200 });
+      : { protocolVersion: '1.6.0', type: 'provider_list', payload: { providers: localProviders === 'empty' ? [] : [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }] } }, { status: localProviders === 'error' ? 503 : 200 });
     if (url.pathname.endsWith('/hosts')) return Response.json({ hosts: [
       { id: 'desk', name: 'Desk Host', online, providerId: 'dsh', providers: deskProviders },
       { id: 'studio', name: 'Studio Host', online: true, providers: [

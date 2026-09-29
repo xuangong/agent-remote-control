@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "1.5.0",
+  "protocolVersion": "1.6.0",
   "borgee": {
     "release": "unreleased",
     "sourceState": "working_tree",
@@ -120,7 +120,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:0073a5fde5c9d185eac45bc3093c25462e5658b774746f6fb55597744800356b"
+      "digest": "sha256:3dc885836905db7aa3d81dde6a73d3d053af698fdf8bfc3f93c0153624bfab95"
     }
   },
   "providers": [

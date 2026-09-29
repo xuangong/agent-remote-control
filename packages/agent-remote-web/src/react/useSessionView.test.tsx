@@ -39,13 +39,13 @@ it('leases neutral session connections and preserves deferred send actions acros
 
 it('queues input during consumer access restoration and dispatches only after access returns', async () => {
   const replica = new AgentReplica();
-  replica.applySnapshot({ protocolVersion: '1.5.0', type: 'agent_snapshot', payload: {
+  replica.applySnapshot({ protocolVersion: '1.6.0', type: 'agent_snapshot', payload: {
     id: 'access-restoration', providerId: 'test', createdAt: '2026-09-26T00:00:00Z', updatedAt: '2026-09-26T00:00:00Z',
     status: 'idle', activeTurn: null, pendingInteractions: [],
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false },
     runtimeInfo: { providerId: 'test', status: 'idle' },
   } });
-  replica.applyHistory({ protocolVersion: '1.5.0', type: 'timeline_page', payload: {
+  replica.applyHistory({ protocolVersion: '1.6.0', type: 'timeline_page', payload: {
     requestId: 'initial', agentId: 'access-restoration', direction: 'tail', epoch: 'access-restoration',
     reset: false, staleCursor: false, gap: false, window: { minSeq: 0, maxSeq: 0, nextSeq: 1 },
     startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [], error: null,

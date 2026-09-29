@@ -327,3 +327,40 @@ A directory attach may return HTTP 409 `native_session_owned` / `native_session_
 Standalone HTTP and plugin creation settle `operationId` in the Relay service cache, scoped to the trusted authenticated principal (or the local service authority for unauthenticated local composition). Retries retain the native result but rebuild the response with the current transport `requestId`. Changing creation configuration, requested binding, or resume persistence with the same operation identity returns `operation_conflict`; an uncertain native create/restore is not replayed. Internal Host projection creation does not enter this external settlement path.
 
 Resume accepts an optional UUID `operationId` extension. Explicit callers must only send it to a receiver supporting this extension: existing strict `1.5.0` receivers reject unknown fields, and version negotiation alone does not advertise this extension. The default web resume request remains unchanged without this field. Legacy resume remains an attach/restore request without operation-cache guarantees. Identified-operation deduplication is bounded by the authority scope, retention interval and service lifetime; it does not persist across service replacement.
+
+## Received agent communication (1.6.0)
+
+Timeline item `agent_communication` carries `messageId`, `sender`, `recipient`, and
+`text`. It represents a message received from another agent: a delegated task,
+follow-up, peer response, or notification. Adapters preserve native identity and
+ordering; they must not synthesize a user prompt from a parent task description.
+It is conversation content but not human input and has no prompt-edit action.
+
+Codex preserves an `agentCommunication` ThreadItem when supplied by a native
+app-server. For existing installations that omit these messages from public
+history, the adapter also reads complete `response_item.agent_message` records
+from the local rollout path returned by native thread metadata. This compatibility
+reader does not require a modified Codex executable. It validates file/session
+identity, preserves plaintext and message IDs, and leaves encrypted bodies as
+explicit unavailable placeholders. Internal formats are not a stable API.
+
+Received records belong to their recorded turn. The adapter may additionally
+read a confirmed parent or direct child's file to recover the current agent's
+outgoing messages; it filters by both endpoints and the current history page's
+time range. Those mirrored receipts have no local turn ID. Native item-completion
+anchors place received records without reordering public history; timestamps
+place cross-session receipts, without asserting exact delivery or execution order.
+Native public messages take precedence over duplicate local records.
+
+Supplementation runs on initial observation, older history pages, and recovered
+snapshots. It does not poll local files or promise live delivery for messages the
+native event stream omits. Missing or incompatible local files do not prevent
+opening native history; a timeline diagnostic reports incomplete recovery.
+Metadata without a local path remains RPC-only. Hooks are not installed or used.
+
+The shared Session View renders attribution and Markdown in Content and All
+activity modes. Search keeps User / Assistant messages as its default; All
+activity also searches communication text and attribution. Recording, replay,
+source-key deduplication, and reconnect use the ordinary timeline contract.
+All strict-schema Remote participants must upgrade together to protocol 1.6.0;
+this does not change the independent Host uplink envelope version.

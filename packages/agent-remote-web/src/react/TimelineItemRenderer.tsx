@@ -4,7 +4,7 @@ import type { AgentReplicaState } from '../replica/types.js';
 import { memo, useMemo } from 'react';
 
 import type { MessageGroupPosition } from './timeline-render-model.js';
-import { AssistantMessageItem, UserMessageItem } from './items/MessageItem.js';
+import { AgentCommunicationItem, AssistantMessageItem, UserMessageItem } from './items/MessageItem.js';
 import { CompactionItem } from './items/CompactionItem.js';
 import { ErrorItem } from './items/ErrorItem.js';
 import { InteractionItem } from './items/InteractionItem.js';
@@ -32,6 +32,7 @@ export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, m
   switch (item.type) {
     case 'user_message': return <UserMessageItem item={item} messageGroup={messageGroup} resourceContext={markdownResources} />;
     case 'assistant_message': return <AssistantMessageItem item={item} messageGroup={messageGroup} resourceContext={markdownResources} />;
+    case 'agent_communication': return <AgentCommunicationItem item={item} resourceContext={markdownResources} />;
     case 'reasoning': return <ReasoningItem item={item} />;
     case 'tool_call': return <ToolCallItem item={item} resolveSessionLink={resolveSessionLink} />;
     case 'todo': return <TodoItem item={item} />;

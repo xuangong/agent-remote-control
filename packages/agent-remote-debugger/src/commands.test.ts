@@ -7,7 +7,7 @@ import type { DebuggerRuntime } from './runtime.js';
 
 import { runCli, type CliEnvironment } from './cli.js';
 
-const protocolVersion = '1.5.0' as const;
+const protocolVersion = '1.6.0' as const;
 
 function agentSnapshot(capabilities = fullCapabilities): AgentSnapshot {
   return {
@@ -365,7 +365,7 @@ describe('ardb command surface', () => {
       },
     });
     h.transport.emit({
-      protocolVersion: '1.5.0', type: 'agent_stream',
+      protocolVersion: '1.6.0', type: 'agent_stream',
       payload: {
         agentId: 'agent-one', timestamp: '2026-09-03T00:00:03.000Z',
         event: { type: 'runtime_updated', providerId: 'provider-one', runtimeInfo: { ...h.transport.snapshot.payload.runtimeInfo, status: 'running' } },
@@ -383,7 +383,7 @@ describe('ardb command surface', () => {
     await Promise.resolve();
     expect(settled).toBe(false);
     h.transport.emit({
-      protocolVersion: '1.5.0', type: 'agent_stream',
+      protocolVersion: '1.6.0', type: 'agent_stream',
       payload: {
         agentId: 'agent-one', timestamp: '2026-09-03T00:00:03.000Z',
         event: { type: 'runtime_updated', providerId: 'provider-one', runtimeInfo: { ...h.transport.snapshot.payload.runtimeInfo, status: 'idle' } },

@@ -4,7 +4,7 @@
 
 ## Boundary
 
-The package owns strict TypeBox schemas plus JSON codecs for Agent creation and resumption, current state, projected Timeline history, live Timeline delivery, interactions, resource reads, command acknowledgement, and protocol errors. Every public behavior-bearing object rejects additional properties, and every top-level message requires protocol version `1.5.0`.
+The package owns strict TypeBox schemas plus JSON codecs for Agent creation and resumption, current state, projected Timeline history, live Timeline delivery, interactions, resource reads, command acknowledgement, and protocol errors. Every public behavior-bearing object rejects additional properties, and every top-level message requires protocol version `1.6.0`.
 
 Provider-native values and server-internal `AgentStreamEvent` or `AgentManagerEvent` unions do not cross this boundary. Public stream values are independently declared even where a server-internal event currently has the same fields.
 
@@ -32,7 +32,7 @@ Timeline entries bind visible locators to Borgee resource identities. Resource r
 `/v1/session-channel?observation=session|activity` multiplexes independent existing
 session wires over one WebSocket per observation mode. The direct
 `/v1/sessions/:id/events` endpoint remains supported. Every outer frame uses
-`protocolVersion: "1.5.0"`; nested session messages retain their existing schemas.
+`protocolVersion: "1.6.0"`; nested session messages retain their existing schemas.
 
 | Direction | Type | Additional fields |
 | --- | --- | --- |
@@ -114,7 +114,7 @@ allowlisted records), and 204 acknowledges a local append. Relay must first prob
 uplink decoders must never receive this new path. A 404 or successful response
 without the capability disables delivery until reconnect. Transient failures
 retry after 30 seconds. A failed updater-status response may still advertise the
-independent diagnostic capability while preserving its original error status. Public session protocol 1.5.0 and uplink version 2 are
+independent diagnostic capability while preserving its original error status. Public session protocol 1.6.0 and uplink version 2 are
 unchanged; no register/registered fields are added. Codec fixtures live in
 `src/relay-diagnostics.test.ts`; real transport coverage also verifies legacy
 capability discovery and reconnect delivery.

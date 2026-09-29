@@ -329,8 +329,8 @@ test('Ask observes activity while minimized, signals changes itself, and switche
       const frame = JSON.parse(String(message));
       if (frame.type === 'subscribe') {
         if (isActivity) activity.set(frame.subscriptionId, { agentId: frame.agentId, emit: status => route.send(JSON.stringify({
-          protocolVersion: '1.5.0', type: 'message', subscriptionId: frame.subscriptionId,
-          message: { protocolVersion: '1.5.0', type: 'agent_activity', payload: { agentId: frame.agentId, status } },
+          protocolVersion: '1.6.0', type: 'message', subscriptionId: frame.subscriptionId,
+          message: { protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: frame.agentId, status } },
         })) });
         else content.set(frame.subscriptionId, frame.agentId);
       }

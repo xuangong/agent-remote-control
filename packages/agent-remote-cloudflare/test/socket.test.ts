@@ -16,7 +16,7 @@ it('receives and sends a maximum-size image preview without closing the Host soc
   const native = new NativeSocket();
   const socket = new WorkerRelaySocket(native as unknown as WebSocket, { waitUntil() {} });
   const byteLength = 10 * 1024 * 1024;
-  const resource = { protocolVersion: '1.5.0', type: 'resource_response', payload: {
+  const resource = { protocolVersion: '1.6.0', type: 'resource_response', payload: {
     requestId: 'r', agentId: 'a', resourceId: 'image', state: { status: 'available', mediaType: 'image/png',
       sha256: 'a'.repeat(64), byteLength, contentBase64: Buffer.alloc(byteLength).toString('base64') },
   } };

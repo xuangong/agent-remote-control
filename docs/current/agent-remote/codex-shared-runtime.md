@@ -240,11 +240,30 @@ automatically. Saved conversation history is preserved. Shared-account guests
 cannot read or invoke this control. Private Codex runtimes and custom sockets do
 not advertise it.
 
-The Controller runs its existing `codex daemon restart` command, followed by
-`codex daemon status`. This preserves the configured Codex home, executable,
-locale, Unix file descriptor limit, and `OPENAI_API_KEY=arc` injection on daemon
-start. Windows uses the existing Windows daemon lifecycle manager. Updating the
-Controller itself still does not restart Codex.
+The Controller runs `codex daemon restart`, followed by `codex daemon status`.
+On macOS and Linux, the explicit restart invokes native `app-server daemon
+bootstrap` so both the daemon and its updater inherit the same Controller
+environment, including the existing `OPENAI_API_KEY=arc` injection, Gateway key,
+locale, and Unix file descriptor limit. Native `restart` can retain an updater
+with an older environment, which would propagate that environment to the daemon
+on its next automatic update.
+
+This maintenance path requires Codex CLI 0.156.0 or newer: older bootstrap
+implementations can overwrite settings or ignore the selected daemon package and
+feature overrides. The Controller checks the calling CLI before dispatch. It
+reads the native daemon settings only to preserve `remoteControlEnabled` through
+bootstrap's explicit flag; Codex retains all other settings, including update
+enablement and interval, and the existing installation selection. Unreadable or
+invalid settings stop the request before any lifecycle command. Version and
+settings refusals expose fixed recovery instructions; native diagnostics are not
+forwarded to the website. Native remote-control settings should not be changed
+concurrently with this explicit restart because the public CLI does not offer an
+atomic preserve-setting option.
+
+Windows uses the existing Windows daemon lifecycle manager. Ordinary startup
+continues to leave a healthy daemon running. Installing a Controller update alone
+does not refresh an already-running updater; a subsequent explicit daemon restart
+applies the environment repair. There is no new monitor or automatic restart loop.
 
 Before dispatch, the Controller records an operation ID and a new revision in
 `codex-daemon-operation.json` under its state directory. Repeating the current
@@ -256,7 +275,8 @@ Only an explicit, newly confirmed intent may start another restart.
 
 The website queries the outcome without automatically resending a restart.
 Polling pauses when Host management is hidden or the page is backgrounded and
-is bounded to two minutes per foreground observation window. **Check status**
+is bounded to sixteen minutes per foreground observation window, covering the
+Unix maintenance command's fifteen-minute deadline and readiness check. **Check status**
 remains available afterward. The saved result describes the last operation,
 not continuous daemon health. A `ready` result confirms that the restart and
 subsequent readiness probe completed; it does not assert recovery of every

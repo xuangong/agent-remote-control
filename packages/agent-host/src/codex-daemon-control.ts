@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isCodexDaemonRestart, isCodexDaemonStatus, type CodexDaemonStatus } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
+import { CodexDaemonRestartRejected } from './codex-daemon-restart-error.js';
 
 export class CodexDaemonControlError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -49,7 +50,8 @@ export function createCodexDaemonControl(options: { stateDir: string; restart(op
     catch (error) {
       phase = error instanceof CodexDaemonRestartUnknown ? 'unknown' : 'failed';
       message = phase === 'unknown' ? 'The restart outcome is unknown. Inspect native state before restarting again.'
-        : 'Codex did not confirm a successful restart. Check the local daemon before retrying.';
+        : error instanceof CodexDaemonRestartRejected ? error.message
+          : 'Codex did not confirm a successful restart. Check the local daemon before retrying.';
     }
     await serialize(async () => {
       if (state.operationId !== operationId) return;

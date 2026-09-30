@@ -44,6 +44,13 @@ it('queries after a lost acknowledgement without replaying restart', async () =>
   expect(container.textContent).toContain('Restarting Codex daemon');
   expect(vi.mocked(f.service.codexDaemon!).mock.calls.filter(call => call[1])).toHaveLength(1);
 });
+it('shows the Controller-provided safe failure reason', async () => {
+  const f = fixture();
+  const message = 'Refreshing the Codex daemon and updater requires Codex CLI 0.156.0 or newer. Update Codex before restarting through the Controller. No lifecycle command was dispatched.';
+  f.setState({ revision, phase: 'failed', updatedAt: 1, message });
+  const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  expect(container.querySelector('[role="status"]')?.textContent).toBe(message);
+});
 it.each(['shared', 'unsupported', 'offline'] as const)('does not dispatch restart for %s Hosts', async kind => {
   const f = fixture();
   const target = { ...host, ...(kind === 'shared' ? { access: 'shared' as const } : kind === 'unsupported' ? { providers: [] } : { online: false }) };
@@ -85,3 +92,31 @@ it('polls pending outcomes only while the management panel is visible and the pa
   await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
   expect(f.service.codexDaemon).toHaveBeenCalledTimes(5);
 });
+
+it('tracks a fifteen-minute restart to completion without dispatching it again', async () => {
+  vi.useFakeTimers();
+  const f = fixture(); const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  await click(container, 'Restart Codex daemon'); await click(container, 'Confirm restart');
+  await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60000); });
+  expect(container.textContent).toContain('Restarting Codex daemon');
+  expect([...container.querySelectorAll('button')].find(value => value.textContent === 'Restart Codex daemon')?.disabled).toBe(true);
+  f.setState({ revision, phase: 'ready', updatedAt: Date.now() });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+  expect(container.textContent).toContain('Restart completed');
+  expect(vi.mocked(f.service.codexDaemon!).mock.calls.filter(call => call[1])).toHaveLength(1);
+}, 10000);
+
+it('bounds extended status polling and permits an explicit status check afterward', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  f.setState({ revision, phase: 'restarting', operationId: crypto.randomUUID(), updatedAt: 0 });
+  const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(16 * 60000 + 3000); });
+  const requests = vi.mocked(f.service.codexDaemon!).mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+  expect(f.service.codexDaemon).toHaveBeenCalledTimes(requests);
+  f.setState({ revision, phase: 'ready', updatedAt: Date.now() });
+  await click(container, 'Check status');
+  expect(container.textContent).toContain('Restart completed');
+  expect(vi.mocked(f.service.codexDaemon!).mock.calls.every(call => !call[1])).toBe(true);
+}, 10000);

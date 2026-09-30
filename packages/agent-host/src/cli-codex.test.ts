@@ -11,7 +11,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, {
 async function fixture(saved: Record<string, string> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'arc-codex-cli-')); roots.push(root);
   const executable = join(root, 'native codex');
-  await writeFile(executable, `#!${process.execPath}\nconst value = { args: process.argv.slice(2), locale: process.env.LC_ALL, home: process.env.CODEX_HOME, key: process.env.AGENT_HOST_REMOTE_KEY }; console.log(JSON.stringify(value)); process.exit(Number(process.env.NATIVE_TEST_EXIT ?? 0));\n`, { mode: 0o700 });
+  await writeFile(executable, `#!${process.execPath}\nif(process.argv[2] === '--version') { console.log('codex-cli 0.159.2'); process.exit(0); }\nconst value = { args: process.argv.slice(2), locale: process.env.LC_ALL, home: process.env.CODEX_HOME, key: process.env.AGENT_HOST_REMOTE_KEY }; console.log(JSON.stringify(value)); process.exit(Number(process.env.NATIVE_TEST_EXIT ?? 0));\n`, { mode: 0o700 });
   await writeFile(join(root, 'connection.json'), JSON.stringify({ serverUrl: 'https://relay.invalid', remoteKey: 'private-key', environment: { AGENT_HOST_CODEX: executable, AGENT_REMOTE_CODEX_HOME: join(root, 'codex home'), ...saved } }));
   const cli = resolve('dist/cli.js');
   const run = (args: string[], environment: NodeJS.ProcessEnv = {}, hardLimit?: number, cwd = process.cwd()) => execute(hardLimit === undefined ? process.execPath : '/bin/sh', hardLimit === undefined ? [cli, 'codex', ...args]
@@ -60,7 +60,7 @@ it('maps daemon lifecycle separately and reports status through the native daemo
   const f = await fixture();
   for (const command of ['start', 'restart', 'stop', 'status']) {
     const result = JSON.parse((await f.run(['daemon', command])).stdout);
-    expect(result.args).toEqual(['app-server', 'daemon', command === 'status' ? 'version' : command]);
+    expect(result.args).toEqual(['app-server', 'daemon', command === 'status' ? 'version' : command === 'restart' ? 'bootstrap' : command]);
     expect(result.locale).toBe('C');
   }
 });
@@ -76,7 +76,7 @@ it('preserves native exit status and supports an explicit inherited file descrip
   await expect(f.run([], { NATIVE_TEST_EXIT: '23' })).rejects.toMatchObject({ code: 23 });
   const limitProbe = join(f.root, 'limit probe');
   // Node raises its own soft limit at startup; a shell probe observes the inherited value directly.
-  await writeFile(limitProbe, '#!/bin/sh\nulimit -Sn\n', { mode: 0o700 });
+  await writeFile(limitProbe, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.159.2"; else ulimit -Sn; fi\n', { mode: 0o700 });
   const result = await f.run(['daemon', 'start'], { AGENT_HOST_CODEX: limitProbe, AGENT_HOST_CODEX_NOFILE: '8192' });
   expect(result.stdout.trim()).toBe('8192');
 });
@@ -95,14 +95,14 @@ it('honors explicit native home overrides and runs without Relay pairing', async
 it.each([['daemon', 'start'], ['daemon', 'restart'], ['app-server', 'daemon', 'restart']])('defaults the inherited daemon descriptor limit for %j', async (...args) => {
   const f = await fixture();
   const probe = join(f.root, 'limit probe');
-  await writeFile(probe, '#!/bin/sh\nulimit -Sn\n', { mode: 0o700 });
+  await writeFile(probe, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.159.2"; else ulimit -Sn; fi\n', { mode: 0o700 });
   expect((await f.run(args, { AGENT_HOST_CODEX: probe })).stdout.trim()).toBe('8192');
 });
 
 it('allows saved and explicit descriptor limits to override the default', async () => {
   const f = await fixture({ AGENT_HOST_CODEX_NOFILE: '4096' });
   const probe = join(f.root, 'limit probe');
-  await writeFile(probe, '#!/bin/sh\nulimit -Sn\n', { mode: 0o700 });
+  await writeFile(probe, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.159.2"; else ulimit -Sn; fi\n', { mode: 0o700 });
   expect((await f.run(['daemon', 'restart'], { AGENT_HOST_CODEX: probe })).stdout.trim()).toBe('4096');
   expect((await f.run(['daemon', 'restart'], { AGENT_HOST_CODEX: probe, AGENT_HOST_CODEX_NOFILE: '2048' })).stdout.trim()).toBe('2048');
 });

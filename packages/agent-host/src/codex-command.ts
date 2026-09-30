@@ -8,6 +8,7 @@ import { loadGatewayCodexEnvironment } from './gateway-codex.js';
 import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
 import { windowsCodexSharedEndpoint } from '@orchardworks/agent-provider-codex';
 import { manageWindowsCodexDaemon } from './windows-codex-command.js';
+import { codexDaemonRestartArgs } from './codex-daemon-restart.js';
 
 /** Runs the native CLI with inherited terminal streams; never owns the shared daemon implicitly. */
 export async function runCodexCommand(args: string[], stateDir: string, environment: NodeJS.ProcessEnv): Promise<number> {
@@ -39,7 +40,11 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
     if (resolve(socket) !== defaultSocket) throw new Error('Cannot manage a daemon for a custom socket. Use the native daemon owner directly, or configure the matching CODEX_HOME and default socket.');
     const action = args[1] ?? 'status';
     if (!['start', 'restart', 'stop', 'status', 'version', '--help', '-h'].includes(action)) throw new Error('Use codex daemon start, restart, stop, or status.');
-    nativeArgs = ['app-server', 'daemon', action === 'status' ? 'version' : action, ...args.slice(2)];
+    const restart = action === 'restart' && !options.some(arg => ['--help', '-h'].includes(arg));
+    if (restart && options.includes('--remote-control')) throw new Error('Configure native remote control separately; Controller restart preserves its saved setting.');
+    nativeArgs = restart
+      ? [...await codexDaemonRestartArgs(executable, home, env), ...args.slice(2)]
+      : ['app-server', 'daemon', action === 'status' ? 'version' : action, ...args.slice(2)];
   } else if (options.some(arg => ['--help', '-h', '--version', '-V'].includes(arg)) || ['help', 'app-server', 'remote-control', 'login', 'logout', 'doctor', 'update', 'completion', 'mcp', 'plugin', 'features'].includes(args[0] ?? '')) {
     nativeArgs = args;
   } else {

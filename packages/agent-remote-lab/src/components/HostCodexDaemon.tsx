@@ -2,6 +2,9 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CodexDaemonStatus } from '@orchardworks/agent-remote-protocol';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 
+// Cover the fifteen-minute native refresh plus readiness confirmation and transport delay.
+const daemonStatusPollingWindowMs = 16 * 60000;
+
 export function HostCodexDaemon({ host, service, visible = true }: { host: RemoteHost; service: HostPairingService; visible?: boolean }) {
   if (host.access === 'shared' || !host.managed || !service.codexDaemon
     || !host.providers?.some(provider => provider.providerId === 'codex' && provider.daemonControl)) return null;
@@ -20,7 +23,7 @@ function DaemonControl({ host, request, visible }: {
   const [refreshKey, setRefreshKey] = useState(0);
   const serial = useRef(0), mounted = useRef(true), writing = useRef(false);
   const requestRef = useRef(request); requestRef.current = request;
-  const deadline = useRef(Date.now() + 120000);
+  const deadline = useRef(Date.now() + daemonStatusPollingWindowMs);
   const description = useId();
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; serial.current++; }; }, []);
   const refresh = useCallback(async () => {
@@ -51,7 +54,7 @@ function DaemonControl({ host, request, visible }: {
       timer = setTimeout(async () => { await refresh(); schedule(); }, failure ? 5000 : 1500);
     };
     const onVisibility = () => {
-      if (!document.hidden) { deadline.current = Date.now() + 120000; void refresh(); }
+      if (!document.hidden) { deadline.current = Date.now() + daemonStatusPollingWindowMs; void refresh(); }
       schedule();
     };
     schedule(); document.addEventListener('visibilitychange', onVisibility);
@@ -72,7 +75,7 @@ function DaemonControl({ host, request, visible }: {
     } finally {
       writing.current = false;
       if (mounted.current) {
-        setSubmitting(false); setConfirming(false); deadline.current = Date.now() + 120000;
+        setSubmitting(false); setConfirming(false); deadline.current = Date.now() + daemonStatusPollingWindowMs;
         setRefreshKey(value => value + 1);
       }
     }
@@ -80,13 +83,13 @@ function DaemonControl({ host, request, visible }: {
   const busy = submitting || status?.phase === 'restarting';
   const labels: Record<string, string> = {
     restarting: 'Restarting Codex daemon…', ready: 'Restart completed. Codex daemon confirmed ready. Interrupted tasks do not resume automatically.',
-    failed: 'Restart failed. Check the local daemon before trying again.',
+    failed: status?.message || 'Restart failed. Check the local daemon before trying again.',
     unknown: 'Restart outcome unknown. Inspect native state before restarting again.',
   };
   return <div className="lab-host-codex-daemon">
     <div className="lab-host-security-actions">
       <button type="button" disabled={!host.online || busy || checking || uncertain || !status} onClick={() => { setConfirming(true); void refresh(); }}>Restart Codex daemon</button>
-      <button type="button" disabled={!host.online || submitting || checking} onClick={() => { deadline.current = Date.now() + 120000; void refresh(); }}>Check status</button>
+      <button type="button" disabled={!host.online || submitting || checking} onClick={() => { deadline.current = Date.now() + daemonStatusPollingWindowMs; void refresh(); }}>Check status</button>
     </div>
     {confirming ? <div className="gateway-security-confirmation" role="group" aria-label="Confirm Codex daemon restart" aria-describedby={description}>
       <p id={description}>Restart the shared Codex daemon on {host.name}? All its Codex sessions, including local CLI sessions, will disconnect. Running tasks will be interrupted and will not resume automatically. Saved history is preserved.</p>

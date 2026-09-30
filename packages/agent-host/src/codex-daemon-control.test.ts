@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it } from 'vitest';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
+import { CodexDaemonRestartRejected } from './codex-daemon-restart-error.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -60,6 +61,16 @@ it('reports failure without exposing native output or automatically retrying', a
   await f.manager.restart(input);
   await expect.poll(async () => (await f.manager.status()).phase).toBe('failed');
   expect(JSON.stringify(await f.manager.restart(input))).not.toContain('secret-native-output');
+  expect(calls).toBe(1);
+}, 10000);
+it.each(['unsupported_cli', 'invalid_settings'] as const)('preserves the safe recovery instruction for %s without replaying', async reason => {
+  let calls = 0;
+  const f = await setup(async () => { calls++; throw new CodexDaemonRestartRejected(reason); });
+  const input = { operationId: randomUUID(), revision: (await f.manager.status()).revision };
+  await f.manager.restart(input);
+  await expect.poll(async () => (await f.manager.status()).phase).toBe('failed');
+  expect((await f.manager.restart(input)).message).toMatch(reason === 'unsupported_cli' ? /Update Codex/ : /Repair CODEX_HOME/);
+  expect((await f.manager.status()).message).toContain('No lifecycle command was dispatched.');
   expect(calls).toBe(1);
 }, 10000);
 it('rejects malformed intents before dispatch', async () => {

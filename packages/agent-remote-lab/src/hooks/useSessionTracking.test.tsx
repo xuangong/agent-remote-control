@@ -1,6 +1,6 @@
 import { act, useEffect, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { AgentReplica, RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { render } from '../test/setup.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';
@@ -8,8 +8,77 @@ import { readTrackedSessions, saveTrackedSessions } from '../tracking-state.js';
 import { useSessionStars } from './useSessionStars.js';
 import { SessionStarsClient } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
+import { ConversationConnections } from '../conversation-connections.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+
+it('retains opened tracked clients through access renewal and collects them only after untracking', async () => {
+  saveTrackedSessions('alice', [star]);
+  const close = vi.fn();
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot: async () => { throw new Error('No snapshot expected before negotiation'); },
+    fetchTimeline: async () => { throw new Error('No history expected before negotiation'); },
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect: (_id, listener) => {
+      queueMicrotask(() => listener.onOpen());
+      return { close, send: () => {} };
+    },
+  };
+  const connections = new ConversationConnections(transport);
+  let tracking!: SessionTracking, accessReady!: (value: boolean) => void;
+  function Fixture() {
+    const [ready, setReady] = useState(true); accessReady = setReady;
+    tracking = useSessionTracking('alice', transport, undefined, undefined, undefined, connections, ready);
+    return null;
+  }
+  try {
+    await render(<Fixture />);
+    const opened = connections.acquire('agent', new AgentReplica(), star);
+    opened.release();
+    await act(async () => accessReady(false));
+    expect(connections.find(star)?.client).toBe(opened.client);
+    expect(close).not.toHaveBeenCalled();
+    await act(async () => accessReady(true));
+    const reopened = connections.acquire('agent', new AgentReplica(), star);
+    expect(reopened.client).toBe(opened.client);
+    reopened.release();
+    await act(async () => tracking.toggle(star));
+    expect(connections.find(star)).toBeUndefined();
+    expect(close).toHaveBeenCalledOnce();
+  } finally { connections.clear(); }
+});
+
+it('retries only an unbound observer after access renewal and ignores the suspended attachment result', async () => {
+  saveTrackedSessions('http://localhost/u/alice/', [star]);
+  const attachments: Array<{ signal?: AbortSignal; finish(value: { agentId: string }): void }> = [];
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockImplementation((_provider, _native, signal) =>
+    new Promise(finish => { attachments.push({ signal, finish }); }));
+  const connect = vi.fn<RemoteAgentTransport['connect']>((_id, listener) => {
+    queueMicrotask(() => listener.onOpen());
+    return { send: () => {}, close: () => {} };
+  });
+  const transport = { connect, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  let accessReady!: (ready: boolean) => void;
+  function Fixture() {
+    const [ready, setReady] = useState(true); accessReady = setReady;
+    const tracking = useSessionTracking('http://localhost/u/alice/', transport, undefined, undefined, undefined, undefined, ready);
+    return <>{tracking.observers}</>;
+  }
+  await render(<Fixture />);
+  expect(attachments).toHaveLength(1);
+  await act(async () => accessReady(false));
+  expect(attachments[0]!.signal?.aborted).toBe(true);
+  await act(async () => attachments[0]!.finish({ agentId: 'stale-binding' }));
+  expect(connect).not.toHaveBeenCalled();
+  await act(async () => accessReady(true));
+  expect(attachments).toHaveLength(2);
+  await act(async () => attachments[1]!.finish({ agentId: 'live-binding' }));
+  expect(connect).toHaveBeenCalledExactlyOnceWith('live-binding', expect.any(Object));
+  await act(async () => accessReady(false));
+  await act(async () => accessReady(true));
+  expect(attach).toHaveBeenCalledTimes(2);
+  expect(connect).toHaveBeenCalledOnce();
+});
 it('migrates only exact native identities, resolves out-of-order branches and persists the local selection', async () => {
   const transport = {} as RemoteAgentTransport;
   let tracking!: SessionTracking;

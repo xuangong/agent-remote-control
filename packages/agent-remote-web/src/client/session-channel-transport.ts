@@ -39,7 +39,9 @@ interface Channel {
   readonly socket: WebSocketLike;
   readonly subscriptions: Map<number, Subscription>;
   active: boolean;
+  opened: boolean;
   ready: boolean;
+  openTimer?: ReturnType<typeof setTimeout>;
   readyTimer?: ReturnType<typeof setTimeout>;
   pingTimer?: ReturnType<typeof setInterval>;
   pongTimer?: ReturnType<typeof setTimeout>;
@@ -47,6 +49,9 @@ interface Channel {
 }
 
 const utf8 = new TextEncoder();
+const channelOpenTimeoutMs = 20_000;
+const channelReadyTimeoutMs = 10_000;
+const foregroundProbeTimeoutMs = 4_000;
 
 /** Owns physical channels while existing session clients own reconnect and replay decisions. */
 export class SessionChannelPool {
@@ -58,13 +63,24 @@ export class SessionChannelPool {
   private nextId = 0;
   private disposed = false;
   private pendingBytes = 0;
+  private pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
   constructor(private readonly dependencies: Dependencies) {
-    this.unwatch = watchPageResume(suspendedMs => {
+    this.unwatch = watchPageResume(() => {
+      this.pageHidden = false;
       for (const channel of [...this.channels.values()]) {
-        if (suspendedMs >= 30_000) this.failChannel(channel, false);
-        else if (channel.ready) this.probeResume(channel);
+        if ((channel.socket.readyState ?? 1) >= 2) this.failChannel(channel, false);
+        else if (channel.ready) {
+          this.startHeartbeat(channel);
+          this.probeResume(channel);
+        } else {
+          this.armOpenDeadline(channel);
+          this.armReadyDeadline(channel);
+        }
       }
+    }, () => {
+      this.pageHidden = true;
+      for (const channel of this.channels.values()) this.pauseDeadlines(channel);
     });
   }
 
@@ -140,10 +156,17 @@ export class SessionChannelPool {
 
   private openChannel(mode: Mode): Channel {
     const socket = this.dependencies.createSocket(mode);
-    const channel: Channel = { mode, socket, subscriptions: new Map(), active: true, ready: false };
+    const channel: Channel = { mode, socket, subscriptions: new Map(), active: true, opened: socket.readyState === 1, ready: false };
     this.channels.set(mode, channel);
-    channel.readyTimer = setTimeout(() => this.failChannel(channel), 3000);
-    socket.onopen = () => undefined;
+    this.armOpenDeadline(channel);
+    this.armReadyDeadline(channel);
+    socket.onopen = () => {
+      if (!channel.active) return;
+      channel.opened = true;
+      clearTimeout(channel.openTimer);
+      channel.openTimer = undefined;
+      this.armReadyDeadline(channel);
+    };
     socket.onmessage = ({ data }) => {
       if (!channel.active) return;
       if (typeof data !== 'string' || utf8.encode(data).byteLength > SESSION_CHANNEL_MAX_FRAME_BYTES) {
@@ -156,13 +179,13 @@ export class SessionChannelPool {
       if (frame.type === 'session_migrated') { this.dependencies.onMigration?.(frame.migration); return; }
       if (frame.type === 'ready' && !channel.ready) {
         channel.ready = true;
+        channel.opened = true;
+        clearTimeout(channel.openTimer);
+        channel.openTimer = undefined;
         this.supportedModes.add(mode);
         clearTimeout(channel.readyTimer);
-        channel.pingTimer = setInterval(() => {
-          if (!channel.active || channel.pongTimer) return;
-          channel.pongTimer = setTimeout(() => this.failChannel(channel, false), 10_000);
-          try { this.write(channel, { protocolVersion: PROTOCOL_VERSION, type: 'ping' }); } catch { /* write retires the channel. */ }
-        }, 30_000);
+        channel.readyTimer = undefined;
+        this.startHeartbeat(channel);
         for (const subscription of [...channel.subscriptions.values()]) this.subscribe(subscription);
       } else if (!channel.ready || frame.type === 'ready') {
         this.invalidBody(); this.failChannel(channel);
@@ -189,11 +212,49 @@ export class SessionChannelPool {
     return channel;
   }
 
+  private armOpenDeadline(channel: Channel): void {
+    clearTimeout(channel.openTimer);
+    channel.openTimer = undefined;
+    if (channel.active && !channel.opened && !this.pageHidden) {
+      channel.openTimer = setTimeout(() => this.failChannel(channel, false), channelOpenTimeoutMs);
+    }
+  }
+
+  private armReadyDeadline(channel: Channel): void {
+    clearTimeout(channel.readyTimer);
+    channel.readyTimer = undefined;
+    if (channel.active && channel.opened && !channel.ready && !this.pageHidden) {
+      channel.readyTimer = setTimeout(() => this.failChannel(channel, 'temporary'), channelReadyTimeoutMs);
+    }
+  }
+
+  private startHeartbeat(channel: Channel): void {
+    if (this.pageHidden || channel.pingTimer) return;
+    channel.pingTimer = setInterval(() => {
+      if (!channel.active || this.pageHidden || channel.pongTimer) return;
+      channel.pongTimer = setTimeout(() => this.failChannel(channel, false), 10_000);
+      try { this.write(channel, { protocolVersion: PROTOCOL_VERSION, type: 'ping' }); }
+      catch { /* write retires the channel. */ }
+    }, 30_000);
+  }
+
+  private pauseDeadlines(channel: Channel): void {
+    clearTimeout(channel.openTimer);
+    clearTimeout(channel.readyTimer);
+    clearInterval(channel.pingTimer);
+    clearTimeout(channel.pongTimer);
+    channel.openTimer = undefined;
+    channel.readyTimer = undefined;
+    channel.pingTimer = undefined;
+    channel.pongTimer = undefined;
+    channel.probingResume = false;
+  }
+
   private probeResume(channel: Channel): void {
     if (!channel.active || channel.probingResume) return;
     channel.probingResume = true;
     clearTimeout(channel.pongTimer);
-    channel.pongTimer = setTimeout(() => this.failChannel(channel, false), 1000);
+    channel.pongTimer = setTimeout(() => this.failChannel(channel, false), foregroundProbeTimeoutMs);
     try { this.write(channel, { protocolVersion: PROTOCOL_VERSION, type: 'ping' }); }
     catch { /* write retires the channel. */ }
   }
@@ -240,12 +301,12 @@ export class SessionChannelPool {
     } catch { this.disconnect(subscription); }
   }
 
-  private failChannel(channel: Channel, allowFallback = true): void {
+  private failChannel(channel: Channel, fallbackPolicy: 'remember' | 'temporary' | false = 'remember'): void {
     if (!channel.active) return;
-    const fallback = allowFallback && !channel.ready && !this.supportedModes.has(channel.mode) && !this.disposed;
+    const fallback = fallbackPolicy !== false && !channel.ready && !this.supportedModes.has(channel.mode) && !this.disposed;
     const subscriptions = [...channel.subscriptions.values()];
     this.stopChannel(channel);
-    if (fallback) this.legacyModes.add(channel.mode);
+    if (fallback && fallbackPolicy === 'remember') this.legacyModes.add(channel.mode);
     for (const subscription of subscriptions) {
       subscription.channel = undefined;
       if (fallback && subscription.active) this.openDirect(subscription);
@@ -257,9 +318,7 @@ export class SessionChannelPool {
     channel.active = false;
     if (this.channels.get(channel.mode) === channel) this.channels.delete(channel.mode);
     channel.subscriptions.clear();
-    clearTimeout(channel.readyTimer);
-    clearInterval(channel.pingTimer);
-    clearTimeout(channel.pongTimer);
+    this.pauseDeadlines(channel);
     channel.socket.onopen = null;
     channel.socket.onmessage = null;
     channel.socket.onclose = null;
@@ -278,6 +337,10 @@ export class SessionChannelPool {
     const channel = subscription.channel;
     if (!channel) return;
     channel.subscriptions.delete(subscription.id);
+    if (!channel.ready && channel.subscriptions.size === 0) {
+      this.stopChannel(channel);
+      return;
+    }
     if (channel.active && channel.ready && subscription.subscribed) {
       try { this.write(channel, { protocolVersion: PROTOCOL_VERSION, type: 'unsubscribe', subscriptionId: subscription.id }); }
       catch { /* write disconnects remaining subscriptions on this channel. */ }

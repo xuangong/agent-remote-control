@@ -8,12 +8,13 @@ import { readTrackedSessions, saveTrackedSessions } from './tracking-state.js';
 import { ForkStore, referenceForkContext } from './session-forks.js';
 import { replicaState } from './test/fixtures.js';
 import { render } from './test/setup.js';
+import { WorkspaceReady } from './workspace-access.js';
 
 const baseUrl = 'http://localhost/u/alice/';
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
-async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[], navigation?: { compact: boolean }) {
+async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[], navigation?: { compact: boolean }, initiallyAuthorized = true) {
   if (navigation) vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: navigation.compact && query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {} })));
   if (navigation) vi.spyOn(SessionDirectoryClient.prototype, 'attachChild').mockImplementation(async (_provider, _parent, id) => ({ agentId: id + '-agent', nativeSessionId: id }));
   saveTrackedSessions(baseUrl, [target, ...(other ? [other] : [])]);
@@ -69,21 +70,52 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
     },
   };
   let hide!: () => void;
+  let setAccessReady!: (ready: boolean) => void;
   function Harness() {
     const [visible, setVisible] = useState(true); hide = () => setVisible(false);
-    return visible ? <App baseUrl={baseUrl} userScoped transport={transport}
+    const [accessReady, setAccess] = useState(initiallyAuthorized); setAccessReady = setAccess;
+    return visible ? <WorkspaceReady.Provider value={accessReady}><App baseUrl={baseUrl} userScoped transport={transport}
       directory={new SessionDirectoryClient(baseUrl)} initialState={replicaState} initialSessionStatus="ready"
-      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Unexpected pairing'); } }} /> : null;
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Unexpected pairing'); } }} /></WorkspaceReady.Provider> : null;
   }
   const container = await render(<Harness />);
-  expect(attach).toHaveBeenCalledTimes(other ? 2 : 1);
+  expect(attach).toHaveBeenCalledTimes(initiallyAuthorized ? other ? 2 : 1 : 0);
   expect(fetchTimeline).not.toHaveBeenCalled();
   const open = async (title = target.title) => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(title))!.click());
   };
-  return { container, attach, open, activity, contentConnections, fetchTimeline, activityClosed, contentClosed, contentListeners, hide };
+  return { container, attach, open, activity, contentConnections, fetchTimeline, activityClosed, contentClosed, contentListeners, hide, setAccessReady };
 }
+
+it('retains tracked bindings and opened conversation clients while workspace authorization renews', async () => {
+  const other = { ...star, nativeSessionId: 'other', title: 'Other conversation' };
+  const f = await fixture(star, true, other);
+  await f.open();
+  await f.open(other.title);
+  expect(f.contentConnections).toEqual(['live-agent', 'other-agent']);
+  f.activityClosed.mockClear(); f.contentClosed.mockClear();
+  await act(async () => f.setAccessReady(false));
+  expect(f.activityClosed).not.toHaveBeenCalled();
+  expect(f.contentClosed).not.toHaveBeenCalled();
+  await act(async () => f.setAccessReady(true));
+  expect(f.attach).toHaveBeenCalledTimes(2);
+  await f.open();
+  expect(f.contentConnections).toEqual(['live-agent', 'other-agent']);
+  expect(f.fetchTimeline).toHaveBeenCalledTimes(2);
+  await act(async () => f.hide());
+  expect(f.activityClosed).toHaveBeenCalledTimes(2);
+  expect(f.contentClosed).toHaveBeenCalledTimes(2);
+});
+
+it('waits for initial authorization before opening saved tracking observers', async () => {
+  const f = await fixture(star, true, undefined, undefined, undefined, false);
+  expect(f.attach).not.toHaveBeenCalled();
+  expect(f.contentConnections).toEqual([]);
+  await act(async () => f.setAccessReady(true));
+  expect(f.attach).toHaveBeenCalledOnce();
+  expect(f.contentConnections).toEqual([]);
+});
 
 it.each([
   star,

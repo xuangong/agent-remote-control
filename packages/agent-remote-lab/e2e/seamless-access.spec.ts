@@ -2,7 +2,62 @@ import { expect, test } from '@playwright/test';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 
-test('cached startup and foreground recovery keep the editor while business traffic waits for access', async ({ page }, testInfo) => {
+for (const signal of ['visibility', 'pageshow'] as const) {
+  test(`authorized ${signal} recovery keeps the live session usable during a delayed access check`, async ({ page }, testInfo) => {
+    const f = await sessionLinkFixture({ automaticSignIn: true });
+    let finish: (() => void) | undefined;
+    let sockets = 0;
+    const recoveries: string[] = [];
+    page.on('websocket', socket => {
+      sockets += 1;
+      socket.on('framesent', ({ payload }) => {
+        const frame = JSON.parse(String(payload));
+        const type = frame.type === 'message' ? frame.message.type : frame.type;
+        if (['subscribe', 'session_control_request', 'timeline_request'].includes(type)) recoveries.push(type);
+      });
+    });
+    try {
+      await page.goto(f.url);
+      await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+      await page.getByLabel('Connected Host').selectOption(f.hostId);
+      await showNewSession(page);
+      await page.getByTestId('session-create').click();
+      const input = page.getByTestId('prompt-input');
+      await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+      await input.fill('Draft before switching apps');
+      const editor = await input.elementHandle();
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      let checking = false;
+      await page.route('**/auth/status', async route => { checking = true; await gate; await route.continue(); });
+      const previousSockets = sockets;
+      const previousRecoveries = [...recoveries];
+      await page.evaluate(kind => {
+        if (kind === 'pageshow') window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+        else {
+          Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+          document.dispatchEvent(new Event('visibilitychange'));
+          Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+          document.dispatchEvent(new Event('visibilitychange'));
+        }
+      }, signal);
+      await expect.poll(() => checking).toBe(true);
+      await expect(input).toHaveValue('Draft before switching apps');
+      await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+      await expect(page.locator('.gateway-recovery')).not.toBeVisible();
+      expect(await editor!.evaluate(element => element.isConnected)).toBe(true);
+      await input.fill('Sent before the access check finishes');
+      await page.getByTestId('prompt-submit').click();
+      await expect(page.locator('.agent-message-assistant').last()).toContainText('Sent before the access check finishes');
+      expect(sockets).toBe(previousSockets);
+      expect(recoveries).toEqual(previousRecoveries);
+      await page.screenshot({ path: testInfo.outputPath('foreground-ready.png') });
+      finish?.();
+      await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+    } finally { finish?.(); await f.close(); }
+  });
+}
+
+test('cached startup keeps the editor while business traffic waits for access', async ({ page }, testInfo) => {
   test.setTimeout(60000);
   const f = await sessionLinkFixture();
   let release!: () => void;
@@ -48,21 +103,6 @@ test('cached startup and foreground recovery keep the editor while business traf
     await expect(input).toHaveValue('Continue typing before authorization');
     await expect.poll(async () => Math.abs(await timeline.evaluate(element => element.scrollTop) - readingTop)).toBeLessThan(4);
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
-    let finishResume!: () => void;
-    const resume = new Promise<void>(resolve => { finishResume = resolve; });
-    await page.route('**/auth/refresh', async route => { await resume; await route.continue(); });
-    waiting = true; premature.length = 0;
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
-    await expect(input).toBeVisible();
-    await input.fill('Still editing during recovery');
-    await expect(page.locator('.gateway-recovery')).toBeVisible({ timeout: 7000 });
-    expect(premature).toEqual([]);
-    expect(await editor!.evaluate(element => element.isConnected)).toBe(true);
-    waiting = false; finishResume();
-    await expect(page.locator('.gateway-recovery')).not.toBeVisible();
-    await expect(input).toHaveValue('Still editing during recovery');
-    await page.getByTestId('prompt-submit').click();
-    await expect(page.locator('.agent-message-assistant').last()).toContainText('Still editing during recovery');
   } finally { release?.(); await f.close(); }
 });
 

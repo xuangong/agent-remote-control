@@ -2,7 +2,7 @@ import { conversationLocalStorage, conversationSessionStorage } from './conversa
 import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite } from './recovery-writes.js';
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
-import { clearImageDraftScope } from '@orchardworks/agent-remote-web/headless';
+import { clearImageDraftScope } from '@orchardworks/agent-remote-web/browser';
 import type { TimelineReadingPosition } from '@orchardworks/agent-remote-web/react';
 
 const prefix = 'agent-remote:recovery:';

@@ -1,4 +1,4 @@
-import { clearPersistedImageDrafts, configureImageDraftPersistence } from '@orchardworks/agent-remote-web/headless';
+import { clearPersistedImageDrafts, configureImageDraftPersistence } from '@orchardworks/agent-remote-web/browser';
 
 const preferenceKey = 'agent-remote:clear-cache-on-close';
 const contentPrefixes = ['agent-remote:recovery:', 'agent-remote-forks:', 'agent-remote-ask:', 'agent-remote-opened:', 'agent-remote-tracking:', 'arc:prompt-edit'];

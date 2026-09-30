@@ -6,6 +6,7 @@ import { sessionKey } from '../session-tree.js';
 import type { SessionStar } from '../session-stars-client.js';
 import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessions, saveTrackedSessions, type SessionObservation } from '../tracking-state.js';
 import { useFeedbackToast } from '../components/Toast.js';
+import { restoreSession } from '../session-restoration.js';
 
 const noOpenSessions: readonly OpenedSession[] = [];
 export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string; visible: boolean }
@@ -14,7 +15,8 @@ const noAuxiliarySessions: readonly AuxiliarySession[] = [];
 export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
-  useEffect(() => { connections?.retainTracked(enabled ? sessions : []); }, [connections, sessions, enabled]);
+  // Authorization gates network access; only tracking changes release retained conversations.
+  useEffect(() => { connections?.retainTracked(sessions); }, [connections, sessions]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
   const observations = observationState.scope === baseUrl && observationState.transport === transport ? observationState.values : {};
   const setObservations = useCallback((update: (values: Record<string, SessionObservation>) => Record<string, SessionObservation>) => {
@@ -152,25 +154,26 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       return next;
     });
   }, [baseUrl, enabled, setObservations, auxiliaryKeys]);
-  const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} />), [observedSessions, baseUrl, transport, update, retries]);
+  const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, update, retries, enabled]);
   useFeedbackToast('Session tracking', error);
   return { reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 
-function SessionObserver({ session, liveAgentId, baseUrl, transport, update }: { session: SessionStar | OpenedSession; liveAgentId?: string; baseUrl: string; transport: RemoteAgentTransport; update(key: string, value: SessionObservation): void }) {
+function SessionObserver({ session, liveAgentId, baseUrl, transport, update, enabled }: { session: SessionStar | OpenedSession; liveAgentId?: string; baseUrl: string; transport: RemoteAgentTransport; update(key: string, value: SessionObservation): void; enabled: boolean }) {
   const key = sessionKey(session);
   const binding = useRef<(agentId: string) => void>();
+  const attachment = useRef<(enabled: boolean) => void>();
   useEffect(() => {
     const abort = new AbortController();
-    const attachment = new AbortController();
+    let stopAttachment: (() => void) | undefined;
     let client: RemoteActivityClient | undefined;
     let connectedAgentId: string | undefined;
     const start = (agentId: string) => {
       if (abort.signal.aborted || agentId === connectedAgentId) return;
       client?.stop();
       connectedAgentId = agentId;
-      attachment.abort();
+      stopAttachment?.(); stopAttachment = undefined;
       client = new RemoteActivityClient(agentId, transport, value => {
         if (!abort.signal.aborted && connectedAgentId === agentId) update(key, { ...value, agentId });
       });
@@ -178,24 +181,26 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, update }: {
     };
     binding.current = start;
     update(key, { connection: 'connecting' });
-    if (liveAgentId) start(liveAgentId);
-    else {
+    attachment.current = ready => {
+      stopAttachment?.(); stopAttachment = undefined;
+      if (!ready || connectedAgentId) return;
       const directory = new SessionDirectoryClient(baseUrl, undefined, session.hostId);
-      void (async () => {
-        try {
-          const signal = AbortSignal.any([abort.signal, attachment.signal, AbortSignal.timeout(35000)]);
-          const attached = session.parentNativeSessionId
-            ? await directory.attachChild(session.providerId, session.parentNativeSessionId, session.nativeSessionId, signal)
-            : await directory.attach(session.providerId, session.nativeSessionId, signal);
-          if (!connectedAgentId) start(attached.agentId);
-        } catch (error) {
-          if (!abort.signal.aborted && !connectedAgentId) update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : 'Tracking could not connect. Try again.' });
-        }
-      })();
-    }
-    return () => { abort.abort(); client?.stop(); binding.current = undefined; };
+      update(key, { connection: 'connecting' });
+      stopAttachment = restoreSession({
+        active: () => !abort.signal.aborted && !connectedAgentId,
+        open: signal => session.parentNativeSessionId
+          ? directory.attachChild(session.providerId, session.parentNativeSessionId, session.nativeSessionId, signal)
+          : directory.attach(session.providerId, session.nativeSessionId, signal),
+        restored: attached => start(attached.agentId),
+        failed: error => update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : 'Tracking could not connect. Try again.' }),
+      });
+    };
+    return () => { abort.abort(); stopAttachment?.(); client?.stop(); binding.current = undefined; attachment.current = undefined; };
     // Native identity owns the observer; moving between tracked and open must not restart it.
   }, [baseUrl, transport, key, update]);
-  useEffect(() => { if (liveAgentId) binding.current?.(liveAgentId); }, [liveAgentId]);
+  useEffect(() => {
+    if (enabled && liveAgentId) binding.current?.(liveAgentId);
+    attachment.current?.(enabled);
+  }, [baseUrl, transport, key, update, enabled, liveAgentId]);
   return null;
 }

@@ -1,4 +1,4 @@
-import { watchPageResume } from '@orchardworks/agent-remote-web/headless';
+import { watchPageResume } from '@orchardworks/agent-remote-web/browser';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { signInReturnKey } from '@orchardworks/agent-remote-hosted/access-page';
@@ -42,26 +42,30 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
       if (display.current) setWorkspaceReady(display.current.basePath, false);
       setReady(false);
     };
+    const pauseExpiredAccess = () => {
+      // A foreground refresh does not invalidate an already confirmed authority lease.
+      if (!current || current.expiresAt <= Date.now()) pause();
+    };
     const stopRequests = () => {
       stopped = true; pending?.abort(); clearTimeout(expiry); clearTimeout(refresh); clearTimeout(deadline); pause();
     };
     stop.current = stopRequests;
-    const schedule = (delay: number) => {
+    const schedule = (delay: number, renew = true) => {
       clearTimeout(refresh);
-      refresh = setTimeout(() => { if (document.visibilityState !== 'hidden') void request(true); }, delay);
+      refresh = setTimeout(() => { if (document.visibilityState !== 'hidden') void request(renew); }, delay);
     };
-    const unavailable = () => {
+    const unavailable = (renew: boolean) => {
       setFailed(true);
       if (!current || current.expiresAt <= Date.now()) pause();
       if (!display.current) setAccess(null);
-      schedule(Math.min(30000, 1000 * 2 ** Math.min(retries++, 5)));
+      schedule(Math.min(30000, 1000 * 2 ** Math.min(retries++, 5)), renew);
     };
     async function request(renew: boolean): Promise<void> {
       if (pending || stopped) return;
       const controller = new AbortController(); pending = controller;
       deadline = setTimeout(() => {
         if (pending !== controller || stopped) return;
-        pending = undefined; controller.abort(); unavailable();
+        pending = undefined; controller.abort(); unavailable(renew);
       }, 12000);
       try {
         const response = await fetch(renew ? '/auth/refresh' : '/auth/status', {
@@ -104,7 +108,7 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
         expiry = setTimeout(() => { pause(); void request(true); }, value.expiresAt - Date.now());
         schedule(Math.max(250, value.refreshAfterMs ?? Math.max(250, value.expiresAt - Date.now() - 1000)));
       } catch {
-        if (!stopped && !controller.signal.aborted) unavailable();
+        if (!stopped && !controller.signal.aborted) unavailable(renew);
       } finally {
         if (pending === controller) { clearTimeout(deadline); pending = undefined; }
       }
@@ -122,19 +126,21 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
       }
     };
     window.addEventListener('storage', storageChanged);
-    const beforeShow = (event: PageTransitionEvent) => { if (event.persisted && !stopped) pause(); };
-    const beforeVisible = () => { if (document.visibilityState === 'visible' && !stopped) pause(); };
-    const beforeOnline = () => { if (document.visibilityState !== 'hidden' && !stopped) pause(); };
+    const beforeShow = (event: PageTransitionEvent) => { if (event.persisted && !stopped) pauseExpiredAccess(); };
+    const beforeVisible = () => { if (document.visibilityState === 'visible' && !stopped) pauseExpiredAccess(); };
+    const beforeOnline = () => { if (document.visibilityState !== 'hidden' && !stopped) pauseExpiredAccess(); };
     window.addEventListener('pageshow', beforeShow, true);
     document.addEventListener('visibilitychange', beforeVisible, true);
     window.addEventListener('online', beforeOnline, true);
     const unwatch = watchPageResume(() => {
       if (stopped) return;
       clearTimeout(refresh);
-      pause();
+      pauseExpiredAccess();
       // Frozen requests may never settle in Safari; replace them on foreground recovery.
       pending?.abort(); pending = undefined; clearTimeout(deadline);
-      void request(true);
+      // The Relay may have renewed the lease while this page was suspended.
+      // Status renews expired grants without forcing another upstream check for a current lease.
+      void request(false);
     });
     pause();
     if (workspaceSignedOut()) { stopped = true; setAccess(null); } else void request(false);

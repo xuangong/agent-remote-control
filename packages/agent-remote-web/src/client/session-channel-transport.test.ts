@@ -156,6 +156,117 @@ describe('session channel transport', () => {
     expect(harness.urls[2]).toBe('/base/v1/sessions/b/events');
   }, 10_000);
 
+  it('falls back for an unanswered ready handshake without disabling multiplexing for later sessions', async () => {
+    const harness = await server(false);
+    const a = connect(harness.transport, 'agent one');
+    await vi.waitFor(() => expect(harness.frames).toHaveLength(1), { timeout: 12000 });
+    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1', '/base/v1/sessions/agent%20one/events']);
+    expect(harness.frames[0]!.frame).toEqual(negotiate);
+    expect(a.opened).toHaveBeenCalledOnce();
+    expect(a.disconnect).not.toHaveBeenCalled();
+    connect(harness.transport, 'b');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(3));
+    expect(harness.urls[2]).toBe('/base/v1/session-channel?observation=session&migrations=1&titles=1');
+    harness.sockets[2]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
+    await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    expect(harness.frames[1]!.frame).toMatchObject({ type: 'subscribe', agentId: 'b' });
+  }, 15_000);
+
+  it.each([false, true])('waits for the actual socket open before starting channel negotiation timeout (suspend=%s)', async suspend => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const browserWindow = new EventTarget();
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); socket.readyState = 0; sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const a = connect(transport, 'a'); await Promise.resolve();
+    if (suspend) {
+      document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(60_000);
+      document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    }
+    vi.advanceTimersByTime(5000);
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.readyState).toBe(0);
+    sockets[0]!.readyState = 1;
+    sockets[0]!.onopen?.({});
+    vi.advanceTimersByTime(9999);
+    expect(sockets).toHaveLength(1);
+    sockets[0]!.receive({protocolVersion: version, type: 'ready'});
+    vi.advanceTimersByTime(1);
+    expect(sockets).toHaveLength(1);
+    expect(a.disconnect).not.toHaveBeenCalled();
+    expect(sockets[0]!.sent).toEqual([expect.objectContaining({ type: 'subscribe', agentId: 'a' })]);
+    transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('replaces a socket that never opens when the session connection deadline expires', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); socket.readyState = 0; sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const client = new RemoteSessionClient('a', transport, new AgentReplica(), { connectionTimeoutMs: 20_000, reconnectInitialDelayMs: 250 });
+    cleanups.push(() => client.stop());
+    client.start(); await Promise.resolve();
+    vi.advanceTimersByTime(20_000);
+    expect(sockets[0]!.readyState).toBe(3);
+    vi.advanceTimersByTime(250); await Promise.resolve();
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]!.readyState).toBe(0);
+    client.stop(); transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('bounds a connecting physical channel despite staggered logical session retries', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const sockets: ControlledSocket[] = [];
+    const urls: string[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: url => {
+      const socket = new ControlledSocket(); socket.readyState = 0; sockets.push(socket); urls.push(url); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const first = new RemoteSessionClient('a', transport, new AgentReplica(), { connectionTimeoutMs: 20_000, reconnectInitialDelayMs: 250 });
+    const second = new RemoteSessionClient('b', transport, new AgentReplica(), { connectionTimeoutMs: 20_000, reconnectInitialDelayMs: 250 });
+    cleanups.push(() => { first.stop(); second.stop(); });
+    first.start(); await Promise.resolve();
+    vi.advanceTimersByTime(10_000);
+    second.start(); await Promise.resolve();
+    vi.advanceTimersByTime(10_000);
+    expect(sockets[0]!.readyState).toBe(3);
+    vi.advanceTimersByTime(250); await Promise.resolve();
+    expect(sockets).toHaveLength(2);
+    expect(urls.every(url => url.includes('session-channel'))).toBe(true);
+    first.stop(); second.stop(); transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('never downgrades a known multiplexed relay because a later ready handshake times out', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const sockets: ControlledSocket[] = [];
+    const urls: string[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: url => {
+      const socket = new ControlledSocket(); sockets.push(socket); urls.push(url); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const a = connect(transport, 'a'); await Promise.resolve();
+    sockets[0]!.receive({ protocolVersion: version, type: 'ready' });
+    sockets[0]!.close();
+    expect(a.disconnect).toHaveBeenCalledOnce();
+    const b = connect(transport, 'b'); await Promise.resolve();
+    vi.advanceTimersByTime(10_000);
+    expect(b.disconnect).toHaveBeenCalledOnce();
+    expect(sockets).toHaveLength(2);
+    connect(transport, 'c'); await Promise.resolve();
+    sockets[2]!.receive({ protocolVersion: version, type: 'ready' });
+    expect(sockets[2]!.sent).toEqual([expect.objectContaining({ type: 'subscribe', agentId: 'c' })]);
+    expect(urls.every(url => url.includes('session-channel'))).toBe(true);
+    transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('reuses an idle channel and keeps protocol observations scoped to validated nested messages', async () => {
     const harness = await server();
     const observed: unknown[] = [];
@@ -176,7 +287,7 @@ describe('session channel transport', () => {
     ]);
   }, 10_000);
 
-  it('preserves healthy content and activity channels through a short page suspension', async () => {
+  it.each([0, 60_000])('preserves healthy content and activity channels through a %i ms page suspension', async suspendedMs => {
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
@@ -188,15 +299,56 @@ describe('session channel transport', () => {
     for (const socket of harness.sockets) socket.on('message', data => {
       if (JSON.parse(String(data)).type === 'ping') socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
     });
+    const hiddenAt = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(hiddenAt);
+    cleanups.push(() => now.mockRestore());
     document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    now.mockReturnValue(hiddenAt + suspendedMs);
     document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
     browserWindow.dispatchEvent(new Event('online'));
+    now.mockRestore();
     await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(2));
     await new Promise(resolve => setTimeout(resolve, 1200));
     expect(a.disconnect).not.toHaveBeenCalled(); expect(activity.disconnect).not.toHaveBeenCalled();
     expect(harness.sockets).toHaveLength(2);
     harness.transport.dispose();
     browserWindow.dispatchEvent(new Event('online'));
+    expect(a.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('preserves a healthy foreground channel when mobile latency delays pong by 1500 ms', async () => {
+    const browserWindow = new EventTarget();
+    vi.stubGlobal('window', browserWindow);
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
+    cleanups.push(() => vi.unstubAllGlobals());
+    const harness = await server(); const a = connect(harness.transport, 'a');
+    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    let pongTimer: ReturnType<typeof setTimeout> | undefined;
+    cleanups.push(() => clearTimeout(pongTimer));
+    harness.sockets[0]!.on('message', data => {
+      if (JSON.parse(String(data)).type === 'ping') pongTimer = setTimeout(() => {
+        harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
+      }, 1500);
+    });
+    const resumedAt = performance.now();
+    browserWindow.dispatchEvent(new Event('online'));
+    await new Promise(resolve => setTimeout(resolve, 1700));
+    console.info('Delayed foreground pong', { delayMs: 1500, elapsedMs: Math.round(performance.now() - resumedAt), disconnects: a.disconnect.mock.calls.length });
+    expect(a.disconnect).not.toHaveBeenCalled();
+    expect(harness.sockets).toHaveLength(1);
+    expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(1);
+  });
+
+  it('keeps multiplexing when the first channel ready frame takes 3500 ms to arrive', async () => {
+    const harness = await server(false); const a = connect(harness.transport, 'a');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const openedAt = performance.now();
+    await new Promise(resolve => setTimeout(resolve, 3500));
+    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
+    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    console.info('Delayed channel readiness', { delayMs: 3500, elapsedMs: Math.round(performance.now() - openedAt), sockets: harness.sockets.length });
+    expect(harness.urls).toHaveLength(1);
+    expect(harness.frames[0]!.frame).toMatchObject({ type: 'subscribe', agentId: 'a' });
     expect(a.disconnect).not.toHaveBeenCalled();
   });
 
@@ -209,7 +361,7 @@ describe('session channel transport', () => {
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
     browserWindow.dispatchEvent(new Event('online'));
     expect(a.disconnect).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(a.disconnect).toHaveBeenCalledTimes(1), {timeout: 2000});
+    await vi.waitFor(() => expect(a.disconnect).toHaveBeenCalledTimes(1), {timeout: 5500});
     browserWindow.dispatchEvent(new Event('online'));
     expect(a.disconnect).toHaveBeenCalledTimes(1);
   });
@@ -239,7 +391,7 @@ describe('session channel transport', () => {
     expect(harness.sockets).toHaveLength(2);
   });
 
-  it('replaces channels immediately after a long suspension', async () => {
+  it('pauses heartbeat deadlines while hidden and gives a resumed channel a fresh probe', async () => {
     vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
@@ -250,11 +402,64 @@ describe('session channel transport', () => {
     cleanups.push(() => transport.dispose());
     const a = connect(transport, 'a'); await Promise.resolve();
     socket.receive({protocolVersion: version, type: 'ready'});
+    vi.advanceTimersByTime(30_000);
+    expect(socket.sent.filter((frame: any) => frame.type === 'ping')).toHaveLength(1);
     document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
-    vi.setSystemTime(Date.now() + 60_000);
+    vi.advanceTimersByTime(60_000);
+    expect(a.disconnect).not.toHaveBeenCalled();
+    expect(socket.sent.filter((frame: any) => frame.type === 'ping')).toHaveLength(1);
     document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
-    expect(a.disconnect).toHaveBeenCalledOnce(); expect(socket.readyState).toBe(3);
+    expect(socket.sent.filter((frame: any) => frame.type === 'ping')).toHaveLength(2);
+    vi.advanceTimersByTime(3999);
+    expect(a.disconnect).not.toHaveBeenCalled();
+    socket.receive({protocolVersion: version, type: 'pong'});
+    vi.advanceTimersByTime(1);
+    expect(a.disconnect).not.toHaveBeenCalled();
+    expect(socket.sent.filter((frame: any) => frame.type === 'subscribe')).toHaveLength(1);
     transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('pauses an opening channel deadline while hidden and bounds its foreground retry', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const browserWindow = new EventTarget();
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const a = connect(transport, 'a'); await Promise.resolve();
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.readyState).toBe(1);
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(9999);
+    expect(sockets).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0]!.readyState).toBe(3);
+    expect(a.disconnect).not.toHaveBeenCalled();
+    transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retires a closed channel immediately on foreground without waiting for a probe', async () => {
+    const browserWindow = new EventTarget();
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const socket = new ControlledSocket();
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => socket });
+    cleanups.push(() => transport.dispose());
+    const a = connect(transport, 'a'); await Promise.resolve();
+    socket.receive({protocolVersion: version, type: 'ready'});
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    socket.readyState = 3;
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    expect(a.disconnect).toHaveBeenCalledOnce();
+    expect(socket.sent).toHaveLength(1);
   });
 
   it('bounds pending commands and never sends a canceled pending stream after ready', async () => {
@@ -266,8 +471,10 @@ describe('session channel transport', () => {
     } };
     expect(() => { for (let index = 0; index < 1024; index++) a.connection.send(command); }).toThrow('limit');
     expect(a.disconnect).toHaveBeenCalledTimes(1);
-    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
     const b = connect(harness.transport, 'b');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    expect(harness.sockets[0]!.readyState).toBe(WebSocket.CLOSED);
+    harness.sockets[1]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
     expect(harness.frames[0]!.frame.agentId).toBe('b');
     expect(b.disconnect).not.toHaveBeenCalled();
@@ -371,7 +578,11 @@ class ControlledSocket implements WebSocketLike {
   receive(value: unknown) { this.onmessage?.({ data: JSON.stringify(value) }); }
 }
 
-it.each(['acknowledge', 'reject', 'disconnect'] as const)('keeps a slow send pending over a real session channel until %s', async outcome => {
+it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge', 'reject', 'disconnect'] as const)('settles a slow send over a real session channel: %s', async outcome => {
+  const browserWindow = new EventTarget();
+  const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
+  cleanups.push(() => vi.unstubAllGlobals());
   const history: HistoryPage = { protocolVersion: version, type: 'timeline_page', payload: {
     requestId: 'history', agentId: 'a', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false, error: null,
     window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 1 },
@@ -408,7 +619,27 @@ it.each(['acknowledge', 'reject', 'disconnect'] as const)('keeps a slow send pen
   expect(status).toBe('ready');
   expect(replica.getState().outgoingMessages?.[0]?.status).toBe('sending');
   const requestId = harness.frames[3]!.frame.message.payload.requestId;
-  if (outcome === 'acknowledge') {
+  if (outcome === 'resume_then_acknowledge' || outcome === 'slow_resume_then_acknowledge') {
+    let pongTimer: ReturnType<typeof setTimeout> | undefined;
+    cleanups.push(() => clearTimeout(pongTimer));
+    socket.on('message', data => {
+      if (JSON.parse(String(data)).type === 'ping') pongTimer = setTimeout(() => {
+        socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
+      }, outcome === 'slow_resume_then_acknowledge' ? 1500 : 0);
+    });
+    const hiddenAt = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(hiddenAt);
+    cleanups.push(() => now.mockRestore());
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    now.mockReturnValue(hiddenAt + 60_000);
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    now.mockRestore();
+    await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(1));
+    if (outcome === 'slow_resume_then_acknowledge') await new Promise(resolve => setTimeout(resolve, 1700));
+    expect(result).toBe('pending');
+    expect(status).toBe('ready');
+  }
+  if (outcome === 'acknowledge' || outcome === 'resume_then_acknowledge' || outcome === 'slow_resume_then_acknowledge') {
     emit({ protocolVersion: version, type: 'command_acknowledged', payload: { requestId, agentId: 'a', command: 'send_message' } });
     await expect(send).resolves.toMatchObject({ type: 'command_acknowledged' });
     emit({ protocolVersion: version, type: 'agent_stream', payload: { agentId: 'a', epoch: 'epoch', seq: 2,

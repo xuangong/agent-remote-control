@@ -1,9 +1,12 @@
 /** A suspended browser may retain a WebSocket object after its network connection dies. */
-export function watchPageResume(resume: (suspendedMs: number) => void): () => void {
+export function watchPageResume(resume: (suspendedMs: number) => void, suspend?: () => void): () => void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return () => undefined;
   let hidden = document.visibilityState === 'hidden';
   let hiddenAt = hidden ? Date.now() : undefined;
-  const hide = () => { if (!hidden) hiddenAt = Date.now(); hidden = true; };
+  const hide = () => {
+    if (hidden) return;
+    hiddenAt = Date.now(); hidden = true; suspend?.();
+  };
   const visible = () => {
     if (document.visibilityState === 'hidden') { hide(); return; }
     if (hidden) {

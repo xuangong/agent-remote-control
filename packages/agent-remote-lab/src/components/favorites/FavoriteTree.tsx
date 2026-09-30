@@ -65,13 +65,13 @@ export function FavoriteTree({favorites,tracking,trackedOnly=false,onFilterChang
   }
   function action(value:FavoriteEdit) {setMenu(undefined);setEdit(value);}
   const focusedId=visible.some(n=>n.id===focused)?focused:visible[0]?.id;
-  return <div className="lab-favorites-manager" aria-busy={!!favorites.pending}>
+  return <div className="lab-favorites-manager" aria-busy={disabled}>
     <div className="lab-favorites-toolbar"><div className="lab-favorites-filter-group" role={onFilterChange?'group':undefined} aria-label={onFilterChange?'Favorites filter':undefined}>
       {onFilterChange?<><button type="button" className="lab-favorites-filter" aria-label="Show all favorites" aria-pressed={!trackedOnly} onClick={()=>onFilterChange(false)}>{favorites.stars.length} favorites</button>
       <button type="button" className="lab-favorites-filter" aria-label="Filter tracked favorites" aria-pressed={trackedOnly} title="Show tracked favorites on this device" onClick={()=>onFilterChange(true)}>{favorites.stars.filter(star=>trackedKeys.has(sessionKey(star))).length} tracked</button></>
       :<span className="lab-favorites-count">{favorites.stars.length} {favorites.stars.length===1?'favorite':'favorites'}</span>}
     </div>{!trackedOnly?<button type="button" disabled={disabled} onClick={()=>setEdit({type:'create',parentId:null})}>＋ New folder</button>:null}</div>
-    {!(trackedOnly?visible:nodes).length&&!favorites.loading ? <p className="lab-control-note">{trackedOnly?'No tracked favorites. Choose Track from a favorite’s menu to watch it here.':'Star a session or create a folder to start organizing.'}</p> : null}
+    {!(trackedOnly?visible:nodes).length ? <p className="lab-control-note" style={{visibility:favorites.loading?'hidden':undefined}}>{trackedOnly?'No tracked favorites. Choose Track from a favorite’s menu to watch it here.':'Star a session or create a folder to start organizing.'}</p> : null}
     <div ref={root} tabIndex={-1} className="lab-favorites-scroll" data-dragging={!!drag.drag}>
       {!trackedOnly?<div data-favorite-root className="lab-favorite-root" data-drop={drag.drag?.target?.id===null?'inside':undefined}><FavoriteIcon folder expanded/><span>Favorites</span></div>:null}
       <div role="tree" aria-label={trackedOnly?"Tracked favorites":"Favorites folders and sessions"} className="lab-favorite-tree">

@@ -1415,6 +1415,10 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-favorites-filter-group button.lab-favorites-filter[aria-pressed="true"] { border-color: var(--obs-action); color: var(--obs-action); background: var(--obs-surface-selected); }
 @media (pointer: coarse) { .lab-favorites-filter-group button.lab-favorites-filter { min-height: 44px; } }
 .lab-favorites-section, .lab-favorites-manager { min-width: 0; max-width: 100%; }
+.lab-favorites-heading { display: inline-flex; align-items: center; gap: 6px; }
+.lab-favorites-loading { flex: none; box-sizing: border-box; width: 12px; height: 12px; border: 2px solid var(--obs-border); border-top-color: var(--obs-action); border-radius: 50%; animation: lab-favorites-loading .8s linear infinite; }
+@keyframes lab-favorites-loading { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lab-favorites-loading { animation: none; } }
 .lab-favorites-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0 10px; }
 .lab-favorites-count { color: var(--obs-text-secondary); font-size: 12px; }
 .lab-favorites-toolbar > button { font-size: 12px; min-height: 32px; padding: 4px 8px; border-color: transparent; background: transparent; }

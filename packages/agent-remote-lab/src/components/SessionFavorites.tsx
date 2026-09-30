@@ -8,6 +8,10 @@ import { sessionKey, type SessionEntry } from '../session-tree.js';
 import type { StarInput, VisibleSessionStar } from '../session-stars-client.js';
 import { SessionPopover } from './SessionPopover.js';
 
+export function FavoritesHeading({ loading }: { loading: boolean }) {
+  return <span className="lab-favorites-heading">Favorites{loading ? <span className="lab-favorites-loading" aria-hidden="true" /> : null}</span>;
+}
+
 export function starInput(session: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title' | 'parentNativeSessionId'>): StarInput {
   return { hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId,
     title: (session.title || session.nativeSessionId).replace(/[\u0000-\u001f]/g, ' ').slice(0, 512), ...(session.parentNativeSessionId ? { parentNativeSessionId: session.parentNativeSessionId } : {}) };
@@ -24,7 +28,7 @@ export function StarButton({ session, favorites }: { session: Parameters<typeof 
 }
 export function FavoritesList({ favorites, tracking, trackedOnly = false, onFilterChange, activeKey, busy, onOpen }: { favorites: SessionStars; tracking: SessionTracking; trackedOnly?: boolean; onFilterChange?(trackedOnly: boolean): void; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
   return <>
-    {favorites.loading ? <p className="lab-control-note" role="status">Loading favorites…</p> : null}
+    <span className="agent-visually-hidden" role="status">{favorites.loading ? 'Loading favorites…' : ''}</span>
     {favorites.error ? <p className="lab-control-note" role="alert">{favorites.error} <button type="button" onClick={() => void favorites.refresh()}>Refresh favorites</button></p> : null}
     <FavoriteTree key={favorites.scope} favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={onFilterChange} activeKey={activeKey} busy={busy} onOpen={onOpen} />
     {tracking.error ? <p className="lab-control-note" role="alert">{tracking.error}</p> : null}
@@ -32,7 +36,7 @@ export function FavoritesList({ favorites, tracking, trackedOnly = false, onFilt
 }
 
 export function FavoritesMenu({ onScan, title, status, currentSession, favorites, tracking, activeKey, busy, onOpen }: { onScan?(): void; title: string; status?: AgentStatus; currentSession?: Parameters<typeof starInput>[0]; favorites: SessionStars; tracking: SessionTracking; activeKey?: string; busy: boolean; onOpen(item: VisibleSessionStar): void }) {
-  return <SessionPopover headingAction={onScan ? close => <button type="button" className="lab-favorites-scan" onClick={() => { close(); onScan(); }}>Scan to open</button> : undefined} label="Favorites" className="lab-title-favorites" trigger={<><span className="lab-favorites-title agent-session-title" data-session-status={status}>{title}</span><span className="lab-favorites-chevron" aria-hidden="true">▾</span></>} onOpen={() => void favorites.refresh()}>
+  return <SessionPopover heading={<FavoritesHeading loading={favorites.loading} />} headingAction={onScan ? close => <button type="button" className="lab-favorites-scan" onClick={() => { close(); onScan(); }}>Scan to open</button> : undefined} label="Favorites" className="lab-title-favorites" trigger={<><span className="lab-favorites-title agent-session-title" data-session-status={status}>{title}</span><span className="lab-favorites-chevron" aria-hidden="true">▾</span></>} onOpen={() => void favorites.refresh()}>
     {close => <>{currentSession ? <div className="lab-favorites-current"><span>Current: {currentSession.title}</span><StarButton session={currentSession} favorites={favorites} /></div> : null}<FavoritesList favorites={favorites} tracking={tracking} activeKey={activeKey} busy={busy} onOpen={item => { close(); onOpen(item); }} /></>}
   </SessionPopover>;
 }

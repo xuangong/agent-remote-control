@@ -23,7 +23,7 @@ import { useSessionStars } from './hooks/useSessionStars.js';
 import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
-import { FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
+import { FavoritesHeading, FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
 import { TrackedSessionViews, type TrackedSessionView } from './tracked-session-views.js';
 import { ToastProvider, useFeedbackToast } from './components/Toast.js';
@@ -1426,7 +1426,7 @@ function AppContent({
         <CachePrivacySettings />
         <LayoutDiagnosticsSettings />
       </section> : null}
-      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2>Favorites</h2></div><FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
+      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div><FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /></section> : null}
       {directory && sessionPanel !== 'favorites' ? <HostPairing compact={compactLayout && sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning} hosts={providers.length > 0 ? [{ id: 'local', name: 'Lab server', online: true }, ...remoteHosts] : remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {(!compactLayout && sessionPanel === 'list') || sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel />
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={compactLayout ? contextOpen : desktopContextVisible}>

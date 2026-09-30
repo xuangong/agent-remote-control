@@ -69,9 +69,9 @@ describe('content-only timeline', () => {
     expect(container.querySelector('.agent-tool')?.textContent).toContain('Completed');
   });
 
-  it('keeps inline Markdown images while hiding attached resource cards and renderer extensions', async () => {
-    const binding = { locator: './summary.png', resourceId: 'summary-image', status: 'available' as const };
-    const current = state([{ type: 'assistant_message', text: '![Summary diagram](./summary.png)' }]);
+  it.each(['./summary.png', 'codex-image:generated', 'claude-image:tool', 'opencode-image:output', 'dsh-attachment:picture', 'another-agent:picture'])('renders bound Markdown image %s without resource cards or renderer extensions', async locator => {
+    const binding = { locator, resourceId: 'summary-image', status: 'available' as const };
+    const current = state([{ type: 'assistant_message', text: `![Summary diagram](${locator})` }]);
     const registry = new RendererRegistry();
     registry.register('assistant_message', () => <p>Execution extension</p>);
     const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline
@@ -81,6 +81,7 @@ describe('content-only timeline', () => {
     /></TimelineDisplay.Provider>);
     expect(container.querySelector('img')?.getAttribute('alt')).toBe('Summary diagram');
     expect(container.querySelector('img')?.getAttribute('width')).toBe('640');
+    expect(container.querySelectorAll('img')).toHaveLength(1);
     expect(container.querySelector('[data-resource-download]')).toBeNull();
     expect(container.textContent).not.toContain('Execution extension');
   });

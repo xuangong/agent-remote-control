@@ -27,11 +27,8 @@ function visit(node: HastNode, linked = false): void {
     delete node.properties.href;
   }
   if (node.type === 'element' && node.tagName === 'img' && typeof node.properties?.src === 'string') {
-    const locator = node.properties.src;
-    if (isLocalLocator(locator)) {
-      node.data = { ...node.data, localResourceLocator: locator, linked };
-      delete node.properties.src;
-    }
+    node.data = { ...node.data, imageResourceLocator: node.properties.src, linked };
+    delete node.properties.src;
   }
   node.children?.forEach(child => visit(child, linked || node.tagName === 'a'));
 }
@@ -59,9 +56,12 @@ export function MarkdownResourceImage({
 }) {
   const preview = useContext(FilePreviewContext);
   const imageNode = node as HastNode | undefined;
-  const locator = typeof imageNode?.data?.localResourceLocator === 'string'
-    ? imageNode.data.localResourceLocator
+  const candidate = typeof imageNode?.data?.imageResourceLocator === 'string'
+    ? imageNode.data.imageResourceLocator
     : undefined;
+  // Opaque provider locators are readable only through this entry's resource bindings.
+  const locator = candidate && (isLocalLocator(candidate) || context?.bindings.some(binding => binding.locator === candidate))
+    ? candidate : undefined;
   const key = JSON.stringify([context?.scopeKey, locator, sourceLocator]);
   const { ref: frameRef, near } = useNearViewport(key);
   const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string }>();

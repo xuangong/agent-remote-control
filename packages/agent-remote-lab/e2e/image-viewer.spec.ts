@@ -29,6 +29,34 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('timeline')).toBeVisible();
 });
 
+test('renders bound native images in content-only view and opens a zoomable fullscreen preview', async ({ page }, info) => {
+  for (const provider of ['codex', 'claude']) {
+    await page.goto(`/e2e/fixtures/image-viewer.html?content=1&native-image=${provider}`);
+    const timeline = page.getByTestId('timeline');
+    await timeline.dispatchEvent('wheel', { deltaY: -1 });
+    await timeline.getByRole('heading', { name: 'Conversation image', exact: true }).scrollIntoViewIfNeeded();
+    const trigger = timeline.getByRole('button', { name: 'Open image: Viewer diagram', exact: true });
+    await expect(trigger).toBeVisible();
+    await trigger.scrollIntoViewIfNeeded();
+    const inlineImage = timeline.getByRole('img', { name: 'Viewer diagram', exact: true });
+    await expect(inlineImage).toHaveCount(1);
+    await expect(inlineImage).toBeVisible();
+    await expect.poll(() => inlineImage.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
+    await expect(page.getByRole('region', { name: 'Referenced resources', exact: true })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath(`content-${provider}-image.png`) });
+    await trigger.click();
+    const dialog = await preview(page);
+    const image = dialog.getByRole('img');
+    const fittedWidth = (await image.boundingBox())!.width;
+    await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
+    await expect.poll(async () => (await image.boundingBox())!.width).toBeGreaterThan(fittedWidth * 1.1);
+    await dialog.getByRole('button', { name: 'Close image preview', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(inlineImage).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Referenced resources', exact: true })).toHaveCount(0);
+  }
+});
+
 test('opens a Markdown image across the viewport and restores reading position and focus', async ({ page }, info) => {
   const timeline = page.getByTestId('timeline');
   await timeline.dispatchEvent('wheel', { deltaY: -1 });

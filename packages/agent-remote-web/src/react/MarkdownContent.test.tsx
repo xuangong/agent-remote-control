@@ -99,6 +99,42 @@ describe('MarkdownContent', () => {
     ]);
   });
 
+  it('loads an opaque image when its session binding arrives after the Markdown', async () => {
+    const binding = { locator: 'native-image:late', resourceId: 'late-image', status: 'available' as const };
+    const detail = { status: 'available' as const, mediaType: 'image/png', byteLength: 1, sha256: 'late', imageDimensions: { width: 640, height: 480 } };
+    const resolveResource = vi.fn(async () => binding);
+    const requestResource = vi.fn(async () => undefined);
+    const context = { scopeKey: 'late-image-session', bindings: [], resources: { 'late-image': detail }, resolveResource, requestResource };
+    const view = (resourceContext: import('./MarkdownContent.js').MarkdownContentProps['resourceContext']) =>
+      <MarkdownContent markdown="![Late image](native-image:late)" resourceContext={resourceContext} />;
+    const container = await render(view(context));
+    expect(container.querySelector('img')).toBeNull();
+    expect(resolveResource).not.toHaveBeenCalled();
+    expect(requestResource).not.toHaveBeenCalled();
+
+    await rerender(container, view({ ...context, bindings: [binding] }));
+    expect(container.querySelector('[data-image-state="loading"]')).not.toBeNull();
+    expect(requestResource).toHaveBeenCalledExactlyOnceWith(binding);
+    expect(resolveResource).not.toHaveBeenCalled();
+    await rerender(container, view({ ...context, bindings: [binding], resources: { 'late-image': { ...detail, contentBase64: 'AA==' } } }));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AA==');
+    expect(requestResource).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not resolve undeclared opaque or remote Markdown images through a session', async () => {
+    const resolveResource = vi.fn();
+    const requestResource = vi.fn();
+    const container = await render(<MarkdownContent markdown={[
+      '![Unknown](codex-image:unknown)', '![Remote](https://example.com/image.png)',
+      '![Executable](javascript:alert%281%29)', '![Embedded](data:image/png;base64,AA==)',
+    ].join('\n\n')} resourceContext={{ scopeKey: 'unbound-images', bindings: [], resources: {}, resolveResource, requestResource }} />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('Unknown');
+    expect(container.textContent).toContain('Remote');
+    expect(resolveResource).not.toHaveBeenCalled();
+    expect(requestResource).not.toHaveBeenCalled();
+  });
+
   it('reserves image dimensions before bytes arrive and retains the frame after a transfer failure', async () => {
     const binding = { locator: './slow.png', resourceId: 'slow-image', status: 'available' as const };
     let reject!: (error: Error) => void;

@@ -29,6 +29,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
   const activityClosed = vi.fn();
   const contentClosed = vi.fn();
   const contentListeners = new Map<string, RemoteTransportListener>();
+  const activityListeners = new Map<string, RemoteTransportListener>();
   const snapshot = { protocolVersion: '1.6.0' as const, type: 'agent_snapshot' as const,
     payload: { ...replicaState.agent!, id: 'live-agent', providerId: target.providerId,
       runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: target.providerId, sessionId: target.nativeSessionId, ...(navigation ? { childSessions: [{ nativeSessionId: 'child', title: 'Tracked child', status: 'idle' as const, observation: 'live' as const, createdAt: '2026-09-20T00:00:00Z' }] } : {}) } } };
@@ -58,8 +59,8 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
           listener.onMessage({ protocolVersion: '1.6.0', type: 'negotiated', sessionControl: true });
           if (message.observation !== 'activity') listener.onMessage({ protocolVersion: '1.6.0', type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
           if (message.observation === 'activity') {
-            observing = true; activity = listener;
-            if (activityReady) listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId, status: 'idle' } });
+            observing = true; activity = listener; activityListeners.set(agentId, listener);
+            if (activityReady) listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId, status: 'idle', cursor: { epoch: 'tracked-epoch', seq: 1 } } });
           } else { contentConnections.push(agentId); contentListeners.set(agentId, listener); listener.onMessage(snapshotFor(agentId)); }
         } else if (message.type === 'session_control_request') {
           listener.onMessage({ protocolVersion: '1.6.0', type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
@@ -85,7 +86,12 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(title))!.click());
   };
-  return { container, attach, open, activity, contentConnections, fetchTimeline, activityClosed, contentClosed, contentListeners, hide, setAccessReady };
+  const emitActivity = (agentId: string, seq: number) => act(async () => {
+    activityListeners.get(agentId)!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+      agentId, status: 'idle', cursor: { epoch: 'tracked-epoch', seq },
+    } });
+  });
+  return { container, attach, open, activity, emitActivity, contentConnections, fetchTimeline, activityClosed, contentClosed, contentListeners, hide, setAccessReady };
 }
 
 it('retains tracked bindings and opened conversation clients while workspace authorization renews', async () => {
@@ -264,6 +270,38 @@ it('restores the child being read on mobile when returning to its tracked parent
   await f.open();
   expect(new URLSearchParams(location.search).get('session')).toBe('child');
   expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Unsent child draft');
+});
+
+it('opens the tracked mobile parent when it has new content instead of restoring its child', async () => {
+  const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
+  const f = await fixture(star, true, other, undefined, { compact: true });
+  await f.open();
+  await openChild(f.container, 'child');
+  await f.open(other.title);
+  await f.emitActivity('live-agent', 2);
+  await f.open();
+  expect(new URLSearchParams(location.search).get('session')).toBe(star.nativeSessionId);
+  expect(f.container.querySelector<HTMLElement>('.lab-primary-conversation')?.hidden).toBe(false);
+  await f.open(other.title);
+  await f.open();
+  expect(new URLSearchParams(location.search).get('session')).toBe(star.nativeSessionId);
+});
+
+it('keeps a closed side conversation in tracking and preserves its unseen content', async () => {
+  const child = { ...star, nativeSessionId: 'child', title: 'Tracked child' };
+  const f = await fixture(star, true, child, undefined, { compact: false });
+  await f.open();
+  await openChild(f.container, 'child');
+  const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  await act(async () => side.querySelector<HTMLButtonElement>('.lab-side-close')!.click());
+  expect(side.hidden).toBe(true);
+  await f.emitActivity('child-agent', 2);
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+  const row = [...f.container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(button => button.textContent?.includes(child.title));
+  expect(row).toBeDefined();
+  expect(row!.querySelector('.lab-tracked-change')).not.toBeNull();
+  await act(async () => row!.click());
+  expect(new URLSearchParams(location.search).get('session')).toBe(child.nativeSessionId);
 });
 
 

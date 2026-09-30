@@ -85,9 +85,14 @@ as schemas and types, with matching `decodeSessionChannel*Message` and
 
 
 `agent_activity.payload.cursor` (`epoch`, `seq`) carries the canonical content
-boundary captured with that activity snapshot. Unchanged activity does not produce
-cursor traffic. A cursor is not a state version and does not order the two
-connections. Deploy the Controller and Relay with the matching protocol schema.
+boundary captured with that activity snapshot. Status changes are immediate;
+canonical Timeline advances with unchanged status are coalesced for up to 500 ms.
+Connection metadata and older-history backfill do not advance the boundary.
+After a Timeline replacement, the completed new-epoch baseline is published
+immediately and separately from subsequent live content. Clients establish a new
+comparison baseline across epochs instead of inferring unread content from a reset.
+A cursor is not a state version and does not order the two connections. Deploy the
+Controller and Relay with the matching protocol schema.
 
 When opening an observed session, the workbench freezes that cursor for the
 navigation. The tracking button edge advances only as the replica applies content

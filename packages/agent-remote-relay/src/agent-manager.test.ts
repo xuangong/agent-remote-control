@@ -515,7 +515,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     providerStream.push(timelineObservation('new-row', 'Rehydrated output.', 2));
     await nextEventLoopTurn();
 
-    expect(events).toEqual(['timeline_replacement', 'agent_stream']);
+    expect(events).toEqual(['timeline_replacement', 'timeline_rebuilt', 'agent_stream']);
     expect(manager.fetchTimeline({
       requestId: 'tail', agentId: 'agent-1', direction: 'tail', limit: 10,
     }).payload).toMatchObject({

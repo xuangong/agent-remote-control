@@ -102,6 +102,11 @@ export function createSessionWire(
   let control: SessionControlLease | undefined;
   let activityOnly = false;
   let lastActivity: AgentStatus | undefined;
+  let lastActivityCursor: TimelineCursor | undefined;
+  let activityStatus: AgentStatus | undefined;
+  let activityCursor: TimelineCursor | undefined;
+  let activityTimer: ReturnType<typeof setTimeout> | undefined;
+  let rebuildingTimeline = false;
   let negotiated = false;
   let closed = false;
   let agent: SessionWireAgent | undefined;
@@ -113,7 +118,7 @@ export function createSessionWire(
   const queuedDuringSubscriptionAck: AgentManagerEvent[] = [];
 
   const receiveManagerEvent = (event: AgentManagerEvent): void => {
-    if (closed || (activityOnly && event.type !== 'agent_state')) return;
+    if (closed || (activityOnly && !isActivityDelivery(event))) return;
     if (bufferingSnapshotHandoff) {
       enqueueManagerEvent(queuedDuringSnapshotHandoff, event);
       return;
@@ -137,6 +142,18 @@ export function createSessionWire(
     try {
       if (activityOnly) {
         if (event.type === 'agent_state') sendActivity(event.snapshot, event.cursor);
+        else if (event.type === 'timeline_replacement') {
+          rebuildingTimeline = true;
+          clearTimeout(activityTimer); activityTimer = undefined;
+        } else if (event.type === 'timeline_rebuilt') {
+          rebuildingTimeline = false;
+          activityCursor = event.cursor;
+          // Establish the replacement baseline before subsequent live content can advance it.
+          publishActivity();
+        } else if (event.type === 'agent_stream' && event.row && !rebuildingTimeline) {
+          advanceActivityCursor({ epoch: event.row.epoch, seq: event.row.seq });
+          scheduleActivity();
+        }
         return;
       }
       const message = managerEventToServerMessage(event, timelineSubscribed);
@@ -448,12 +465,41 @@ export function createSessionWire(
 
   function sendActivity(snapshot: AgentSnapshot, cursor?: TimelineCursor): void {
     const agent = snapshot.payload;
-    const status = agent.status === 'closed' || agent.status === 'failed' ? agent.status
+    activityStatus = agent.status === 'closed' || agent.status === 'failed' ? agent.status
       : agent.pendingInteractions.length || agent.status === 'waiting' ? 'waiting'
       : agent.activeTurn || agent.status === 'running' ? 'running' : agent.status;
-    if (lastActivity === status) return;
-    lastActivity = status;
-    sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId: agent.id, status, ...(cursor ? { cursor } : {}) } });
+    if (!rebuildingTimeline && cursor) advanceActivityCursor(cursor);
+    if (lastActivity !== activityStatus) publishActivity();
+    else if (!rebuildingTimeline) scheduleActivity();
+  }
+
+  function advanceActivityCursor(cursor: TimelineCursor): void {
+    if (activityCursor?.epoch === cursor.epoch && activityCursor.seq >= cursor.seq) return;
+    activityCursor = cursor;
+  }
+
+  function scheduleActivity(): void {
+    if (activityTimer || activityStatus === undefined || sameCursor(lastActivityCursor, activityCursor)) return;
+    // Status remains immediate; content bursts share one bounded metadata update.
+    activityTimer = setTimeout(() => {
+      activityTimer = undefined;
+      if (closed || rebuildingTimeline) return;
+      try { publishActivity(); }
+      catch (error) {
+        failSession({ kind: 'manager_event_delivery', error: error instanceof Error ? error : new Error('Activity delivery failed.') });
+      }
+    }, 500);
+  }
+
+  function publishActivity(): void {
+    clearTimeout(activityTimer); activityTimer = undefined;
+    const cursor = rebuildingTimeline ? lastActivityCursor : activityCursor;
+    if (activityStatus === undefined || (lastActivity === activityStatus && sameCursor(lastActivityCursor, cursor))) return;
+    lastActivity = activityStatus;
+    lastActivityCursor = cursor;
+    sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: {
+      agentId: requireBoundAgent().agentId, status: activityStatus, ...(cursor ? { cursor } : {}),
+    } });
   }
 
   function bindAgent(): void {
@@ -505,6 +551,7 @@ export function createSessionWire(
     control?.close();
     if (closed) return;
     closed = true;
+    clearTimeout(activityTimer); activityTimer = undefined;
     const release = unsubscribe;
     unsubscribe = undefined;
     release?.();
@@ -677,6 +724,15 @@ function isTimelineDelivery(event: AgentManagerEvent): boolean {
   return event.type === 'timeline_replacement'
     || event.type === 'timeline_resource_binding_replaced'
     || (event.type === 'agent_stream' && event.event.type === 'timeline');
+}
+
+function isActivityDelivery(event: AgentManagerEvent): boolean {
+  return event.type === 'agent_state' || event.type === 'timeline_replacement' || event.type === 'timeline_rebuilt'
+    || (event.type === 'agent_stream' && event.event.type === 'timeline' && event.row !== undefined);
+}
+
+function sameCursor(left: TimelineCursor | undefined, right: TimelineCursor | undefined): boolean {
+  return left?.epoch === right?.epoch && left?.seq === right?.seq;
 }
 
 function isInteractionResponseError(error: unknown): error is Error & { code: string } {

@@ -7,7 +7,12 @@ export const MAX_TRACKED_SESSIONS = 8;
 export function nextObservation(previous: SessionObservation | undefined, next: SessionObservation): SessionObservation {
   const activity = next.connection === 'ready' ? next.activity : undefined;
   const runtimeChanged = previous?.connection === 'ready' && next.connection === 'ready' && previous.activity !== undefined && activity !== undefined && previous.activity !== activity;
-  const disconnected = previous?.connection === 'ready' && next.connection === 'disconnected';
+  const observedCursor = next.connection === 'ready' ? next.cursor : undefined;
+  const previousCursor = previous?.cursor;
+  const replaced = !!observedCursor && !!previousCursor && observedCursor.epoch !== previousCursor.epoch;
+  const progressed = !!observedCursor && !!previousCursor && !replaced && observedCursor.seq > previousCursor.seq;
+  // Reconnects retain the content boundary; a different epoch establishes a new baseline.
+  const cursor = !observedCursor || (previousCursor && !replaced && observedCursor.seq < previousCursor.seq) ? previousCursor : observedCursor;
   let attention = previous?.attention;
   if (runtimeChanged) {
     attention = activity === 'waiting' ? 'pending' : previous.activity === 'running' && activity === 'idle' ? 'idle' : undefined;
@@ -15,7 +20,7 @@ export function nextObservation(previous: SessionObservation | undefined, next: 
     // Retain an unread reminder across reconnect only while that state still applies.
     if ((attention === 'pending' && activity !== 'waiting') || (attention === 'idle' && activity !== 'idle')) attention = undefined;
   }
-  return { ...next, activity, attention, changed: previous?.changed === true || runtimeChanged || disconnected };
+  return { ...next, activity, cursor, attention, changed: !replaced && (previous?.changed === true || progressed) };
 }
 export function readTrackedSessions(scope: string): SessionStar[] {
   try {

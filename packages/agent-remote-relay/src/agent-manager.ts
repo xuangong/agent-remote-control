@@ -279,12 +279,18 @@ export class AgentManager {
   }
 
   replaceTimeline(epoch: string): void {
-    if (epoch === this.timeline.epoch) return;
+    if (!this.resetTimeline(epoch)) return;
+    this.emit({ type: 'timeline_rebuilt', agentId: this.agentId, cursor: this.timeline.cursor });
+  }
+
+  private resetTimeline(epoch: string): boolean {
+    if (epoch === this.timeline.epoch) return false;
     this.timeline = new TimelineStore(epoch);
     this.seenProviderRecords.clear();
     this.olderHistoryCursor = undefined;
     this.historyLoading = undefined;
     this.emit({ type: 'timeline_replacement', agentId: this.agentId, epoch });
+    return true;
   }
 
   private readonly operationContext = new AsyncLocalStorage<{ beforeDispatch?: () => void }>();
@@ -570,9 +576,10 @@ export class AgentManager {
         if (item.type === 'timeline_replacement') {
           if (!this.boundarySeen) throw new Error('Provider replaced Timeline before history readiness.');
           if (item.observations.some((observation) => observation.event.type !== 'timeline')) throw new Error('Provider Timeline replacement contains non-Timeline state.');
-          this.replaceTimeline(randomUUID());
+          this.resetTimeline(randomUUID());
           this.olderHistoryCursor = item.olderCursor;
           for (const observation of item.observations) await this.applyObservation(observation);
+          this.emit({ type: 'timeline_rebuilt', agentId: this.agentId, cursor: this.timeline.cursor });
           continue;
         }
         if (item.type === 'history_boundary') {

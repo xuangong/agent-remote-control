@@ -53,6 +53,12 @@ test('QR and copied URLs open the same session across authenticated devices with
     await mobile.goto(f.url);
     await signIn(mobile);
     await expect(mobile.getByRole('button', { name: 'Share session link' })).toHaveCount(0);
+    await expect(mobile.getByRole('button', { name: 'Scan session QR code', exact: true })).toBeVisible();
+    const lateScannerScripts: string[] = [];
+    await mobile.route('**/assets/*.js', route => {
+      lateScannerScripts.push(route.request().url());
+      return route.fulfill({ status: 404, body: 'Asset no longer available' });
+    });
     await mobile.evaluate(() => Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true,
       value: async () => { throw new DOMException('Denied', 'NotAllowedError'); } }));
     await mobile.getByRole('button', { name: 'Scan session QR code', exact: true }).click();
@@ -84,10 +90,15 @@ test('QR and copied URLs open the same session across authenticated devices with
     await expect(mobile.locator('.agent-message-assistant').last()).toContainText('Cross-device conversation marker');
     expect(await mobile.evaluate(() => (window as unknown as { scanDocument: boolean }).scanDocument)).toBe(true);
     expect(await mobile.evaluate(() => (window as unknown as { scanStream: MediaStream }).scanStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
+    expect(lateScannerScripts).toEqual([]);
     await mobile.evaluate(() => history.back());
     await expect(mobile.getByTestId('prompt-input')).toHaveValue('Keep this draft when scanning');
     await mobile.evaluate(() => history.forward());
     await expect(mobile).toHaveURL(original);
+    const takeControl = mobile.getByRole('button', { name: 'Take control', exact: true });
+    await expect(takeControl).toBeVisible();
+    await takeControl.click();
+    await expect(mobile.getByTestId('prompt-input')).toBeEditable();
     await mobile.getByTestId('prompt-input').fill('Reply from phone');
     await mobile.getByTestId('prompt-submit').click();
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Reply from phone');

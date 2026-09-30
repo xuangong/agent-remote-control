@@ -12,7 +12,7 @@ const noOpenSessions: readonly OpenedSession[] = [];
 export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string; visible: boolean }
 const noAuxiliarySessions: readonly AuxiliarySession[] = [];
 
-export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true) {
+export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true, visibleSessions?: readonly OpenedSession[]) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   // Authorization gates network access; only tracking changes release retained conversations.
@@ -29,7 +29,12 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   }, [baseUrl, transport]);
   const [retries, setRetries] = useState<Record<string, number>>({});
   const [error, setError] = useState<string>();
-  const visibleKeys = useMemo(() => new Set([...openSessions.map(sessionKey), ...auxiliarySessions.filter(item => item.visible).map(item => sessionKey(item.session)), ...(currentSessionKey ? [currentSessionKey] : [])]), [openSessions, currentSessionKey, auxiliarySessions]);
+  const visibleIdentity = JSON.stringify([...new Set([
+    ...(visibleSessions ?? openSessions).map(sessionKey),
+    ...auxiliarySessions.filter(item => item.visible).map(item => sessionKey(item.session)),
+    ...(visibleSessions === undefined && currentSessionKey ? [currentSessionKey] : []),
+  ])].sort());
+  const visibleKeys = useMemo(() => new Set<string>(JSON.parse(visibleIdentity)), [visibleIdentity]);
   const auxiliaryKeys = useMemo(() => new Set(auxiliarySessions.map(item => sessionKey(item.session))), [auxiliarySessions]);
   const backgroundSessions = useMemo(() => sessions.filter(session => !visibleKeys.has(sessionKey(session)) && !auxiliaryKeys.has(sessionKey(session))), [sessions, visibleKeys, auxiliaryKeys]);
   const observedSessions = useMemo(() => {
@@ -42,14 +47,48 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const current = useRef(sessions); current.current = sessions;
   const observed = useRef(observedSessions); observed.current = observedSessions;
   const visible = useRef(visibleKeys); visible.current = visibleKeys;
-  useEffect(() => { setObservations(values => {
+  const acknowledgeVisible = useCallback((key: string, value: SessionObservation): SessionObservation => {
+    if ((!value.changed && !value.attention) || !visible.current.has(key) || document.visibilityState === 'hidden') return value;
+    if (connections) {
+      const session = observed.current.find(item => sessionKey(item.session) === key)?.session;
+      const timeline = session && connections.find(session)?.replica.getState().timeline;
+      // Opening a view is not a read receipt until its replica has received the notified content.
+      if (!timeline?.initialized || (value.cursor && (timeline.epoch !== value.cursor.epoch || timeline.nextSeq - 1 < value.cursor.seq))) return value;
+    }
+    return { ...value, changed: false, attention: undefined };
+  }, [connections]);
+  const acknowledgeVisibleSessions = useCallback(() => setObservations(values => {
     let next = values;
-    for (const key of visibleKeys) {
-      if (!values[key]?.changed && !values[key]?.attention) continue;
-      next = { ...next, [key]: { ...values[key]!, changed: false, attention: undefined } };
+    for (const key of visible.current) {
+      const value = values[key];
+      if (!value) continue;
+      const acknowledged = acknowledgeVisible(key, value);
+      if (acknowledged !== value) next = { ...next, [key]: acknowledged };
     }
     return next;
-  }); }, [visibleKeys, setObservations]);
+  }), [acknowledgeVisible, setObservations]);
+  useEffect(() => {
+    const subscriptions = new Map<string, { replica: import('@orchardworks/agent-remote-web').AgentReplica; stop(): void }>();
+    const refresh = () => {
+      for (const key of visibleKeys) {
+        const session = observed.current.find(item => sessionKey(item.session) === key)?.session;
+        const replica = session && connections?.find(session)?.replica;
+        const previous = subscriptions.get(key);
+        if (previous?.replica === replica) continue;
+        previous?.stop(); subscriptions.delete(key);
+        if (replica) subscriptions.set(key, { replica, stop: replica.subscribe(acknowledgeVisibleSessions) });
+      }
+      acknowledgeVisibleSessions();
+    };
+    const stop = connections?.subscribe(refresh);
+    refresh();
+    document.addEventListener('visibilitychange', acknowledgeVisibleSessions);
+    return () => {
+      stop?.();
+      for (const subscription of subscriptions.values()) subscription.stop();
+      document.removeEventListener('visibilitychange', acknowledgeVisibleSessions);
+    };
+  }, [visibleKeys, connections, acknowledgeVisibleSessions]);
   useEffect(() => { setSelection({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }); setError(undefined); }, [baseUrl]);
   function toggle(session: SessionStar) {
     const key = sessionKey(session), previous = current.current;
@@ -85,14 +124,13 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const update = useCallback((key: string, value: SessionObservation) => {
     if (!observed.current.some(item => sessionKey(item.session) === key)) return;
     setObservations(previous => {
-      const next = nextObservation(previous[key], value), old = previous[key];
-      if (visible.current.has(key)) { next.changed = false; next.attention = undefined; }
+      const next = acknowledgeVisible(key, nextObservation(previous[key], value)), old = previous[key];
       return old && old.connection === next.connection && old.activity === next.activity && old.error === next.error && old.changed === next.changed && old.attention === next.attention && old.agentId === next.agentId && old.cursor?.epoch === next.cursor?.epoch && old.cursor?.seq === next.cursor?.seq ? previous : { ...previous, [key]: next };
     });
-  }, [setObservations]);
+  }, [setObservations, acknowledgeVisible]);
   const acknowledge = useCallback((key: string) => setObservations(previous => {
     const value = previous[key];
-    return value?.changed ? { ...previous, [key]: { ...value, changed: false, attention: undefined } } : previous;
+    return value?.changed || value?.attention ? { ...previous, [key]: { ...value, changed: false, attention: undefined } } : previous;
   }), [setObservations]);
   const retry = (key: string) => { setObservations(values => { const next = { ...values }; delete next[key]; return next; }); setRetries(values => ({ ...values, [key]: (values[key] ?? 0) + 1 })); };
   const migrations = useRef({ scope: baseUrl, values: new Map<string, import('@orchardworks/agent-remote-protocol').SessionMigration>() });

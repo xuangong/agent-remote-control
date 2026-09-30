@@ -558,7 +558,7 @@ function AppContent({
   async function openTrackedSession(item: SessionEntry): Promise<void> {
     if (!directory || transitionRef.current) return;
     rememberTrackedView();
-    const view = trackedViews.get(item);
+    const view = tracking.observations[sessionKey(item)]?.changed ? undefined : trackedViews.get(item);
     const primary = view ? sessionEntries.find(session => sessionKey(session) === sessionKey(view.primary)) ?? view.primary : item;
     if (await openSession(primary, undefined, undefined, false, view)) trackedViews.select(item);
   }
@@ -907,7 +907,8 @@ function AppContent({
   });
   const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target ? [{ session: askEntry.record.target, visible: askVisible,
     liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, askEntry?.record?.target, askEntry?.attached, askVisible]);
-  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady);
+  const visibleWindows = openWindows.filter(session => activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(sessionKey(session)));
+  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady, visibleWindows);
   useEffect(() => trackedViews.retain(tracking.sessions), [trackedViews, tracking.sessions]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;

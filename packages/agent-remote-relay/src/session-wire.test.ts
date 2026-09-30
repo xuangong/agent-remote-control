@@ -597,20 +597,87 @@ function timelineManagerEvent(seq: number, text: string): AgentManagerEvent {
 }
 
 
-it('captures the content cursor with the activity change, without sending content or moving unchanged targets', async () => {
+it('captures activity immediately and coalesces content progress while activity stays unchanged', async () => {
+  vi.useFakeTimers();
   const { agent, emit } = fakeAgent();
   Object.assign(agent, { timelineCursor: () => ({ epoch: 'epoch-1', seq: 3 }) });
   const output: any[] = [];
   const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
-  await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
-  expect(output.at(-1)).toMatchObject({ type: 'agent_activity', payload: { status: 'idle', cursor: { epoch: 'epoch-1', seq: 3 } } });
-  const snapshot = agent.snapshot(); snapshot.payload.status = 'waiting';
-  emit({ type: 'agent_state', agentId: agent.agentId, snapshot, cursor: { epoch: 'epoch-1', seq: 7 } } as AgentManagerEvent);
-  expect(output.at(-1).payload).toEqual({ agentId: agent.agentId, status: 'waiting', cursor: { epoch: 'epoch-1', seq: 7 } });
-  const count = output.length;
-  emit({ type: 'agent_state', agentId: agent.agentId, snapshot, cursor: { epoch: 'epoch-1', seq: 8 } } as AgentManagerEvent);
-  expect(output).toHaveLength(count);
-  wire.close();
+  try {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    expect(output.at(-1)).toMatchObject({ type: 'agent_activity', payload: { status: 'idle', cursor: { epoch: 'epoch-1', seq: 3 } } });
+    const snapshot = agent.snapshot(); snapshot.payload.status = 'waiting';
+    emit({ type: 'agent_state', agentId: agent.agentId, snapshot, cursor: { epoch: 'epoch-1', seq: 7 } });
+    expect(output.at(-1).payload).toEqual({ agentId: agent.agentId, status: 'waiting', cursor: { epoch: 'epoch-1', seq: 7 } });
+    const count = output.length;
+    emit({ type: 'agent_state', agentId: agent.agentId, snapshot, cursor: { epoch: 'epoch-1', seq: 8 } });
+    expect(output).toHaveLength(count);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(output.at(-1).payload).toEqual({ agentId: agent.agentId, status: 'waiting', cursor: { epoch: 'epoch-1', seq: 8 } });
+  } finally { wire.close(); vi.useRealTimers(); }
+});
+
+it('coalesces streaming content and stops pending activity delivery when closed', async () => {
+  vi.useFakeTimers();
+  const { agent, emit } = fakeAgent();
+  Object.assign(agent, { timelineCursor: () => ({ epoch: 'epoch-1', seq: 0 }) });
+  const output: any[] = [];
+  const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+  try {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    emit(timelineManagerEvent(1, 'First'));
+    await vi.advanceTimersByTimeAsync(250);
+    emit(timelineManagerEvent(2, ' next'));
+    await vi.advanceTimersByTimeAsync(249);
+    expect(output.filter(item => item.type === 'agent_activity')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(output.at(-1).payload).toEqual({ agentId: agent.agentId, status: 'idle', cursor: { epoch: 'epoch-1', seq: 2 } });
+    expect(output.map(item => item.type)).toEqual(['negotiated', 'agent_activity', 'agent_activity']);
+    emit(timelineManagerEvent(3, ' later'));
+    wire.close();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(output).toHaveLength(3);
+  } finally { wire.close(); vi.useRealTimers(); }
+});
+
+it('publishes a replacement content baseline only after the complete rebuild', async () => {
+  vi.useFakeTimers();
+  const { agent, emit } = fakeAgent();
+  Object.assign(agent, { timelineCursor: () => ({ epoch: 'old', seq: 10 }) });
+  const output: any[] = [];
+  const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+  try {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    emit({ type: 'timeline_replacement', agentId: agent.agentId, epoch: 'epoch-1' });
+    emit(timelineManagerEvent(1, 'Restored'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(output.filter(item => item.type === 'agent_activity')).toHaveLength(1);
+    emit(timelineManagerEvent(2, ' history'));
+    emit({ type: 'timeline_rebuilt', agentId: agent.agentId, cursor: { epoch: 'epoch-1', seq: 2 } });
+    expect(output.at(-1).payload.cursor).toEqual({ epoch: 'epoch-1', seq: 2 });
+    expect(output.filter(item => item.type === 'agent_activity')).toHaveLength(2);
+  } finally { wire.close(); vi.useRealTimers(); }
+});
+
+it.each([0, 250])('separates a rebuilt baseline from live content arriving %i ms later', async delay => {
+  vi.useFakeTimers();
+  const { agent, emit } = fakeAgent();
+  Object.assign(agent, { timelineCursor: () => ({ epoch: 'old', seq: 10 }) });
+  const output: any[] = [];
+  const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+  try {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    emit({ type: 'timeline_replacement', agentId: agent.agentId, epoch: 'epoch-1' });
+    emit(timelineManagerEvent(1, 'Restored'));
+    emit(timelineManagerEvent(2, ' history'));
+    emit({ type: 'timeline_rebuilt', agentId: agent.agentId, cursor: { epoch: 'epoch-1', seq: 2 } });
+    if (delay) await vi.advanceTimersByTimeAsync(delay);
+    emit(timelineManagerEvent(3, ' New live content'));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(output.filter(item => item.type === 'agent_activity').map(item => item.payload.cursor)).toEqual([
+      { epoch: 'old', seq: 10 }, { epoch: 'epoch-1', seq: 2 }, { epoch: 'epoch-1', seq: 3 },
+    ]);
+  } finally { wire.close(); vi.useRealTimers(); }
 });
 
 it('fences an operation if control changes while asynchronous validation is pending', async () => {

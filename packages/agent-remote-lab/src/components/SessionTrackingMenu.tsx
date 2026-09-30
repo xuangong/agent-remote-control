@@ -40,7 +40,7 @@ export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: 
   const alertLabel = alert === 'pending' ? 'New pending sessions need attention.' : alert === 'idle' ? 'A working session is now idle.' : '';
   const attention = sessions.some(session => ['waiting', 'failed'].includes(tracking.observations[sessionKey(session)]?.activity ?? ''));
   return <div ref={root} style={style} {...handlers} className="lab-tracking-floating" data-attention={attention} data-alert={alert} {...(inert ? { inert: '' } : {})}>
-    <SessionPopover label="Tracked sessions" triggerTitle={`${alertLabel ? `${alertLabel} ` : ''}Drag to move, or focus and use arrow keys`} trigger={<><SessionCatchUpRing value={catchUp} /><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={`${group.label}: ${group.count}`} aria-label={`${group.count} ${group.label.toLowerCase()} sessions`}>{group.count}</span>) : <span className="lab-tracking-count" title="No background sessions">0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={`${changes} session status changes`} /> : attention ? <span className="lab-tracking-attention" aria-label="A tracked session needs attention" /> : null}</>}>
+    <SessionPopover label="Tracked sessions" triggerTitle={`${alertLabel ? `${alertLabel} ` : ''}Drag to move, or focus and use arrow keys`} trigger={<><SessionCatchUpRing value={catchUp} /><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={`${group.label}: ${group.count}`} aria-label={`${group.count} ${group.label.toLowerCase()} sessions`}>{group.count}</span>) : <span className="lab-tracking-count" title="No background sessions">0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={`${changes} sessions with new content`} /> : attention ? <span className="lab-tracking-attention" aria-label="A tracked session needs attention" /> : null}</>}>
       {close => <>
         <p className="lab-control-note">Tracking on this client · Drag to reorder</p>
         <span id={hintId} className="agent-visually-hidden">Open a session with Enter. Drag a row to reorder; on touch screens use its grip. Alt plus Up or Down also changes its position.</span>
@@ -59,7 +59,7 @@ export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: 
                 if (target) reorder(key, sessionKey(target), event.key === 'ArrowUp' ? 'before' : 'after');
               }}>
               <span className="lab-tracked-description"><strong className="agent-session-title" data-session-status={value?.activity ?? 'unknown'}>{session.title}</strong><small className="agent-session-title" data-session-status={value?.activity}>{observationLabel(value)} · {session.providerId}</small></span>
-              {value?.changed ? <span className="lab-tracked-change" data-attention={value.attention} aria-label={`New status for ${session.title}`}><span aria-hidden="true" />New</span> : null}
+              {value?.changed ? <span className="lab-tracked-change" data-attention={value.attention} aria-label={`New content in ${session.title}`}><span aria-hidden="true" />New</span> : null}
               {sessions.length > 1 ? <span className="lab-tracked-grip" aria-hidden="true" title="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="3" r="1.2" /><circle cx="11" cy="3" r="1.2" /><circle cx="5" cy="8" r="1.2" /><circle cx="11" cy="8" r="1.2" /><circle cx="5" cy="13" r="1.2" /><circle cx="11" cy="13" r="1.2" /></svg></span> : null}
             </button>
           </div>{value?.error ? <p className="lab-control-note" role="alert">{value.error} <button type="button" onClick={() => tracking.retry(key)}>Retry tracking</button></p> : null}</li>;
@@ -68,6 +68,6 @@ export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: 
         <span className="agent-visually-hidden" role="status">{announcement}</span>
       </>}
     </SessionPopover>
-    <span className="agent-visually-hidden" role="status">{changes ? `${changes} tracked session status changes. ${alertLabel}`.trim() : ''}</span>
+    <span className="agent-visually-hidden" role="status">{changes ? `${changes} tracked sessions have new content. ${alertLabel}`.trim() : ''}</span>
   </div>;
 }

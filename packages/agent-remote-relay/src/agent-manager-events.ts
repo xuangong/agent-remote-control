@@ -22,6 +22,8 @@ export type AgentManagerEvent =
       row?: CanonicalTimelineRow;
     }
   | { type: 'timeline_replacement'; agentId: string; epoch: string }
+  /** Internal publication boundary after all replacement rows have been committed. */
+  | { type: 'timeline_rebuilt'; agentId: string; cursor: TimelineCursor }
   | {
       type: 'timeline_resource_binding_replaced';
       agentId: string;

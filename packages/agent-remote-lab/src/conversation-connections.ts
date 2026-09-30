@@ -16,11 +16,17 @@ interface Connection {
 /** Keeps already opened tracked conversations live independently of their mounted views. */
 export class ConversationConnections {
   private readonly connections = new Map<string, Connection>();
+  private readonly listeners = new Set<() => void>();
   private tracked = new Set<string>();
 
   constructor(private readonly transport: RemoteAgentTransport, private readonly recoveryScope?: string, private readonly controlExtension?: (agentId: string, session?: Identity) => SessionControlExtension | undefined) {}
 
   get agentIds(): string[] { return [...this.connections.keys()]; }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   find(session: Identity): Connection | undefined {
     const key = sessionKey(session);
@@ -34,6 +40,8 @@ export class ConversationConnections {
 
   acquire(agentId: string, replica: AgentReplica, session?: Identity): { client: RemoteSessionClient; replica: AgentReplica; release(): void } {
     let connection = this.connections.get(agentId);
+    const previous = connection;
+    const previousKey = connection?.key;
     if (!connection) {
       const key = session ? sessionKey(session) : undefined;
       connection = { agentId, key, replica, viewers: 0,
@@ -46,6 +54,7 @@ export class ConversationConnections {
     }
     if (session) connection.key = sessionKey(session);
     connection.viewers += 1;
+    if (!previous || previousKey !== connection.key) this.notify();
     const acquired = connection;
     let released = false;
     return { client: connection.client, replica: connection.replica, release: () => {
@@ -74,6 +83,11 @@ export class ConversationConnections {
     this.connections.delete(connection.agentId);
     connection.client.stop();
     connection.stopRecovery();
+    this.notify();
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
   }
 }
 

@@ -89,6 +89,38 @@ test('rejects a foreign QR link without leaving the current session', async ({ p
   await expect(page.getByRole('button', { name: 'Scan again' })).toBeVisible();
 });
 
+test('requests camera access from an older open page without a late decoder download', async ({ page }, info) => {
+  await setup(page);
+  await page.getByRole('button', { name: 'Close session link' }).click();
+  const lateScripts: string[] = [];
+  await page.route(/\/(?:assets\/.*\.js|[^/?]*jsqr[^/?]*)(?:\?.*)?$/i, route => {
+    lateScripts.push(route.request().url());
+    return route.abort('failed');
+  });
+  await page.evaluate(() => {
+    Object.assign(window, { cameraRequested: false });
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => {
+      Object.assign(window, { cameraRequested: true });
+      throw new DOMException('Denied', 'NotAllowedError');
+    } });
+  });
+  if (info.project.name.includes('mobile')) {
+    await page.getByRole('button', { name: 'Favorites', exact: true }).click();
+    await page.getByRole('button', { name: 'Scan to open', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: 'Scan session QR code', exact: true }).click();
+  }
+  const scanner = page.getByRole('dialog', { name: 'Scan session', exact: true });
+  await expect(scanner.getByRole('alert')).toBeVisible();
+  const result = {
+    cameraRequested: await page.evaluate(() => (window as unknown as { cameraRequested: boolean }).cameraRequested),
+    message: await scanner.getByRole('alert').textContent(),
+  };
+  await info.attach('scanner-startup', { body: JSON.stringify({ ...result, lateScripts }, null, 2), contentType: 'application/json' });
+  expect(result).toEqual({ cameraRequested: true, message: expect.stringContaining('Camera access was denied') });
+  expect(lateScripts).toEqual([]);
+});
+
 
 test('opens the shared scanner from the mobile title without opening the sidebar', async ({ page }, info) => {
   test.skip(!info.project.name.includes('mobile'), 'The title shortcut is mobile navigation.');

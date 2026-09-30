@@ -205,7 +205,7 @@ it('acknowledges only the selected session and clears reminders when that sessio
   expect(tracking.observations[sessionKey(second)]?.attention).toBe('idle');
   await act(async () => tracking.acknowledge(sessionKey(star)));
   expect(tracking.observations[sessionKey(star)]).toMatchObject({ changed: false, attention: undefined });
-  expect(tracking.observations[sessionKey(second)]).toMatchObject({ changed: true, attention: 'idle' });
+  expect(tracking.observations[sessionKey(second)]).toMatchObject({ changed: false, attention: 'idle' });
   await emit('native', 'waiting');
   expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
   await act(async () => select(sessionKey(second)));
@@ -292,7 +292,7 @@ it('observes a minimized auxiliary Ask independently and replaces only its subsc
   expect(tracking.sessions).toEqual([]);
   expect(tracking.backgroundSessions).toEqual([]);
   await act(async () => listeners.get('ask')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'ask', status: 'waiting' } }));
-  expect(tracking.observations[sessionKey(ask)]).toMatchObject({ attention: 'pending', changed: true });
+  expect(tracking.observations[sessionKey(ask)]).toMatchObject({ attention: 'pending', changed: false });
   await act(async () => show(true));
   expect(tracking.observations[sessionKey(ask)]).toMatchObject({ attention: undefined, changed: false });
   const primaryListener = listeners.get('primary');
@@ -442,4 +442,61 @@ it('preserves a tracked branch when its source is forked again and favorites ref
   expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['first']);
   await act(async () => tracking.reconcileFavorites({ scope: 'alice', ready: true, stars: [{ ...star, nativeSessionId: 'first' }] }));
   expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['first']);
+});
+
+it.each(['before', 'after'] as const)('acknowledges updates only after their visible replica has applied the content, acquired %s opening, never while hidden', async timing => {
+  const primary = { ...star, agentId: 'native' };
+  const child = { ...primary, nativeSessionId: 'child', agentId: 'child' };
+  saveTrackedSessions('alice', [star]);
+  const activity = new Map<string, Parameters<RemoteAgentTransport['connect']>[1]>();
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot: async () => { throw new Error('No history requested by tracking'); },
+    fetchTimeline: async () => { throw new Error('No history requested by tracking'); },
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect(id, listener) {
+      queueMicrotask(() => listener.onOpen());
+      return { close: () => {}, send: message => {
+        if (message.type !== 'negotiate' || message.observation !== 'activity') return;
+        activity.set(id, listener);
+        listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 } } });
+      } };
+    },
+  };
+  const page = (seq: number): import('@orchardworks/agent-remote-protocol').HistoryPage => ({
+    protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+      requestId: 'history', agentId: 'native', direction: 'tail', epoch: 'content', reset: false, staleCursor: false, gap: false, error: null,
+      window: { minSeq: 1, maxSeq: seq, nextSeq: seq + 1 }, startCursor: { epoch: 'content', seq: 1 }, endCursor: { epoch: 'content', seq },
+      hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', seqStart: 1, seqEnd: seq, sourceSeqRanges: [{ startSeq: 1, endSeq: seq }], collapsed: [], resources: [],
+        timestamp: '2026-09-30T00:00:00Z', item: { type: 'assistant_message', text: `Output ${seq}` } }],
+    },
+  });
+  const replica = new AgentReplica(); replica.applyHistory(page(1));
+  const connections = new ConversationConnections(transport);
+  let acquired = timing === 'before' ? connections.acquire(primary.agentId, replica, primary) : undefined;
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  let tracking!: SessionTracking, show!: (sessions: typeof primary[]) => void;
+  function Fixture() {
+    const [visible, setVisible] = useState<typeof primary[]>([child]); show = setVisible;
+    tracking = useSessionTracking('alice', transport, sessionKey(child), [primary, child], undefined, connections, true, visible);
+    return <>{tracking.observers}</>;
+  }
+  const emit = (seq: number) => act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity',
+    payload: { agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq } } }));
+  try {
+    await render(<Fixture />);
+    await emit(2);
+    expect(tracking.backgroundSessions).toEqual([star]);
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
+    await act(async () => show([primary]));
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
+    if (timing === 'after') await act(async () => { acquired = connections.acquire(primary.agentId, replica, primary); });
+    await act(async () => { replica.applyHistory(page(2)); });
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
+    await act(async () => { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); });
+    await emit(3);
+    await act(async () => { replica.applyHistory(page(3)); });
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
+    await act(async () => { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
+  } finally { acquired?.release(); connections.clear(); }
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import decodeQr from 'jsqr';
 
 function cameraFailure(error: unknown): string {
   const name = error instanceof Error ? error.name : '';
@@ -32,9 +33,6 @@ export function SessionScanner({ onRead }: { onRead(text: string): void }) {
         if (!navigator.mediaDevices?.getUserMedia) {
           setFailure('Camera scanning is unavailable in this browser. Use HTTPS or paste a session link.'); return;
         }
-        // Load decoding only while scanning. Five bounded frames per second keep mobile work low.
-        const { default: decode } = await import('jsqr');
-        if (retired) return;
         stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 720 }, height: { ideal: 720 } } });
         if (retired) { stop(); return; }
         element.srcObject = stream;
@@ -52,7 +50,7 @@ export function SessionScanner({ onRead }: { onRead(text: string): void }) {
               canvas.width = Math.round(element.videoWidth * scale); canvas.height = Math.round(element.videoHeight * scale);
               context!.drawImage(element, 0, 0, canvas.width, canvas.height);
               const pixels = context!.getImageData(0, 0, canvas.width, canvas.height);
-              const code = decode(pixels.data, pixels.width, pixels.height, { inversionAttempts: 'dontInvert' });
+              const code = decodeQr(pixels.data, pixels.width, pixels.height, { inversionAttempts: 'dontInvert' });
               if (code) { retired = true; stop(); callback.current(code.data); return; }
             }
             timer = setTimeout(scan, 200);
@@ -61,7 +59,8 @@ export function SessionScanner({ onRead }: { onRead(text: string): void }) {
         scan();
       } catch (error) { stop(); if (!retired) setFailure(cameraFailure(error)); }
     }
-    void start();
+    // Defer acquisition so a retired mount never requests camera access.
+    queueMicrotask(() => { if (!retired) void start(); });
     return () => { retired = true; stop(); document.removeEventListener('visibilitychange', hide); };
   }, [attempt]);
   return <div className="lab-session-scanner">

@@ -120,9 +120,11 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     expect(await panel.locator('.cm-content').count()).toBe(0);
     await panel.getByRole('button', { name: 'Close file preview' }).click();
     await page.getByRole('button', { name: 'Open image: Diagram' }).click();
-    await expect.poll(() => panel.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
+    const imagePanel = page.getByRole('dialog', { name: 'Image preview', exact: true });
+    await expect.poll(() => imagePanel.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
+    expect((await imagePanel.boundingBox())!.width).toBeGreaterThanOrEqual(width * 0.98);
     await page.evaluate(() => (window as any).switchScope());
-    await expect.poll(() => panel.count()).toBe(0);
+    await expect.poll(() => imagePanel.count()).toBe(0);
     expect(fileRequests).toEqual([]);
     expect(errors).toEqual([]);
   }, 45_000);

@@ -230,6 +230,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
   return <div className="lab-timeline-stage" onKeyDownCapture={event => {
+      if (event.target instanceof Node && !event.currentTarget.contains(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && state?.timeline.initialized) {
         event.preventDefault(); event.stopPropagation(); setOpenSearchScope(searchScope);
       }

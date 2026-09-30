@@ -8,4 +8,8 @@ export interface FilePreviewRequest {
   readonly context: MarkdownResourceContext;
 }
 
-export const FilePreviewContext = createContext<{ open(request: FilePreviewRequest): void } | undefined>(undefined);
+export const FilePreviewContext = createContext<{
+  /** Invalidates open previews when the surrounding conversation view changes. */
+  readonly scopeKey?: string;
+  open(request: FilePreviewRequest): void;
+} | undefined>(undefined);

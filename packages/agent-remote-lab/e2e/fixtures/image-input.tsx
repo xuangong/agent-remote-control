@@ -31,7 +31,12 @@ function Fixture() {
         if (options?.signal?.aborted) throw new DOMException('Paused', 'AbortError');
         if (fail) throw new Error('Fixture upload failed. Retry this image.');
         const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('');
-        return { attachmentId: uploadId, sha256, byteLength: file.size, mediaType: 'image/png', imageDimensions: { width: 1, height: 1 } };
+        const image = new Image();
+        const url = URL.createObjectURL(file);
+        try {
+          image.src = url; await image.decode();
+          return { attachmentId: uploadId, sha256, byteLength: file.size, mediaType: 'image/png', imageDimensions: { width: image.naturalWidth, height: image.naturalHeight } };
+        } finally { URL.revokeObjectURL(url); }
       },
     }} />
     <pre data-testid="sent-content" style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(sent)}</pre>

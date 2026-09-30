@@ -42,7 +42,7 @@ export function PreviewWorkspace({ children, className, style, resourceScope, ..
   return <div {...props} ref={attach}
     className={`agent-preview-workspace${className ? ` ${className}` : ''}`} data-preview-open={open || undefined}
     style={{ ...style, '--agent-preview-width': `${displayedFraction * 100}%` } as CSSProperties}>
-    <FilePreviewContext.Provider value={{ open: openFile }}><div className="agent-preview-workspace-content">{children}</div></FilePreviewContext.Provider>
+    <FilePreviewContext.Provider value={{ open: openFile, scopeKey: resourceScope }}><div className="agent-preview-workspace-content">{children}</div></FilePreviewContext.Provider>
     {selectedFile ? <FilePreview key={selectedFile.version} request={selectedFile.request} onClose={() => setFile(undefined)} /> : null}
     {open ? <>
       {dragging ? <div className="agent-preview-resize-shield" /> : null}

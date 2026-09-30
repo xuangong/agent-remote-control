@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import type { AgentReplicaState } from '../replica/types.js';
+import { ImagePreview } from './ImagePreview.js';
 
 export interface ResourceCardProps {
   readonly binding: ResourceBinding;
@@ -29,6 +30,7 @@ const inertPreviewMediaTypes = new Set([
 
 export function ResourceCard({ binding, detail, pending, failure, onRequest }: ResourceCardProps) {
   const [failedPreview, setFailedPreview] = useState<string>();
+  const [openedImage, setOpenedImage] = useState<string>();
   const status = detail?.status ?? binding.status;
   const imageUrl = detail?.status === 'available' && 'contentBase64' in detail && canPreviewImage(detail.mediaType)
     ? resourceDataUrl(detail.mediaType, detail.contentBase64) : undefined;
@@ -38,10 +40,12 @@ export function ResourceCard({ binding, detail, pending, failure, onRequest }: R
     {detail?.status === 'failed' ? <small role="alert">{detail.message}</small> : null}
     {detail?.status === 'unavailable' ? <small>{detail.reason}</small> : null}
     {failure ? <small role="alert">{failure}</small> : null}
-    {imageUrl ? failedPreview === imageUrl ? <small role="alert">Image preview unavailable. Download the resource to view it.</small> : <img
-      className="agent-resource-image" src={imageUrl} alt={binding.locator} loading="lazy" decoding="async"
-      onError={() => setFailedPreview(imageUrl)}
-    /> : null}
+    {imageUrl ? failedPreview === imageUrl ? <small role="alert">Image preview unavailable. Download the resource to view it.</small> : <button
+      type="button" className="agent-resource-image-open" aria-label={`Open image: ${binding.locator}`} onClick={() => setOpenedImage(imageUrl)}>
+      <img className="agent-resource-image" src={imageUrl} alt={binding.locator} loading="lazy" decoding="async"
+        onError={() => setFailedPreview(imageUrl)} />
+    </button> : null}
+    {imageUrl && openedImage === imageUrl ? <ImagePreview src={imageUrl} label={binding.locator} onClose={() => setOpenedImage(undefined)} /> : null}
     {detail?.status === 'available' && 'contentBase64' in detail ? <div className="agent-resource-actions">
       {canOpenResource(detail.mediaType) ? <a
         data-resource-open={binding.resourceId}

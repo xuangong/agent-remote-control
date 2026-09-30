@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import base from './playwright.config.js';
 export default defineConfig(base, {
-  testMatch: 'image-input.spec.ts',
+  testMatch: ['image-input.spec.ts', 'image-viewer.spec.ts'],
   projects: [...(base.projects ?? []),
     { name: 'webkit-desktop', use: { ...devices['Desktop Safari'] } },
     { name: 'webkit-mobile', use: { ...devices['iPhone 13'] } },

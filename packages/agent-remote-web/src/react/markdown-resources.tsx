@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import { FilePreviewContext } from './FilePreviewContext.js';
+import { ImagePreview } from './ImagePreview.js';
 import { MarkdownImageFrame } from './MarkdownImageFrame.js';
 import { canPreviewImage } from './ResourceCard.js';
 import { useNearViewport } from './useNearViewport.js';
@@ -64,6 +65,8 @@ export function MarkdownResourceImage({
   const key = JSON.stringify([context?.scopeKey, locator, sourceLocator]);
   const { ref: frameRef, near } = useNearViewport(key);
   const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string }>();
+  const [openedKey, setOpenedKey] = useState<string>();
+  useEffect(() => { setOpenedKey(undefined); }, [key]);
   const binding = (result?.key === key ? result.binding : undefined)
     ?? (context && locator ? cachedLocalResourceBinding(context, locator, sourceLocator) : undefined);
   const failure = result?.key === key ? result.failure : undefined;
@@ -90,6 +93,9 @@ export function MarkdownResourceImage({
     : detail?.status === 'available' && !canPreviewImage(detail.mediaType) ? 'This resource is not a supported image.' : undefined);
   const frame = <MarkdownImageFrame key={key} frameRef={frameRef} src={src} alt={alt ?? locator} failure={reason}
     dimensions={detail?.status === 'available' ? detail.imageDimensions : undefined} />;
-  return preview && !imageNode?.data?.linked ? <button type="button" className="agent-resource-image-open" aria-label={`Open image: ${alt ?? locator}`}
-    onClick={() => preview.open({ locator, sourceLocator, context })}>{frame}</button> : frame;
+  return !imageNode?.data?.linked ? <>
+    <button type="button" className="agent-resource-image-open" aria-label={`Open image: ${alt ?? locator}`} disabled={!src && !preview}
+      onClick={() => { if (src) setOpenedKey(key); else preview?.open({ locator, sourceLocator, context }); }}>{frame}</button>
+    {openedKey === key && src ? <ImagePreview src={src} label={alt ?? locator} onClose={() => setOpenedKey(undefined)} /> : null}
+  </> : frame;
 }

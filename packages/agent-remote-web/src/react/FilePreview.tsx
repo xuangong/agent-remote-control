@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { FilePreviewRequest } from './FilePreviewContext.js';
 import { loadLocalResource } from './local-resource.js';
 import { canPreviewImage } from './ResourceCard.js';
-import { MarkdownImageFrame } from './MarkdownImageFrame.js';
+import { ImagePreview } from './ImagePreview.js';
 import { usePreviewVisibility } from './usePreviewVisibility.js';
 
 const ReadOnlyCode = lazy(() => import('./ReadOnlyCode.js'));
@@ -13,12 +13,11 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
   const dialog = useRef<HTMLDialogElement>(null);
   const [attempt, retry] = useState(0);
   const [wrap, setWrap] = useState(true);
-  const [result, setResult] = useState<Loaded>();
+  const [result, setResult] = useState<{ request: FilePreviewRequest; value: Loaded }>();
   const [failure, setFailure] = useState<string>();
   const [loading, setLoading] = useState(true);
   const target = fileTarget(request.locator);
   const filename = displayFilename(target.locator);
-  usePreviewVisibility(dialog, true, `file:${request.context.scopeKey}:${request.locator}`);
 
   useEffect(() => {
     const trigger = request.returnFocus;
@@ -32,16 +31,18 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
       current = false; setLoading(false); setFailure('The file request timed out. Check the Host connection and retry.');
     }, 20_000);
     void loadLocalResource(request.context, target.locator, request.sourceLocator, undefined, attempt > 0).then(value => {
-      if (current) { setResult(value); setLoading(false); window.clearTimeout(deadline); }
+      if (current) { setResult({ request, value }); setLoading(false); window.clearTimeout(deadline); }
     }).catch(error => {
       if (current) { setFailure(error instanceof Error ? error.message : 'The file could not be loaded.'); setLoading(false); window.clearTimeout(deadline); }
     });
     return () => { current = false; window.clearTimeout(deadline); };
   }, [request, target.locator, attempt]);
 
-  const detail = result?.detail;
-  const available = detail?.status === 'available' && 'contentBase64' in detail ? detail : undefined;
+  const detail = result?.request === request ? result.value.detail : undefined;
+  const available = detail?.status === 'available' && 'contentBase64' in detail && typeof detail.contentBase64 === 'string'
+    ? { ...detail, contentBase64: detail.contentBase64 } : undefined;
   const isImage = available && canPreviewImage(available.mediaType);
+  usePreviewVisibility(dialog, !isImage, `file:${request.context.scopeKey}:${request.locator}`);
   let text: string | undefined;
   let error = failure ?? (detail?.status === 'unavailable' ? detail.reason : detail?.status === 'failed' ? detail.message
     : !loading && !available ? 'This file is unavailable. Check the path and Host connection, then retry.' : undefined);
@@ -52,6 +53,9 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
       if (text.includes('\0')) throw new Error('Binary files cannot be previewed as text.');
     } catch (cause) { error = cause instanceof Error ? cause.message : 'This file is not readable UTF-8 text.'; }
   }
+  if (available && isImage) return <ImagePreview src={`data:${available.mediaType};base64,${available.contentBase64}`} label={filename}
+    status={`${available.byteLength.toLocaleString()} bytes · Read only`} onClose={onClose}
+    actions={<button type="button" aria-label="Refresh file" title="Read file again" disabled={loading} onClick={() => retry(value => value + 1)}>Refresh file</button>} />;
   return <dialog ref={dialog} className="agent-preview-browser agent-file-preview" aria-label="File preview" tabIndex={-1} autoFocus
     onCancel={event => { event.preventDefault(); onClose(); }} onKeyDown={event => {
       if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); onClose(); }
@@ -66,7 +70,6 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
       <div className="agent-file-body" aria-busy={loading}>
         {loading ? <p className="agent-file-message" role="status">Loading file…</p>
           : error ? <div className="agent-file-message" role="alert"><p>{error}</p><button type="button" onClick={() => retry(value => value + 1)}>Retry</button></div>
-          : available && isImage ? <div className="agent-file-image"><MarkdownImageFrame src={`data:${available.mediaType};base64,${available.contentBase64}`} alt={filename} dimensions={available.imageDimensions} /></div>
           : text !== undefined ? <Suspense fallback={<p role="status" className="agent-file-message">Opening source…</p>}><ReadOnlyCode text={text} filename={filename} wrap={wrap} line={target.line} /></Suspense> : null}
       </div>
       <footer className="agent-file-footer"><span>Read only</span><span>{available ? `${available.byteLength.toLocaleString()} bytes` : 'Local resource'}</span></footer>

@@ -1,7 +1,7 @@
 import { useContext, useRef, useState } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { CommunicationNavigationContext } from './CommunicationNavigation.js';
-import { CommunicationContent } from './CommunicationContent.js';
+import { CommunicationContent, CommunicationTitle } from './CommunicationContent.js';
 import type { MarkdownResourceContext } from './markdown-resources.js';
 
 export function CommunicationLetter({ entry, resourceContext }: { entry: ProjectedTimelineEntry; resourceContext?: MarkdownResourceContext }) {
@@ -25,10 +25,10 @@ export function CommunicationLetter({ entry, resourceContext }: { entry: Project
       if (!navigation || (event.target as HTMLElement).closest('button, a, details, input, textarea, select, [contenteditable]') || (selection && !selection.isCollapsed)) return;
       void open();
     }}>
-    <CommunicationContent item={item} timestamp={entry.timestamp} resourceContext={resourceContext} action={
+    <CommunicationContent item={item} timestamp={entry.timestamp} resourceContext={resourceContext} heading={
       <button type="button" className="agent-letter-open" disabled={!navigation || pending} onClick={() => void open()}
         aria-label={`Open letter from ${item.sender} to ${item.recipient}`} title="Go to the linked session at this message">
-        <svg className="agent-letter-envelope" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></svg>
+        <CommunicationTitle sender={item.sender} recipient={item.recipient} />
         {direction ? <span className="agent-letter-direction" aria-label={`Recipient on the ${direction}`}>{direction === 'left' ? '←' : '→'}</span> : null}
       </button>
     } />

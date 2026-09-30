@@ -66,7 +66,7 @@ async function revealHiddenLetterFromSearch(page: Page) {
   await browserExpect.poll(() => page.evaluate(() => localStorage.getItem('agent-remote:show-letters'))).toBe('false');
 }
 
-for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(`keeps letter metadata in Details without navigating on ${mobile ? 'mobile' : 'desktop'} ${engine.name()}`, async () => {
+for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(`keeps the letter title visible while toggling Details without navigation on ${mobile ? 'mobile' : 'desktop'} ${engine.name()}`, async () => {
   const browser = await engine.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: mobile ? { width: 402, height: 874 } : { width: 1600, height: 1000 }, isMobile: mobile, hasTouch: mobile });
@@ -81,7 +81,8 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     const details = letter.locator('details');
     const summary = details.locator('summary');
     const header = details.getByText(/Message Type: FINAL_ANSWER/);
-    const participants = details.getByText('/root/review → /root', { exact: true });
+    const title = letter.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true });
+    const participants = title.getByText('/root/review → /root', { exact: true });
     const timestamp = details.locator('time');
     const initialUrl = page.url();
     const expectNoNavigation = async () => {
@@ -95,13 +96,19 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     await browserExpect(summary).toHaveText('Details');
     await browserExpect(details).not.toHaveAttribute('open');
     await browserExpect(header).toBeHidden();
-    await browserExpect(participants).toBeHidden();
+    await browserExpect(participants).toBeVisible();
+    await browserExpect(letter.getByText('/root/review → /root', { exact: true })).toHaveCount(1);
+    await browserExpect(title.locator('svg')).toBeVisible();
+    await browserExpect(letter.locator('.agent-letter-envelope')).toHaveCount(1);
+    await browserExpect(letter.locator('.agent-letter-footer svg')).toHaveCount(0);
     await browserExpect(timestamp).toBeHidden();
+    const titleBounds = (await title.boundingBox())!, bodyBounds = (await body.boundingBox())!;
+    expect(titleBounds.y + titleBounds.height).toBeLessThanOrEqual(bodyBounds.y + 1);
     expect((await letter.boundingBox())!.height).toBeLessThanOrEqual(mobile ? 120 : 110);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expectNoNavigation();
     await page.screenshot({ path: `/tmp/arc-letter-payload-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-collapsed.png` });
-    await letter.screenshot({ path: `/tmp/arc-letter-compact-${engine.name()}-${mobile ? 'mobile' : 'desktop'}.png` });
+    await letter.screenshot({ path: `/tmp/arc-letter-heading-${engine.name()}-${mobile ? 'mobile' : 'desktop'}.png` });
     await summary.click();
     await browserExpect(details).toHaveAttribute('open', '');
     await browserExpect(header).toBeVisible();
@@ -117,7 +124,7 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     await summary.click();
     await browserExpect(details).not.toHaveAttribute('open');
     await browserExpect(header).toBeHidden();
-    await browserExpect(participants).toBeHidden();
+    await browserExpect(participants).toBeVisible();
     await browserExpect(timestamp).toBeHidden();
     await browserExpect(body).toBeVisible();
     await expectNoNavigation();
@@ -235,7 +242,7 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     await revealHiddenLetterFromSearch(page);
     const open=primary.getByRole('button',{name:'Open letter from /root to /root/review',exact:true});
     await browserExpect(open).toBeVisible();
-    await open.click();
+    await open.getByText('/root → /root/review', { exact: true }).click();
     const side=page.locator('.lab-side-conversation');
     await browserExpect(side).toBeVisible();
     await browserExpect(side.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key',/task$/);
@@ -284,7 +291,8 @@ for (const engine of [chromium, webkit]) it(`navigates mobile letters in the cur
     await page.goto(url);
     const primary = page.locator('.lab-primary-conversation');
     await revealHiddenLetterFromSearch(page);
-    await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
+    await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true })
+      .getByText('/root → /root/review', { exact: true }).click();
     await browserExpect(primary).toBeVisible();
     await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
     await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);

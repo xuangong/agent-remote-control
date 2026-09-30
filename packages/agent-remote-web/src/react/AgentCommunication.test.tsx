@@ -56,7 +56,7 @@ function replyEntry(text: string): ProjectedTimelineEntry {
     resources: [], collapsed: [], sourceSeqRanges: [] };
 }
 
-it.each([true, false])('shows only the payload with collapsed metadata (projected: %s)', async projected => {
+it.each([true, false])('shows the letter title and payload with collapsed metadata (projected: %s)', async projected => {
   const entry = replyEntry(`${envelopeHeader}\nReview **complete**.`);
   const container = await render(<TimelineItemRenderer item={entry.item} entry={projected ? entry : undefined} />);
   const body = container.querySelector('.agent-letter-body')!;
@@ -65,9 +65,12 @@ it.each([true, false])('shows only the payload with collapsed metadata (projecte
   const details = container.querySelector('details')!;
   expect(details).not.toBeNull();
   expect(details.open).toBe(false);
-  expect(details.textContent).toContain('/root/review → /root');
+  expect(details.querySelector('.agent-letter-participants')).toBeNull();
   expect(details.querySelector('pre')?.textContent).toBe(envelopeHeader);
-  expect(container.querySelector('.agent-letter-heading')?.textContent ?? '').not.toContain('/root');
+  const heading = container.querySelector('.agent-letter-heading')!;
+  expect(heading.textContent).toBe('/root/review → /root');
+  expect(heading.querySelector('.agent-letter-envelope')).not.toBeNull();
+  expect(heading.closest('details')).toBeNull();
   await act(async () => details.querySelector('summary')!.click());
   expect(details.open).toBe(true);
   await act(async () => details.querySelector('summary')!.click());

@@ -73,8 +73,9 @@ import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey, sessionChildren } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { PreviewProvider, PreviewWorkspace, TimelineDisplay, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
+import { PreviewProvider, PreviewWorkspace, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
 import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
+import { useTimelineLettersVisible } from './hooks/useTimelineLettersVisible.js';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
@@ -262,6 +263,7 @@ function AppContent({
   const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
   const [timelineDisplay, setTimelineDisplay] = useTimelineDisplayMode();
+  const [lettersVisible, setLettersVisible] = useTimelineLettersVisible();
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
   const compactLayoutRef = useRef(isCompactLayout());
@@ -1029,9 +1031,10 @@ function AppContent({
     setTraceNavigation(previous => previous?.scope === traceScope ? previous : undefined);
   }, [traceScope]);
   function inspectTimelineEntry(key: string, view: 'workbench' | 'trace') {
-    if (view === 'workbench' && timelineDisplay === 'content' && state) {
+    if (view === 'workbench' && state) {
       const item = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries).find(entry => entry.key === key)?.entry.item;
-      if (item && !isContentOnlyItem(item)) setTimelineDisplay('simple');
+      if (item?.type === 'agent_communication') setLettersVisible(true);
+      if (timelineDisplay === 'content' && item && !isContentOnlyItem(item)) setTimelineDisplay('simple');
     }
     if (activeAgentId) setLetterReveals(values => { const next = { ...values }; delete next[activeAgentId]; return next; });
     setTraceNavigation({ scope: traceScope, key, view, requestId: ++traceRequestCounter.current });
@@ -1156,6 +1159,7 @@ function AppContent({
         if (!await openSession(destination, undefined, undefined, true)) throw new Error('The linked session could not be opened.');
         // Opening the other endpoint intentionally advances the navigation generation.
         controller.signal.throwIfAborted();
+        setLettersVisible(true);
         setLetterReveals(values => ({ ...values, [destination.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
         await new Promise(resolve => setTimeout(resolve, 0));
         return;
@@ -1180,6 +1184,7 @@ function AppContent({
       setSideFocus(sessionKey(recipient)); setActiveView('workbench');
       const target = await loadSessionCommunication(receiver, entry, controller.signal);
       check();
+      setLettersVisible(true);
       setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
       // Mounted panes acquire their own leases before this temporary navigation lease is released.
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -1311,7 +1316,7 @@ function AppContent({
     deleteMessage: conversationActions.deleteMessage,
   };
 
-  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><TimelineLettersVisible.Provider value={lettersVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {(ask.enabled || !ask.hiddenByPreference && askEntry?.record?.remote) && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
@@ -1334,6 +1339,7 @@ function AppContent({
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       contentOnly={timelineDisplay === 'content'} onToggleContentOnly={() => setTimelineDisplay(value => value === 'content' ? 'preview' : 'content')}
       simpleConversation={timelineDisplay === 'simple'} onToggleSimpleConversation={() => setTimelineDisplay(value => value === 'simple' ? 'preview' : 'simple')}
+      lettersVisible={lettersVisible} onToggleLetters={() => setLettersVisible(value => !value)}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
       onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
     <header className="lab-app-bar" hidden={headerHidden}>
@@ -1572,7 +1578,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
+  </main></RecoveryScope.Provider></TimelineLettersVisible.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

@@ -8,10 +8,98 @@ import {
 import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 
 import { App, type LabTransport } from './App.js';
-import { render } from './test/setup.js';
+import { render, unmount } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 describe('App', () => {
+  const letterState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
+    providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+    item: { type: 'agent_communication' as const, messageId: 'task-letter', sender: '/root', recipient: '/root/review', text: 'Review the transport.' },
+  }] } };
+
+  it('keeps Show letters independent from every display mode and restores it after remount', async () => {
+    const modeKey = 'agent-remote:timeline-display';
+    const lettersKey = 'agent-remote:show-letters';
+    window.localStorage.removeItem(modeKey);
+    window.localStorage.removeItem(lettersKey);
+    try {
+      const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      const letters = container.querySelector<HTMLInputElement>('[aria-label="Show letters"]');
+      const content = container.querySelector<HTMLInputElement>('[aria-label="Content only view"]')!;
+      const simple = container.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]')!;
+      expect(letters).not.toBeNull();
+      expect(letters!.checked).toBe(true);
+      expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
+      for (const mode of ['preview', 'content', 'simple'] as const) {
+        if (mode === 'content') await act(async () => content.click());
+        if (mode === 'simple') await act(async () => simple.click());
+        await act(async () => letters!.click());
+        expect(window.localStorage.getItem(modeKey)).toBe(mode);
+        expect(window.localStorage.getItem(lettersKey)).toBe('false');
+        expect(container.querySelector('.agent-communication-letter')).toBeNull();
+        await act(async () => letters!.click());
+        expect(window.localStorage.getItem(modeKey)).toBe(mode);
+        expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
+      }
+      await act(async () => letters!.click());
+      for (const button of [simple, content, simple]) {
+        await act(async () => button.click());
+        expect(letters!.checked).toBe(false);
+        expect(window.localStorage.getItem(lettersKey)).toBe('false');
+        expect(container.querySelector('.agent-communication-letter')).toBeNull();
+      }
+      await unmount(container);
+      const restored = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
+      expect(restored.querySelector('.agent-communication-letter')).toBeNull();
+      await act(async () => restored.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      expect(restored.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(false);
+      expect(restored.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]')!.checked).toBe(true);
+    } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
+  });
+
+  it('shows a hidden letter opened from Trace and lets Show letters hide it again', async () => {
+    const modeKey = 'agent-remote:timeline-display';
+    const lettersKey = 'agent-remote:show-letters';
+    window.localStorage.setItem(modeKey, 'content');
+    window.localStorage.setItem(lettersKey, 'false');
+    try {
+      const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
+      expect(container.querySelector('.agent-communication-letter')).toBeNull();
+      await act(async () => tab(container, 'Trace').click());
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-trace-entry-key]')!.click());
+      const show = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Show in Conversation')!;
+      await act(async () => show.click());
+      expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
+      expect(window.localStorage.getItem(modeKey)).toBe('content');
+      expect(window.localStorage.getItem(lettersKey)).toBe('true');
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
+      expect(container.querySelector('.agent-communication-letter')).toBeNull();
+    } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
+  });
+
+  it('clears a letter search reveal when Show letters is changed', async () => {
+    const lettersKey = 'agent-remote:show-letters';
+    window.localStorage.removeItem(lettersKey);
+    try {
+      const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search this session"]')!.click());
+      const input = container.querySelector<HTMLInputElement>('[aria-label="Search session history"]')!;
+      const scope = container.querySelector<HTMLSelectElement>('[aria-label="Search scope"]')!;
+      await act(async () => {
+        scope.value = 'all'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Review the transport');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => container.querySelector<HTMLButtonElement>('.agent-session-search-results button')!.click());
+      expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
+      expect(container.querySelector('.agent-communication-letter')).toBeNull();
+    } finally { window.localStorage.removeItem(lettersKey); }
+  });
+
   it('reveals a filtered execution event when explicitly opening it from Trace', async () => {
     const key = 'agent-remote:timeline-display';
     window.localStorage.setItem(key, 'content');

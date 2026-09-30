@@ -847,13 +847,13 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 @media (pointer: coarse) { .agent-session-search-input button { min-height: 40px; width: 36px; } }
 
 /* Letters keep their timeline footprint while moving toward the receiving pane. */
-.agent-letter-position { container-type: inline-size; padding-block: 12px; }
+.agent-letter-position { container-type: inline-size; padding-block: 6px; }
 .agent-communication-letter {
   box-sizing: border-box;
   width: fit-content;
   max-width: min(65ch, calc(100% - 32px));
   margin-inline: auto;
-  padding: 12px 14px;
+  padding: 8px 10px;
   border: 1px solid var(--agent-rule);
   border-radius: var(--agent-radius);
   background: var(--agent-panel);
@@ -863,17 +863,28 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 }
 .agent-communication-letter[data-direction="left"] { transform: translateX(calc((100% - 100cqw) / 2)); }
 .agent-communication-letter[data-direction="right"] { transform: translateX(calc((100cqw - 100%) / 2)); }
-.agent-letter-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.agent-letter-heading time { font-size: 11px; color: var(--agent-muted); white-space: nowrap; }
+.agent-letter-footer { display: flex; align-items: flex-start; gap: 4px; margin-top: 2px; }
 .agent-letter-open {
-  display: inline-flex; flex: 1; align-items: center; gap: 8px; min-width: 0; padding: 0;
+  display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 4px; min-width: 28px; min-height: 28px; padding: 0 3px;
   border: 0; background: transparent; color: var(--agent-action-text); text-align: left; font: inherit; cursor: pointer;
 }
 .agent-letter-open:disabled { cursor: default; color: var(--agent-muted); }
 .agent-letter-open:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 4px; border-radius: 2px; }
 .agent-letter-envelope, .agent-letter-direction { flex: none; }
 .agent-letter-participants { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
-.agent-letter-body { margin-top: 10px; font-size: 13px; }
+.agent-letter-body { font-size: 13px; }
+.agent-letter-body .agent-markdown > :first-child { margin-top: 0; }
+.agent-letter-body .agent-markdown > :last-child { margin-bottom: 0; }
+.agent-letter-details { min-width: 0; flex: 1; color: var(--agent-muted); font-size: 12px; cursor: auto; }
+.agent-letter-details > summary { width: fit-content; min-height: 28px; line-height: 28px; cursor: pointer; }
+.agent-letter-details > summary:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; border-radius: 2px; }
+.agent-letter-metadata { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; overflow-wrap: anywhere; }
+.agent-letter-metadata time { font-size: 11px; }
+.agent-letter-metadata pre { margin: 0; white-space: pre-wrap; font: inherit; }
+@media (pointer: coarse) {
+  .agent-letter-open { min-width: 32px; min-height: 32px; }
+  .agent-letter-details > summary { min-height: 32px; line-height: 32px; }
+}
 .agent-communication-letter:has(.agent-letter-open:not(:disabled)) { cursor: pointer; }
 .agent-communication-letter:has(.agent-letter-open:not(:disabled)):hover { border-color: var(--agent-signal); }
 .agent-communication-letter > small { display: block; margin-top: 8px; color: var(--agent-muted); }

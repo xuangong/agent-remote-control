@@ -5,6 +5,7 @@ import { loadLocalResource } from '../local-resource.js';
 import { TimelineTitle } from '../TimelineTitle.js';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent } from '../MarkdownContent.js';
+import { CommunicationContent } from '../CommunicationContent.js';
 import type { MessageGroupPosition } from '../timeline-render-model.js';
 import type { MarkdownResourceContext } from '../markdown-resources.js';
 
@@ -76,7 +77,6 @@ export function AgentCommunicationItem({ item, resourceContext }: {
   resourceContext?: MarkdownResourceContext;
 }) {
   return <article className="agent-timeline-item agent-message agent-message-assistant agent-message-group-single" aria-label="Agent communication">
-    <header className="agent-item-header"><TimelineTitle className="agent-item-kicker">{item.sender} → {item.recipient}</TimelineTitle></header>
-    <MarkdownContent markdown={item.text} resourceContext={resourceContext} />
+    <CommunicationContent item={item} resourceContext={resourceContext} />
   </article>;
 }

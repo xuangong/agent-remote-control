@@ -16,7 +16,7 @@ import { createTimelineRenderModel } from './timeline-render-model.js';
 import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
-import { TimelineDisplay, isContentOnlyItem } from './TimelineDisplay.js';
+import { TimelineDisplay, TimelineLettersVisible, isContentOnlyItem } from './TimelineDisplay.js';
 import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import { useTimelineAction } from './useTimelineAction.js';
 
@@ -78,6 +78,7 @@ export function AgentTimeline({
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
   const contentOnly = useContext(TimelineDisplay) === 'content';
+  const lettersVisible = useContext(TimelineLettersVisible);
   const scopeKey = JSON.stringify([state.agent?.id, state.timeline.epoch]);
   const editPrompt = useTimelineAction(scopeKey, onEditPrompt);
   const inspectEntry = useTimelineAction(scopeKey, onInspectEntry);
@@ -98,7 +99,14 @@ export function AgentTimeline({
     }
     return prompts;
   }, [state.timeline.entries, state.timeline.hasOlder]);
-  const entries = useMemo(() => contentOnly ? state.timeline.entries.filter(entry => isContentOnlyItem(entry.item) || (searchEntryKey !== undefined && timelineEntryKey(state.timeline.epoch, entry) === searchEntryKey)) : state.timeline.entries, [contentOnly, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
+  const entries = useMemo(() => {
+    if (!contentOnly && lettersVisible) return state.timeline.entries;
+    return state.timeline.entries.filter(entry => {
+      if (searchEntryKey !== undefined && timelineEntryKey(state.timeline.epoch, entry) === searchEntryKey) return true;
+      if (!lettersVisible && entry.item.type === 'agent_communication') return false;
+      return !contentOnly || isContentOnlyItem(entry.item);
+    });
+  }, [contentOnly, lettersVisible, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
   const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });

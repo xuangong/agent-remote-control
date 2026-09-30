@@ -4,6 +4,7 @@ export const TimelineSearchReveal = createContext(false);
 
 export type TimelineDisplayMode = 'preview' | 'simple' | 'content';
 export const TimelineDisplay = createContext<TimelineDisplayMode>('preview');
+export const TimelineLettersVisible = createContext(true);
 
 const planTools = new Set(['update_plan', 'TodoWrite', 'todo_write', 'EnterPlanMode', 'ExitPlanMode', 'enter_plan_mode', 'exit_plan_mode', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet']);
 

@@ -2,10 +2,11 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { chromium, webkit, expect as browserExpect } from '@playwright/test';
+import { chromium, webkit, expect as browserExpect, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 let script = '', css = '', url = '';
+const replyEnvelope = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/review\nPayload:\nThe transport review is complete.';
 const server = createServer((request, response) => {
   response.setHeader('content-type', request.url === '/fixture.js' ? 'application/javascript' : 'text/html; charset=utf-8');
   response.end(request.url === '/fixture.js' ? script : `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><div id="root"></div><script src="/fixture.js"></script>`);
@@ -22,15 +23,16 @@ beforeAll(async () => {
       return { providerId: 'codex', seqStart: seq, seqEnd: seq, timestamp: '2026-09-29T00:00:00Z', resources:[], collapsed:[], sourceSeqRanges:[{startSeq:seq,endSeq:seq}],
         ...((task && id === 'parent') || (reply && id === 'child') ? {} : { turnId:id+'-turn' }),
         item: task ? {type:'agent_communication', messageId:'task', sender:'/root',recipient:'/root/review',text:'Review the transport.'}
-        : reply ? {type:'agent_communication',messageId:'reply',sender:'/root/review',recipient:'/root',text:'The transport review is complete.'}
+        : reply ? {type:'agent_communication',messageId:'reply',sender:'/root/review',recipient:'/root',text:${JSON.stringify(replyEnvelope)}}
         : {type:'assistant_message',messageId:'work-'+seq,text:'Activity '+seq+'. This is the work after receiving the task. A longer paragraph keeps each conversation independently scrollable.'} };
     });
     const transport = {listProviders:async()=>[],createAgent:async()=>{},resumeAgent:async()=>{},
       fetchSnapshot:async id=>({protocolVersion:'1.6.0',type:'agent_snapshot',payload:agent(id)}),
       fetchTimeline:async id=>({protocolVersion:'1.6.0',type:'timeline_page',payload:{requestId:'page',agentId:id,epoch:'epoch',direction:'tail',reset:false,staleCursor:false,gap:false,window:{minSeq:1,maxSeq:40,nextSeq:41},startCursor:null,endCursor:null,entries:entries(id),hasOlder:false,hasNewer:false,error:null}}),
       connect:(id,listener)=>{queueMicrotask(()=>{listener.onOpen();listener.onMessage({protocolVersion:'1.6.0',type:'negotiated',sessionControl:true});listener.onMessage({protocolVersion:'1.6.0',type:'session_control',payload:{agentId:id,revision:'control',access:'control',available:false,token:'token'}});listener.onMessage({protocolVersion:'1.6.0',type:'agent_snapshot',payload:agent(id)});});return{close(){},send(m){if(m.type==='timeline_subscription')queueMicrotask(()=>listener.onMessage({protocolVersion:'1.6.0',type:'timeline_subscribed',payload:{requestId:m.payload.requestId,agentIds:[id]}}));if(m.type==='session_control_request')queueMicrotask(()=>listener.onMessage({protocolVersion:'1.6.0',type:'session_control',payload:{agentId:id,requestId:m.payload.requestId,revision:'control',access:'control',available:false,token:'token'}}));}};},onDiagnostic:()=>()=>{},onProtocolMessage:()=>()=>{}};
+    window.letterNavigationRequests = [];
     const directory = new SessionDirectoryClient(location.origin, async (input, init) => {
-      if(String(input).includes('/attach')){const b=JSON.parse(init.body);return Response.json({agentId:b.nativeSessionId,nativeSessionId:b.nativeSessionId});}
+      if(String(input).includes('/attach')){const b=JSON.parse(init.body);window.letterNavigationRequests.push(b.nativeSessionId);return Response.json({agentId:b.nativeSessionId,nativeSessionId:b.nativeSessionId});}
       return Response.json({items:[],workspaces:[],hasMore:false,revision:'1'});
     });
     history.replaceState(null,'','/?agent=parent');
@@ -45,6 +47,184 @@ beforeAll(async () => {
 });
 afterAll(async () => { await new Promise<void>(resolve => server.close(() => resolve())); });
 
+async function revealHiddenLetterFromSearch(page: Page) {
+  const primary = page.locator('.lab-primary-conversation');
+  const view = page.getByRole('button', { name: 'View options', exact: true });
+  await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(2);
+  await view.click();
+  await page.getByRole('checkbox', { name: 'Show letters', exact: true }).uncheck();
+  await view.click();
+  await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(0);
+  await primary.getByRole('button', { name: 'Search this session', exact: true }).click();
+  await primary.getByRole('searchbox').fill('Review the transport.');
+  await primary.getByLabel('Search scope').selectOption('all');
+  const results = primary.locator('.agent-session-search-results button');
+  await browserExpect(results).toHaveCount(1);
+  await results.click();
+  await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
+  await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(1);
+  await browserExpect.poll(() => page.evaluate(() => localStorage.getItem('agent-remote:show-letters'))).toBe('false');
+}
+
+for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(`keeps letter metadata in Details without navigating on ${mobile ? 'mobile' : 'desktop'} ${engine.name()}`, async () => {
+  const browser = await engine.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: mobile ? { width: 402, height: 874 } : { width: 1600, height: 1000 }, isMobile: mobile, hasTouch: mobile });
+    page.setDefaultTimeout(8000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(url);
+    await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
+    const primary = page.locator('.lab-primary-conversation');
+    const letter = primary.locator('[data-entry-key$=":reply"] .agent-communication-letter');
+    const body = letter.locator('.agent-letter-body');
+    const details = letter.locator('details');
+    const summary = details.locator('summary');
+    const header = details.getByText(/Message Type: FINAL_ANSWER/);
+    const participants = details.getByText('/root/review → /root', { exact: true });
+    const timestamp = details.locator('time');
+    const initialUrl = page.url();
+    const expectNoNavigation = async () => {
+      await browserExpect(page).toHaveURL(initialUrl);
+      await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
+      await browserExpect(primary.locator('[data-inspected="true"]')).toHaveCount(0);
+      expect(await page.evaluate(() => (window as unknown as { letterNavigationRequests: string[] }).letterNavigationRequests)).toEqual([]);
+    };
+    await browserExpect(body).toHaveText('The transport review is complete.');
+    await browserExpect(body).toBeVisible();
+    await browserExpect(summary).toHaveText('Details');
+    await browserExpect(details).not.toHaveAttribute('open');
+    await browserExpect(header).toBeHidden();
+    await browserExpect(participants).toBeHidden();
+    await browserExpect(timestamp).toBeHidden();
+    expect((await letter.boundingBox())!.height).toBeLessThanOrEqual(mobile ? 120 : 110);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expectNoNavigation();
+    await page.screenshot({ path: `/tmp/arc-letter-payload-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-collapsed.png` });
+    await letter.screenshot({ path: `/tmp/arc-letter-compact-${engine.name()}-${mobile ? 'mobile' : 'desktop'}.png` });
+    await summary.click();
+    await browserExpect(details).toHaveAttribute('open', '');
+    await browserExpect(header).toBeVisible();
+    await browserExpect(header).toContainText('Task name: /root');
+    await browserExpect(header).toContainText('Sender: /root/review');
+    await browserExpect(participants).toBeVisible();
+    await browserExpect(timestamp).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expectNoNavigation();
+    await header.click();
+    await expectNoNavigation();
+    await page.screenshot({ path: `/tmp/arc-letter-payload-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-expanded.png` });
+    await summary.click();
+    await browserExpect(details).not.toHaveAttribute('open');
+    await browserExpect(header).toBeHidden();
+    await browserExpect(participants).toBeHidden();
+    await browserExpect(timestamp).toBeHidden();
+    await browserExpect(body).toBeVisible();
+    await expectNoNavigation();
+    expect(errors).toEqual([]);
+  } finally { await browser.close(); }
+}, 30000);
+
+for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(`toggles letters independently of conversation modes and remembers the choice on ${mobile ? 'mobile' : 'desktop'} ${engine.name()}`, async () => {
+  const browser = await engine.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: mobile ? { width: 320, height: 874 } : { width: 1600, height: 1000 }, isMobile: mobile, hasTouch: mobile });
+    page.setDefaultTimeout(8000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const primary = page.locator('.lab-primary-conversation');
+    const letters = primary.locator('.agent-communication-letter');
+    const activity = primary.getByText('Activity 39. This is the work after receiving the task. A longer paragraph keeps each conversation independently scrollable.', { exact: true });
+    const view = page.getByRole('button', { name: 'View options', exact: true });
+    const content = page.getByRole('checkbox', { name: 'Content only view', exact: true });
+    const simple = page.getByRole('checkbox', { name: 'Simple conversation view', exact: true });
+    const showLetters = page.getByRole('checkbox', { name: 'Show letters', exact: true });
+    const expectMode = async (mode: 'preview' | 'content' | 'simple') => {
+      await browserExpect(content).toBeChecked({ checked: mode === 'content' });
+      await browserExpect(simple).toBeChecked({ checked: mode === 'simple' });
+      await browserExpect.poll(() => page.evaluate(() => localStorage.getItem('agent-remote:timeline-display'))).toBe(mode);
+    };
+    const expectFits = async () => {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      const panel = (await page.getByRole('region', { name: 'View options', exact: true }).boundingBox())!;
+      expect(panel.x).toBeGreaterThanOrEqual(0);
+      expect(panel.x + panel.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    };
+    const waitForConversation = async () => {
+      await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
+      await browserExpect(activity).toBeVisible();
+      await view.click();
+    };
+    await page.goto(url);
+    await waitForConversation();
+    await browserExpect(showLetters).toBeChecked();
+    await browserExpect(letters).toHaveCount(2);
+    await expectMode('preview');
+    await showLetters.uncheck();
+    for (const mode of ['preview', 'content', 'simple'] as const) {
+      if (mode === 'content') await content.check();
+      if (mode === 'simple') await simple.check();
+      await expectMode(mode);
+      await browserExpect(showLetters).not.toBeChecked();
+      await browserExpect(letters).toHaveCount(0);
+      await browserExpect(activity).toBeVisible();
+      await showLetters.check();
+      await browserExpect(showLetters).toBeChecked();
+      await browserExpect(letters).toHaveCount(2);
+      await browserExpect(primary.locator('[data-entry-key$=":reply"] .agent-letter-body')).toHaveText('The transport review is complete.');
+      await expectMode(mode);
+      await expectFits();
+      await showLetters.uncheck();
+      await browserExpect(letters).toHaveCount(0);
+      await browserExpect(activity).toBeVisible();
+      await expectMode(mode);
+      await browserExpect.poll(() => page.evaluate(() => localStorage.getItem('agent-remote:show-letters'))).toBe('false');
+      if (mode === 'content') await page.screenshot({ path: `/tmp/arc-letter-toggle-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-hidden.png` });
+      await page.reload();
+      await waitForConversation();
+      await browserExpect(showLetters).not.toBeChecked();
+      await browserExpect(letters).toHaveCount(0);
+      await expectMode(mode);
+      await expectFits();
+    }
+    await showLetters.check();
+    await browserExpect(letters).toHaveCount(2);
+    await expectMode('simple');
+    await content.check();
+    await expectMode('content');
+    await browserExpect(showLetters).toBeChecked();
+    await browserExpect(letters).toHaveCount(2);
+    await content.uncheck();
+    await expectMode('preview');
+    await browserExpect.poll(() => page.evaluate(() => localStorage.getItem('agent-remote:show-letters'))).toBe('true');
+    await page.reload();
+    await waitForConversation();
+    await browserExpect(showLetters).toBeChecked();
+    await browserExpect(letters).toHaveCount(2);
+    await expectMode('preview');
+    await expectFits();
+    await page.screenshot({ path: `/tmp/arc-letter-toggle-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-visible.png` });
+    if (!mobile) {
+      await view.click();
+      await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
+      const side = page.locator('.lab-side-conversation');
+      await browserExpect(side).toBeVisible();
+      await view.click();
+      await showLetters.uncheck();
+      await browserExpect(letters).toHaveCount(0);
+      await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(0);
+      await browserExpect(side).toBeVisible();
+      await expectMode('preview');
+      await showLetters.check();
+      await browserExpect(letters).toHaveCount(2);
+      await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(2);
+      await browserExpect(side).toBeVisible();
+      await expectMode('preview');
+    }
+    expect(errors).toEqual([]);
+  } finally { await browser.close(); }
+}, 30000);
+
 for (const engine of [chromium, webkit]) it(`moves letters through available space and jumps only the receiving timeline in ${engine.name()}`, async () => {
   const browser = await engine.launch({headless:true});
   try {
@@ -52,12 +232,15 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     const errors: string[]=[]; page.on('pageerror', e=>errors.push(e.message));
     await page.goto(url);
     const primary=page.locator('.lab-primary-conversation');
+    await revealHiddenLetterFromSearch(page);
     const open=primary.getByRole('button',{name:'Open letter from /root to /root/review',exact:true});
     await browserExpect(open).toBeVisible();
     await open.click();
     const side=page.locator('.lab-side-conversation');
     await browserExpect(side).toBeVisible();
     await browserExpect(side.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key',/task$/);
+    await browserExpect.poll(() => page.evaluate(() => localStorage.getItem('agent-remote:show-letters'))).toBe('true');
+    await primary.getByRole('button', { name: 'Close session search', exact: true }).click();
     const card=primary.locator('.agent-communication-letter').first();
     await browserExpect(card).toHaveAttribute('data-direction','right');
     await page.waitForTimeout(260);
@@ -100,11 +283,13 @@ for (const engine of [chromium, webkit]) it(`navigates mobile letters in the cur
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(url);
     const primary = page.locator('.lab-primary-conversation');
+    await revealHiddenLetterFromSearch(page);
     await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
     await browserExpect(primary).toBeVisible();
     await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
     await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
     await browserExpect(page).toHaveURL(/session=child/);
+    await browserExpect.poll(() => page.evaluate(() => localStorage.getItem('agent-remote:show-letters'))).toBe('true');
     const receipt = primary.locator('[data-entry-key$=":task"]');
     const viewport = primary.locator('.lab-timeline-scroll');
     await browserExpect.poll(async () => {

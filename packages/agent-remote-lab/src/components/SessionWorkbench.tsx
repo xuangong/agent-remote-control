@@ -10,7 +10,7 @@ import type {
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, TimelineSearch, PreviewDock, TimelineDisplay, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import { AgentCommandDetails, AgentTimeline, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 
 
 import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-remote-web/react';
@@ -215,7 +215,9 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   const selectedSearchKey = searchSelection?.scope === searchScope ? searchSelection.key : undefined;
   function closeSearch() { setOpenSearchScope(undefined); setSearchSelection(undefined); requestAnimationFrame(() => searchTrigger.current?.focus()); }
   const display = useContext(TimelineDisplay);
-  const contentRevision = useMemo(() => ({}), [state, display, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
+  const lettersVisible = useContext(TimelineLettersVisible);
+  useLayoutEffect(() => { setSearchSelection(undefined); }, [lettersVisible]);
+  const contentRevision = useMemo(() => ({}), [state, display, lettersVisible, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
     actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined, contentRevision, 'bottom');
   const consumedReveal = useRef<string>();

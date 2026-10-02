@@ -8,10 +8,11 @@ import { canPreviewImage, ResourceCard } from './ResourceCard.js';
 export interface ResourceListProps {
   readonly bindings: readonly ResourceBinding[];
   readonly resources: AgentReplicaState['resources'];
+  readonly labels?: ReadonlyMap<string, string>;
   readonly onRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
 }
 
-export function ResourceList({ bindings, resources, onRequest }: ResourceListProps) {
+export function ResourceList({ bindings, resources, labels, onRequest }: ResourceListProps) {
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const [failures, setFailures] = useState<Readonly<Record<string, string>>>({});
   const requestedImages = useRef(new Set<string>());
@@ -57,6 +58,7 @@ export function ResourceList({ bindings, resources, onRequest }: ResourceListPro
     <ul>{bindings.map((binding) => <ResourceCard
       key={`${binding.resourceId}-${binding.locator}`}
       binding={binding}
+      label={labels?.get(binding.locator)}
       detail={resources[binding.resourceId]}
       pending={pending.has(binding.resourceId)}
       failure={failures[binding.resourceId]}

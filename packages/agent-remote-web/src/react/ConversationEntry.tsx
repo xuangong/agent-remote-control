@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
 import type { AgentTimelineProps } from './AgentTimeline.js';
@@ -8,6 +8,7 @@ import { ResourceList } from './ResourceList.js';
 import { PreviewActions, type PreviewController } from './PreviewActions.js';
 import { isContentOnlyItem, TimelineSearchReveal } from './TimelineDisplay.js';
 import type { MessageGroupPosition } from './timeline-render-model.js';
+import { messageResources } from './message-resources.js';
 
 interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt' | 'onInspectEntry' | 'resolveSessionLink'
   | 'onResourceResolve' | 'onResourceRequest'> {
@@ -28,6 +29,8 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
 export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, contentOnly, agentId,
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
   previews, extension }: ConversationEntryProps) {
+  const attachments = useMemo(() => messageResources(entry.item, entry.resources, contentOnly && !!onResourceResolve && !!onResourceRequest),
+    [entry.item, entry.resources, contentOnly, onResourceResolve, onResourceRequest]);
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
@@ -36,10 +39,9 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
       resources={resources} resourceBindings={entry.resources} resourceScopeKey={scopeKey}
       onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
     {previews && agentId && entry.item.type !== 'error' && isContentOnlyItem(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}
-    {!contentOnly ? <>
-      {extension}
-      <ResourceList bindings={entry.resources} resources={resources} onRequest={onResourceRequest} />
-    </> : null}
+    {!contentOnly ? extension : null}
+    <ResourceList bindings={contentOnly ? attachments.bindings : entry.resources} labels={attachments.labels}
+      resources={resources} onRequest={onResourceRequest} />
   </TimelineEntry></TimelineSearchReveal.Provider>;
 });
 

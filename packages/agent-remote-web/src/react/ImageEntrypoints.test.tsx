@@ -82,7 +82,7 @@ it('opens resource card image bytes in the viewer while preserving its download'
   const { binding, detail } = cachedImage('resource-card-viewer');
   const request = vi.fn(async () => {});
   const container = await render(<ul><ResourceCard binding={binding} detail={detail} pending={false} onRequest={request} /></ul>);
-  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Open image: ./picture.png"]');
+  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Open image: picture.png"]');
   expect(trigger).not.toBeNull();
   await act(async () => trigger!.click());
   expect(document.querySelector('dialog[aria-label="Image preview"] img')?.getAttribute('src')).toBe('data:image/png;base64,AA==');

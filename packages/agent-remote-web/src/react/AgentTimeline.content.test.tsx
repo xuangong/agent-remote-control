@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState } from '../replica/reducer.js';
@@ -84,6 +84,69 @@ describe('content-only timeline', () => {
     expect(container.querySelectorAll('img')).toHaveLength(1);
     expect(container.querySelector('[data-resource-download]')).toBeNull();
     expect(container.textContent).not.toContain('Execution extension');
+  });
+
+  it.each(['user_message', 'assistant_message'] as const)('keeps image and file attachments on %s while hiding tool resources', async type => {
+    const image = { locator: 'codex-image:opaque', resourceId: 'picture', status: 'available' as const };
+    const file = { locator: '/workspace/report.md', resourceId: 'report', status: 'available' as const };
+    const content: AgentTimelineItem = type === 'user_message'
+      ? { type, text: 'Review this picture and report.', content: [{ type: 'image', locator: image.locator, label: 'image #11' }, { type: 'text', text: 'Review this picture and report.' }] }
+      : { type, text: 'The picture and report are ready.' };
+    const current = state([content, items[3]!]);
+    const registry = new RendererRegistry();
+    registry.register(type, () => <p>Execution extension</p>);
+    const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline
+      state={{ ...current, timeline: { ...current.timeline, entries: current.timeline.entries.map((entry, index) => ({ ...entry,
+        resources: index === 0 ? [image, file] : [{ locator: '/workspace/internal.log', resourceId: 'log', status: 'available' }],
+      })) }, resources: {
+        picture: { status: 'available', mediaType: 'image/png', byteLength: 1, sha256: 'picture', contentBase64: 'AA==' },
+        report: { status: 'available', mediaType: 'text/markdown', byteLength: 1, sha256: 'report', contentBase64: 'AA==' },
+      } }} registry={registry}
+    /></TimelineDisplay.Provider>);
+    expect(container.querySelectorAll('.agent-resources li')).toHaveLength(2);
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AA==');
+    expect(container.querySelector('img')?.getAttribute('alt')).toBe(type === 'user_message' ? 'image #11' : 'Image');
+    expect(container.querySelector('[data-resource-download="report"]')?.getAttribute('download')).toBe('report.md');
+    expect(container.textContent).toContain('report.md');
+    expect(container.textContent).not.toContain(image.locator);
+    expect(container.textContent).not.toContain('internal.log');
+    expect(container.textContent).not.toContain('Execution extension');
+  });
+
+  it('keeps attachment status and retry controls available in content-only mode', async () => {
+    const binding = { locator: 'attachment:opaque', resourceId: 'attachment', status: 'pending' as const };
+    const base = state([{ type: 'user_message', text: 'Review the attached file.' }]);
+    const current = { ...base, timeline: { ...base.timeline, entries: base.timeline.entries.map(entry => ({ ...entry, resources: [binding] })) } };
+    const request = vi.fn(async () => { throw new Error('Connection unavailable'); });
+    const view = (resources: Parameters<typeof AgentTimeline>[0]['state']['resources']) => <TimelineDisplay.Provider value="content">
+      <AgentTimeline state={{ ...current, resources }} onResourceRequest={request} />
+    </TimelineDisplay.Provider>;
+    const container = await render(view({ attachment: { status: 'pending', retryAfterMs: 100 } }));
+    expect(container.querySelector('.agent-resources')?.textContent).toContain('Pending');
+    await rerender(container, view({ attachment: { status: 'failed', message: 'File could not be read.', retryable: true } }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('File could not be read.');
+    await rerender(container, view({ attachment: { status: 'unavailable', reason: 'File no longer exists.' } }));
+    expect(container.querySelector('.agent-resources')?.textContent).toContain('File no longer exists.');
+    await rerender(container, view({ attachment: { status: 'available', mediaType: 'text/plain', byteLength: 10, sha256: 'file' } }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-resource-id="attachment"]')!.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Connection unavailable');
+    expect(container.querySelector<HTMLButtonElement>('[data-resource-id="attachment"]')?.disabled).toBe(false);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-resource-id="attachment"]')!.click());
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('deduplicates rendered Markdown images without hiding other attachments or image syntax in code', async () => {
+    const current = state([{ type: 'assistant_message', text: '![Diagram][result]\n\n[result]: ./diagram.png\n\n`![Example](./example.png)`\n\n```md\n![Example](./fenced.png)\n```' }]);
+    const bindings = ['diagram', 'example', 'fenced', 'attached'].map(name => ({ locator: `./${name}.png`, resourceId: name, status: 'available' as const }));
+    const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline
+      state={{ ...current, timeline: { ...current.timeline, entries: current.timeline.entries.map(entry => ({ ...entry, resources: bindings })) },
+        resources: Object.fromEntries(bindings.map(binding => [binding.resourceId, { status: 'available', mediaType: 'image/png', byteLength: 1, sha256: binding.resourceId, contentBase64: 'AA==' }])) }}
+      onResourceResolve={async locator => bindings.find(binding => binding.locator === locator)!} onResourceRequest={async () => {}}
+    /></TimelineDisplay.Provider>);
+    expect(container.querySelectorAll('img')).toHaveLength(4);
+    expect(container.querySelectorAll('.agent-resources li')).toHaveLength(3);
+    expect(container.querySelector('[data-resource-download="diagram"]')).toBeNull();
+    for (const id of ['example', 'fenced', 'attached']) expect(container.querySelector(`[data-resource-download="${id}"]`)).not.toBeNull();
   });
 
   it('keeps messages, task progress and approval history while hiding execution details', async () => {

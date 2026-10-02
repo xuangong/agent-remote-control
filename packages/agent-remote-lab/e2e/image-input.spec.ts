@@ -70,8 +70,8 @@ test('opens the image across the viewport with readable status and keyboard dism
   await tag.click();
   const dialog = page.getByRole('dialog', { name: 'Image preview' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText('image #1', { exact: true })).toBeVisible();
-  await expect(dialog.getByRole('img')).toBeVisible();
+  await expect(dialog).toHaveAccessibleDescription('image #1');
+  await expect(dialog.getByRole('img', { name: 'image #1', exact: true })).toBeVisible();
   await expect(dialog.getByRole('status').filter({ hasText: /^Ready to send$/ })).toHaveText('Ready to send');
   await expect(dialog.getByRole('button', { name: 'Replace', exact: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();

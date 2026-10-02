@@ -747,31 +747,36 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-composer .agent-composer-editor .agent-image-tag:hover,
 .agent-message .agent-message-ordered-content .agent-image-tag:hover:not(:disabled) { background-color: var(--agent-surface-selected); text-decoration-style: solid; }
 .agent-image-tag.ProseMirror-selectednode { background-color: var(--agent-surface-selected); outline: 1px solid var(--agent-signal); outline-offset: 1px; }
-.agent-image-preview { position: fixed; inset: 0; box-sizing: border-box; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; border: 0; border-radius: 0; background: var(--agent-panel); color: var(--agent-ink); font: 14px/1.5 system-ui, sans-serif; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.agent-image-preview { position: fixed; inset: 0; box-sizing: border-box; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; border: 0; border-radius: 0; background: transparent; color: var(--agent-ink); font: 14px/1.5 system-ui, sans-serif; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; --image-dismiss-duration: 220ms; }
 body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-image-preview[open] { display: flex; flex-direction: column; }
-.agent-image-preview::backdrop { background: oklch(0.18 0.01 250 / .58); }
-.agent-image-preview-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); border-bottom: 1px solid var(--agent-rule); }
-.agent-image-preview-heading { display: grid; gap: 2px; min-width: 0; }
-.agent-image-preview-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
-.agent-image-preview-heading span { min-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--agent-muted); font-variant-numeric: tabular-nums; }
+.agent-image-preview::backdrop { background: transparent; }
+.agent-image-preview-backdrop { position: absolute; inset: 0; pointer-events: none; background: var(--agent-surface-muted); opacity: var(--image-backdrop-opacity, 1); }
 .agent-image-preview button { min-height: 44px; padding: 8px 16px; border: 1px solid var(--agent-rule); border-radius: 8px; background: var(--agent-panel-raised); color: var(--agent-ink); font: inherit; font-weight: 500; cursor: pointer; touch-action: manipulation; }
 .agent-image-preview button:hover:not(:disabled) { background: var(--agent-surface-selected); }
 .agent-image-preview button:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 .agent-image-preview button:disabled { opacity: .45; cursor: default; }
-.agent-image-preview .agent-image-preview-close { flex: 0 0 44px; width: 44px; padding: 0; border-color: transparent; background: transparent; font-size: 26px; font-weight: 400; line-height: 1; }
-.agent-image-viewport { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; }
-.agent-image-preview-stage { position: relative; flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--agent-surface-muted); touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none; }
+.agent-image-preview .agent-image-preview-close { position: absolute; z-index: 2; top: max(10px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 44px; padding: 0; border: 0; border-radius: 50%; background: var(--agent-panel); box-shadow: 0 2px 12px oklch(0.18 0.01 250 / .1); font-size: 26px; font-weight: 400; line-height: 1; }
+.agent-image-viewport { position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; }
+.agent-image-preview-stage { position: relative; flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: transparent; touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none; }
 .agent-image-preview-stage[data-zoomed="true"] { cursor: grab; }
 .agent-image-preview-stage[data-zoomed="true"][data-dragging="true"] { cursor: grabbing; }
 .agent-image-preview-stage:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: -2px; }
 .agent-image-preview-stage img { position: absolute; top: 50%; left: 50%; display: block; max-width: none; max-height: none; margin: 0; object-fit: contain; transform-origin: center; pointer-events: none; -webkit-touch-callout: none; }
 .agent-image-preview-stage > span { padding: 24px; color: var(--agent-muted); text-align: center; }
-.agent-image-preview-controls { flex: none; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); border-top: 1px solid var(--agent-rule); }
+.agent-image-preview-controls { position: absolute; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border-radius: 28px; background: var(--agent-panel); box-shadow: 0 2px 12px oklch(0.18 0.01 250 / .1); }
 .agent-image-preview-controls button { min-width: 44px; padding: 8px 12px; border-color: transparent; background: transparent; }
 .agent-image-preview-scale { min-width: 64px; text-align: center; color: var(--agent-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.agent-image-preview:has(.agent-image-preview-footer) .agent-image-preview-controls { padding-bottom: 8px; }
-.agent-image-preview-footer { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 14px; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); border-top: 1px solid var(--agent-rule); }
+.agent-image-preview:has(.agent-image-preview-footer) .agent-image-preview-controls { bottom: 12px; }
+.agent-image-preview-footer { position: relative; flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 14px; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); border-top: 1px solid var(--agent-rule); background: var(--agent-panel); }
+.agent-image-preview-close, .agent-image-preview-controls, .agent-image-preview-footer { opacity: var(--image-controls-opacity, 1); }
+.agent-image-preview[data-dismiss-phase="closing"] { --image-dismiss-duration: 180ms; }
+.agent-image-preview:is([data-dismiss-phase="settling"], [data-dismiss-phase="closing"]) :is(.agent-image-preview-backdrop, .agent-image-preview-close, .agent-image-preview-controls, .agent-image-preview-footer, .agent-image-preview-stage img) { transition: transform var(--image-dismiss-duration) cubic-bezier(.22, 1, .36, 1), opacity var(--image-dismiss-duration) cubic-bezier(.22, 1, .36, 1); }
+.agent-image-preview[data-dismiss-phase="closing"] .agent-image-preview-stage img { opacity: 0; }
+.agent-image-preview:is([data-dismiss-phase="dragging"], [data-dismiss-phase="closing"]) :is(.agent-image-preview-close, .agent-image-preview-controls, .agent-image-preview-footer) { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-image-preview:is([data-dismiss-phase="settling"], [data-dismiss-phase="closing"]) :is(.agent-image-preview-backdrop, .agent-image-preview-close, .agent-image-preview-controls, .agent-image-preview-footer, .agent-image-preview-stage img) { transition: none; }
+}
 .agent-image-preview-status { display: grid; gap: 6px; min-width: 0; }
 .agent-image-preview-status [role="status"] { color: var(--agent-muted); font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .agent-image-preview-status[data-error="true"] [role="status"] { color: var(--agent-danger); }

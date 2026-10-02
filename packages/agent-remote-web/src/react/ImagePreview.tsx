@@ -1,7 +1,8 @@
-import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ImageViewport } from './ImageViewport.js';
 import { FilePreviewContext } from './FilePreviewContext.js';
+import type { ImageDismissMotion } from './useImageDismiss.js';
 
 interface ImagePreviewProps {
   blob?: Blob;
@@ -19,12 +20,17 @@ function containPreviewEvent(event: SyntheticEvent): void { event.stopPropagatio
 
 export function ImagePreview({ blob, src, label = 'Image', status, error, progress, actions, onClose }: ImagePreviewProps) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const heading = useId();
   const scope = useContext(FilePreviewContext)?.scopeKey;
   const openedScope = useRef(scope);
   const scopeChanged = useRef(false);
   const [url, setUrl] = useState<string>();
-  const [dimensions, setDimensions] = useState<string>();
+  const showMotion = useCallback((motion: ImageDismissMotion) => {
+    const element = dialog.current;
+    if (!element) return;
+    element.dataset.dismissPhase = motion.phase;
+    element.style.setProperty('--image-backdrop-opacity', String(1 - motion.progress));
+    element.style.setProperty('--image-controls-opacity', String(Math.max(0, 1 - motion.progress * 4)));
+  }, []);
   useEffect(() => {
     const trigger = document.activeElement;
     const modal = dialog.current!;
@@ -38,15 +44,12 @@ export function ImagePreview({ blob, src, label = 'Image', status, error, progre
     if (scope !== openedScope.current) { scopeChanged.current = true; onClose(); }
   }, [scope, onClose]);
   useEffect(() => {
-    setDimensions(undefined);
     if (src || !blob) { setUrl(src); return; }
     const value = URL.createObjectURL(blob); setUrl(value);
     return () => URL.revokeObjectURL(value);
   }, [blob, src]);
-  const size = blob ? blob.size >= 1024 * 1024 ? `${(blob.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(blob.size / 1024))} KB` : undefined;
-  const format = blob?.type.split('/')[1]?.toUpperCase();
   function close(): void { dialog.current?.close(); onClose(); }
-  return createPortal(<dialog ref={dialog} aria-label="Image preview" aria-describedby={heading} className="agent-image-preview"
+  return createPortal(<dialog ref={dialog} aria-label="Image preview" aria-description={label} className="agent-image-preview"
     onFocus={containPreviewEvent} onBlur={containPreviewEvent}
     onTouchStart={containPreviewEvent} onTouchMove={containPreviewEvent} onTouchEnd={containPreviewEvent} onTouchCancel={containPreviewEvent}
     onPointerDown={containPreviewEvent} onPointerMove={containPreviewEvent} onPointerUp={containPreviewEvent} onPointerCancel={containPreviewEvent}
@@ -67,11 +70,9 @@ export function ImagePreview({ blob, src, label = 'Image', status, error, progre
       const box = event.currentTarget.getBoundingClientRect();
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) close();
     }}>
-    <header className="agent-image-preview-header">
-      <div className="agent-image-preview-heading"><strong id={heading}>{label}</strong><span>{[format, size, dimensions].filter(Boolean).join(' · ')}</span></div>
-      <button type="button" className="agent-image-preview-close" onClick={close} aria-label="Close image preview">×</button>
-    </header>
-    {url ? <ImageViewport key={url} src={url} label={label} onDimensions={setDimensions} />
+    <div className="agent-image-preview-backdrop" aria-hidden="true" />
+    <button type="button" className="agent-image-preview-close" onClick={close} aria-label="Close image preview">×</button>
+    {url ? <ImageViewport key={url} src={url} label={label} onClose={close} onDismissMotion={showMotion} />
       : <div className="agent-image-preview-stage"><span>{blob || src ? 'Loading image…' : 'Local image unavailable. Replace it to continue.'}</span></div>}
     {status || error || actions ? <footer className="agent-image-preview-footer">
       <div className="agent-image-preview-status" data-error={Boolean(error)}>

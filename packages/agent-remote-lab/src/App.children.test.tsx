@@ -197,23 +197,27 @@ it('persists refreshed child titles over saved nicknames before switching conver
 
 it('releases view and delivery-persistence subscriptions while revisiting parent and child chats', async () => {
   const subscribe = AgentReplica.prototype.subscribe;
-  let activeSubscriptions = 0;
+  const activeSubscriptions = new Map<AgentReplica, number>();
+  const count = (agentId?: string) => [...activeSubscriptions].reduce((total, [replica, subscriptions]) =>
+    agentId === undefined || replica.getState().agent?.id === agentId ? total + subscriptions : total, 0);
   vi.spyOn(AgentReplica.prototype, 'subscribe').mockImplementation(function (this: AgentReplica, listener) {
     const unsubscribe = subscribe.call(this, listener);
-    activeSubscriptions += 1;
-    return () => { activeSubscriptions -= 1; unsubscribe(); };
+    activeSubscriptions.set(this, (activeSubscriptions.get(this) ?? 0) + 1);
+    return () => { activeSubscriptions.set(this, activeSubscriptions.get(this)! - 1); unsubscribe(); };
   });
   const f = await setup(false, { live: true });
-  const subscriptionsPerView = activeSubscriptions;
-  expect(subscriptionsPerView).toBeGreaterThan(0);
+  expect(count('parent')).toBeGreaterThan(0);
+  expect(count('child')).toBe(0);
   for (let revisit = 0; revisit < 3; revisit += 1) {
     await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
-    expect(activeSubscriptions).toBe(subscriptionsPerView);
+    expect(count('parent')).toBe(0);
+    expect(count('child')).toBeGreaterThan(0);
     await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
-    expect(activeSubscriptions).toBe(subscriptionsPerView);
+    expect(count('child')).toBe(0);
+    expect(count('parent')).toBeGreaterThan(0);
   }
   await unmount(f.container);
-  expect(activeSubscriptions).toBe(0);
+  expect(count()).toBe(0);
 });
 
 it('keeps desktop parent controls and uses child attachment without recreating a runtime', async () => {

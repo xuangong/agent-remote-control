@@ -127,3 +127,26 @@ it('reuses a tracked subscription after its side window unmounts and releases it
     expect(f.closes).toEqual(['side']);
   } finally { await act(async () => connections.clear()); }
 });
+
+it('keeps the current composer mounted when its side session becomes independent', async () => {
+  const f = fixture();
+  const store = new ForkStore('side-independent');
+  let detach!: () => void;
+  function Harness() {
+    const [standalone, setStandalone] = useState(false);
+    detach = () => setStandalone(true);
+    return <SideConversation standalone={standalone} session={{ agentId: 'side', providerId: 'recorded', nativeSessionId: 'side', title: 'Side' }}
+      transport={f.transport} store={store} draft="Keep this draft" onClose={() => {}} onOpenSource={() => {}} onOpenFork={() => {}}
+      onFork={async () => { throw new Error('Unexpected fork'); }} />;
+  }
+  const container = await render(<Harness />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]');
+  expect(input?.value).toBe('Keep this draft');
+  expect(container.querySelector('.lab-side-close')).not.toBeNull();
+  await act(async () => detach());
+  expect(container.querySelector('.lab-side-close')).toBeNull();
+  expect(container.querySelector('.lab-window-number')).toBeNull();
+  expect(container.querySelector('[data-testid="prompt-input"]')).toBe(input);
+  expect(input?.value).toBe('Keep this draft');
+  expect(f.closes).toEqual([]);
+});

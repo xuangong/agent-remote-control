@@ -25,8 +25,8 @@ import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
 import { FavoritesHeading, FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
-import { TrackedSessionViews, type TrackedSessionView } from './tracked-session-views.js';
-import { ToastProvider, useFeedbackToast } from './components/Toast.js';
+import { TrackedSessionViews, unlinkSideView, type TrackedSessionView } from './tracked-session-views.js';
+import { ToastProvider, useFeedbackToast, useToast } from './components/Toast.js';
 import { SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
@@ -38,6 +38,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -204,7 +205,7 @@ function AppContent({
   const openedSessionsRef = useRef(openedSessions);
   openedSessionsRef.current = openedSessions;
   const forkStore = useMemo(() => new ForkStore(baseUrl), [baseUrl]);
-  const [, setForkRevision] = useState(0);
+  const [forkRevision, setForkRevision] = useState(0);
   useEffect(() => forkStore.subscribe(() => setForkRevision((value) => value + 1)), [forkStore]);
   const [sideSessions, setSideSessions] = useState<OpenedSession[]>([]);
   const [letterReveals, setLetterReveals] = useState<Record<string, { key: string; requestId: number; align: 'start' }>>({});
@@ -218,6 +219,10 @@ function AppContent({
   const [sideFocus, setSideFocus] = useState<string>();
   // Navigation chooses the visible pair; focusing either visible pane keeps that pair.
   const [sideAnchor, setSideAnchor] = useState<string>();
+  // An unlinked window stays mounted so drafts, scrolling and subscriptions survive.
+  const [detachedSideRoot, setDetachedSideRoot] = useState<string>();
+  const appliedUnlinks = useMemo(() => new Map<string, number>(), [forkStore]);
+  const toast = useToast();
   const trackedViews = useMemo(() => new TrackedSessionViews(), [baseUrl, transport]);
   function navigateSide(key: string | undefined): void {
     setSideAnchor(key);
@@ -419,6 +424,7 @@ function AppContent({
 
   const attach = useCallback((agentId: string, catchUpTarget?: TimelineCursor): void => {
     if (!accessReadyRef.current) return;
+    if (primaryBinding.current?.agentId !== agentId) setDetachedSideRoot(undefined);
     navigationGeneration.current += 1;
     setSessionNotice(undefined);
     setUncertainMutation(false);
@@ -551,8 +557,8 @@ function AppContent({
   }
 
   function rememberTrackedView(): void {
-    if (!stackRoot) return;
-    trackedViews.remember({ primary: stackRoot, focus: sideFocus, anchor: sideAnchor,
+    if (!visibleStackRoot) return;
+    trackedViews.remember({ primary: visibleStackRoot, focus: sideFocus, anchor: sideAnchor,
       selections: Object.fromEntries(stackPath.map(session => [sessionKey(session), sideSelections[sessionKey(session)] ?? null])),
     }, tracking.sessions, sessionEntries);
   }
@@ -562,10 +568,10 @@ function AppContent({
     rememberTrackedView();
     const view = tracking.observations[sessionKey(item)]?.changed ? undefined : trackedViews.get(item);
     const primary = view ? sessionEntries.find(session => sessionKey(session) === sessionKey(view.primary)) ?? view.primary : item;
-    if (await openSession(primary, undefined, undefined, false, view)) trackedViews.select(item);
+    if (await openSession(primary, undefined, undefined, false, view ? () => trackedViews.get(item) : undefined)) trackedViews.select(item);
   }
 
-  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false, view?: TrackedSessionView): Promise<boolean> {
+  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false, restoreView?: () => TrackedSessionView | undefined): Promise<boolean> {
     if (!letterNavigation) letterRequest.current?.abort();
     if (!directory || transitionRef.current) return false;
     rememberTrackedView();
@@ -573,7 +579,7 @@ function AppContent({
     const key = sessionKey({ ...item, hostId });
     const visible = stackPath.find(entry => sessionKey(entry) === key);
     // Existing windows keep their connections; live tracking can also supply a confirmed binding.
-    if (!view && !takeOver && !onRestoring && visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner && (visible.agentId !== activeAgentId || status === 'ready')) {
+    if (!restoreView && !takeOver && !onRestoring && visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner && (visible.agentId !== activeAgentId || status === 'ready')) {
       const observation = tracking.observations[key];
       beginCatchUp(replicaFor(visible.agentId), observation?.connection === 'ready' && observation.agentId === visible.agentId ? observation.cursor : undefined);
       setSideFocus(key);
@@ -608,6 +614,9 @@ function AppContent({
       const prior = openedSessions.find((entry) => sessionKey(entry) === sessionKey({ ...item, hostId }));
       rememberSession({ ...prior, ...item, hostId, agentId });
       setProviderName(providerConnectionName(hostId, item.providerId));
+      setDetachedSideRoot(undefined);
+      // Another device can unlink a remembered side while native attachment is pending.
+      const view = restoreView?.();
       if (view) {
         setSideSelections(current => ({ ...current, ...view.selections }));
         setSideFocus(view.focus);
@@ -878,15 +887,47 @@ function AppContent({
     agentId: state.agent.id, nativeSessionId: state.agent.runtimeInfo.sessionId,
     providerId: state.agent.providerId, hostId: 'local', title: 'Conversation',
   } : undefined);
-  const stackPath = sidePath(stackRoot, sideSessions, sideSelections).map((session) => ({
+  const visibleStackRoot = sideSessions.find(session => sessionKey(session) === detachedSideRoot) ?? stackRoot;
+  const stackPath = sidePath(visibleStackRoot, sideSessions, sideSelections).map((session) => ({
     ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title,
   }));
   const stackRange = expandedSideRange(stackPath, compactLayout ? sideFocus : sideAnchor, compactLayout ? 1 : 2);
   const expandedKeys = new Set(stackPath.slice(stackRange.start, stackRange.end + 1).map(sessionKey));
   const focusedWindow = stackPath.find(session => sessionKey(session) === sideFocus) ?? stackPath[stackRange.end];
-  const primaryExpanded = stackRange.start === 0;
-  const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? stackRoot;
-  const refreshRelations = useSessionRelations(baseUrl, userScoped && accessReady, forkStore, ask.store, addressSession ? sessionKey(addressSession) : undefined);
+  const primaryExpanded = detachedSideRoot ? !!stackRoot && expandedKeys.has(sessionKey(stackRoot)) : stackRange.start === 0;
+  const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? visibleStackRoot;
+  const refreshRelations = useSessionRelations(baseUrl, userScoped && accessReady, forkStore, ask.store, addressSession ? sessionKey(addressSession) : undefined, userScoped);
+  useLayoutEffect(() => {
+    for (const record of forkStore.all()) {
+      if (record.linked !== false || !record.target || appliedUnlinks.get(record.id) === (record.revision ?? 0)) continue;
+      appliedUnlinks.set(record.id, record.revision ?? 0);
+      trackedViews.unlink(record.source, record.target);
+      nextSideRequest(record.source);
+      if (!visibleStackRoot) continue;
+      const sourceKey = sessionKey(record.source), targetKey = sessionKey(record.target);
+      const current = { primary: visibleStackRoot, selections: sideSelections, focus: sideFocus, anchor: sideAnchor };
+      const next = unlinkSideView(current, sourceKey, targetKey);
+      if (next === current) continue;
+      letterRequest.current?.abort();
+      setSideSelections(values => values[sourceKey] === targetKey ? { ...values, [sourceKey]: null } : values);
+      if (next.focus !== sideFocus) {
+        setDetachedSideRoot(targetKey);
+        const branch = sidePath(record.target, sideSessions, sideSelections);
+        if (!branch.some(session => sessionKey(session) === sideAnchor)) setSideAnchor(sideFocus ?? targetKey);
+      } else {
+        setSideFocus(next.focus);
+        setSideAnchor(next.anchor);
+      }
+    }
+  }, [forkStore, forkRevision, appliedUnlinks, trackedViews, visibleStackRoot, sideSessions, sideSelections, sideFocus, sideAnchor]);
+
+  async function unlinkSide(record: SessionFork): Promise<void> {
+    await refreshRelations.setLinked(record, false);
+    const unlinked = forkStore.get(record.id);
+    toast?.show(`unlink-side:${record.id}`, 'Side session unlinked', 'The conversation is still available as an independent session.', 'info', {
+      label: 'Undo', onClick: async () => { await refreshRelations.setLinked(unlinked, true); },
+    });
+  }
   const askKey = addressSession ? sessionKey(addressSession) : undefined;
   const askEntry = addressSession ? ask.entryFor(addressSession) : undefined;
   const askVisible = ask.enabled && ask.openKey === askKey && !!askEntry && activeView === 'workbench' && !supportingRailOpen;
@@ -970,6 +1011,7 @@ function AppContent({
       setSideSelections(values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === sessionKey(source) ? sessionKey(target) : value])));
       setSideFocus(value => value === sessionKey(source) ? sessionKey(target) : value);
       setSideAnchor(value => value === sessionKey(source) ? sessionKey(target) : value);
+      setDetachedSideRoot(value => value === sessionKey(source) ? sessionKey(target) : value);
       return true;
     },
   });
@@ -1196,7 +1238,7 @@ function AppContent({
 
   async function openFork(record: SessionFork): Promise<void> {
     letterRequest.current?.abort();
-    if (!record.target || !directory) return;
+    if (!record.target || !directory || forkStore.get(record.id).linked === false) return;
     const saved = record.target;
     const request = nextSideRequest(record.source);
     const target = (saved.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, saved.hostId);
@@ -1206,7 +1248,7 @@ function AppContent({
       forkStore.bind(record.id, session);
       await configureFork(transport, forkStore, forkStore.get(record.id));
       rememberSession(session);
-      if (sideRequests.current.get(sessionKey(record.source)) === request && session.agentId !== activeAgentId) selectSide(record.source, session);
+      if (sideRequests.current.get(sessionKey(record.source)) === request && forkStore.get(record.id).linked !== false && session.agentId !== activeAgentId) selectSide(record.source, session);
     } catch (error) {
       if (sideRequests.current.get(sessionKey(record.source)) === request) setFailure(message(error, 'Forked session could not be opened.'));
     }
@@ -1255,7 +1297,7 @@ function AppContent({
       rememberSession(source); rememberSession(session);
       setDirectoryRevision((value) => value + 1);
       if (args.trim()) messageDrafts.set(session.agentId, args.trim());
-      if (id === 'console:side') selectSide(source, session);
+      if (id === 'console:side' && forkStore.get(record.id).linked !== false) selectSide(source, session);
       if (args.trim() && forkStore.get(record.id).delivery !== 'sent') {
         setForkInputStatus({ agentId: session.agentId, pending: true });
         try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
@@ -1330,7 +1372,7 @@ function AppContent({
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       {userScoped ? <FavoritesMenu onScan={directory ? () => setScanOpen(true) : undefined} status={addressSession?.agentId === state?.agent?.id ? state?.agent?.status : sessionEntries.find(entry => addressSession && sessionKey(entry) === sessionKey(addressSession))?.status} currentSession={addressSession} title={addressSession?.title || activeOpened?.title || 'Agent Remote'} favorites={favorites} tracking={tracking} activeKey={addressSession ? sessionKey(addressSession) : undefined} busy={transitioning} onOpen={item => void openSession(item)} /> : stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
         {stackPath.map((session, index) => <option className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === session.agentId)?.status} key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
-      </select> : <span className="lab-mobile-session-title agent-session-title" data-session-status={state?.agent?.status}>{activeOpened?.title || 'Agent Remote'}</span>}
+      </select> : <span className="lab-mobile-session-title agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === addressSession?.agentId)?.status}>{addressSession?.title || 'Agent Remote'}</span>}
       {userScoped && stackPath.length > 1 ? <select className="lab-mobile-side-path" aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={event => { const session = stackPath.find(entry => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
         {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : null}
@@ -1511,8 +1553,8 @@ function AppContent({
                 if (!opened) throw new Error('Session navigation changed before native restoration was confirmed.');
               }, options);
             }} /> : undefined}
-          composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} /> : undefined}
-          composerNotice={<ForkEntries forks={forkStore.all().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} />}
+          composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} onUnlink={unlinkSide} /> : undefined}
+          composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} />}
           sessionManager={<>{!compactLayout && addressSession ? <StarButton session={addressSession} favorites={favorites} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
             <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || hostOffline || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
             <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={transitioning || hostOffline || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
@@ -1535,7 +1577,7 @@ function AppContent({
         /></CommunicationNavigationContext.Provider>
         </div>
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
-          key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)}
+          key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} standalone={sessionKey(session) === detachedSideRoot} onUnlink={unlinkSide}
           communication={sideState => letterNavigation(session, sideState)} revealEntry={letterReveals[session.agentId]}
           onOpenChildSession={(child, sideState) => openChildSession(child, session, sideState)} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
           position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}

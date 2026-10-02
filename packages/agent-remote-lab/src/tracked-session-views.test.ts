@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { TrackedSessionViews, type TrackedSessionView } from './tracked-session-views.js';
 import type { SessionEntry } from './session-tree.js';
+import { sessionKey } from './session-tree.js';
 
 const parent: SessionEntry = { hostId: 'host-a', providerId: 'codex', nativeSessionId: 'parent', title: 'Project' };
 const child: SessionEntry = { ...parent, nativeSessionId: 'child', parentNativeSessionId: 'parent', title: 'Review' };
@@ -42,4 +43,29 @@ it('drops view memory when a session is untracked instead of reviving it when tr
   views.retain([]);
   views.retain([parent]);
   expect(views.get(parent)).toBeUndefined();
+});
+
+it('removes an unlinked side from every saved track without breaking its own descendants', () => {
+  const side = { ...parent, nativeSessionId: 'side', title: 'Side' };
+  const nested = { ...parent, nativeSessionId: 'nested', title: 'Nested' };
+  const [a, b, c] = [parent, side, nested].map(sessionKey);
+  const views = new TrackedSessionViews();
+  const tracked = [parent, side];
+  views.select(parent);
+  views.remember({ primary: parent, selections: { [a!]: b!, [b!]: c! }, focus: c, anchor: c }, tracked, tracked);
+  views.select(side);
+  views.remember({ primary: side, selections: { [b!]: c! }, focus: c, anchor: c }, tracked, tracked);
+  views.unlink(parent, side);
+  expect(views.get(parent)).toEqual({ primary: parent, selections: { [a!]: null, [b!]: c! }, focus: a, anchor: a });
+  expect(views.get(side)).toEqual({ primary: side, selections: { [b!]: c! }, focus: c, anchor: c });
+});
+
+it('keeps a different selected sibling when another side is unlinked', () => {
+  const side = { ...parent, nativeSessionId: 'side' };
+  const a = sessionKey(parent), b = sessionKey(side), other = 'other-side';
+  const views = new TrackedSessionViews();
+  const saved = { primary: parent, selections: { [a]: other, [b]: 'nested' }, focus: other, anchor: other };
+  views.remember(saved, [parent], [parent]);
+  views.unlink(parent, side);
+  expect(views.get(parent)).toEqual(saved);
 });

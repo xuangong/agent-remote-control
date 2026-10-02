@@ -8,6 +8,16 @@ export interface TrackedSessionView {
   anchor?: string;
 }
 
+/** Detach one navigation edge while keeping the independent branch's own path. */
+export function unlinkSideView(view: TrackedSessionView, source: string, target: string): TrackedSessionView {
+  if (view.selections[source] !== target) return view;
+  const detached = new Set<string>();
+  for (let key: string | null | undefined = target; key && !detached.has(key); key = view.selections[key]) detached.add(key);
+  return { ...view, selections: { ...view.selections, [source]: null },
+    focus: view.focus && detached.has(view.focus) ? source : view.focus,
+    anchor: view.anchor && detached.has(view.anchor) ? source : view.anchor };
+}
+
 /** Page-local navigation memory. Connection ownership stays with ConversationConnections. */
 export class TrackedSessionViews {
   private readonly views = new Map<string, TrackedSessionView>();
@@ -15,6 +25,10 @@ export class TrackedSessionViews {
 
   select(session: SessionEntry): void { this.selected = sessionKey(session); }
   get(session: SessionEntry): TrackedSessionView | undefined { return this.views.get(sessionKey(session)); }
+
+  unlink(source: SessionEntry, target: SessionEntry): void {
+    for (const [key, view] of this.views) this.views.set(key, unlinkSideView(view, sessionKey(source), sessionKey(target)));
+  }
 
   retain(sessions: readonly SessionEntry[]): void {
     const keys = new Set(sessions.map(sessionKey));

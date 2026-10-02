@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { ToastProvider, useFeedbackToast } from './Toast.js';
+import { ToastProvider, useFeedbackToast, useToast } from './Toast.js';
 
 afterEach(() => vi.useRealTimers());
 function Feedback({ message = 'The Host did not answer.' }: { message?: string }) {
@@ -93,4 +93,56 @@ it('gives an updated error its full countdown after an opening status', async ()
   expect(container.querySelector('.lab-toast')).not.toBeNull();
   await act(async () => vi.advanceTimersByTimeAsync(1000));
   expect(container.querySelector('.lab-toast')).toBeNull();
+});
+
+
+it('keeps a failed Undo available and suppresses repeated clicks while it is pending', async () => {
+  vi.useFakeTimers();
+  let attempts = 0, finish!: () => void;
+  function UnlinkFeedback() {
+    const toast = useToast();
+    return <button onClick={() => toast?.show('side-unlinked', 'Side session', 'Side session unlinked', 'info', {
+      label: 'Undo', onClick: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('Unable to restore the link while offline.');
+        await new Promise<void>(resolve => { finish = resolve; });
+      },
+    })}>Unlink</button>;
+  }
+  const container = await render(<ToastProvider><UnlinkFeedback /></ToastProvider>);
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  const undo = container.querySelector<HTMLButtonElement>('.lab-toast-action')!;
+  expect(undo?.textContent).toBe('Undo');
+  await act(async () => undo.click());
+  expect(container.querySelector('.lab-toast [role="alert"]')?.textContent).toContain('Unable to restore the link while offline.');
+  await act(async () => vi.advanceTimersByTimeAsync(20000));
+  expect(container.querySelector('.lab-toast')).not.toBeNull();
+  expect(undo.disabled).toBe(false);
+  await act(async () => undo.click());
+  expect(undo.disabled).toBe(true);
+  await act(async () => undo.click());
+  expect(attempts).toBe(2);
+  await act(async () => vi.advanceTimersByTimeAsync(20000));
+  expect(container.querySelector('.lab-toast')).not.toBeNull();
+  await act(async () => finish());
+  expect(container.querySelector('.lab-toast')).toBeNull();
+});
+
+
+it('does not dismiss a newer notification when an older action completes', async () => {
+  let finish!: () => void;
+  function FeedbackActions() {
+    const toast = useToast();
+    return <>
+      <button onClick={() => toast?.show('side-link', 'Side session', 'First unlink', 'info', { label: 'Undo', onClick: () => new Promise<void>(resolve => { finish = resolve; }) })}>First</button>
+      <button onClick={() => toast?.show('side-link', 'Side session', 'Another unlink', 'info', { label: 'Undo', onClick: () => {} })}>Next</button>
+    </>;
+  }
+  const container = await render(<ToastProvider><FeedbackActions /></ToastProvider>);
+  await act(async () => container.querySelectorAll<HTMLButtonElement>('button')[0]!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-toast-action')!.click());
+  await act(async () => container.querySelectorAll<HTMLButtonElement>('button')[1]!.click());
+  expect(container.querySelector('.lab-toast')?.textContent).toContain('Another unlink');
+  await act(async () => finish());
+  expect(container.querySelector('.lab-toast')?.textContent).toContain('Another unlink');
 });

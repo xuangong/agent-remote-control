@@ -180,3 +180,73 @@ it('opens shared navigation when browser storage is unavailable', () => {
   store.bind('shared', { ...source, agentId: 'attached', nativeSessionId: 'child' });
   expect(store.get('shared').target?.agentId).toBe('attached');
 });
+
+it('applies shared unlink state to a matching local target without losing its delivery ledger', async () => {
+  const store = new ForkStore('shared-unlink');
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  const target = { ...source, nativeSessionId: 'side', agentId: 'side-agent' };
+  store.bind(record.id, target);
+  await expect(store.send(record.id, 'question awaiting receipt', async () => { throw new Error('lost receipt'); }, async () => false)).rejects.toThrow('lost receipt');
+  store.setSharedRelations([{ id: 'server-relation', kind: 'side', createdAt: record.capturedAt, source, target, linked: false, revision: 2 }]);
+  expect(store.linked()).toEqual([]);
+  expect(store.all()).toHaveLength(1);
+  expect(store.find(target)).toMatchObject({ id: record.id, relationId: 'server-relation', linked: false, revision: 2,
+    delivery: 'uncertain', pendingInput: 'question awaiting receipt', firstInput: 'question awaiting receipt' });
+  expect(store.get(record.id)).toMatchObject({ linked: false, revision: 2, delivery: 'uncertain' });
+});
+
+it('persists local unlink and uses revisions to reject stale undo while preserving context', async () => {
+  const store = new ForkStore('local-unlink');
+  const record = store.prepare(await captureForkContext({ fetchTimeline: async () => page([entry(1, 'source context')]) }, source));
+  store.bind(record.id, { ...source, nativeSessionId: 'side' });
+  store.setLinked(record.id, false, 0);
+  const restored = new ForkStore('local-unlink');
+  expect(restored.linked()).toEqual([]);
+  expect(restored.get(record.id)).toMatchObject({ linked: false, revision: 1, delivery: 'pending' });
+  expect(contextPrefix(restored.get(record.id))).toContain('source context');
+  expect(() => restored.setLinked(record.id, true, 0)).toThrow(/changed/);
+  restored.setLinked(record.id, true, 1);
+  expect(restored.linked()).toHaveLength(1);
+  expect(restored.get(record.id).revision).toBe(2);
+});
+
+it('does not resurrect shared navigation when an older revision arrives after unlink', () => {
+  const store = new ForkStore('reordered-relations');
+  const relation = { id: 'shared', kind: 'side' as const, createdAt: '2026-10-02T00:00:00.000Z', source,
+    target: { ...source, nativeSessionId: 'side', agentId: 'side-agent' } };
+  store.setSharedRelations([{ ...relation, linked: false, revision: 3 }]);
+  store.setSharedRelations([relation]);
+  expect(store.linked()).toEqual([]);
+  expect(store.get('shared')).toMatchObject({ linked: false, revision: 3 });
+  store.setSharedRelations([{ ...relation, linked: true, revision: 4 }]);
+  expect(store.linked().map(item => item.id)).toEqual(['shared']);
+});
+
+it('keeps an acknowledged unlink across reload before refresh and after an empty directory response', () => {
+  const store = new ForkStore('durable-navigation');
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  const target = { ...source, nativeSessionId: 'side', agentId: 'side-agent' };
+  store.bind(record.id, target);
+  store.setSharedRelations([{ id: 'server-side', kind: 'side', createdAt: record.capturedAt, source, target, linked: false, revision: 1 }]);
+  const restored = new ForkStore('durable-navigation');
+  expect(restored.linked()).toEqual([]);
+  restored.setSharedRelations([]);
+  expect(restored.get(record.id)).toMatchObject({ linked: false, revision: 1, delivery: 'pending' });
+  expect(restored.linked()).toEqual([]);
+});
+
+it('keeps acknowledged navigation separate from an older tab rewriting its delivery record', () => {
+  const store = new ForkStore('old-delivery-writer');
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  const target = { ...source, nativeSessionId: 'side', agentId: 'side-agent' };
+  store.bind(record.id, target);
+  const old = store.get(record.id);
+  const relation = { id: 'server-side', kind: 'side' as const, createdAt: record.capturedAt, source, target };
+  store.setSharedRelations([{ ...relation, linked: false, revision: 3 }]);
+  localStorage.setItem('agent-remote-forks:old-delivery-writer:record:' + record.id, JSON.stringify({ ...old, delivery: 'sent', firstInput: 'received' }));
+  const restored = new ForkStore('old-delivery-writer');
+  restored.setSharedRelations([relation]);
+  expect(restored.get(record.id)).toMatchObject({ linked: false, revision: 3, delivery: 'sent', firstInput: 'received' });
+  restored.setSharedRelations([{ ...relation, linked: true, revision: 4 }]);
+  expect(new ForkStore('old-delivery-writer').linked()).toHaveLength(1);
+});

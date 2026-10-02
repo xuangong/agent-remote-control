@@ -2,9 +2,10 @@ import { useToastPlacement } from '../hooks/useToastPlacement.js';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 type ToastTone = 'info' | 'error';
-interface ToastMessage { id: string; title: string; message: string; tone: ToastTone; revision: number }
+export interface ToastAction { label: string; onClick(): Promise<void> | void }
+interface ToastMessage { id: string; title: string; message: string; tone: ToastTone; revision: number; action?: ToastAction }
 interface ToastService {
-  show(id: string, title: string, message: string, tone: ToastTone): void;
+  show(id: string, title: string, message: string, tone: ToastTone, action?: ToastAction): void;
   dismiss(id: string): void;
   registerAnchor(element: HTMLElement): () => void;
 }
@@ -19,11 +20,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
   const [messages, setMessages] = useState<ToastMessage[]>([]);
   const dismiss = useCallback((id: string) => setMessages(current => current.some(item => item.id === id) ? current.filter(item => item.id !== id) : current), []);
-  const show = useCallback((id: string, title: string, message: string, tone: ToastTone) => {
+  const show = useCallback((id: string, title: string, message: string, tone: ToastTone, action?: ToastAction) => {
     setMessages(current => {
       const prior = current.find(item => item.id === id);
-      if (prior?.title === title && prior.message === message && prior.tone === tone) return current;
-      return [...current.filter(item => item.id !== id), { id, title, message, tone, revision: (prior?.revision ?? 0) + 1 }].slice(-3);
+      if (prior?.title === title && prior.message === message && prior.tone === tone && prior.action === action) return current;
+      return [...current.filter(item => item.id !== id), { id, title, message, tone, action, revision: (prior?.revision ?? 0) + 1 }].slice(-3);
     });
   }, []);
   const viewport = useToastPlacement(anchors, messages.length > 0);
@@ -34,6 +35,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     </section>
   </ToastContext.Provider>;
 }
+
+export function useToast() { return useContext(ToastContext); }
 
 /** Visible composers reserve their input area without changing conversation layout. */
 export function useToastAnchor<T extends HTMLElement = HTMLDivElement>(enabled: boolean) {
@@ -58,6 +61,8 @@ export function useFeedbackToast(title: string, message: string | undefined, ton
 
 function Toast({ value, dismiss }: { value: ToastMessage; dismiss(id: string): void }) {
   const previousFocus = useRef(document.activeElement);
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const close = () => {
     dismiss(value.id);
     if (previousFocus.current instanceof HTMLElement && previousFocus.current.isConnected) previousFocus.current.focus({ preventScroll: true });
@@ -67,7 +72,17 @@ function Toast({ value, dismiss }: { value: ToastMessage; dismiss(id: string): v
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(document.visibilityState === 'hidden');
-  const paused = hovered || focused || hidden;
+  const [pending, setPending] = useState(false);
+  const [actionError, setActionError] = useState<string>();
+  const actionRunning = useRef(false);
+  const paused = hovered || focused || hidden || pending || !!actionError;
+  const runAction = async () => {
+    if (!value.action || actionRunning.current) return;
+    actionRunning.current = true; setPending(true); setActionError(undefined);
+    try { await value.action.onClick(); if (active.current) close(); }
+    catch (error) { if (active.current) setActionError(error instanceof Error ? error.message : 'The action could not be completed. Try again.'); }
+    finally { actionRunning.current = false; if (active.current) setPending(false); }
+  };
   useEffect(() => {
     const update = () => setHidden(document.visibilityState === 'hidden');
     document.addEventListener('visibilitychange', update);
@@ -91,6 +106,8 @@ function Toast({ value, dismiss }: { value: ToastMessage; dismiss(id: string): v
       <button type="button" aria-label={`Dismiss notification: ${value.title}`} onClick={close}>×</button>
     </div>
     <p>{value.message}</p>
+    {value.action ? <button type="button" className="lab-toast-action" disabled={pending} onClick={() => void runAction()}>{value.action.label}</button> : null}
+    {actionError ? <p className="lab-toast-action-error" role="alert">{actionError}</p> : null}
     <span className="lab-toast-countdown" aria-hidden="true">{paused ? 'Auto-dismiss paused' : `Closes in ${Math.ceil(remaining / 1000)}s`}</span>
     <div className="lab-toast-progress" aria-hidden="true"><span style={{ width: `${remaining / duration * 100}%` }} /></div>
   </div>;

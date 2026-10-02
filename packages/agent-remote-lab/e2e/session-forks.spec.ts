@@ -93,7 +93,7 @@ test('fork keeps the source chat, side sends independently, and references survi
   const sourceUrl = page.url();
   await primary.getByTestId('prompt-input').fill('/fork');
   await primary.getByTestId('prompt-input').press('Enter');
-  const entry = primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button');
+  const entry = primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]');
   await expect(entry).toHaveCount(1);
   expect(page.url()).toBe(sourceUrl);
   await expect(page.getByRole('complementary', { name: 'Side conversation' })).toHaveCount(0);
@@ -137,10 +137,12 @@ test('fork keeps the source chat, side sends independently, and references survi
   await expect(primary.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');
   await primary.locator('.lab-fork-reference summary').click();
   await primary.getByRole('button', { name: 'Open source session' }).click();
-  await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button')).toBeVisible();
-  await primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button').click();
+  await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]')).toBeVisible();
+  await primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]').click();
   await expect(side.locator('.lab-fork-reference summary')).toBeVisible();
   await expect(side.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');
+  const resumedControl = side.getByRole('button', { name: 'Take control', exact: true });
+  if (await resumedControl.isVisible()) await resumedControl.click();
   await side.getByTestId('prompt-input').fill('A second branch message.');
   await side.getByTestId('prompt-input').press('Enter');
   await expect(side.locator('.agent-message-user')).toHaveCount(3);
@@ -171,7 +173,7 @@ test('forks a conversation with a large tool result and discloses shortened cont
   });
   await primary.getByTestId('prompt-input').fill('/fork Continue from that build');
   await primary.getByTestId('prompt-input').press('Enter');
-  await primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button').click();
+  await primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]').click();
   const side = page.getByRole('complementary', { name: 'Side conversation' });
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Continue from that build');
   await side.locator('.lab-fork-reference summary').click();
@@ -184,7 +186,7 @@ test('rejects a delayed fork input after the main conversation changes', async (
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/fork');
   await primary.getByTestId('prompt-input').press('Enter');
-  await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button')).toHaveCount(1);
+  await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]')).toHaveCount(1);
   await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button', { name: 'Refresh', exact: true }).click();
   await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
   await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
@@ -268,7 +270,7 @@ test('a slow sibling attachment does not override the latest side selection', as
   for (const name of ['First branch', 'Second branch']) {
     await primary.getByTestId('prompt-input').fill(`/fork ${name}`);
     await primary.getByTestId('prompt-input').press('Enter');
-    await expect(primary.getByRole('button', { name: new RegExp(name) })).toBeVisible();
+    await expect(primary.getByRole('button', { name: new RegExp(`^Side \\d+ · ${name}`) })).toBeVisible();
     await expect(primary.getByTestId('prompt-input')).toHaveValue('');
   }
   const firstTarget = await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(':record:'))

@@ -334,6 +334,43 @@ it.each([false, true])('restores a side view and remembers when it was explicitl
   expect(new URLSearchParams(location.search).get('session')).toBe('tracked');
 });
 
+it.each([false, true])('does not restore a side link removed by another tab while tracked attachment is pending (compact: %s)', async compact => {
+  const store = new ForkStore(baseUrl);
+  const source = { ...star, agentId: 'live-agent' };
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  store.bind(record.id, { ...source, nativeSessionId: 'side', agentId: 'side-agent', title: 'Side discussion' });
+  store.markConfigured(record.id);
+  const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
+  const f = await fixture(star, true, other, undefined, { compact });
+  await f.open();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Forked sessions"] button')!.click());
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  expect(side.hidden).toBe(false);
+  await f.open(other.title);
+  await act(async () => f.contentListeners.get('live-agent')!.onMessage({ protocolVersion: '1.6.0', type: 'session_control', payload: {
+    agentId: 'live-agent', revision: 'native-owner', access: 'read_only', available: false,
+    nativeOwner: { kind: 'native_cli', generation: 'native-owner' },
+  } }));
+  let finishAttach!: (value: { agentId: string }) => void;
+  f.attach.mockClear();
+  f.attach.mockImplementationOnce(() => new Promise<{ agentId: string }>(resolve => { finishAttach = resolve; }));
+  await f.open();
+  expect(f.attach).toHaveBeenCalledOnce();
+  expect(new URLSearchParams(location.search).get('session')).toBe(other.nativeSessionId);
+
+  // A second tab removes the relation after this tab captured its saved view.
+  await act(async () => {
+    store.setLinked(record.id, false);
+    window.dispatchEvent(new StorageEvent('storage', { key: null }));
+  });
+  await act(async () => finishAttach({ agentId: 'live-agent' }));
+  expect(side.hidden).toBe(true);
+  expect(primary.hidden).toBe(false);
+  expect(new URLSearchParams(location.search).get('session')).toBe(source.nativeSessionId);
+  expect(f.container.querySelector('[aria-label="Forked sessions"]')).toBeNull();
+});
+
 it('remembers an explicit return to the mobile parent instead of reviving the previous child', async () => {
   const other = { ...star, nativeSessionId: 'other', title: 'Other tracked conversation' };
   const f = await fixture(star, true, other, undefined, { compact: true });

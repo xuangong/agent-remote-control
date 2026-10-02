@@ -1,4 +1,4 @@
-import { validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
+import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
 import { isHostProviderChange } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { isCodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
@@ -1112,7 +1112,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         const source = nativeBindings.get(JSON.stringify([binding.hostId, binding.providerId, relation.sourceNativeSessionId]));
         if (!source || !sessionAllowed(source, subject)) continue;
         const identity = (value: Binding, title: string) => ({ hostId: value.hostId, providerId: value.providerId, nativeSessionId: value.nativeSessionId, agentId: value.agentId, title });
-        result.push({ id: relation.id, kind: relation.kind, createdAt: relation.createdAt,
+        result.push({ id: relation.id, kind: relation.kind, createdAt: relation.createdAt, linked: relation.linked ?? true, revision: relation.revision ?? 0,
           source: identity(source, 'Source session'), target: identity(binding, relation.kind === 'ask' ? 'Ask' : 'Side') });
       }
       return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
@@ -1140,6 +1140,26 @@ export function createHostBroker(options: HostBrokerOptions) {
         const saved = draft.bindings.find(item => item.agentId === binding!.agentId)!;
         saved.sourceRelation = prior ?? relation;
         return { value: undefined, publish() { binding!.sourceRelation = saved.sourceRelation; } };
+      });
+    },
+    async updateSessionRelation(subject: string, input: unknown): Promise<void> {
+      if (!validSessionRelationUpdate(input)) throw new SharingError(400, 'invalid_relation', 'A complete session relation and current revision are required.');
+      await commit(draft => {
+        const binding = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.nativeSessionId]));
+        const source = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.sourceNativeSessionId]));
+        if (!binding || !source || !sessionAllowed(binding, subject) || !sessionAllowed(source, subject)) {
+          throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+        }
+        const relation = binding.sourceRelation;
+        if (!relation || relation.kind !== 'side' || relation.id !== input.id || relation.sourceNativeSessionId !== input.sourceNativeSessionId) {
+          throw new SharingError(409, 'relation_conflict', 'This side relationship changed. Refresh before trying again.');
+        }
+        const revision = relation.revision ?? 0;
+        if (revision === input.expectedRevision + 1 && (relation.linked ?? true) === input.linked) return { value: undefined, publish() {} };
+        if (revision !== input.expectedRevision) throw new SharingError(409, 'relation_conflict', 'This side relationship changed. Refresh before trying again.');
+        const next = { ...relation, linked: input.linked, revision: revision + 1 };
+        draft.bindings.find(item => item.agentId === binding.agentId)!.sourceRelation = next;
+        return { value: undefined, publish() { binding.sourceRelation = next; } };
       });
     },
     canAccessSession: (agentId: string, subject: string) => { const binding = bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },

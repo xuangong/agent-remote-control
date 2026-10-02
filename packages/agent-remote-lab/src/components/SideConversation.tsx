@@ -13,11 +13,12 @@ import { ForkEntries, ForkReference } from './ForkReference.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, communication, revealEntry, onOpenChildSession }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, communication, revealEntry, onOpenChildSession }: {
   communication?(state: AgentReplicaState | undefined): CommunicationNavigation;
   revealEntry?: TraceEntryRequest;
   onOpenChildSession?(child: AgentChildSessionView, state: AgentReplicaState | undefined): Promise<void>;
   replica?: AgentReplica;
+  standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
   initialInput?: { pending: boolean; error?: string };
   session: OpenedSession; transport: RemoteAgentTransport; store: ForkStore; draftBinding?: DraftBinding; draft?: string; onDraftChange?(text: string): void;
@@ -40,13 +41,13 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
     <CommunicationNavigationContext.Provider value={communication?.(state)}><LabWorkbench revealEntry={revealEntry} onOpenChildSession={onOpenChildSession ? child => onOpenChildSession(child, state) : undefined} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
-      conversationPath={<span className="lab-side-title" title={title}><span className="lab-window-number">{position + 1}</span><span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}
-      sessionManager={<><SessionLink session={session} /><button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>
+      conversationPath={<span className="lab-side-title" title={title}>{standalone ? null : <span className="lab-window-number">{position + 1}</span>}<span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}
+      sessionManager={<><SessionLink session={session} />{standalone ? null : <button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>
         <svg className="lab-side-back-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
         <span className="lab-side-back-label" aria-hidden="true">Back</span><span className="lab-side-close-icon" aria-hidden="true">×</span>
-      </button></>}
-      composerContext={record ? <ForkReference fork={record} onOpen={onOpenSource} /> : undefined}
-      composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.all().filter((fork) => fork.target && sessionKey(fork.source) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} /></>}
+      </button>}</>}
+      composerContext={record && record.linked !== false ? <ForkReference fork={record} onOpen={onOpenSource} onUnlink={onUnlink} /> : undefined}
+      composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.linked().filter((fork) => fork.target && sessionKey(fork.source) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} onUnlink={onUnlink} /></>}
       consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
       onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
   </aside>;

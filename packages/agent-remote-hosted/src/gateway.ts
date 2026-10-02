@@ -451,16 +451,18 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (path === '/v1/session-relations') {
       const list = () => [...tenants.values()].flatMap(value => value.broker.sessionRelations(grant.subject));
       if (request.method === 'GET') return json(200, { relations: list() });
-      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+      if (!['POST', 'PATCH'].includes(request.method)) return json(405, { error: 'Method is not allowed.' });
       try {
         const input = await readJson(request);
         if (!input) return json(400, { error: 'A session relation is required.' });
         const target = [...tenants.values()].find(value => typeof input.hostId === 'string' && value.broker.hasHost(input.hostId));
         if (!target) return json(403, { error: 'Session access is unavailable.' });
-        await target.broker.importSessionRelation(grant.subject, input);
+        if (request.method === 'PATCH') await target.broker.updateSessionRelation(grant.subject, input);
+        else await target.broker.importSessionRelation(grant.subject, input);
         return json(200, { relations: list() });
       } catch (error) {
-        if (error instanceof SharingError) return json(error.status, { code: error.code, error: error.message });
+        if (error instanceof SharingError) return json(error.status, { code: error.code, error: error.message,
+          ...(request.method === 'PATCH' && error.status === 409 ? { relations: list() } : {}) });
         throw error;
       }
     }

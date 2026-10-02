@@ -500,3 +500,139 @@ it.each(['before', 'after'] as const)('acknowledges updates only after their vis
     expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
   } finally { acquired?.release(); connections.clear(); }
 });
+
+it.each([
+  { leave: 'switching sessions', unseen: false },
+  { leave: 'switching sessions', unseen: true },
+  { leave: 'backgrounding the page', unseen: false },
+  { leave: 'backgrounding the page', unseen: true },
+].flatMap(scenario => [{ ...scenario, replaced: false }, { ...scenario, replaced: true }]))('remembers content seen before $leave when activity arrives later (new background content: $unseen, replaced epoch: $replaced)', async ({ leave, unseen, replaced }) => {
+  const primary = { ...star, agentId: 'native' };
+  const other = { ...primary, nativeSessionId: 'other', agentId: 'other' };
+  saveTrackedSessions('alice', [star]);
+  const activity = new Map<string, Parameters<RemoteAgentTransport['connect']>[1]>();
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot: async () => { throw new Error('Activity tracking must not load snapshots'); },
+    fetchTimeline: async () => { throw new Error('Activity tracking must not load history'); },
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect(id, listener) {
+      queueMicrotask(() => listener.onOpen());
+      return { close: () => {}, send: message => {
+        if (message.type !== 'negotiate' || message.observation !== 'activity') return;
+        activity.set(id, listener);
+        listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+          agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 },
+        } });
+      } };
+    },
+  };
+  const page = (seq: number, epoch = 'content'): import('@orchardworks/agent-remote-protocol').HistoryPage => ({
+    protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+      requestId: `history-${seq}`, agentId: 'native', direction: 'tail', epoch, reset: false, staleCursor: false, gap: false, error: null,
+      window: { minSeq: 1, maxSeq: seq, nextSeq: seq + 1 }, startCursor: { epoch, seq: 1 }, endCursor: { epoch, seq },
+      hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', seqStart: 1, seqEnd: seq,
+        sourceSeqRanges: [{ startSeq: 1, endSeq: seq }], collapsed: [], resources: [], timestamp: '2026-10-03T00:00:00Z',
+        item: { type: 'assistant_message', text: `Output ${seq}` } }],
+    },
+  });
+  const replica = new AgentReplica(); replica.applyHistory(page(1));
+  const connections = new ConversationConnections(transport);
+  const acquired = connections.acquire(primary.agentId, replica, primary);
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  let tracking!: SessionTracking, show!: (sessions: typeof primary[]) => void;
+  let renders = 0;
+  function Fixture() {
+    renders++;
+    const [visible, setVisible] = useState<typeof primary[]>([primary]); show = setVisible;
+    tracking = useSessionTracking('alice', transport, sessionKey(visible[0]!), [primary, other], undefined, connections, true, visible);
+    return <>{tracking.observers}</>;
+  }
+  try {
+    await render(<Fixture />);
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
+    // The visible content channel wins the race against the independently coalesced activity channel.
+    const epoch = replaced ? 'replacement' : 'content';
+    const rendersBeforeContent = renders;
+    await act(async () => { replica.applyHistory(page(2, epoch)); });
+    expect(replica.getState().timeline.entries[0]?.item).toMatchObject({ text: 'Output 2' });
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
+    expect(renders).toBe(rendersBeforeContent);
+    await act(async () => {
+      if (leave === 'switching sessions') show([other]);
+      else { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
+    });
+    if (unseen) await act(async () => { replica.applyHistory(page(3, epoch)); });
+    if (replaced) {
+      await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+        agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq: 1 },
+      } }));
+      await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+        agentId: 'native', status: 'idle', cursor: { epoch, seq: 1 },
+      } }));
+    }
+    await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+      agentId: 'native', status: 'idle', cursor: { epoch, seq: unseen ? 3 : 2 },
+    } }));
+    expect(tracking.observations[sessionKey(star)]).toMatchObject({ activity: 'idle', changed: unseen });
+  } finally { await act(async () => { acquired.release(); connections.clear(); }); }
+});
+
+it.each(['scope', 'transport'] as const)('does not reuse read content after the tracking %s changes', async boundary => {
+  const primary = { ...star, agentId: 'native' };
+  saveTrackedSessions('alice', [star]);
+  saveTrackedSessions('bob', [star]);
+  const activity = new Map<RemoteAgentTransport, Parameters<RemoteAgentTransport['connect']>[1]>();
+  const makeTransport = (): RemoteAgentTransport => {
+    const transport: RemoteAgentTransport = {
+      fetchSnapshot: async () => { throw new Error('Activity tracking must not load snapshots'); },
+      fetchTimeline: async () => { throw new Error('Activity tracking must not load history'); },
+      onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+      connect(id, listener) {
+        queueMicrotask(() => listener.onOpen());
+        return { close: () => {}, send: message => {
+          if (message.type !== 'negotiate' || message.observation !== 'activity') return;
+          activity.set(transport, listener);
+          listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+            agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 },
+          } });
+        } };
+      },
+    };
+    return transport;
+  };
+  const initialTransport = makeTransport(), replacementTransport = makeTransport();
+  const replica = new AgentReplica();
+  replica.applyHistory({ protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+    requestId: 'history', agentId: 'native', direction: 'tail', epoch: 'content', reset: false, staleCursor: false, gap: false, error: null,
+    window: { minSeq: 1, maxSeq: 8, nextSeq: 9 }, startCursor: { epoch: 'content', seq: 1 }, endCursor: { epoch: 'content', seq: 8 },
+    hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', seqStart: 1, seqEnd: 8,
+      sourceSeqRanges: [{ startSeq: 1, endSeq: 8 }], collapsed: [], resources: [], timestamp: '2026-10-03T00:00:00Z',
+      item: { type: 'assistant_message', text: 'Content seen in the initial scope' } }],
+  } });
+  const connections = new ConversationConnections(initialTransport);
+  const acquired = connections.acquire(primary.agentId, replica, primary);
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  let tracking!: SessionTracking, hide!: () => void, replace!: () => void;
+  function Fixture() {
+    const [visible, setVisible] = useState<typeof primary[]>([primary]); hide = () => setVisible([]);
+    const [replaced, setReplaced] = useState(false); replace = () => setReplaced(true);
+    const scope = replaced && boundary === 'scope' ? 'bob' : 'alice';
+    const transport = replaced && boundary === 'transport' ? replacementTransport : initialTransport;
+    tracking = useSessionTracking(scope, transport, undefined, [primary], undefined, connections, true, visible);
+    return <>{tracking.observers}</>;
+  }
+  const emit = (transport: RemoteAgentTransport, seq: number) => act(async () => activity.get(transport)!.onMessage({
+    protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq } },
+  }));
+  try {
+    await render(<Fixture />);
+    await act(async () => hide());
+    await emit(initialTransport, 8);
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
+    await act(async () => replace());
+    const activeTransport = boundary === 'transport' ? replacementTransport : initialTransport;
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
+    await emit(activeTransport, 2);
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
+  } finally { await act(async () => { acquired.release(); connections.clear(); }); }
+});

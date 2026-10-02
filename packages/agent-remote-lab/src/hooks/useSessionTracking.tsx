@@ -1,4 +1,5 @@
 import type { ConversationConnections } from '../conversation-connections.js';
+import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
@@ -19,6 +20,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   useEffect(() => { connections?.retainTracked(sessions); }, [connections, sessions]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
   const observations = observationState.scope === baseUrl && observationState.transport === transport ? observationState.values : {};
+  const latestObservations = useRef(observations); latestObservations.current = observations;
   const setObservations = useCallback((update: (values: Record<string, SessionObservation>) => Record<string, SessionObservation>) => {
     setObservationState(previous => {
       const sameScope = previous.scope === baseUrl && previous.transport === transport;
@@ -47,6 +49,22 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const current = useRef(sessions); current.current = sessions;
   const observed = useRef(observedSessions); observed.current = observedSessions;
   const visible = useRef(visibleKeys); visible.current = visibleKeys;
+  // Read receipts are local to this transport and do not render on every streamed token.
+  const readCursorState = useRef({ scope: baseUrl, transport, values: new Map<string, TimelineCursor>() });
+  if (readCursorState.current.scope !== baseUrl || readCursorState.current.transport !== transport) {
+    readCursorState.current = { scope: baseUrl, transport, values: new Map() };
+  }
+  const readCursors = readCursorState.current.values;
+  const captureVisibleCursor = useCallback((key: string) => {
+    if (!visible.current.has(key) || document.visibilityState === 'hidden') return;
+    const session = observed.current.find(item => sessionKey(item.session) === key)?.session;
+    const timeline = session && connections?.find(session)?.replica.getState().timeline;
+    if (!timeline?.initialized || !timeline.epoch) return;
+    const previous = readCursors.get(key);
+    if (previous?.epoch !== timeline.epoch || previous.seq < timeline.nextSeq - 1) {
+      readCursors.set(key, { epoch: timeline.epoch, seq: timeline.nextSeq - 1 });
+    }
+  }, [connections, readCursors]);
   const acknowledgeVisible = useCallback((key: string, value: SessionObservation): SessionObservation => {
     if ((!value.changed && !value.attention) || !visible.current.has(key) || document.visibilityState === 'hidden') return value;
     if (connections) {
@@ -57,16 +75,20 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     }
     return { ...value, changed: false, attention: undefined };
   }, [connections]);
-  const acknowledgeVisibleSessions = useCallback(() => setObservations(values => {
-    let next = values;
-    for (const key of visible.current) {
-      const value = values[key];
-      if (!value) continue;
-      const acknowledged = acknowledgeVisible(key, value);
-      if (acknowledged !== value) next = { ...next, [key]: acknowledged };
-    }
-    return next;
-  }), [acknowledgeVisible, setObservations]);
+  const acknowledgeVisibleSessions = useCallback(() => {
+    for (const key of visible.current) captureVisibleCursor(key);
+    if (![...visible.current].some(key => latestObservations.current[key]?.changed || latestObservations.current[key]?.attention)) return;
+    setObservations(values => {
+      let next = values;
+      for (const key of visible.current) {
+        const value = values[key];
+        if (!value) continue;
+        const acknowledged = acknowledgeVisible(key, value);
+        if (acknowledged !== value) next = { ...next, [key]: acknowledged };
+      }
+      return next;
+    });
+  }, [captureVisibleCursor, acknowledgeVisible, setObservations]);
   useEffect(() => {
     const subscriptions = new Map<string, { replica: import('@orchardworks/agent-remote-web').AgentReplica; stop(): void }>();
     const refresh = () => {
@@ -98,7 +120,10 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     try { saveTrackedSessions(baseUrl, next); setError(undefined); }
     catch { setError('Tracking changed for this page, but this browser could not save it for the next visit.'); }
     current.current = next; setSelection({ scope: baseUrl, sessions: next });
-    if (exists && !visible.current.has(key)) setObservations(values => { const next = { ...values }; delete next[key]; return next; });
+    if (exists && !visible.current.has(key)) {
+      readCursors.delete(key);
+      setObservations(values => { const next = { ...values }; delete next[key]; return next; });
+    }
   }
   function reorder(key: string, targetKey: string, placement: 'before' | 'after') {
     const previous = current.current;
@@ -123,11 +148,12 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   }, [baseUrl]);
   const update = useCallback((key: string, value: SessionObservation) => {
     if (!observed.current.some(item => sessionKey(item.session) === key)) return;
+    captureVisibleCursor(key);
     setObservations(previous => {
-      const next = acknowledgeVisible(key, nextObservation(previous[key], value)), old = previous[key];
+      const next = acknowledgeVisible(key, nextObservation(previous[key], value, readCursors.get(key))), old = previous[key];
       return old && old.connection === next.connection && old.activity === next.activity && old.error === next.error && old.changed === next.changed && old.attention === next.attention && old.agentId === next.agentId && old.cursor?.epoch === next.cursor?.epoch && old.cursor?.seq === next.cursor?.seq ? previous : { ...previous, [key]: next };
     });
-  }, [setObservations, acknowledgeVisible]);
+  }, [setObservations, acknowledgeVisible, captureVisibleCursor, readCursors]);
   const acknowledge = useCallback((key: string) => setObservations(previous => {
     const value = previous[key];
     return value?.changed || value?.attention ? { ...previous, [key]: { ...value, changed: false, attention: undefined } } : previous;
@@ -187,11 +213,11 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     setObservations(values => {
       const next = { ...values };
       for (const key of Object.keys(next)) {
-        if (!allowed.has(key) && !visible.current.has(key) && !auxiliaryKeys.has(key)) delete next[key];
+        if (!allowed.has(key) && !visible.current.has(key) && !auxiliaryKeys.has(key)) { delete next[key]; readCursors.delete(key); }
       }
       return next;
     });
-  }, [baseUrl, enabled, setObservations, auxiliaryKeys]);
+  }, [baseUrl, enabled, setObservations, auxiliaryKeys, readCursors]);
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, update, retries, enabled]);
   useFeedbackToast('Session tracking', error);
   return { reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };

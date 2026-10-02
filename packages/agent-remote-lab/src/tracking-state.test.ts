@@ -71,3 +71,39 @@ it('alerts only on new pending states or working completion, never initial state
   expect(nextObservation({ connection: 'ready', activity: 'waiting' }, { connection: 'ready', activity: 'idle' }).attention).toBeUndefined();
   expect(nextObservation({ connection: 'ready', activity: 'idle' }, { connection: 'ready', activity: 'starting' }).attention).toBeUndefined();
 });
+
+it('does not repeat an already read update after reconnect, but reports later unseen content', () => {
+  const cursor = { epoch: 'content', seq: 8 };
+  const readCursor = { ...cursor, seq: 10 };
+  const first = nextObservation(undefined, { connection: 'ready', activity: 'idle', cursor });
+  const offline = nextObservation(first, { connection: 'disconnected' }, readCursor);
+  const connecting = nextObservation(offline, { connection: 'connecting' }, readCursor);
+  const restored = nextObservation(connecting, { connection: 'ready', activity: 'idle', cursor: { ...cursor, seq: 9 } }, readCursor);
+  expect(restored.changed).toBe(false);
+  const caughtUp = nextObservation(restored, { connection: 'ready', activity: 'idle', cursor: readCursor }, readCursor);
+  expect(caughtUp.changed).toBe(false);
+  const unseen = nextObservation(caughtUp, { connection: 'ready', activity: 'idle', cursor: { ...cursor, seq: 11 } }, readCursor);
+  expect(unseen.changed).toBe(true);
+});
+
+it('does not let a high read cursor from an old epoch hide progress in the replacement epoch', () => {
+  const readCursor = { epoch: 'old', seq: 100 };
+  const first = nextObservation(undefined, { connection: 'ready', activity: 'idle', cursor: { epoch: 'old', seq: 8 } });
+  const replacement = nextObservation(first, { connection: 'ready', activity: 'idle', cursor: { epoch: 'new', seq: 1 } }, readCursor);
+  expect(replacement.changed).toBe(false);
+  const unseen = nextObservation(replacement, { connection: 'ready', activity: 'idle', cursor: { epoch: 'new', seq: 2 } }, readCursor);
+  expect(unseen.changed).toBe(true);
+});
+
+it('honors content already read in a replacement epoch even when activity catches up after reconnect', () => {
+  const readCursor = { epoch: 'new', seq: 3 };
+  const first = nextObservation(undefined, { connection: 'ready', activity: 'idle', cursor: { epoch: 'old', seq: 8 } });
+  const lateOldActivity = nextObservation(first, { connection: 'ready', activity: 'idle', cursor: { epoch: 'old', seq: 8 } }, readCursor);
+  const offline = nextObservation(lateOldActivity, { connection: 'disconnected' }, readCursor);
+  const replacement = nextObservation(offline, { connection: 'ready', activity: 'idle', cursor: { epoch: 'new', seq: 1 } }, readCursor);
+  expect(replacement.changed).toBe(false);
+  const caughtUp = nextObservation(replacement, { connection: 'ready', activity: 'idle', cursor: readCursor }, readCursor);
+  expect(caughtUp.changed).toBe(false);
+  const unseen = nextObservation(caughtUp, { connection: 'ready', activity: 'idle', cursor: { epoch: 'new', seq: 4 } }, readCursor);
+  expect(unseen.changed).toBe(true);
+});

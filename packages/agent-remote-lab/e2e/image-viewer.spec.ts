@@ -103,30 +103,119 @@ test('rebounds a short held drag and dismisses a long drag without losing readin
   expect((await trigger.boundingBox())!.y).toBeCloseTo(triggerBefore.y, 0);
 });
 
-test('dismisses a short downward flick but keeps a zoomed image open during a long pan', async ({ page }) => {
-  let dialog = await openMarkdown(page);
-  let start = await canvasCenter(dialog);
+test('dismisses a short downward flick', async ({ page }) => {
+  const dialog = await openMarkdown(page);
+  const start = await canvasCenter(dialog);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(start.x, start.y + 96, { steps: 2 });
   await page.mouse.up();
   await expect(dialog).toHaveCount(0);
+});
 
-  dialog = await openMarkdown(page);
+test('hands a zoomed pan to dismissal only beyond the top edge and can push back without losing zoom', async ({ page }, info) => {
+  const dialog = await openMarkdown(page);
   const image = dialog.getByRole('img');
-  const fitted = (await image.boundingBox())!;
-  await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
-  start = await canvasCenter(dialog);
-  const scrollBefore = await page.getByTestId('timeline').evaluate(element => element.scrollTop);
+  const canvas = dialog.getByRole('group', { name: 'Image canvas', exact: true });
+  const stage = (await canvas.boundingBox())!;
+  for (let attempt = 0; attempt < 8 && (await image.boundingBox())!.height <= stage.height + 80; attempt++) {
+    await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  }
+  const zoomed = (await image.boundingBox())!;
+  expect(zoomed.height).toBeGreaterThan(stage.height + 80);
+  const topTravel = stage.y - zoomed.y;
+  const panDistance = Math.min(40, topTravel / 2);
+  const start = { x: stage.x + stage.width / 2, y: stage.y + 60 };
+  const timeline = page.getByTestId('timeline');
+  const scrollBefore = await timeline.evaluate(element => element.scrollTop);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(start.x + 45, start.y + 230, { steps: 6 });
+  await page.mouse.move(start.x, start.y + panDistance, { steps: 4 });
+  await expect.poll(async () => (await image.boundingBox())!.y).toBeCloseTo(zoomed.y + panDistance, 0);
+  expect((await image.boundingBox())!.width).toBeCloseTo(zoomed.width, 0);
+  expect(await backdropOpacity(dialog)).toBeCloseTo(1, 2);
+
+  await page.mouse.move(start.x, start.y + topTravel + 140, { steps: 10 });
+  await expect.poll(() => backdropOpacity(dialog)).toBeLessThan(0.95);
+  await expect.poll(async () => (await image.boundingBox())!.y).toBeGreaterThan(stage.y + 60);
+  expect((await image.boundingBox())!.width).toBeLessThan(zoomed.width * 0.99);
+  await page.screenshot({ path: info.outputPath('zoomed-pull-down.png') });
+
+  await page.mouse.move(start.x, start.y + panDistance, { steps: 10 });
+  await expect.poll(() => backdropOpacity(dialog)).toBeCloseTo(1, 2);
+  await expect.poll(async () => (await image.boundingBox())!.width).toBeCloseTo(zoomed.width, 0);
+  await expect.poll(async () => (await image.boundingBox())!.y).toBeCloseTo(zoomed.y + panDistance, 0);
+  await page.mouse.move(start.x, start.y - 30, { steps: 6 });
+  await expect.poll(async () => (await image.boundingBox())!.y).toBeCloseTo(zoomed.y - 30, 0);
   await page.mouse.up();
   await expect(dialog).toBeVisible();
-  expect((await image.boundingBox())!.width).toBeGreaterThan(fitted.width * 2);
+  expect((await image.boundingBox())!.width).toBeCloseTo(zoomed.width, 0);
+
+  const remainingTravel = stage.y - (await image.boundingBox())!.y;
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x, start.y + remainingTravel + 240, { steps: 12 });
+  await page.waitForTimeout(180);
+  await page.mouse.up();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open image: Viewer diagram', exact: true })).toBeFocused();
+  expect(await timeline.evaluate(element => element.scrollTop)).toBeCloseTo(scrollBefore, 0);
+});
+
+test('floats and dismisses a zoomed image that is still shorter than the canvas', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  const dialog = await openMarkdown(page);
+  const image = dialog.getByRole('img');
+  const fitted = (await image.boundingBox())!;
+  const canvas = (await dialog.getByRole('group', { name: 'Image canvas', exact: true }).boundingBox())!;
+  await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  const zoomed = (await image.boundingBox())!;
+  expect(zoomed.width).toBeGreaterThan(fitted.width * 1.4);
+  expect(zoomed.height).toBeLessThan(canvas.height);
+  const start = await canvasCenter(dialog);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x, start.y + 240, { steps: 10 });
+  await expect.poll(() => backdropOpacity(dialog)).toBeLessThan(0.95);
+  await expect.poll(async () => (await image.boundingBox())!.y).toBeGreaterThan(zoomed.y + 100);
+  expect((await image.boundingBox())!.width).toBeLessThan(zoomed.width * 0.99);
+  await page.waitForTimeout(180);
+  await page.mouse.up();
+  await expect(dialog).toHaveCount(0);
+});
+
+test('changes from a horizontal pan at the top edge into a small dismiss drag and rebounds at the same zoom', async ({ page }) => {
+  const dialog = await openMarkdown(page);
+  const image = dialog.getByRole('img');
+  const canvas = dialog.getByRole('group', { name: 'Image canvas', exact: true });
+  const stage = (await canvas.boundingBox())!;
+  for (let attempt = 0; attempt < 8 && (await image.boundingBox())!.height <= stage.height + 80; attempt++) {
+    await dialog.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  }
+  const zoomed = (await image.boundingBox())!;
+  expect(zoomed.height).toBeGreaterThan(stage.height + 80);
+  const start = { x: stage.x + stage.width / 2, y: stage.y + 60 };
+  const edgeY = start.y + stage.y - zoomed.y;
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x, edgeY, { steps: 6 });
+  await expect.poll(async () => Math.abs((await image.boundingBox())!.y - stage.y)).toBeLessThan(1);
+  await page.mouse.move(start.x + 60, edgeY, { steps: 6 });
+  await expect.poll(async () => (await image.boundingBox())!.x).toBeCloseTo(zoomed.x + 60, 0);
   expect(await backdropOpacity(dialog)).toBeCloseTo(1, 2);
-  expect(await page.getByTestId('timeline').evaluate(element => element.scrollTop)).toBeCloseTo(scrollBefore, 0);
+
+  await page.mouse.move(start.x + 60, edgeY + 48, { steps: 6 });
+  await expect.poll(async () => Math.abs((await image.boundingBox())!.y - stage.y - 48)).toBeLessThan(1);
+  expect((await image.boundingBox())!.width).toBeLessThan(zoomed.width);
+  expect(await backdropOpacity(dialog)).toBeLessThan(1);
+  // Only the movement beyond the image edge counts toward dismissal, and a held short drag rebounds.
+  await page.waitForTimeout(180);
+  await page.mouse.up();
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => backdropOpacity(dialog)).toBeCloseTo(1, 2);
+  await expect.poll(async () => (await image.boundingBox())!.width).toBeCloseTo(zoomed.width, 0);
+  await expect.poll(async () => (await image.boundingBox())!.y).toBeCloseTo(stage.y, 0);
+  expect((await image.boundingBox())!.x).toBeCloseTo(zoomed.x + 60, 0);
 });
 
 test('uses a native touch drag to dismiss while keeping pinch and remaining-finger movement inside the viewer', async ({ page, browserName, isMobile }) => {
@@ -159,9 +248,8 @@ test('uses a native touch drag to dismiss while keeping pinch and remaining-fing
     await expect(dialog).toBeVisible();
     expect((await image.boundingBox())!.width).toBeGreaterThan(fitted.width * 1.4);
     expect(await backdropOpacity(dialog)).toBeCloseTo(1, 2);
-    await dialog.getByRole('button', { name: 'Reset zoom', exact: true }).click();
-    await expect.poll(async () => (await image.boundingBox())!.width).toBeCloseTo(fitted.width, 0);
 
+    // Once every pinch contact ends, a new single-finger gesture may dismiss at the current zoom.
     await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 0, ...center }] });
     for (const offset of [30, 60, 90, 120, 160, 200, 240]) {
       await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 0, x: center.x, y: center.y + offset }] });
@@ -345,14 +433,14 @@ test('keeps following new messages after opening and manipulating an image at th
   await page.mouse.move(center.x, center.y);
   if (browserName !== 'webkit' || !isMobile) await page.mouse.wheel(0, -100);
   await page.mouse.down();
-  await page.mouse.move(center.x + 50, center.y + 50, { steps: 6 });
+  await page.mouse.move(center.x + 50, center.y + 25, { steps: 6 });
   await page.mouse.up();
   if (browserName === 'chromium' && isMobile) {
     const touch = await page.context().newCDPSession(page);
     try {
       await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 0, ...center }] });
       for (const offset of [10, 20, 30, 40, 50]) {
-        await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 0, x: center.x, y: center.y + offset }] });
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 0, x: center.x + offset, y: center.y }] });
       }
       await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     } finally { await touch.detach(); }

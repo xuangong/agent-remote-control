@@ -50,7 +50,38 @@ export function ImageViewport({ src, label, onClose, onDismissMotion }: {
   }
   function rebase(time: number): void {
     gesture.current = { view: current.current, points: [...pointers.current.values()],
-      mode: pointers.current.size === 1 && current.current.zoom === 1 && !multiTouch.current ? 'pending' : 'pan', startedAt: time };
+      mode: 'pan', startedAt: time };
+  }
+  function moveSingle(point: Point, time: number): void {
+    const start = gesture.current!;
+    const before = start.points[0]!;
+    const dx = point.x - before.x; const dy = point.y - before.y;
+    const vertical = Math.max(0, (height * start.view.zoom - bounds.height) / 2);
+    const next = { ...start.view, x: start.view.x + dx, y: start.view.y + dy };
+    if (start.mode === 'pan') {
+      if (dy > 0 && next.y > vertical) {
+        // Only movement beyond the top edge belongs to dismissal, including its flick velocity.
+        const fraction = clamp((vertical - start.view.y) / dy, 0, 1);
+        change({ ...start.view, x: start.view.x + dx * fraction, y: vertical });
+        gesture.current = { view: current.current, points: [{ x: before.x + dx * fraction, y: before.y + dy * fraction }],
+          mode: 'pending', startedAt: start.startedAt + (time - start.startedAt) * fraction };
+        moveSingle(point, time);
+      } else { change(next); rebase(time); }
+      return;
+    }
+    if (dy <= 0) {
+      dismiss.cancel(false);
+      change(next); rebase(time);
+      return;
+    }
+    if (start.mode === 'pending') {
+      if (Math.hypot(dx, dy) < 8) return;
+      if (dy <= Math.abs(dx)) { change(next); rebase(time); return; }
+      start.mode = 'dismiss';
+      dismiss.begin(start.startedAt);
+    }
+    change({ ...next, y: vertical });
+    dismiss.move(next.x - current.current.x, dy, time, bounds.height);
   }
   function release(event: PointerEvent<HTMLDivElement>, cancelled = false): void {
     if (!pointers.current.has(event.pointerId)) return;
@@ -117,17 +148,8 @@ export function ImageViewport({ src, label, onClose, onDismissMotion }: {
         event.preventDefault();
         pointers.current.set(event.pointerId, relative(event.clientX, event.clientY));
         const start = gesture.current; const points = [...pointers.current.values()];
+        if (points.length === 1 && !multiTouch.current) { moveSingle(points[0]!, event.timeStamp); return; }
         const before = midpoint(start.points); const after = midpoint(points);
-        const dx = after.x - before.x; const dy = after.y - before.y;
-        if (start.mode === 'pending') {
-          if (Math.hypot(dx, dy) < 8) return;
-          start.mode = dy > Math.abs(dx) ? 'dismiss' : 'pan';
-          if (start.mode === 'dismiss') dismiss.begin(start.startedAt);
-        }
-        if (start.mode === 'dismiss') {
-          dismiss.move(dx, dy, event.timeStamp, bounds.height);
-          return;
-        }
         const span = distance(start.points);
         const zoom = clamp(start.view.zoom * (span > 0 ? distance(points) / span : 1), 1, maximum);
         const ratio = zoom / start.view.zoom;
@@ -149,7 +171,7 @@ export function ImageViewport({ src, label, onClose, onDismissMotion }: {
       {!failed ? <img src={src} alt={label} draggable={false}
         style={ready ? {
           width, height,
-          transform: `translate(-50%, -50%) translate(${view.x + dismiss.motion.x}px, ${view.y + dismiss.motion.y}px) scale(${view.zoom * dismiss.motion.scale})`,
+          transform: `translate(-50%, -50%) translate(${view.x + dismiss.motion.x}px, ${view.y + dismiss.motion.y - (height * view.zoom > bounds.height ? height * view.zoom * (1 - dismiss.motion.scale) / 2 : 0)}px) scale(${view.zoom * dismiss.motion.scale})`,
           borderRadius: Math.min(14, dismiss.motion.progress * 56),
           boxShadow: dismiss.motion.progress ? `0 12px 40px oklch(0.18 0.01 250 / ${Math.min(.24, dismiss.motion.progress)})` : undefined,
         } : { visibility: 'hidden' }}

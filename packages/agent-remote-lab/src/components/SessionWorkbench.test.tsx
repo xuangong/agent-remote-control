@@ -61,3 +61,33 @@ it('does not open session search from an image portal but keeps the timeline sho
   await act(async () => container.querySelector('[data-testid="timeline"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true })));
   expect(search.hidden).toBe(true);
 });
+
+it('reopens a collapsed runtime notice group when the same search result is requested again', async () => {
+  const state: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false,
+    entries: ['First runtime notice', 'Second runtime notice'].map((message, index) => ({
+      providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-03T00:00:00Z',
+      sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'error', message },
+    })),
+  } };
+  const container = await render(<SessionWorkbench state={state} sessionStatus="ready" actions={{}} />);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search this session"]')!.click());
+  await act(async () => {
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Search session history"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Second runtime');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const scope = container.querySelector<HTMLSelectElement>('[aria-label="Search scope"]')!;
+    scope.value = 'all'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const next = container.querySelector<HTMLButtonElement>('[aria-label="Next search result"]')!;
+  expect(next.disabled).toBe(false);
+  await act(async () => next.click());
+  const toggle = container.querySelector<HTMLButtonElement>('.agent-notice-toggle')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  const target = '.agent-timeline-entry[data-entry-key="epoch-1:recorded:2:error"]';
+  expect(container.querySelector(target)?.getAttribute('data-inspected')).toBe('true');
+  await act(async () => toggle.click());
+  expect(container.querySelector(target)).toBeNull();
+  await act(async () => next.click());
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector(target)?.textContent).toContain('Second runtime notice');
+});

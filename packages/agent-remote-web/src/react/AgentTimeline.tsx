@@ -12,7 +12,8 @@ import { InteractionPanel } from './InteractionPanel.js';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
 import type { RendererRegistry } from './renderer-registry.js';
 import { ConversationEntry } from './ConversationEntry.js';
-import { createTimelineRenderModel } from './timeline-render-model.js';
+import { createTimelineRenderModel, type TimelineRenderEntry } from './timeline-render-model.js';
+import { groupRuntimeNotices, RuntimeNoticeGroup, useRuntimeNoticeDisclosure, type RuntimeNoticePresentation } from './RuntimeNoticeGroup.js';
 import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
@@ -24,12 +25,14 @@ export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
   readonly searchEntryKey?: string;
+  readonly searchRequestId?: number;
   readonly onEditPrompt?: (entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry) => Promise<void>;
   readonly state: AgentReplicaState;
   readonly onRetryMessage?: (id: string) => Promise<void>;
   readonly onDeleteMessage?: (id: string) => void;
   readonly onInspectEntry?: (entryKey: string) => void;
   readonly inspectedEntryKey?: string;
+  readonly inspectedRequestId?: number;
   readonly childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[];
   readonly resolveSessionLink?: SessionLinkResolver;
   readonly registry?: RendererRegistry;
@@ -52,6 +55,7 @@ export interface AgentTimelineProps {
 export function AgentTimeline({
   state,
   searchEntryKey,
+  searchRequestId,
   onEditPrompt,
   onRetryMessage,
   onDeleteMessage,
@@ -74,6 +78,7 @@ export function AgentTimeline({
   previewController,
   onInspectEntry,
   inspectedEntryKey,
+  inspectedRequestId,
 }: AgentTimelineProps) {
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
@@ -108,6 +113,18 @@ export function AgentTimeline({
     });
   }, [contentOnly, lettersVisible, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
   const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
+  const rows = useMemo(() => groupRuntimeNotices(renderModel, state.timeline.entries), [renderModel, state.timeline.entries]);
+  const notices = useRuntimeNoticeDisclosure(scopeKey, searchEntryKey, inspectedEntryKey, searchRequestId, inspectedRequestId);
+  const renderEntry = ({ entry, key, messageGroup }: TimelineRenderEntry, notice?: RuntimeNoticePresentation) =>
+    <ConversationEntry key={key} entry={entry} entryKey={key}
+      searchSelected={key === searchEntryKey} messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
+      scopeKey={scopeKey} resources={state.resources}
+      onEditPrompt={editablePrompts.has(entry) ? editPrompt : undefined}
+      onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}
+      resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
+      onResourceResolve={resolveResource} onResourceRequest={requestResource}
+      previews={previews} extension={!contentOnly ? registry?.render(entry.item) : undefined}
+      {...notice} />;
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
   const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);
@@ -141,14 +158,9 @@ export function AgentTimeline({
     <div className="agent-timeline-entries" aria-live="polite">
       {renderModel.length === 0 && outgoing.length === 0
         ? <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
-        : renderModel.map(({ entry, key, messageGroup }) => <ConversationEntry key={key} entry={entry} entryKey={key}
-            searchSelected={key === searchEntryKey} messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
-            scopeKey={scopeKey} resources={state.resources}
-            onEditPrompt={editablePrompts.has(entry) ? editPrompt : undefined}
-            onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}
-            resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
-            onResourceResolve={resolveResource} onResourceRequest={requestResource}
-            previews={previews} extension={!contentOnly ? registry?.render(entry.item) : undefined} />)}
+        : rows.map(row => row.type === 'entry' ? renderEntry(row.value) : <RuntimeNoticeGroup key={row.key}
+            entries={row.entries} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)}
+            renderEntry={renderEntry} />)}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
     </div>
 

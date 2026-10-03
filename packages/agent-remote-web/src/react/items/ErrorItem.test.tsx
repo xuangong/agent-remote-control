@@ -12,6 +12,8 @@ it('keeps runtime diagnostics quiet and discloses their complete text on request
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
   expect(toggle.getAttribute('aria-controls')).toBe(details.id);
   expect(details.hidden).toBe(true);
+  expect(container.querySelector('.agent-content-preview, .agent-notice-summary')).toBeNull();
+  expect(toggle.textContent).toMatch(/Runtime notice\s*1/);
   await act(async () => toggle.click());
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(details.hidden).toBe(false);

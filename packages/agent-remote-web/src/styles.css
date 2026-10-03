@@ -196,7 +196,7 @@
 .agent-notice-toggle:hover { background: var(--agent-panel); color: var(--agent-ink); }
 .agent-notice-toggle:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 .agent-notice-label { flex-shrink: 0; }
-.agent-notice-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-notice-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; box-sizing: border-box; padding: 0 5px; border-radius: 9px; background: var(--agent-panel); color: var(--agent-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .agent-error .agent-notice-details { margin: 4px 10px 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-compaction { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; min-height: 36px; color: var(--agent-muted); background: var(--agent-panel); }
 .agent-timeline-empty { margin: 0; padding: 28px 18px; color: var(--agent-muted); text-align: center; }

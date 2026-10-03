@@ -4,7 +4,6 @@ import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../../test/setup.js';
 import { ToolCallItem } from './ToolCallItem.js';
 import { ReasoningItem } from './ReasoningItem.js';
-import { ErrorItem } from './ErrorItem.js';
 import { CompletedQuestionItem } from './CompletedQuestionItem.js';
 
 const output = Array.from({ length: 30 }, (_, index) => `line ${index}`).join('\n');
@@ -32,14 +31,10 @@ it('exposes a file diff preview without opening the tool disclosure', async () =
   expect(container.querySelector('.agent-tool-toggle')?.getAttribute('aria-expanded')).toBe('false');
 });
 
-it('previews supplied reasoning and multiline diagnostics as inert text', async () => {
-  for (const Component of [ReasoningItem, ErrorItem]) {
-    const container = await render(Component === ReasoningItem
-      ? <ReasoningItem item={{ type: 'reasoning', text: '<script>alert(1)</script>\nNext step' }} />
-      : <ErrorItem item={{ type: 'error', message: '<script>alert(1)</script>\nNext step' }} />);
-    expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Next step');
-    expect(container.querySelector('script')).toBeNull();
-  }
+it('previews supplied reasoning as inert text', async () => {
+  const container = await render(<ReasoningItem item={{ type: 'reasoning', text: '<script>alert(1)</script>\nNext step' }} />);
+  expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Next step');
+  expect(container.querySelector('script')).toBeNull();
 });
 
 it('shows question context alongside the answer while retaining sensitive answer redaction', async () => {

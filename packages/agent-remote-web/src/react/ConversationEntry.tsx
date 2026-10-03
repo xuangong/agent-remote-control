@@ -9,9 +9,11 @@ import { PreviewActions, type PreviewController } from './PreviewActions.js';
 import { isContentOnlyItem, TimelineSearchReveal } from './TimelineDisplay.js';
 import type { MessageGroupPosition } from './timeline-render-model.js';
 import { messageResources } from './message-resources.js';
+import { RuntimeNoticeItem } from './items/ErrorItem.js';
+import type { RuntimeNoticePresentation } from './RuntimeNoticeGroup.js';
 
 interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt' | 'onInspectEntry' | 'resolveSessionLink'
-  | 'onResourceResolve' | 'onResourceRequest'> {
+  | 'onResourceResolve' | 'onResourceRequest'>, RuntimeNoticePresentation {
   entry: ProjectedTimelineEntry;
   entryKey: string;
   messageGroup?: MessageGroupPosition;
@@ -28,20 +30,24 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
 // Unchanged history stays mounted without rebuilding its controls on every delta.
 export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, contentOnly, agentId,
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
-  previews, extension }: ConversationEntryProps) {
+  previews, extension, noticeExpanded, noticeCount, onToggleNotice, noticeDetailsId, noticeControls }: ConversationEntryProps) {
+  const collapsed = noticeExpanded === false;
   const attachments = useMemo(() => messageResources(entry.item, entry.resources, contentOnly && !!onResourceResolve && !!onResourceRequest),
     [entry.item, entry.resources, contentOnly, onResourceResolve, onResourceRequest]);
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
     inspected={inspected || !!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}>
-    <TimelineItemRenderer item={entry.item} entry={entry} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
+    {entry.item.type === 'error' && noticeExpanded !== undefined && noticeDetailsId !== undefined
+      ? <RuntimeNoticeItem item={entry.item} expanded={noticeExpanded} count={noticeCount} toggle={onToggleNotice}
+          detailsId={noticeDetailsId} controls={noticeControls} />
+      : <TimelineItemRenderer item={entry.item} entry={entry} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
       resources={resources} resourceBindings={entry.resources} resourceScopeKey={scopeKey}
-      onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />
+      onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />}
     {previews && agentId && entry.item.type !== 'error' && isContentOnlyItem(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}
-    {!contentOnly ? extension : null}
-    <ResourceList bindings={contentOnly ? attachments.bindings : entry.resources} labels={attachments.labels}
-      resources={resources} onRequest={onResourceRequest} />
+    {!collapsed && !contentOnly ? extension : null}
+    {!collapsed ? <ResourceList bindings={contentOnly ? attachments.bindings : entry.resources} labels={attachments.labels}
+      resources={resources} onRequest={onResourceRequest} /> : null}
   </TimelineEntry></TimelineSearchReveal.Provider>;
 });
 

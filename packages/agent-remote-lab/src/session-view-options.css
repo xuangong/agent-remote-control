@@ -1,0 +1,76 @@
+.lab-session-view-options { position: relative; flex: 0 0 auto; }
+.lab-primary-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-session-view-options-trigger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-height: 32px; padding: 4px 7px; border-color: transparent; background: transparent;
+  color: var(--obs-text-secondary); font-size: 11px;
+}
+.lab-session-view-options-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-session-view-options-panel {
+  position: absolute; z-index: 50; top: calc(100% + 5px); right: 0;
+  width: 216px; max-width: calc(100cqw - 20px); max-height: calc(100cqh - 64px); overflow-y: auto;
+  padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px;
+  background: var(--obs-surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--obs-text) 14%, transparent);
+  color: var(--obs-text); font-size: 12px;
+}
+.lab-session-view-options-panel fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.lab-session-view-options-panel legend { padding: 5px 7px; color: var(--obs-text-secondary); font-size: 11px; font-weight: 600; }
+.lab-session-view-options-panel label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; margin: 0; padding: 6px 7px; border-radius: 5px; cursor: pointer; }
+.lab-session-view-options-panel label:hover, .lab-session-view-options-panel label:focus-within { background: var(--obs-surface-selected); }
+.lab-session-view .lab-session-view-options-panel input { flex: 0 0 auto; width: 14px; height: 14px; min-width: 14px; min-height: 14px; margin: 0; accent-color: var(--obs-action); }
+.lab-session-view-options-panel .lab-session-letters-option { margin-top: 5px; border-top: 1px solid var(--obs-border); border-radius: 0; padding-top: 10px; }
+.lab-session-heading-actions, .lab-session-heading-actions-panel { display: contents; }
+.lab-session-heading-actions-trigger { display: none; }
+@container session-view (max-width: 520px) {
+  .lab-session-heading-actions { display: block; position: relative; flex: 0 0 auto; }
+  .lab-session-heading-actions-trigger {
+    display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px;
+    padding: 0; border-color: transparent; background: transparent; color: var(--obs-text-secondary); font-size: 22px;
+  }
+  .lab-session-heading-actions-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
+  .lab-session-heading-actions-panel {
+    position: absolute; z-index: 50; top: calc(100% + 5px); right: 0;
+    display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100cqw - 24px);
+    padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px;
+    background: var(--obs-surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--obs-text) 14%, transparent);
+  }
+  .lab-session-heading-actions[data-open="false"] > .lab-session-heading-actions-panel { display: none; }
+}
+
+/* Shell chrome can be hidden without hiding an individual view's controls. */
+.lab-shell.lab-header-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) { display: flex; }
+@media (max-width: 1180px) {
+  .lab-shell.lab-header-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
+    padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right)); min-height: 44px;
+  }
+}
+/* Global controls keep their own row when both supporting shell panels are hidden. */
+@media (min-width: 1181px) {
+  .lab-shell.lab-header-hidden.lab-context-hidden { grid-template-rows: 38px minmax(0, 1fr); }
+  .lab-shell.lab-header-hidden.lab-context-hidden::before {
+    content: ''; grid-column: 1 / -1; grid-row: 1; background: var(--obs-surface);
+    border-bottom: 1px solid var(--obs-border); pointer-events: none;
+  }
+  .lab-shell.lab-header-hidden.lab-context-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
+    padding-left: 16px; min-height: 38px;
+  }
+  @container session-view (max-width: 760px) {
+    .lab-shell.lab-header-hidden.lab-context-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
+      padding-left: 12px; min-height: 44px;
+    }
+  }
+}
+/* Supporting views never reserve space for global controls in the page corner. */
+:is(.lab-shell.lab-header-hidden, .gateway-private > .lab-shell.lab-header-hidden) .lab-main-stage
+  :is(.lab-side-conversation, .lab-ask-window) .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
+  padding-left: 16px; min-height: 38px;
+}
+@container session-view (max-width: 760px) {
+  .lab-session-view-options-trigger { min-width: 44px; min-height: 44px; padding: 4px; }
+  .lab-session-view-options-trigger > span { display: none; }
+  .lab-session-view-options-panel label { min-height: 44px; }
+  :is(.lab-shell.lab-header-hidden, .gateway-private > .lab-shell.lab-header-hidden) .lab-main-stage
+    :is(.lab-side-conversation, .lab-ask-window) .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
+    padding-left: 12px; min-height: 44px;
+  }
+}

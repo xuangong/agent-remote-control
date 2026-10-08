@@ -1,5 +1,4 @@
 import { useId } from 'react';
-import '../ask-resize.css';
 
 export function AskResize() {
   const hint = useId();

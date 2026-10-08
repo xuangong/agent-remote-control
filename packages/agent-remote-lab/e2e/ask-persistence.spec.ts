@@ -5,7 +5,7 @@ async function openAsk(page: Page) {
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation').getByTestId('prompt-input');
+  const primary = page.locator('.lab-primary-conversation > .lab-session-view').getByTestId('prompt-input');
   await expect(primary).toBeEnabled();
   await primary.fill('/ask');
   await primary.press('Enter');

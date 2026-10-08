@@ -122,7 +122,9 @@ async function openAsk(container: HTMLElement) {
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!.click());
   const ask = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Ask"]')!;
   expect(ask).not.toBeNull();
-  await act(async () => ask.querySelector<HTMLButtonElement>('[aria-label="Simple view"]')!.click());
+  await act(async () => ask.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+  await act(async () => ask.querySelector<HTMLInputElement>('input[value="simple"]')!.click());
+  await act(async () => ask.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
   return ask;
 }
 

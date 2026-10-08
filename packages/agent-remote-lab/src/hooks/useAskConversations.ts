@@ -1,4 +1,4 @@
-import { conversationSessionStorage } from '../conversation-storage.js';
+import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
@@ -12,36 +12,13 @@ export interface AskInput { id: string; text: string }
 export interface AskEntry { attached?: boolean; restoring?: boolean; restoreOnly?: boolean; inputs?: AskInput[]; source: OpenedSession; record?: SessionFork; pending?: SessionFork; busy?: boolean; error?: string }
 
 export function useAskConversations(baseUrl: string, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void) {
-  const [enabled, setEnabledState] = useState(() => {
-    try { return localStorage.getItem('agent-remote-ask-enabled') === 'true'; } catch { return false; }
-  });
-  const [hiddenByPreference, setHiddenByPreference] = useState(() => {
-    try { return localStorage.getItem('agent-remote-ask-enabled') === 'false'; } catch { return false; }
-  });
-  const enabledRef = useRef(enabled);
   const preparations = useRef(new Map<string, AbortController>());
   const preparationSettlements = useRef(new Map<string, Promise<void>>());
   const resumeRequested = useRef(new Set<string>());
-  const openKeyRef = useRef<string>();
   useEffect(() => () => {
     resumeRequested.current.clear();
     for (const preparation of preparations.current.values()) preparation.abort();
   }, []);
-  function setEnabled(next: boolean) {
-    enabledRef.current = next;
-    setEnabledState(next);
-    setHiddenByPreference(!next);
-    try { localStorage.setItem('agent-remote-ask-enabled', String(next)); } catch { /* Keep the preference for this page. */ }
-    if (!next) {
-      setOpenKey(undefined);
-      resumeRequested.current.clear();
-      for (const preparation of preparations.current.values()) preparation.abort();
-    }
-  }
-  function toggle(hasRelated = false) {
-    const next = !(enabledRef.current || !hiddenByPreference && hasRelated === true);
-    setEnabled(next);
-  }
   // A tab-local ledger keeps retries idempotent without populating the normal fork list.
   const storage = useMemo(() => {
     try { return conversationSessionStorage; } catch { return undefined; }
@@ -60,25 +37,59 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     else storage.removeItem(inputsKey(key));
   }
   const entries = useMemo(() => new Map<string, AskEntry>(), [store]);
-  const [, refresh] = useState(0);
-  const windowKey = `agent-remote-ask:${baseUrl}:open`;
-  const savedWindow = useMemo(() => {
-    let key: string | undefined;
-    try { key = storage?.getItem(windowKey) ?? undefined; } catch { /* Keep Ask usable without window-state persistence. */ }
-    return { scope: baseUrl, key };
+  const [revision, refresh] = useState(0);
+  const windowKey = `agent-remote-ask:${baseUrl}:open-windows`;
+  const windows = useMemo(() => {
+    let expanded: string[] = [];
+    try {
+      const saved: unknown = JSON.parse(storage?.getItem(windowKey) ?? 'null');
+      if (Array.isArray(saved)) expanded = saved.filter((key): key is string => typeof key === 'string');
+      else {
+        const previous = storage?.getItem(`agent-remote-ask:${baseUrl}:open`);
+        if (previous) expanded = [previous];
+      }
+    } catch { /* Keep Ask usable without window-state persistence. */ }
+    return { expanded: new Set(expanded), restoring: new Set(expanded), controllers: new Map<string, AbortController>(), preferences: new Map<string, boolean>() };
   }, [baseUrl, storage]);
-  const [windowSelection, setWindowSelection] = useState(savedWindow);
-  const openKey = windowSelection.scope === baseUrl ? windowSelection.key : savedWindow.key;
-  openKeyRef.current = openKey;
-  const restoration = useMemo<{ key?: string; controller?: AbortController }>(() => ({ key: savedWindow.key }), [savedWindow]);
-  useEffect(() => () => restoration.controller?.abort(), [restoration]);
-  function setOpenKey(key: string | undefined) {
-    restoration.controller?.abort();
-    restoration.key = undefined;
-    openKeyRef.current = key;
-    setWindowSelection({ scope: baseUrl, key });
-    try { if (key) storage?.setItem(windowKey, key); else storage?.removeItem(windowKey); }
-    catch { /* The current window remains usable when browser storage is unavailable. */ }
+  useEffect(() => () => { for (const controller of windows.controllers.values()) controller.abort(); }, [windows]);
+  function isOpen(source: OpenedSession) { return windows.expanded.has(sessionKey(source)); }
+  function isEnabled(source: OpenedSession): boolean {
+    const key = sessionKey(source);
+    if (windows.preferences.has(key)) return windows.preferences.get(key)!;
+    let saved: string | null = null;
+    try { saved = conversationLocalStorage.getItem(`agent-remote-ask:${baseUrl}:enabled:${key}`) ?? localStorage.getItem('agent-remote-ask-enabled'); }
+    catch { /* The current source remains usable without preferences. */ }
+    return saved !== null ? saved === 'true' : !!entryFor(source).record?.remote;
+  }
+  function setOpen(key: string, expanded: boolean) {
+    windows.controllers.get(key)?.abort();
+    windows.controllers.delete(key);
+    windows.restoring.delete(key);
+    if (expanded) windows.expanded.add(key); else windows.expanded.delete(key);
+    try {
+      storage?.setItem(windowKey, JSON.stringify([...windows.expanded]));
+      storage?.removeItem(`agent-remote-ask:${baseUrl}:open`);
+    } catch { /* Keep the current window usable when storage is unavailable. */ }
+    refresh(value => value + 1);
+  }
+  function setEnabled(source: OpenedSession, enabled: boolean) {
+    const key = sessionKey(source);
+    windows.preferences.set(key, enabled);
+    try { conversationLocalStorage.setItem(`agent-remote-ask:${baseUrl}:enabled:${key}`, String(enabled)); }
+    catch { /* Keep this source preference for the current page. */ }
+    if (!enabled) {
+      setOpen(key, false);
+      resumeRequested.current.delete(key);
+      preparations.current.get(key)?.abort();
+    }
+    refresh(value => value + 1);
+  }
+  function toggle(source: OpenedSession) { setEnabled(source, !isEnabled(source)); }
+  function close(source: OpenedSession) {
+    const key = sessionKey(source);
+    setOpen(key, false);
+    resumeRequested.current.delete(key);
+    preparations.current.get(key)?.abort();
   }
   const drafts = useMemo(() => new DraftStore(`${baseUrl}:ask`), [baseUrl]);
   useEffect(() => store.subscribe(() => refresh(value => value + 1)), [store]);
@@ -107,10 +118,10 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     let entry = entries.get(key);
     if (!entry) {
       const saved = store.all().filter(record => sessionKey(record.source) === key).reverse();
-      entry = { source, restoring: restoration.key === key, restoreOnly: restoration.key === key, inputs: savedInputs(key), record: saved.find(record => record.target && !record.creationKey), pending: saved.find(record => !!record.creationKey) };
+      entry = { source, restoring: windows.restoring.has(key), restoreOnly: windows.restoring.has(key), inputs: savedInputs(key), record: saved.find(record => record.target && !record.creationKey), pending: saved.find(record => !!record.creationKey) };
       entries.set(key, entry);
     }
-    if (!entry.busy && (!entry.attached || openKeyRef.current !== key) && !entry.pending) {
+    if (!entry.busy && (!entry.attached || !windows.expanded.has(key)) && !entry.pending) {
       const latest = store.all().filter(record => record.target && !record.creationKey && sessionKey(record.source) === key).at(-1);
       if (latest) {
         if (entry.record?.id !== latest.id) entry.attached = false;
@@ -122,34 +133,35 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
   }
   function restore(source: OpenedSession, synchronize: () => Promise<void>) {
     const key = sessionKey(source);
-    if (!enabledRef.current || restoration.key !== key || restoration.controller && !restoration.controller.signal.aborted || openKeyRef.current !== key || !directory) return;
+    const previous = windows.controllers.get(key);
+    if (!isEnabled(source) || !windows.restoring.has(key) || previous && !previous.signal.aborted || !windows.expanded.has(key) || !directory) return;
     const preparation = new AbortController();
-    restoration.controller = preparation;
+    windows.controllers.set(key, preparation);
     entryFor(source);
     update(key, { restoring: true, restoreOnly: true, error: undefined });
     void synchronize().then(async () => {
-      if (preparation.signal.aborted || openKeyRef.current !== key || !enabledRef.current) return;
+      if (preparation.signal.aborted || !windows.expanded.has(key) || !isEnabled(source)) return;
       await open(undefined, source, '', false, preparation);
     }).catch(error => {
       if (!preparation.signal.aborted) update(key, { error: error instanceof Error ? error.message : 'Ask could not restore. Retry to reconnect.' });
     }).finally(() => {
-      if (restoration.controller !== preparation) return;
-      restoration.controller = undefined;
-      if (!preparation.signal.aborted) restoration.key = undefined;
+      if (windows.controllers.get(key) !== preparation) return;
+      windows.controllers.delete(key);
+      if (!preparation.signal.aborted) windows.restoring.delete(key);
       update(key, { restoring: false });
     });
     return () => preparation.abort();
   }
   async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args = '', clean = false, restoring?: AbortController) {
-    if (!restoring) setEnabled(true);
+    if (!restoring) setEnabled(source, true);
     const key = sessionKey(source);
     const entry = entryFor(source);
-    if (!restoring) setOpenKey(key);
+    if (!restoring) setOpen(key, true);
     if (entry.busy) {
       if (preparations.current.get(key)?.signal.aborted && !args.trim() && !clean) {
         if (restoring) {
           await preparationSettlements.current.get(key);
-          if (restoring.signal.aborted || !enabledRef.current || openKeyRef.current !== key) return {};
+          if (restoring.signal.aborted || !isEnabled(source) || !windows.expanded.has(key)) return {};
           return open(sourceState, source, '', false, restoring);
         }
         resumeRequested.current.add(key);
@@ -208,10 +220,10 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       preparationSettlements.current.delete(key);
       update(key, { busy: false });
       finishPreparation();
-      if (resumeRequested.current.delete(key) && enabledRef.current && openKeyRef.current === key) {
+      if (resumeRequested.current.delete(key) && isEnabled(source) && windows.expanded.has(key)) {
         void open(sourceState, source).catch(() => {});
       }
     }
   }
-  return { enabled, hiddenByPreference, toggle, store, entries, entryFor, openKey, drafts, setDraft, sendInput, restore, open, close: () => setOpenKey(undefined) };
+  return { revision, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, setDraft, sendInput, restore, open, close };
 }

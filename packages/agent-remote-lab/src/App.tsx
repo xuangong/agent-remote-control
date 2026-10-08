@@ -4,7 +4,6 @@ import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol
 import type { SessionEntry } from './session-tree.js';
 import { useSessionRelations } from './hooks/useSessionRelations.js';
 import { sessionViewNavigation, type SessionViewNavigation } from './session-view-navigation.js';
-import { SessionOverlay } from './components/SessionOverlay.js';
 import { remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
 import {SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
@@ -35,6 +34,7 @@ import { readControllerLocation, type ControllerLocation } from '@orchardworks/a
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
 import type { ScannedSession } from './session-transfer.js';
 import { SessionLink, SessionTransferDialog } from './components/SessionLink.js';
+import { SessionHeadingActions } from './components/SessionHeadingActions.js';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
 import {
   useCallback,
@@ -77,15 +77,11 @@ import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { PreviewProvider, PreviewWorkspace, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
-import { useTimelineDisplayMode } from './hooks/useTimelineDisplayMode.js';
-import { useTimelineLettersVisible } from './hooks/useTimelineLettersVisible.js';
+import { PreviewProvider, PreviewWorkspace, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
-import type { FloatingPosition } from './hooks/useTrackingPosition.js';
-import { AskButton } from './components/AskButton.js';
-import { AskConversation } from './components/AskConversation.js';
+import { SessionAsk } from './components/SessionAsk.js';
 import { useAskConversations } from './hooks/useAskConversations.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
 import { referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
@@ -165,8 +161,6 @@ function AppContent({
   const accessReadyRef = useRef(accessReady); accessReadyRef.current = accessReady;
   const shellRef = useVisualViewport();
   useEffect(() => () => stopLayoutDiagnostics('unmount'), []);
-  const askPositionRef = useRef<FloatingPosition>(null);
-  const askTriggerRef = useRef<HTMLButtonElement>(null);
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport
     ?? new HttpWebSocketTransport(baseUrl, { sessionChannels: true, fetch: workspaceFetch, webSocketFactory: workspaceSocket }) as LabTransport, [baseUrl, injectedTransport]);
@@ -212,7 +206,6 @@ function AppContent({
   const hostClient = useMemo(() => hostService ?? new RemoteHostClient(baseUrl), [baseUrl, hostService]);
   const previewClient = useMemo(() => new HttpPreviewClient(baseUrl, workspaceFetch), [baseUrl]);
   const directory = useMemo(() => !activated ? undefined : injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id, activated]);
-  const [askSimple, setAskSimple] = useState(false);
   const restoredHostSelection = useRef(false);
   const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory || cachedState || savedComposition ? readOpenedSessions(baseUrl) : []);
   const openedSessionsRef = useRef(openedSessions);
@@ -281,8 +274,6 @@ function AppContent({
   const [trackedOnly, setTrackedOnly] = useState(false);
   const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
-  const [timelineDisplay, setTimelineDisplay] = useTimelineDisplayMode();
-  const [lettersVisible, setLettersVisible] = useTimelineLettersVisible();
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
   const compactLayoutRef = useRef(isCompactLayout());
@@ -981,6 +972,10 @@ function AppContent({
     providerId: state.agent.providerId, hostId: 'local', title: 'Conversation',
   } : undefined);
   const visibleStackRoot = sideSessions.find(session => sessionKey(session) === detachedSideRoot) ?? stackRoot;
+  useEffect(() => {
+    document.title = visibleStackRoot?.title?.trim() ? `${visibleStackRoot.title.trim()} · Agent Remote Control` : 'Agent Remote Control';
+    return () => { document.title = 'Agent Remote Control'; };
+  }, [visibleStackRoot?.title]);
   const stackPath = sidePath(visibleStackRoot, sideSessions, sideSelections).map((session) => ({
     ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title,
   }));
@@ -1023,33 +1018,31 @@ function AppContent({
       label: 'Undo', onClick: async () => { await refreshRelations.setLinked(unlinked, true); },
     });
   }
-  const askKey = addressSession ? sessionKey(addressSession) : undefined;
-  const askEntry = addressSession ? ask.entryFor(addressSession) : undefined;
-  const askVisible = ask.enabled && ask.openKey === askKey && !!askEntry && activeView === 'workbench' && !supportingRailOpen;
-  const askSourceState = addressSession?.agentId === state?.agent?.id ? state : addressSession ? replicas.get(addressSession.agentId)?.getState() : undefined;
-  useEffect(() => {
-    if (compositionProtected || !addressSession || !accessReady || !directory || transitioning) return;
-    return ask.restore(addressSession, refreshRelations);
-  }, [compositionProtected, ask.enabled, ask.openKey, askKey, addressSession?.agentId, accessReady, directory, transitioning, refreshRelations]);
-  function openAsk(clean = false) {
+  function openAsk(source: OpenedSession, sourceState: AgentReplicaState | undefined, clean = false) {
     cancelCompositionRecovery();
-    if (addressSession) void refreshRelations().then(() => ask.open(askSourceState, addressSession, '', clean)).catch(error => setFailure(message(error, 'Ask could not open.')));
+    void refreshRelations().then(() => ask.open(sourceState, source, '', clean)).catch(error => setFailure(message(error, 'Ask could not open.')));
   }
   useEffect(() => focusCatchUp(addressSession ? replicas.get(addressSession.agentId) : undefined), [addressSession?.agentId, replicas, focusCatchUp]);
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
     && primaryBinding.current.transport === transport && primaryBinding.current.agentId === stackRoot?.agentId);
   const openWindows = useMemo(() => [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [stackRoot, primaryIsBound, sideSessions]);
+  const expandedViewIdentity = JSON.stringify([...expandedKeys]);
+  const askActivitySessions = useMemo(() => openWindows.flatMap(source => {
+    const entry = ask.entryFor(source);
+    if (!ask.isEnabled(source) || !entry.record?.target || ask.isOpen(source) && !entry.attached) return [];
+    return [{ session: entry.record.target,
+      visible: ask.isOpen(source) && activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(sessionKey(source)),
+      liveAgentId: entry.attached ? entry.record.target.agentId : undefined }];
+  }), [openWindows, ask.revision, activeView, supportingRailOpen, expandedViewIdentity]);
   useEffect(() => {
     replicas.retain([
       ...connections.agentIds,
       ...(primaryBinding.current?.agentId ? [primaryBinding.current.agentId] : []),
       ...sideSessions.map(session => session.agentId),
-      ...(askVisible && askEntry?.record?.target ? [askEntry.record.target.agentId] : []),
+      ...askActivitySessions.filter(item => item.visible).map(item => item.session.agentId),
       ...(addressSession ? [addressSession.agentId] : []),
     ]);
   });
-  const askActivitySessions = useMemo(() => ask.enabled && askEntry?.record?.target && (ask.openKey !== askKey || askEntry.attached) ? [{ session: askEntry.record.target, visible: askVisible,
-    liveAgentId: askEntry.attached ? askEntry.record.target.agentId : undefined }] : [], [ask.enabled, ask.openKey, askKey, askEntry?.record?.target, askEntry?.attached, askVisible]);
   const visibleWindows = openWindows.filter(session => activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(sessionKey(session)));
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady, visibleWindows);
   useEffect(() => trackedViews.retain(tracking.sessions), [trackedViews, tracking.sessions]);
@@ -1181,11 +1174,6 @@ function AppContent({
     setTraceNavigation(previous => previous?.scope === traceScope ? previous : undefined);
   }, [traceScope]);
   function inspectTimelineEntry(key: string, view: 'workbench' | 'trace') {
-    if (view === 'workbench' && state) {
-      const item = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries).find(entry => entry.key === key)?.entry.item;
-      if (item?.type === 'agent_communication') setLettersVisible(true);
-      if (timelineDisplay === 'content' && item && !isContentOnlyItem(item)) setTimelineDisplay('simple');
-    }
     if (activeAgentId) setLetterReveals(values => { const next = { ...values }; delete next[activeAgentId]; return next; });
     setTraceNavigation({ scope: traceScope, key, view, requestId: ++traceRequestCounter.current });
     if (view === 'workbench' && stackRoot) revealSession(stackRoot);
@@ -1316,7 +1304,6 @@ function AppContent({
         if (!await openSession(destination, undefined, undefined, true)) throw new Error('The linked session could not be opened.');
         // Opening the other endpoint intentionally advances the navigation generation.
         controller.signal.throwIfAborted();
-        setLettersVisible(true);
         setLetterReveals(values => ({ ...values, [destination.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
         await new Promise(resolve => setTimeout(resolve, 0));
         return;
@@ -1341,7 +1328,6 @@ function AppContent({
       setSideFocus(sessionKey(recipient)); setActiveView('workbench');
       const target = await loadSessionCommunication(receiver, entry, controller.signal);
       check();
-      setLettersVisible(true);
       setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
       // Mounted panes acquire their own leases before this temporary navigation lease is released.
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -1373,9 +1359,9 @@ function AppContent({
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
     cancelCompositionRecovery();
     letterRequest.current?.abort();
-    if (id === 'console:ask' && !args.trim()) { ask.toggle(!!saved && !!ask.entryFor(saved).record?.remote); return {}; }
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
+    if (id === 'console:ask' && !args.trim()) { ask.toggle(saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }); return {}; }
     if (id === 'console:ask') { await refreshRelations(); return ask.open(sourceState, saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }, args); }
     if (forkBusy.current) throw new Error('A session fork is already being created.');
     forkBusy.current = true;
@@ -1476,13 +1462,16 @@ function AppContent({
   };
 
   const { communication: primaryCommunication, ...primaryNavigation }: Partial<SessionViewNavigation> = stackRoot ? viewNavigation(stackRoot, state) : {};
-  const floatingConversation = (ask.enabled || !ask.hiddenByPreference && askEntry?.record?.remote) && addressSession && directory && activeView === 'workbench' && !supportingRailOpen ? <><AskButton positionRef={askPositionRef} triggerRef={askTriggerRef} hidden={askVisible} disabled={!askSourceState?.agent || hostOffline || transitioning}
-      observation={askEntry?.record?.target ? tracking.observations[sessionKey(askEntry.record.target)] : undefined} onOpen={() => openAsk()} />
-      {askVisible ? <AskConversation navigation={viewNavigation} positionRef={askPositionRef} triggerRef={askTriggerRef} simple={askSimple} onToggleSimple={() => setAskSimple(value => !value)}
-      entry={askEntry!} store={ask.store} transport={transport} replica={askEntry?.record?.target ? replicaFor(askEntry.record.target.agentId) : undefined}
-      onSendInput={(id, send) => ask.sendInput(askKey!, id, send)} draftBinding={{ store: ask.drafts, key: askKey! }} onClose={ask.close} onToggleEnabled={ask.toggle} onClean={() => openAsk(true)} onRetry={() => openAsk()} />
-      : null}</> : null;
-  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><TimelineDisplay.Provider value={timelineDisplay}><TimelineLettersVisible.Provider value={lettersVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  function renderAsk(source: OpenedSession, sourceState?: AgentReplicaState) {
+    if (!directory) return null;
+    const available = accessReady && !transitioning && remoteHosts.find(host => host.id === source.hostId)?.online !== false;
+    return <SessionAsk key={sessionKey(source)} source={source} state={sourceState} ask={ask} storageScope={baseUrl}
+      visible={activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(sessionKey(source))}
+      available={available} canRestore={available && !compositionProtected} synchronize={refreshRelations}
+      onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
+      observations={tracking.observations} navigation={viewNavigation} />;
+  }
+  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
@@ -1497,9 +1486,6 @@ function AppContent({
     </nav> : null}
     <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
-      contentOnly={timelineDisplay === 'content'} onToggleContentOnly={() => setTimelineDisplay(value => value === 'content' ? 'preview' : 'content')}
-      simpleConversation={timelineDisplay === 'simple'} onToggleSimpleConversation={() => setTimelineDisplay(value => value === 'simple' ? 'preview' : 'simple')}
-      lettersVisible={lettersVisible} onToggleLetters={() => setLettersVisible(value => !value)}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
       onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
     <header className="lab-app-bar" hidden={headerHidden}>
@@ -1635,7 +1621,6 @@ function AppContent({
     </SupportingRail>
     {!compactLayout && contextVisible ? <SidebarResize width={sidebar.width} maximum={sidebar.maximum} onChange={sidebar.setWidth} /> : null}
     <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
-      <SessionOverlay target={shellRef}>{floatingConversation}</SessionOverlay>
       <section
         ref={workbenchPanelRef}
         className={(sessionNotice && !nativeTakeover && !(compactLayout && contextOpen)) || promptMigrations.notice ? 'lab-workbench-with-notice' : undefined}
@@ -1651,7 +1636,7 @@ function AppContent({
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <div className={`lab-conversation-split${stackPath.length > 1 ? ' lab-has-side' : ''}`}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
-        <div className="lab-primary-conversation" tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot) focusSession(stackRoot); }} onClickCapture={() => { if (stackRoot) focusSession(stackRoot); }}>
+        <div className="lab-primary-conversation lab-session-composition" tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot) focusSession(stackRoot); }} onClickCapture={() => { if (stackRoot) focusSession(stackRoot); }}>
         <CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
           sessionState={!accessReady || hostOffline ? remoteSessionState(state, !accessReady ? 'connecting' : 'disconnected') : sessionState}
           handoff={handoff}
@@ -1674,27 +1659,28 @@ function AppContent({
             }} /> : undefined}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} onUnlink={unlinkSide} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} />}
-          sessionManager={<>{!compactLayout && addressSession ? <StarButton session={addressSession} favorites={favorites} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
+          sessionManager={<>{!compactLayout && stackRoot ? <StarButton session={stackRoot} favorites={favorites} /> : null}{directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}<SessionHeadingActions sessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}><nav className="lab-conversation-history" aria-label="Conversation history">
             <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || hostOffline || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
             <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={transitioning || hostOffline || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
-          </nav>{directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}{addressSession ? <SessionLink session={addressSession} /> : null}</>}
+          </nav>{stackRoot ? <SessionLink session={stackRoot} /> : null}</SessionHeadingActions></>}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
               <button type="button" className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === ancestor.agentId)?.status} disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
               <span aria-hidden="true"> / </span>
             </span>)}
             <span className="agent-session-title" data-session-status={state?.agent?.status} aria-current="page">{activeOpened?.title}</span>
-          </nav> : null}
+          </nav> : stackRoot ? <strong className="agent-session-title lab-primary-title" data-session-status={state?.agent?.status}>{stackRoot.title}</strong> : null}
           draftBinding={activeAgentId ? { store: messageDrafts, key: activeAgentId } : undefined}
           questionDrafts={activeAgentId ? questionDrafts[activeAgentId] ?? {} : undefined}
           onQuestionDraftChange={activeAgentId ? (requestId, draft) => setQuestionDrafts((current) => ({
             ...current, [activeAgentId]: { ...current[activeAgentId], [requestId]: draft },
           })) : undefined}
         /></CommunicationNavigationContext.Provider>
+        {stackRoot ? renderAsk(stackRoot, state) : null}
         </div>
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
           key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} standalone={sessionKey(session) === detachedSideRoot} onUnlink={unlinkSide}
-          navigation={viewNavigation} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
+          navigation={viewNavigation} renderAsk={renderAsk} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
           position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}
           expanded={expandedKeys.has(sessionKey(session))}
           focused={!compositionProtected && focusedWindow !== undefined && sessionKey(focusedWindow) === sessionKey(session)}
@@ -1735,7 +1721,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></TimelineLettersVisible.Provider></TimelineDisplay.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

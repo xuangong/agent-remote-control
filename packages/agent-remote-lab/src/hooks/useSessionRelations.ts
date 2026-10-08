@@ -110,7 +110,9 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
     backgroundRefresh();
     return () => { refreshRef.current = undefined; setLinkedRef.current = undefined; controller.abort(); clearTimeout(timer); clearInterval(poll); removeSides(); removeAsks();
       window.removeEventListener('focus', schedule); document.removeEventListener('visibilitychange', schedule); };
-  }, [baseUrl, enabled, sides, asks, current]);
+  }, [baseUrl, enabled, sides, asks]);
+  // Focus requests fresh relations without retiring other views' in-flight recovery.
+  useEffect(() => { if (enabled) void refreshRef.current?.().catch(() => {}); }, [enabled, current]);
   return useMemo(() => Object.assign(async () => { if (enabled) await refreshRef.current?.(); }, {
     setLinked: async (record: SessionFork, linked: boolean) => {
       let local: SessionFork;

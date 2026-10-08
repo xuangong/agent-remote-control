@@ -43,7 +43,7 @@ for (const source of ['primary', 'side'] as const) {
     const primaryCreated = createdSession();
     await page.getByTestId('session-create').click();
     const primaryIdentity = await primaryCreated;
-    const primary = page.locator('.lab-primary-conversation');
+    const primary = page.locator('.lab-primary-conversation > .lab-session-view');
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
     await send(primary, primaryHistory);
     await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
@@ -51,7 +51,7 @@ for (const source of ['primary', 'side'] as const) {
     const sideCreated = createdSession();
     await send(primary, `/side ${sideHistory}`);
     const sideIdentity = await sideCreated;
-    const side = page.locator('.lab-side-conversation');
+    const side = page.locator('.lab-side-conversation > .lab-session-view');
     await expect(side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
     const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
     if (await takeControl.isVisible()) await takeControl.click();
@@ -115,14 +115,14 @@ async function openSideFixture(page: Page, isMobile: boolean) {
   const creation = createdSession();
   await page.getByTestId('session-create').click();
   const primaryIdentity = await creation;
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await send(primary, primaryHistory);
   await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
   const sideCreation = createdSession();
   await send(primary, `/side ${sideHistory}`);
   const sideIdentity = await sideCreation;
-  const side = page.locator('.lab-side-conversation');
+  const side = page.locator('.lab-side-conversation > .lab-session-view');
   await expect(side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
   const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
   if (await takeControl.isVisible()) await takeControl.click();
@@ -284,8 +284,8 @@ test('a terminal nested Side failure preserves the saved path without moving foc
   const nestedCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await send(fixture.side, `/side ${nestedHistory}`);
   const identity = await (await nestedCreated).json() as { nativeSessionId: string };
-  const middle = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: sideHistory }) });
-  const nested = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: nestedHistory }) });
+  const middle = page.locator('.lab-side-conversation > .lab-session-view').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: sideHistory }) });
+  const nested = page.locator('.lab-side-conversation > .lab-session-view').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: nestedHistory }) });
   await expect(nested.locator('.agent-message-assistant').last()).toContainText(nestedHistory);
   const location = page.url();
   const sentBeforeReload = [...fixture.sends];
@@ -360,7 +360,7 @@ for (const action of ['focus', 'Ask'] as const) {
       const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
       await page.getByTestId('session-create').click();
       const identity = await (await created).json() as { nativeSessionId: string };
-      const primary = page.locator('.lab-primary-conversation');
+      const primary = page.locator('.lab-primary-conversation > .lab-session-view');
       await expect(primary.getByTestId('prompt-input')).toBeEnabled();
       await send(primary, primaryHistory);
       await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);

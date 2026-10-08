@@ -10,12 +10,13 @@ import type {
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import { AgentCommandDetails, AgentTimeline, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type TimelineDisplayMode, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 
 
 import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-remote-web/react';
 
 import { PlanningControl } from './PlanningControl.js';
+import { SessionViewOptions, type SessionDisplayPreferences } from './SessionViewOptions.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 import { useRecoveryNotice } from '../hooks/useRecoveryNotice.js';
@@ -25,7 +26,31 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'preview', sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { displayPreferences?: SessionDisplayPreferences; onDisplayPreferencesChange?(preferences: SessionDisplayPreferences): void; defaultDisplayMode?: TimelineDisplayMode; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+  const displayScope = draftSessionKey ?? state?.agent?.runtimeInfo.sessionId ?? attachingAgentId;
+  const [localDisplay, setLocalDisplay] = useState(() => ({ scope: displayScope, value: { mode: defaultDisplayMode, lettersVisible: true } }));
+  let localPreferences = localDisplay.value;
+  if (localDisplay.scope !== displayScope) {
+    localPreferences = { mode: defaultDisplayMode, lettersVisible: true };
+    setLocalDisplay({ scope: displayScope, value: localPreferences });
+  }
+  const preferences = displayPreferences ?? localPreferences;
+  function changeDisplayPreferences(value: SessionDisplayPreferences): void {
+    if (onDisplayPreferencesChange) onDisplayPreferencesChange(value);
+    else setLocalDisplay({ scope: displayScope, value });
+  }
+  const revealedDisplayRequest = useRef<string>();
+  useLayoutEffect(() => {
+    if (!visible || !revealEntry || !state) return;
+    const request = JSON.stringify([displayScope, state.timeline.epoch, revealEntry.requestId, revealEntry.key]);
+    if (revealedDisplayRequest.current === request) return;
+    const item = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries).find(entry => entry.key === revealEntry.key)?.entry.item;
+    if (!item) return;
+    revealedDisplayRequest.current = request;
+    const mode = preferences.mode === 'content' && !isContentOnlyItem(item) ? 'simple' : preferences.mode;
+    const lettersVisible = item.type === 'agent_communication' ? true : preferences.lettersVisible;
+    if (mode !== preferences.mode || lettersVisible !== preferences.lettersVisible) changeDisplayPreferences({ mode, lettersVisible });
+  }, [visible, displayScope, state?.timeline.epoch, state?.timeline.entries, revealEntry, preferences.mode, preferences.lettersVisible]);
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
   const controlReadOnly = !!nativeTakeover || session.readOnly;
@@ -97,7 +122,7 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
     : activity === 'waiting' ? 'Waiting for response'
     : activity === 'running' ? 'Working'
     : 'Ready';
-  return <SessionViewFrame className={selectedCommand ? 'lab-command-details-open' : undefined}>
+  return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}><SessionViewFrame className={selectedCommand ? 'lab-command-details-open' : undefined}>
     <header className="lab-workbench-heading">
       <div>
         {conversationPath}
@@ -105,6 +130,7 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
       </div>
       {sessionManager}
       {workspaceLink}
+      <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span>
     </header>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
@@ -166,7 +192,7 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
       resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
-  </SessionViewFrame>;
+  </SessionViewFrame></TimelineLettersVisible.Provider></TimelineDisplay.Provider>;
 }
 
 
@@ -224,7 +250,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     if (!visible || !revealEntry) return;
     const request = JSON.stringify([state?.agent?.id, state?.timeline.epoch, revealEntry.requestId]);
     if (consumedReveal.current !== request && scroll.revealEntry(revealEntry.key, revealEntry.align)) consumedReveal.current = request;
-  }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries]);
+  }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries, display, lettersVisible]);
   useLayoutEffect(() => {
     if (visible && selectedSearchKey) scroll.revealEntry(selectedSearchKey);
   }, [visible, selectedSearchKey, searchSelection?.request]);

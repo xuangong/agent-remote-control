@@ -24,10 +24,10 @@ describe('App', () => {
     window.localStorage.removeItem(lettersKey);
     try {
       const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
       const letters = container.querySelector<HTMLInputElement>('[aria-label="Show letters"]');
-      const content = container.querySelector<HTMLInputElement>('[aria-label="Content only view"]')!;
-      const simple = container.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]')!;
+      const content = container.querySelector<HTMLInputElement>('input[value="content"]')!;
+      const simple = container.querySelector<HTMLInputElement>('input[value="simple"]')!;
       expect(letters).not.toBeNull();
       expect(letters!.checked).toBe(true);
       expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
@@ -35,26 +35,25 @@ describe('App', () => {
         if (mode === 'content') await act(async () => content.click());
         if (mode === 'simple') await act(async () => simple.click());
         await act(async () => letters!.click());
-        expect(window.localStorage.getItem(modeKey)).toBe(mode);
-        expect(window.localStorage.getItem(lettersKey)).toBe('false');
+        expect(container.querySelector<HTMLInputElement>(`input[value="${mode}"]`)!.checked).toBe(true);
+        expect(letters!.checked).toBe(false);
         expect(container.querySelector('.agent-communication-letter')).toBeNull();
         await act(async () => letters!.click());
-        expect(window.localStorage.getItem(modeKey)).toBe(mode);
+        expect(container.querySelector<HTMLInputElement>(`input[value="${mode}"]`)!.checked).toBe(true);
         expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
       }
       await act(async () => letters!.click());
       for (const button of [simple, content, simple]) {
         await act(async () => button.click());
         expect(letters!.checked).toBe(false);
-        expect(window.localStorage.getItem(lettersKey)).toBe('false');
         expect(container.querySelector('.agent-communication-letter')).toBeNull();
       }
       await unmount(container);
       const restored = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
       expect(restored.querySelector('.agent-communication-letter')).toBeNull();
-      await act(async () => restored.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      await act(async () => restored.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
       expect(restored.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(false);
-      expect(restored.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]')!.checked).toBe(true);
+      expect(restored.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
     } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
   });
 
@@ -71,9 +70,9 @@ describe('App', () => {
       const show = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Show in Conversation')!;
       await act(async () => show.click());
       expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
-      expect(window.localStorage.getItem(modeKey)).toBe('content');
-      expect(window.localStorage.getItem(lettersKey)).toBe('true');
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+      expect(container.querySelector<HTMLInputElement>('input[value="content"]')!.checked).toBe(true);
+      expect(container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(true);
       await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
       expect(container.querySelector('.agent-communication-letter')).toBeNull();
     } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
@@ -94,7 +93,7 @@ describe('App', () => {
       });
       await act(async () => container.querySelector<HTMLButtonElement>('.agent-session-search-results button')!.click());
       expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
       await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
       expect(container.querySelector('.agent-communication-letter')).toBeNull();
     } finally { window.localStorage.removeItem(lettersKey); }
@@ -116,11 +115,12 @@ describe('App', () => {
       await act(async () => show.click());
       expect(tab(container, 'Workbench').getAttribute('aria-selected')).toBe('true');
       expect(container.querySelector('[data-inspected="true"] .agent-reasoning')).not.toBeNull();
-      expect(window.localStorage.getItem(key)).toBe('simple');
+      await openSessionViewOptions(container);
+      expect(container.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
     } finally { window.localStorage.removeItem(key); }
   });
 
-  it('offers content-only above simple view, switches modes exclusively, and restores content-only after remount', async () => {
+  it('selects display modes exclusively and restores this session choice after remount', async () => {
     const key = 'agent-remote:timeline-display';
     window.localStorage.removeItem(key);
     const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [
@@ -131,17 +131,16 @@ describe('App', () => {
       timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item })) } };
     try {
       const container = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
-      const content = container.querySelector<HTMLInputElement>('[aria-label="Content only view"]');
-      const simple = container.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]')!;
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+      const content = container.querySelector<HTMLInputElement>('input[value="content"]');
+      const simple = container.querySelector<HTMLInputElement>('input[value="simple"]')!;
       expect(content).not.toBeNull();
-      expect(content!.compareDocumentPosition(simple) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       await act(async () => content!.click());
       expect(simple.checked).toBe(false);
       expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
       expect(container.querySelector('.agent-message-user')?.textContent).toContain('The requirement.');
       expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('The summary.');
-      expect(window.localStorage.getItem(key)).toBe('content');
+      expect(content!.checked).toBe(true);
       const restored = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
       expect(restored.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
       await act(async () => simple.click());
@@ -150,8 +149,8 @@ describe('App', () => {
       expect(container.querySelector('.agent-content-preview')).toBeNull();
       await act(async () => content!.click());
       expect(simple.checked).toBe(false);
-      await act(async () => content!.click());
-      expect(window.localStorage.getItem(key)).toBe('preview');
+      await act(async () => container.querySelector<HTMLInputElement>('input[value="preview"]')!.click());
+      expect(container.querySelector<HTMLInputElement>('input[value="preview"]')!.checked).toBe(true);
       expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Execution details.');
     } finally { window.localStorage.removeItem(key); }
   });
@@ -221,15 +220,16 @@ describe('App', () => {
     try {
       const container = await render(<App initialState={initialState} transport={labTransport()} />);
       expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Review the failing test');
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
-      const simple = container.querySelector<HTMLInputElement>('[aria-label="Simple conversation view"]');
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+      const simple = container.querySelector<HTMLInputElement>('input[value="simple"]');
       expect(simple).not.toBeNull();
       await act(async () => simple!.click());
       expect(container.querySelector('.agent-content-preview')).toBeNull();
-      expect(window.localStorage.getItem(key)).toBe('simple');
+      await openSessionViewOptions(container);
+      expect(container.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
       const restored = await render(<App initialState={initialState} transport={labTransport()} />);
       expect(restored.querySelector('.agent-content-preview')).toBeNull();
-      await act(async () => simple!.click());
+      await act(async () => container.querySelector<HTMLInputElement>('input[value="preview"]')!.click());
       expect(container.querySelector('.agent-content-preview')).not.toBeNull();
     } finally { window.localStorage.removeItem(key); }
   });
@@ -833,3 +833,8 @@ it('renders saved conversation content and a usable draft before business access
     expect(fetcher).not.toHaveBeenCalled();
   } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }
 });
+
+async function openSessionViewOptions(container: ParentNode): Promise<void> {
+  const button = container.querySelector<HTMLButtonElement>('button[aria-label="Session view options"]')!;
+  if (button.getAttribute('aria-expanded') !== 'true') await act(async () => button.click());
+}

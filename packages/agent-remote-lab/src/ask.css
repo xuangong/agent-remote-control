@@ -1,37 +1,36 @@
+.lab-session-composition {
+  position: relative; isolation: isolate; width: 100%; height: 100%; min-width: 0; min-height: 0;
+}
 .lab-ask-floating {
-  position: fixed; right: max(12px, env(safe-area-inset-right)); top: calc(var(--lab-viewport-top, 0px) + 116px); z-index: 139;
+  position: absolute; right: 0; top: clamp(64px, 28%, 160px); z-index: 39;
 }
 .lab-ask-floating[data-hidden="true"] { visibility: hidden; pointer-events: none; }
 .lab-ask-trigger {
-  touch-action: none; user-select: none; cursor: grab; display: flex; align-items: center; gap: 7px; min-height: 44px;
-  padding: 8px 14px; border: 1px solid var(--obs-control-border); border-radius: 24px;
+  touch-action: manipulation; user-select: none; cursor: pointer; display: flex; align-items: center; gap: 6px; min-height: 44px;
+  padding: 8px 10px; border: 1px solid var(--obs-control-border); border-right: 0; border-radius: 12px 0 0 12px;
   background: var(--obs-surface); color: var(--obs-text); font-weight: 600;
-  box-shadow: 0 2px 10px color-mix(in oklab, var(--obs-text) 10%, transparent);
+  box-shadow: -3px 2px 9px color-mix(in oklab, var(--obs-text) 9%, transparent);
 }
-.lab-ask-trigger > span { color: var(--obs-action); font-size: 17px; }
-html:has(.lab-ask-viewport) { overflow: clip; }
-body:has(.lab-ask-viewport) { position: fixed; inset: 0; overflow: clip; }
-.lab-shell:has(.lab-ask-viewport) { overflow: clip; }
+.lab-ask-trigger > svg { flex: none; color: var(--obs-action); }
+.lab-ask-trigger:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -3px; }
 .lab-ask-viewport {
-  position: fixed; z-index: 145; inset-inline: 0; top: var(--lab-viewport-top, 0px);
-  height: var(--lab-viewport-height, 100dvh); padding: max(8px, env(safe-area-inset-top)) 12px max(8px, env(safe-area-inset-bottom));
-  display: grid; place-items: center; pointer-events: none;
+  position: absolute; z-index: 45; inset: 0; min-width: 0; min-height: 0; pointer-events: none;
   container: ask-viewport / size;
 }
 .lab-ask-window {
-  position: relative; pointer-events: auto;
+  position: absolute; inset: 0; pointer-events: auto;
   --lab-composer-bottom-inset: 0px;
-  width: min(440px, 100%); height: min(560px, calc(var(--lab-viewport-height, 100dvh) * .68)); min-width: 0; min-height: 0;
+  width: 100%; height: 100%; min-width: 0; min-height: 0;
   display: flex; flex-direction: column; overflow: clip;
-  border: 1px solid var(--obs-border-strong); border-radius: 16px;
-  background: var(--obs-surface); box-shadow: 0 10px 40px color-mix(in oklab, var(--obs-text) 18%, transparent);
+  border: 0; background: var(--obs-surface);
   animation: ask-reveal 160ms ease-out;
 }
-@container ask-viewport (max-height: 500px) {
-  .lab-ask-window { height: 100%; }
+.lab-ask-viewport[data-presentation="floating"] > .lab-ask-window {
+  inset: auto; left: var(--ask-left, 12px); top: var(--ask-top, 12px);
+  width: var(--ask-width, 440px); height: var(--ask-height, 560px);
+  border: 1px solid var(--obs-border-strong); border-radius: 14px;
+  box-shadow: 0 8px 28px color-mix(in oklab, var(--obs-text) 16%, transparent);
 }
-.lab-shell[data-viewport-occluded="true"] .lab-ask-viewport { padding-bottom: 8px; }
-.lab-shell[data-viewport-occluded="true"] .lab-ask-window { height: 100%; }
 .lab-ask-window > .lab-session-view { flex: 1; min-height: 0; width: 100%; }
 .lab-ask-heading {
   display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; padding: 6px 10px 6px 16px;
@@ -40,32 +39,26 @@ body:has(.lab-ask-viewport) { position: fixed; inset: 0; overflow: clip; }
 .lab-ask-controls { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .lab-ask-controls button { min-height: 36px; padding: 6px 10px; border-color: transparent; background: transparent; }
 .lab-ask-controls button:last-child { min-width: 36px; font-size: 22px; }
-.lab-ask-draft { font-size: 16px; max-height: min(110px, calc(var(--lab-viewport-height, 100dvh) * .18)); }
+.lab-ask-draft { font-size: 16px; max-height: min(110px, 25%); }
 .lab-ask-error { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-danger); background: var(--obs-danger-soft); max-height: 25%; overflow: auto; }
 .lab-ask-error button { margin-left: 8px; }
 .lab-ask-opening { flex: 1; min-height: 0; display: grid; place-content: center; padding: 12px; color: var(--obs-text-secondary); }
 .lab-ask-draft { margin: 10px; padding: 10px; min-width: 0; resize: none; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-canvas); color: var(--obs-text); }
-@keyframes ask-reveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ask-reveal { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .lab-ask-window { animation: none; } }
 
 .lab-ask-waiting { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-text-secondary); max-height: 20%; overflow: auto; overflow-wrap: anywhere; }
 
-.lab-ask-floating .lab-ask-trigger:active { cursor: grabbing; }
 .lab-ask-floating[data-status="working"] .lab-ask-trigger { background: var(--tracking-working-surface); }
 .lab-ask-floating[data-status="pending"] .lab-ask-trigger { background: var(--tracking-pending-surface); }
 .lab-ask-floating[data-status="idle"] .lab-ask-trigger { background: var(--obs-surface); }
 .lab-ask-floating[data-alert="pending"] .lab-ask-trigger { animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite; }
 .lab-ask-floating[data-alert="idle"] .lab-ask-trigger { animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite; }
-.lab-ask-controls .lab-ask-view-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; }
-.lab-ask-controls .lab-ask-view-toggle[aria-pressed="true"] { color: var(--obs-action); background: color-mix(in oklab, var(--obs-action) 12%, var(--obs-surface)); }
 @media (prefers-reduced-motion: reduce) {
   .lab-ask-floating[data-alert="pending"] .lab-ask-trigger { animation: none; background: var(--tracking-pending-surface); }
   .lab-ask-floating[data-alert="idle"] .lab-ask-trigger { animation: none; background: var(--tracking-idle-surface); }
 }
 
-@media (min-width: 1181px) {
-  .lab-ask-window :is(.lab-workbench-heading, .lab-ask-heading) { cursor: grab; touch-action: none; user-select: none; }
-  .lab-ask-window[data-dragging="true"],
-  .lab-ask-window[data-dragging="true"] :is(.lab-workbench-heading, .lab-ask-heading) { cursor: grabbing; }
-  .lab-ask-window { position: absolute; left: var(--ask-left); top: var(--ask-top); max-height: calc(var(--lab-viewport-height, 100dvh) - 24px); }
-}
+.lab-ask-viewport[data-presentation="floating"] .lab-ask-window :is(.lab-workbench-heading, .lab-ask-heading) { cursor: grab; touch-action: none; user-select: none; }
+.lab-ask-window[data-dragging="true"],
+.lab-ask-window[data-dragging="true"] :is(.lab-workbench-heading, .lab-ask-heading) { cursor: grabbing; }

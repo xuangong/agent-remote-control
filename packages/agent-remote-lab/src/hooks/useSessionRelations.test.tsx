@@ -1,7 +1,9 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { ForkStore, referenceForkContext } from '../session-forks.js';
+import { SessionDirectoryClient } from '../directory-client.js';
+import { sessionKey } from '../session-tree.js';
 import { useAskConversations } from './useAskConversations.js';
 import { useSessionRelations } from './useSessionRelations.js';
 import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
@@ -72,9 +74,44 @@ it('lets the first Ask toggle hide an automatically discovered entry and the nex
   await render(<Harness />);
   await act(async () => ask.store.setSharedRelations([relation('ask')]));
   expect(ask.entryFor(source).record?.remote).toBe(true);
-  expect(ask.enabled).toBe(false); expect(ask.hiddenByPreference).toBe(false);
-  await act(async () => ask.toggle(true));
-  expect(ask.enabled).toBe(false); expect(ask.hiddenByPreference).toBe(true);
-  await act(async () => ask.toggle(true));
-  expect(ask.enabled).toBe(true); expect(ask.hiddenByPreference).toBe(false);
+  expect(ask.isEnabled(source)).toBe(true);
+  await act(async () => ask.toggle(source));
+  expect(ask.isEnabled(source)).toBe(false);
+  await act(async () => ask.toggle(source));
+  expect(ask.isEnabled(source)).toBe(true);
+});
+
+it('keeps a pending Ask relation recovery alive when focus moves to a sibling view', async () => {
+  const baseUrl = 'http://localhost/';
+  sessionStorage.setItem(`agent-remote-ask:${baseUrl}:open-windows`, JSON.stringify([sessionKey(source)]));
+  localStorage.setItem(`agent-remote-ask:${baseUrl}:enabled:${sessionKey(source)}`, 'true');
+  let finish!: () => void;
+  let relationSignal: AbortSignal | undefined;
+  const ready = new Promise<void>(resolve => { finish = resolve; });
+  const fetchRelations = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    relationSignal = init?.signal ?? undefined;
+    await ready;
+    relationSignal?.throwIfAborted();
+    return Response.json({ relations: [relation('ask')] });
+  });
+  vi.stubGlobal('fetch', fetchRelations);
+  const attach = vi.fn(async () => Response.json({ agentId: 'restored-ask', nativeSessionId: 'ask' }));
+  const directory = new SessionDirectoryClient(baseUrl, attach);
+  const sides = new ForkStore('relation-focus');
+  let ask!: ReturnType<typeof useAskConversations>, refresh!: () => Promise<void>, focus!: (key: string) => void;
+  function Harness() {
+    const [current, setCurrent] = useState('main'); focus = setCurrent;
+    ask = useAskConversations(baseUrl, {} as never, directory, 'host');
+    refresh = useSessionRelations(baseUrl, true, sides, ask.store, current);
+    return null;
+  }
+  await render(<Harness />);
+  await act(async () => { ask.restore(source, refresh); });
+  await act(async () => { focus('side'); });
+  expect(relationSignal?.aborted).toBe(false);
+  expect(ask.entryFor(source).error).toBeUndefined();
+  await act(async () => { finish(); });
+  expect(ask.entryFor(source)).toMatchObject({ attached: true, restoring: false });
+  expect(attach).toHaveBeenCalledTimes(1);
+  expect(fetchRelations).toHaveBeenCalledTimes(1);
 });

@@ -5,7 +5,7 @@ async function start(page: Page, enableAsk = true) {
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   if (enableAsk) {
     await primary.getByTestId('prompt-input').fill('/ask');
@@ -45,7 +45,7 @@ test('Ask floats over its source, preserves a minimized draft and starts fresh o
   expect(creations[1]!.operationId).not.toBe(creations[0]!.operationId);
   expect(page.url()).toBe(url);
   const box = (await ask.boundingBox())!;
-  expect(box.width).toBeLessThanOrEqual(page.viewportSize()!.width - 16);
+  expect(box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   await ask.getByTestId('prompt-input').fill('What should I consider next?');
@@ -65,6 +65,9 @@ test('/ask sends its question once and stays attached to the source when session
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await showNewSession(page);
   await page.getByTestId('session-create').click();
+  await expect(page.getByRole('button', { name: 'Ask about this session', exact: true })).toHaveCount(0);
+  await primary.getByTestId('prompt-input').fill('/ask');
+  await primary.getByTestId('prompt-input').press('Enter');
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await expect(ask.getByTestId('timeline')).not.toContainText('Why was this approach chosen?');
@@ -163,10 +166,9 @@ for (const rich of [false, true]) test(`Ask keeps its heading and multiline ${ri
         inputVisible: input.top >= heading.bottom && input.bottom <= window.bottom,
         sendVisible: send.top >= heading.bottom && send.bottom <= window.bottom,
         inViewport: window.top >= visible.offsetTop && window.bottom <= visible.offsetTop + visible.height,
-        keyboardGap: Math.round(visible.offsetTop + visible.height - window.bottom),
         panelScroll: element.scrollTop,
       };
-    }, viewport)).toEqual({ headingVisible: true, inputVisible: true, sendVisible: true, inViewport: true, keyboardGap: 8, panelScroll: 0 });
+    }, viewport)).toEqual({ headingVisible: true, inputVisible: true, sendVisible: true, inViewport: true, panelScroll: 0 });
   }
   await page.screenshot({ path: info.outputPath('ask-keyboard.png') });
   await page.evaluate(() => {
@@ -176,7 +178,8 @@ for (const rich of [false, true]) test(`Ask keeps its heading and multiline ${ri
   });
   await expect.poll(async () => {
     const box = (await ask.boundingBox())!;
-    return Math.abs(box.y + box.height / 2 - 422);
+    const owner = (await page.locator('.lab-primary-conversation').boundingBox())!;
+    return Math.abs(box.y + box.height - owner.y - owner.height);
   }).toBeLessThan(2);
   if (rich) await expect(input).toContainText('Question line 12');
   else await expect(input).toHaveValue(/Question line 12/);
@@ -194,19 +197,19 @@ test('slash questions preserve an existing Ask draft', async ({ page }) => {
   await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep my unfinished thought');
 });
 
-test('changing focus to a side conversation does not reopen the primary Ask', async ({ page }, info) => {
+test('changing focus to a side conversation keeps the primary Ask in its own view', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium-desktop', 'Two visible conversations require desktop width.');
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/side');
   await primary.getByTestId('prompt-input').press('Enter');
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  const side = page.getByRole('complementary', { name: 'Side conversation' }).locator(':scope > .lab-session-view');
   await expect(side.getByTestId('prompt-input')).toBeEnabled();
   await primary.getByTestId('prompt-input').fill('/ask Explain this conversation');
   await primary.getByTestId('prompt-input').press('Enter');
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await side.getByTestId('prompt-input').focus();
-  await expect(ask).toHaveCount(0);
+  await expect(ask).toBeVisible();
   await side.getByTestId('prompt-input').click();
   await expect(side.getByTestId('prompt-input')).toBeFocused();
 });
@@ -267,51 +270,45 @@ test('a question queued while Ask opens survives minimizing and reload', async (
   await expect(ask.locator('.agent-message-user').filter({ hasText: 'Keep this queued question' })).toHaveCount(1);
 });
 
-test('Ask uses a content-only window with an independent simple-view toggle', async ({ page, isMobile }) => {
+test('Ask uses the same independent display controls as the source Session View', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  if (isMobile) await expect.poll(async () => {
-    const box = (await ask.boundingBox())!;
-    return Math.abs(box.y + box.height / 2 - page.viewportSize()!.height / 2);
-  }).toBeLessThan(2);
   await expect(ask.locator('.agent-reasoning, .agent-tool')).toHaveCount(0);
-  const toggle = ask.getByRole('button', { name: 'Simple view', exact: true });
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const trigger = ask.getByRole('button', { name: 'Session view options', exact: true });
+  await trigger.click();
+  const options = ask.getByRole('region', { name: 'Session view options', exact: true });
+  await expect(options.getByRole('radio', { name: 'Content only', exact: true })).toBeChecked();
+  await options.getByRole('radio', { name: 'Simple conversation', exact: true }).check();
+  await trigger.press('Escape');
   await expect(ask.locator('.agent-tool').first()).toBeVisible();
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await toggle.click();
+  await trigger.click();
+  await expect(options.getByRole('radio', { name: 'Simple conversation', exact: true })).toBeChecked();
+  await options.getByRole('radio', { name: 'Content only', exact: true }).check();
+  await trigger.press('Escape');
   await expect(ask.locator('.agent-reasoning, .agent-tool')).toHaveCount(0);
 });
 
-test('Ask can be dragged without opening and retains its own position across reload', async ({ page }, info) => {
+test('Ask remains attached to the source edge across resizing and reload', async ({ page }) => {
   await start(page);
+  const owner = page.locator('.lab-primary-conversation');
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
-  const initial = (await button.boundingBox())!;
-  const target = { x: 55, y: page.viewportSize()!.height - 70 };
-  if (info.project.name.includes('mobile')) {
-    const input = await page.context().newCDPSession(page);
-    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: initial.x + initial.width / 2, y: initial.y + initial.height / 2 }] });
-    await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [target] });
-    await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await input.detach();
-  } else {
-    await page.mouse.move(initial.x + initial.width / 2, initial.y + initial.height / 2);
-    await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 12 }); await page.mouse.up();
+  for (const width of [1440, 390, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(async () => {
+      const source = (await owner.boundingBox())!, edge = (await button.boundingBox())!;
+      return Math.abs(source.x + source.width - edge.x - edge.width);
+    }).toBeLessThan(1);
   }
-  const moved = (await button.boundingBox())!;
-  expect(moved.y).toBeGreaterThan(initial.y + 100); expect(moved.x).toBeLessThan(60);
-  await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(0);
   await page.reload();
-  const restored = (await button.boundingBox())!;
-  expect(Math.abs(restored.x - moved.x)).toBeLessThan(2); expect(Math.abs(restored.y - moved.y)).toBeLessThan(2);
-  await button.focus(); await button.press('ArrowUp');
-  expect((await button.boundingBox())!.y).toBeLessThan(restored.y);
+  await expect(button).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(0);
+  await button.focus();
+  await button.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toBeVisible();
 });
 
 
@@ -405,7 +402,7 @@ test('Ask reconciles a delayed standalone keyboard viewport after focus and resu
   await expect.poll(async () => {
     const box = (await ask.boundingBox())!;
     return Math.round(box.y + box.height);
-  }).toBe(472);
+  }).toBe(480);
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 844 });
     Object.defineProperty(window.visualViewport!, 'offsetTop', { configurable: true, value: 0 });
@@ -413,35 +410,28 @@ test('Ask reconciles a delayed standalone keyboard viewport after focus and resu
   });
   await expect.poll(async () => {
     const box = (await ask.boundingBox())!;
-    return Math.round(box.y + box.height / 2);
-  }).toBe(422);
+    const owner = (await page.locator('.lab-primary-conversation').boundingBox())!;
+    return Math.abs(box.y + box.height - owner.y - owner.height);
+  }).toBeLessThan(1);
   await expect(input).toHaveValue('Standalone keyboard draft');
 });
 
 
-test('desktop Ask opens beside its moved button and flips above near the bottom', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'Desktop anchored overlay.');
+test('desktop Ask opens within its source and leaves global navigation outside the overlay', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop contained overlay.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await start(page);
+  const owner = page.locator('.lab-primary-conversation');
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
+  await button.click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
-  for (const target of [{ x: 600, y: 120 }, { x: 1300, y: 910 }]) {
-    const before = (await button.boundingBox())!;
-    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
-    await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 8 }); await page.mouse.up();
-    const anchor = (await button.boundingBox())!;
-    await button.click();
-    await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-    await expect.poll(async () => {
-      const box = (await ask.boundingBox())!;
-      const expectedTop = target.y < 500 ? anchor.y + anchor.height + 8 : anchor.y - box.height - 8;
-      return Math.abs(box.y - expectedTop);
-    }).toBeLessThan(2);
-    const box = (await ask.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(12);
-    expect(box.x + box.width).toBeLessThanOrEqual(1428);
-    await ask.getByRole('button', { name: 'Minimize Ask' }).click();
-  }
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  const source = (await owner.boundingBox())!, box = (await ask.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(source.x + 12);
+  expect(box.y).toBeGreaterThanOrEqual(source.y + 12);
+  expect(box.x + box.width).toBeLessThanOrEqual(source.x + source.width - 12);
+  expect(box.y + box.height).toBeLessThanOrEqual(source.y + source.height - 12);
+  await expect(page.getByRole('navigation', { name: 'Sidebar sections' })).toBeVisible();
 });
 
 
@@ -461,7 +451,7 @@ test('desktop Ask keeps its controls visible in a wide short window', async ({ p
 });
 
 
-test('desktop Ask title dragging shares the button position and survives minimize and reload', async ({ page, isMobile }) => {
+test('desktop Ask title dragging keeps its edge tab fixed and preserves position through reload', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop window dragging.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -471,49 +461,30 @@ test('desktop Ask title dragging shares the button position and survives minimiz
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   const floating = page.locator('.lab-ask-floating');
-  const anchor = (await button.boundingBox())!;
+  const anchor = (await floating.boundingBox())!;
   await button.click();
   await ask.getByTestId('prompt-input').fill('Keep my question');
   const before = (await ask.boundingBox())!;
   const heading = (await ask.locator('.lab-workbench-heading').boundingBox())!;
-  await page.mouse.move(heading.x + 60, heading.y + heading.height / 2);
+  await page.mouse.move(heading.x + 60, heading.y + 24);
   await page.mouse.down();
-  await page.mouse.move(heading.x - 240, heading.y + heading.height / 2 + 90, { steps: 12 });
+  await page.mouse.move(heading.x - 140, heading.y + 114, { steps: 12 });
   await page.mouse.up();
-  await expect.poll(async () => (await ask.boundingBox())!.x).toBeCloseTo(before.x - 300, 0);
+  await expect.poll(async () => (await ask.boundingBox())!.x).toBeCloseTo(before.x - 200, 0);
   const moved = (await ask.boundingBox())!;
-  expect(moved.x).toBeCloseTo(before.x - 300, 0);
   expect(moved.y).toBeCloseTo(before.y + 90, 0);
-  await expect.poll(async () => (await floating.boundingBox())!.x).toBeCloseTo(anchor.x - 300, 0);
-  const movedAnchor = (await floating.boundingBox())!;
-  expect(movedAnchor.x).toBeCloseTo(anchor.x - 300, 0);
-  expect(movedAnchor.y).toBeCloseTo(anchor.y + 90, 0);
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep my question');
-  expect(creations).toBe(1);
-  await ask.getByRole('button', { name: 'Simple view' }).click();
-  expect((await ask.boundingBox())!.x).toBeCloseTo(moved.x, 0);
+  expect(await floating.boundingBox()).toEqual(anchor);
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await button.click();
   await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep my question');
-  expect((await ask.boundingBox())!.x).toBeCloseTo(moved.x, 0);
-  expect((await ask.boundingBox())!.y).toBeCloseTo(moved.y, 0);
+  await expect.poll(() => ask.boundingBox()).toEqual(moved);
   await page.reload();
-  await expect(ask).toBeVisible();
-  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  expect((await ask.boundingBox())!.x).toBeCloseTo(moved.x, 0);
-  expect((await ask.boundingBox())!.y).toBeCloseTo(moved.y, 0);
+  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep my question');
+  await expect.poll(() => ask.boundingBox()).toEqual(moved);
   expect(creations).toBe(1);
-  await ask.getByRole('button', { name: 'Minimize Ask' }).click();
-  const restored = (await button.boundingBox())!;
-  await page.mouse.move(restored.x + 30, restored.y + 20);
-  await page.mouse.down(); await page.mouse.move(330, 140, { steps: 8 }); await page.mouse.up();
-  await expect.poll(async () => (await button.boundingBox())!.x).toBeCloseTo(300, 0);
-  const newAnchor = (await button.boundingBox())!;
-  await button.click();
-  await expect.poll(async () => (await ask.boundingBox())!.y).toBeCloseTo(newAnchor.y + newAnchor.height + 8, 0);
 });
 
-test('desktop Ask title dragging keeps controls inside the viewport at every edge', async ({ page, isMobile }) => {
+test('desktop Ask title dragging keeps controls inside the source at every edge', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop window dragging.');
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -521,21 +492,22 @@ test('desktop Ask title dragging keeps controls inside the viewport at every edg
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  const source = (await page.locator('.lab-primary-conversation').boundingBox())!;
   for (const target of [{ x: 0, y: 0 }, { x: 1280, y: 800 }]) {
     const heading = (await ask.locator('.lab-workbench-heading').boundingBox())!;
     await page.mouse.move(heading.x + 60, heading.y + 24);
     await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 10 }); await page.mouse.up();
     const box = (await ask.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(12);
-    expect(box.y).toBeGreaterThanOrEqual(12);
-    expect(box.x + box.width).toBeLessThanOrEqual(1268);
-    expect(box.y + box.height).toBeLessThanOrEqual(788);
+    expect(box.x).toBeGreaterThanOrEqual(source.x + 12);
+    expect(box.y).toBeGreaterThanOrEqual(source.y + 12);
+    expect(box.x + box.width).toBeLessThanOrEqual(source.x + source.width - 12);
+    expect(box.y + box.height).toBeLessThanOrEqual(source.y + source.height - 12);
     await expect(ask.getByRole('button', { name: 'Minimize Ask' })).toBeInViewport();
     await expect(ask.getByTestId('prompt-submit')).toBeInViewport();
   }
   const before = (await ask.boundingBox())!;
   await page.setViewportSize({ width: 1280, height: 450 });
-  await expect.poll(async () => { const box = (await ask.boundingBox())!; return box.y + box.height <= 438; }).toBe(true);
+  await expect.poll(async () => { const box = (await ask.boundingBox())!; const owner = (await page.locator('.lab-primary-conversation').boundingBox())!; return box.y >= owner.y && box.y + box.height <= owner.y + owner.height; }).toBe(true);
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect.poll(async () => (await ask.boundingBox())!.y).toBeCloseTo(before.y, 0);
   await ask.getByRole('button', { name: 'Clean Ask' }).click();
@@ -543,7 +515,7 @@ test('desktop Ask title dragging keeps controls inside the viewport at every edg
   expect((await ask.boundingBox())!.x).toBeCloseTo(before.x, 0);
 });
 
-test('mobile Ask stays centered when its heading is dragged', async ({ page }) => {
+test('mobile Ask continues covering its source when its heading is dragged', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await start(page);
@@ -555,7 +527,7 @@ test('mobile Ask stays centered when its heading is dragged', async ({ page }) =
   await page.mouse.move(heading.x + 60, heading.y + 24);
   await page.mouse.down(); await page.mouse.move(heading.x + 120, heading.y + 120, { steps: 8 }); await page.mouse.up();
   expect(await ask.boundingBox()).toEqual(before);
-  expect(before.y + before.height / 2).toBeCloseTo(422, 0);
+  expect(before).toEqual(await page.locator('.lab-primary-conversation').boundingBox());
 });
 
 

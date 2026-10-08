@@ -1,7 +1,7 @@
 import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
 import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
@@ -13,8 +13,9 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk }: {
   navigation?: SessionViewNavigationFactory;
+  renderAsk?(source: OpenedSession, state: AgentReplicaState | undefined): ReactNode;
   replica?: AgentReplica;
   standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
@@ -36,7 +37,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   useEffect(() => { onActivityChange?.(session.agentId, activity); }, [session.agentId, activity, onActivityChange]);
   const record = store.find(session);
   const title = record?.firstInput?.trim().slice(0, 72) || session.title;
-  return <aside className="lab-side-conversation" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
+  return <aside className="lab-side-conversation lab-session-composition" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
     <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
@@ -49,5 +50,6 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
       composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.linked().filter((fork) => fork.target && sessionKey(fork.source) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} onUnlink={onUnlink} /></>}
       consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
       onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
+    {renderAsk?.(session, state)}
   </aside>;
 }

@@ -2,13 +2,12 @@ import type { SessionViewActions } from '@orchardworks/agent-remote-web/react';
 import { RecordingPicker } from './recording-picker.js';
 import { memo, useEffect, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
-import { SessionWorkbench } from '../../agent-remote-lab/src/components/SessionWorkbench.js';
-import { DebugSessionView } from './session-view.js';
+import { DebugSessionView, DebugWorkbench } from './session-view.js';
 import { RecordingPlayer, type SessionRecording } from '../src/recording.js';
 
 const noActions: SessionViewActions = {};
-const ReplaySession = memo(function ReplaySession({ state, status }: { state: AgentReplicaState; status: RemoteSessionStatus }) {
-  return <SessionWorkbench readOnly state={state} sessionStatus={status} actions={noActions} draftSessionKey={`replay:${state.agent?.id}`} />;
+const ReplaySession = memo(function ReplaySession({ state, status, agentId }: { state: AgentReplicaState; status: RemoteSessionStatus; agentId: string }) {
+  return <DebugWorkbench readOnly state={state} sessionStatus={status} actions={noActions} draftSessionKey={`replay:${state.agent?.id}`} displaySessionKey={`replay:${agentId}`} />;
 });
 const time = (milliseconds: number) => `${Math.floor(milliseconds / 60000)}:${(milliseconds / 1000 % 60).toFixed(1).padStart(4, '0')}`;
 
@@ -49,6 +48,6 @@ export function ReplayView({ name, recording, player, onOpen, modeControls, live
         aria-valuetext={`${time(player.position)} of ${time(recording.duration)}`} onChange={event => change(() => { player.pause(); player.seek(Number(event.target.value)); })} />
       {recording.warnings.length > 0 ? <details className="ardb-recording-notes"><summary>{recording.warnings.length} recording {recording.warnings.length === 1 ? 'note' : 'notes'}</summary><ul>{recording.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details> : null}
     </section>}>
-    <ReplaySession key={recording.agentId} state={player.state} status={player.status} />
+    <ReplaySession key={recording.agentId} agentId={recording.agentId} state={player.state} status={player.status} />
   </DebugSessionView>;
 }

@@ -13,7 +13,12 @@ export async function revealComposerAction(view: Locator, name: string, keyboard
     else await more.click();
   }
   const action = menu.getByRole('button', { name, exact: true });
-  await expect(action).toBeVisible();
+  await expect(direct.or(action)).toBeVisible();
+  if (await direct.isVisible()) {
+    await more.press('Escape');
+    await expect(menu).toBeHidden();
+    return { action: direct, trigger: direct };
+  }
   return { action, trigger: more };
 }
 

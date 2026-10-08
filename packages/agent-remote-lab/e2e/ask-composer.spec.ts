@@ -26,7 +26,7 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await primary.getByTestId('prompt-input').fill('/ask');
   await primary.getByTestId('prompt-input').press('Enter');
@@ -47,6 +47,8 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
 
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
+    await expect(ask.locator('..')).toHaveAttribute('data-presentation', width >= 600 ? 'floating' : 'overlay');
+    await expect.poll(async () => (await ask.boundingBox())!.width).toBe(width >= 600 ? 440 : width);
     for (const [action, label] of [
       ['Model', 'Model settings'],
       ['Permissions', 'Permission settings'],
@@ -105,7 +107,7 @@ test('Ask handles Escape within its own settings and window without dismissing b
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
   const primaryInput = primary.getByTestId('prompt-input');
   await expect(primaryInput).toBeEnabled();
   await primaryInput.fill('/ask');
@@ -138,32 +140,32 @@ test('Ask handles Escape within its own settings and window without dismissing b
   await expect(openAsk).toBeFocused();
 });
 
-test('Ask opens the shared file preview above overlapping floating conversations', async ({ page, isMobile }) => {
+test('Ask opens a usable shared file preview while staying inside its resized source', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop previews share the non-modal workspace.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const input = page.locator('.lab-primary-conversation').getByTestId('prompt-input');
+  const input = page.locator('.lab-primary-conversation > .lab-session-view').getByTestId('prompt-input');
   await expect(input).toBeEnabled();
   await input.fill('/ask');
   await input.press('Enter');
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   const file = ask.getByRole('button', { name: 'lab-proof.txt', exact: true });
   await file.click();
   const preview = page.getByRole('dialog', { name: 'File preview', exact: true });
   await expect(preview).toBeVisible();
   await expect(page.locator('.agent-preview-workspace')).toHaveCount(1);
-  const overlap = await preview.evaluate(element => {
-    const a = element.getBoundingClientRect();
-    const b = document.querySelector('.lab-ask-window')!.getBoundingClientRect();
-    const left = Math.max(a.left, b.left), right = Math.min(a.right, b.right);
-    const top = Math.max(a.top, b.top), bottom = Math.min(a.bottom, b.bottom);
-    return { intersects: right > left && bottom > top,
-      previewOnTop: element.contains(document.elementFromPoint((left + right) / 2, (top + bottom) / 2)) };
-  });
-  expect(overlap).toEqual({ intersects: true, previewOnTop: true });
+  await expect.poll(() => preview.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+  })).toBe(true);
+  await expect.poll(() => ask.evaluate(element => {
+    const rect = element.getBoundingClientRect(), owner = element.closest('.lab-session-composition')!.getBoundingClientRect();
+    return rect.x >= owner.x && rect.y >= owner.y && rect.right <= owner.right && rect.bottom <= owner.bottom;
+  })).toBe(true);
   await preview.getByRole('button', { name: 'Close file preview' }).click();
   await expect(preview).toBeHidden();
   await expect(ask).toBeVisible();

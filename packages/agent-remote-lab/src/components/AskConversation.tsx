@@ -1,28 +1,26 @@
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import { useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } from 'react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { CommunicationNavigationContext, TimelineDisplay, type TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
+import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import type { AskEntry, AskInput, AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { ForkStore, SessionFork } from '../session-forks.js';
 import { sessionKey } from '../session-tree.js';
-import type { FloatingPosition } from '../hooks/useTrackingPosition.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { AskResize } from './AskResize.js';
 
-export function AskConversation({ entry, store, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, simple, onToggleSimple, triggerRef, positionRef, navigation }: {
+export function AskConversation({ entry, store, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, triggerRef, storageScope, navigation }: {
   navigation?: SessionViewNavigationFactory;
-  positionRef: RefObject<FloatingPosition>; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
-  simple: boolean; onToggleSimple(): void;
+  storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const busy = !!entry.busy || !!entry.restoring;
-  useAskPosition(panel, triggerRef, positionRef);
+  useAskPosition(panel, triggerRef, storageScope);
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || !(event.target instanceof Node) || !panel.current?.contains(event.target)) return;
@@ -36,7 +34,7 @@ export function AskConversation({ entry, store, replica, transport, draftBinding
     const previous = document.activeElement;
     const element = panel.current;
     if (!element?.contains(previous)) returnFocus.current = previous instanceof HTMLElement && previous !== document.body ? previous : triggerRef.current;
-    element?.focus({ preventScroll: true });
+    if (!entry.restoring && !entry.restoreOnly) element?.focus({ preventScroll: true });
     return () => {
       if (!element?.contains(document.activeElement)) return;
       const target = returnFocus.current;
@@ -48,16 +46,13 @@ export function AskConversation({ entry, store, replica, transport, draftBinding
   }, [triggerRef]);
   const tools = <div className="lab-ask-controls">
     <button type="button" aria-label="Clean Ask" title="Start a fresh Ask conversation" disabled={busy || !!entry.inputs?.length} onClick={onClean}>Clean</button>
-    <button type="button" className="lab-ask-view-toggle" aria-label="Simple view" aria-pressed={simple} title={simple ? 'Show content only' : 'Show simple timeline'} onClick={onToggleSimple}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth="3" strokeLinecap="round" /></svg>
-    </button>
     <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={onClose}>×</button>
   </div>;
   return <div className="lab-ask-viewport"><section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}>
     {entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => input.text).join(" · ")}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}
     {entry.record?.target ? <AskChat key={entry.record.id} record={store.get(entry.record.id)} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
-      navigation={navigation} onToggleEnabled={onToggleEnabled} mode={simple ? 'simple' : 'content'} busy={busy || !entry.attached} draftBinding={draftBinding} tools={tools} /> : <>
+      navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy || !entry.attached} draftBinding={draftBinding} tools={tools} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div>
       <AskDraft binding={draftBinding} />
@@ -66,9 +61,9 @@ export function AskConversation({ entry, store, replica, transport, draftBinding
   </section></div>;
 }
 
-function AskChat({ mode, record, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation }: {
+function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation }: {
   navigation?: SessionViewNavigationFactory;
-  onToggleEnabled(): void; mode: TimelineDisplayMode; record: SessionFork; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
+  onToggleEnabled(): void; record: SessionFork; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
 }) {
   const session = record.target!;
@@ -77,7 +72,7 @@ function AskChat({ mode, record, inputs, onSendInput, replica, transport, draftB
   useEffect(() => {
     if (sendQueuedInput && !busy && inputs?.[0]) onSendInput(inputs[0].id, sendQueuedInput);
   }, [sendQueuedInput, inputs, onSendInput, busy]);
-  return <TimelineDisplay.Provider value={mode}><CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} state={state}
+  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench defaultDisplayMode="content" {...viewNavigation} sessionState={sessionState} state={state}
     consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
       if (args.trim()) {
         if (!actions.sendMessage) throw new Error('Wait for Ask to finish synchronizing.');
@@ -89,7 +84,7 @@ function AskChat({ mode, record, inputs, onSendInput, replica, transport, draftB
     draftSessionKey={sessionKey(session)} draftBinding={draftBinding}
     questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title" data-session-status={state?.agent?.status}>Ask</strong>}
-    sessionManager={tools} /></CommunicationNavigationContext.Provider></TimelineDisplay.Provider>;
+    sessionManager={tools} /></CommunicationNavigationContext.Provider>;
 }
 
 function AskDraft({ binding }: { binding: DraftBinding }) {

@@ -7,7 +7,7 @@ async function openAsk(page: Page) {
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await primary.getByTestId('prompt-input').fill('/ask');
   await primary.getByTestId('prompt-input').press('Enter');
@@ -17,7 +17,7 @@ async function openAsk(page: Page) {
   await trigger.click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  return { ask, trigger, creations: () => creations };
+  return { ask, trigger, primary, creations: () => creations };
 }
 
 async function moveAsk(page: Page, ask: Locator, x: number, y: number) {
@@ -27,11 +27,11 @@ async function moveAsk(page: Page, ask: Locator, x: number, y: number) {
   await page.mouse.down();
   await page.mouse.move(x + heading.x - before.x + 60, y + heading.y - before.y + 24, { steps: 8 });
   await page.mouse.up();
-  const viewport = page.viewportSize()!;
+  const viewport = (await ask.locator('..').boundingBox())!;
   await expect.poll(async () => {
     const box = (await ask.boundingBox())!;
     return { x: Math.round(box.x), y: Math.round(box.y) };
-  }).toEqual({ x: Math.round(Math.max(12, Math.min(x, viewport.width - before.width - 12))), y: Math.round(Math.max(12, Math.min(y, viewport.height - before.height - 12))) });
+  }).toEqual({ x: Math.round(Math.max(viewport.x + 12, Math.min(x, viewport.x + viewport.width - before.width - 12))), y: Math.round(Math.max(viewport.y + 12, Math.min(y, viewport.y + viewport.height - before.height - 12))) });
 }
 
 async function resizeAsk(page: Page, ask: Locator, dx: number, dy: number) {
@@ -43,11 +43,11 @@ async function resizeAsk(page: Page, ask: Locator, dx: number, dy: number) {
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 10 });
   await page.mouse.up();
-  const viewport = page.viewportSize()!;
+  const viewport = (await ask.locator('..').boundingBox())!;
   await expect.poll(async () => {
     const resized = (await ask.boundingBox())!;
     return { width: Math.round(resized.width), height: Math.round(resized.height) };
-  }).toEqual({ width: Math.round(Math.min(viewport.width - before.x - 12, Math.max(360, before.width + dx))), height: Math.round(Math.min(viewport.height - before.y - 12, Math.max(320, before.height + dy))) });
+  }).toEqual({ width: Math.round(Math.min(viewport.x + viewport.width - before.x - 12, Math.max(360, before.width + dx))), height: Math.round(Math.min(viewport.y + viewport.height - before.y - 12, Math.max(320, before.height + dy))) });
 }
 
 test('desktop Ask resizing keeps its position, draft and session through minimize and reload', async ({ page, isMobile }) => {
@@ -86,12 +86,13 @@ test('desktop Ask resizing keeps its position, draft and session through minimiz
   expect(moved.y).toBeCloseTo(resized.y + 50, 0);
 });
 
-test('desktop Ask supports keyboard resizing and clamps both dimensions to usable viewport bounds', async ({ page, isMobile }) => {
+test('desktop Ask supports keyboard resizing and clamps both dimensions to its source view', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop resizing.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const { ask } = await openAsk(page);
-  await moveAsk(page, ask, 12, 12);
+  const bounds = (await ask.locator('..').boundingBox())!;
+  await moveAsk(page, ask, bounds.x + 12, bounds.y + 12);
   const before = (await ask.boundingBox())!;
   const handle = ask.getByRole('button', { name: 'Resize Ask', exact: true });
   await handle.focus();
@@ -100,12 +101,12 @@ test('desktop Ask supports keyboard resizing and clamps both dimensions to usabl
   await handle.press('Shift+ArrowDown');
   await expect.poll(() => ask.boundingBox()).toEqual({ ...before, width: before.width + 20, height: before.height + 40 });
   await resizeAsk(page, ask, 2000, 2000);
-  await expect.poll(async () => { const box = (await ask.boundingBox())!; return box.x + box.width; }).toBeCloseTo(1428, 0);
+  await expect.poll(async () => { const box = (await ask.boundingBox())!; return box.x + box.width; }).toBeCloseTo(bounds.x + bounds.width - 12, 0);
   const maximum = (await ask.boundingBox())!;
-  expect(maximum.x).toBeCloseTo(12, 0);
-  expect(maximum.y).toBeCloseTo(12, 0);
-  expect(maximum.x + maximum.width).toBeCloseTo(1428, 0);
-  expect(maximum.y + maximum.height).toBeCloseTo(988, 0);
+  expect(maximum.x).toBeCloseTo(bounds.x + 12, 0);
+  expect(maximum.y).toBeCloseTo(bounds.y + 12, 0);
+  expect(maximum.x + maximum.width).toBeCloseTo(bounds.x + bounds.width - 12, 0);
+  expect(maximum.y + maximum.height).toBeCloseTo(bounds.y + bounds.height - 12, 0);
   await resizeAsk(page, ask, -2000, -2000);
   await expect.poll(async () => (await ask.boundingBox())!.width).toBe(360);
   const minimum = (await ask.boundingBox())!;
@@ -117,15 +118,15 @@ test('desktop Ask supports keyboard resizing and clamps both dimensions to usabl
   await expect(ask.getByTestId('prompt-submit')).toBeInViewport();
   await resizeAsk(page, ask, 280, 380);
   const preferred = (await ask.boundingBox())!;
-  await page.setViewportSize({ width: 1280, height: 450 });
-  await expect.poll(async () => { const box = (await ask.boundingBox())!; return box.y + box.height <= 438; }).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 650 });
+  await expect.poll(async () => { const box = (await ask.boundingBox())!; const owner = (await ask.locator('..').boundingBox())!; return box.y + box.height <= owner.y + owner.height - 12; }).toBe(true);
   await expect(ask.getByTestId('prompt-submit')).toBeInViewport();
   await handle.focus();
   await handle.press('ArrowRight');
   await expect.poll(async () => (await ask.boundingBox())!.width).toBeCloseTo(preferred.width + 10, 0);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect.poll(async () => (await ask.boundingBox())!.height).toBeCloseTo(preferred.height, 0);
-  await page.setViewportSize({ width: 1280, height: 450 });
+  await page.setViewportSize({ width: 1280, height: 650 });
   await expect.poll(async () => (await ask.boundingBox())!.height).toBeLessThan(preferred.height);
   await resizeAsk(page, ask, 10, 0);
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -136,21 +137,21 @@ test('a resized desktop Ask returns to mobile layout and follows the visual keyb
   test.skip(isMobile, 'Switches between desktop and mobile geometry.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  const { ask } = await openAsk(page);
-  await moveAsk(page, ask, 12, 12);
+  const { ask, primary } = await openAsk(page);
+  const owner = (await primary.boundingBox())!;
+  await moveAsk(page, ask, owner.x + 12, owner.y + 12);
   await resizeAsk(page, ask, 240, 120);
   const preferred = (await ask.boundingBox())!;
   await ask.getByTestId('prompt-input').fill('Keep the responsive draft');
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(ask.getByRole('button', { name: 'Resize Ask', exact: true })).toBeHidden();
-  await expect.poll(async () => { const box = (await ask.boundingBox())!; return Math.round(box.y + box.height / 2); }).toBe(422);
-  expect((await ask.boundingBox())!.width).toBeLessThanOrEqual(366);
+  await expect.poll(async () => JSON.stringify(await ask.boundingBox()) === JSON.stringify(await primary.boundingBox())).toBe(true);
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 360 });
     Object.defineProperty(window.visualViewport!, 'offsetTop', { configurable: true, value: 120 });
     window.visualViewport!.dispatchEvent(new Event('resize'));
   });
-  await expect.poll(async () => { const box = (await ask.boundingBox())!; return Math.round(box.y + box.height); }).toBe(472);
+  await expect.poll(async () => { const box = (await ask.boundingBox())!; const owner = (await primary.boundingBox())!; return Math.abs(box.y + box.height - owner.y - owner.height); }).toBeLessThan(1);
   await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep the responsive draft');
   await expect(ask.getByTestId('prompt-submit')).toBeInViewport();
   await page.evaluate(() => {

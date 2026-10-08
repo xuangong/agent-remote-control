@@ -27,15 +27,15 @@ for (const width of [320, 390, 844, 1440]) {
     await page.getByTestId('timeline').dispatchEvent('wheel', { deltaY: -100 });
     await page.locator('.agent-reasoning').scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`previews-${width}.png`) });
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
-    await page.getByRole('checkbox', { name: 'Simple conversation view' }).check();
+    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+    await page.getByRole('radio', { name: 'Simple conversation', exact: true }).check();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     // App replaces the fixture URL with the session URL; revisit the fixture to remount it.
     await page.goto('/e2e/fixtures/view-overflow.html?view=previews');
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
-    await page.getByRole('checkbox', { name: 'Simple conversation view' }).uncheck();
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
+    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+    await page.getByRole('radio', { name: 'Preview', exact: true }).check();
+    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(2);
     const tool = page.locator('.agent-tool').first();
     await tool.getByRole('button', { name: 'Show full result' }).click();

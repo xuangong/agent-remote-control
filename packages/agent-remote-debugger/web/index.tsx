@@ -3,8 +3,7 @@ import { RecordingPicker, type OpenedRecording } from './recording-picker.js';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
-import { SessionWorkbench } from '../../agent-remote-lab/src/components/SessionWorkbench.js';
-import { DebugControlsState, DebugSessionView } from './session-view.js';
+import { DebugControlsState, DebugSessionView, DebugWorkbench } from './session-view.js';
 import { useSessionView } from '@orchardworks/agent-remote-web/react';
 import type { OpenedSession } from '../../agent-remote-lab/src/directory-client.js';
 import { trackFocusModality } from '../../agent-remote-lab/src/focus-modality.js';
@@ -37,8 +36,8 @@ function SessionView({ session, ...view }: ViewProps & { session: OpenedSession 
   const controls = <LiveControls capture={capture} agentId={session.agentId} onOpen={view.mode === 'live' ? view.onOpen : undefined} />;
   const recordingActive = capture.status?.phase === 'recording';
   if (view.mode === 'replay') return <Playback {...view} liveControls={controls} recordingActive={recordingActive} />;
-  return <DebugSessionView modeControls={view.modeControls} liveControls={controls} recordingActive={recordingActive}><SessionWorkbench sessionState={sessionState} handoff={handoff} state={state} sessionStatus={status} attachingAgentId={session.agentId}
-    actions={actions} questionDrafts={questions} draftSessionKey={session.agentId}
+  return <DebugSessionView modeControls={view.modeControls} liveControls={controls} recordingActive={recordingActive}><DebugWorkbench sessionState={sessionState} handoff={handoff} state={state} sessionStatus={status} attachingAgentId={session.agentId}
+    actions={actions} questionDrafts={questions} draftSessionKey={session.agentId} displaySessionKey={JSON.stringify([session.providerId, session.nativeSessionId])}
     onQuestionDraftChange={(id, draft) => setQuestions(current => ({ ...current, [id]: draft }))} /></DebugSessionView>;
 }
 function Workspace({ initialSession, initialRecording, directory = '', executable }: {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { expect, test as base } from '@playwright/test';
+import { expect, test as base, type Page } from '@playwright/test';
 
 const packageDirectory = fileURLToPath(new URL('..', import.meta.url));
 let installed = '';
@@ -122,16 +122,15 @@ sharedTest('standalone Session View keeps product presentation and display prefe
   await checkPresentation(page);
   await command('send', agentId, 'trace');
   await expect(page.locator('.agent-reasoning')).toContainText('Fixture reasoning detail');
-  await page.getByRole('button', { name: 'Show debug controls' }).click();
-  await page.getByLabel('Timeline display').selectOption('simple');
+  await chooseDisplay(page, 'Simple conversation');
   await expect(page.locator('.agent-reasoning')).toBeVisible();
   await expect(page.getByText('Fixture reasoning detail', { exact: true })).toHaveCount(0);
-  await page.getByLabel('Timeline display').selectOption('content');
+  await chooseDisplay(page, 'Content only');
   await expect(page.locator('.agent-reasoning')).toHaveCount(0);
   await expect(page.getByText('STDIO reply: trace', { exact: true })).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'Show debug controls' }).click();
-  await expect(page.getByLabel('Timeline display')).toHaveValue('content');
+  await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'Content only', exact: true })).toBeChecked();
   await expect(page.locator('.agent-reasoning')).toHaveCount(0);
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   try { await checkPresentation(await mobile.newPage()); } finally { await mobile.close(); }
@@ -166,7 +165,8 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   await page.getByTestId('prompt-input').fill('browser recorded');
   await page.getByTestId('prompt-input').press('Enter');
   await expect(page.getByText('STDIO reply: browser recorded', { exact: true })).toBeVisible();
-  await command('send', agentId, 'approve');
+  await page.getByTestId('prompt-input').fill('approve');
+  await page.getByTestId('prompt-input').press('Enter');
   await page.getByRole('button', { name: 'Allow once', exact: true }).click();
   await expect.poll(() => output).toContain('Approval received');
   child.kill('SIGTERM');
@@ -214,9 +214,9 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   await expect(page.getByText('STDIO reply: browser recorded', { exact: true })).toBeVisible();
   await expect(page.getByText('Approval received', { exact: true })).toBeVisible();
   await expect(page.locator('.agent-reasoning')).toHaveCount(1);
-  await page.getByLabel('Timeline display').selectOption('content');
+  await chooseDisplay(page, 'Content only');
   await expect(page.locator('.agent-reasoning')).toHaveCount(0);
-  await page.getByLabel('Timeline display').selectOption('preview');
+  await chooseDisplay(page, 'Preview');
   await expect(page.locator('.agent-reasoning')).toHaveCount(1);
   await page.getByRole('button', { name: 'Restart recording' }).click();
   await expect(page.getByText('Approval received', { exact: true })).toHaveCount(0);
@@ -229,7 +229,7 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const mobileBounds = await view.boundingBox();
-  await page.getByLabel('Timeline display').focus();
+  await page.getByLabel('Playback speed').focus();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Show playback controls' })).toBeFocused();
   expect(await view.boundingBox()).toEqual(mobileBounds);
@@ -405,3 +405,14 @@ test('replay entry point starts live from the floating controls and switches wit
   await expect(page.getByText('STDIO reply: background live message', { exact: true })).toBeVisible();
   expect((await (await page.request.get(`${url}/__ardb/session`)).json()).live.agentId).toBe(agentId);
 });
+
+async function chooseDisplay(page: Page, name: 'Preview' | 'Simple conversation' | 'Content only'): Promise<void> {
+  const controls = page.locator('.ardb-controls-toggle');
+  const controlsExpanded = await controls.getAttribute('aria-expanded') === 'true';
+  if (controlsExpanded) await controls.click();
+  const trigger = page.getByRole('button', { name: 'Session view options', exact: true });
+  if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
+  await page.getByRole('radio', { name, exact: true }).check();
+  await trigger.click();
+  if (controlsExpanded) await controls.click();
+}

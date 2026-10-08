@@ -3,13 +3,14 @@ import { afterEach, expect, it } from 'vitest';
 import { render, unmount } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionDirectoryClient } from '../directory-client.js';
+import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { sessionKey } from '../session-tree.js';
 import { useAskConversations } from './useAskConversations.js';
 
 const baseUrl = 'http://localhost/';
 const source = { agentId: 'source-agent', nativeSessionId: 'source-native', providerId: 'codex', hostId: 'local', title: 'Source' };
 const state = { ...replicaState, agent: { ...replicaState.agent!, runtimeInfo: { ...replicaState.agent!.runtimeInfo, settings: [] } } };
-afterEach(() => { localStorage.clear(); sessionStorage.clear(); });
+afterEach(() => { conversationLocalStorage.clear(); conversationSessionStorage.clear(); localStorage.clear(); sessionStorage.clear(); });
 
 async function setup() {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
@@ -27,19 +28,19 @@ async function setup() {
   });
   let ask!: ReturnType<typeof useAskConversations>;
   function Harness() { ask = useAskConversations(baseUrl, {} as never, directory); return null; }
-  const container = await render(<Harness />);
+  let container = await render(<Harness />);
   await act(async () => { await ask.open(state, source); ask.setDraft(sessionKey(source), 'Unsent Ask draft'); });
   return { requests, current: () => ask, failAttach: (message?: string) => { attachError = message; },
     failCreate: (message?: string) => { createError = message; },
     pauseAttach: () => { let finish!: () => void; attachPause = new Promise<void>(resolve => { finish = resolve; }); return finish; },
-    reload: async () => { await unmount(container); return render(<Harness />); } };
+    reload: async () => { await unmount(container); container = await render(<Harness />); return container; } };
 }
 
 it('restores an expanded source-bound Ask and draft without creating another native session', async () => {
   const fixture = await setup();
   await fixture.reload();
   const ask = fixture.current();
-  expect(ask.openKey).toBe(sessionKey(source));
+  expect(ask.isOpen(source)).toBe(true);
   expect(ask.drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
   await act(async () => { ask.restore(source, async () => {}); });
   expect(fixture.current().entryFor(source)).toMatchObject({ attached: true, record: {
@@ -77,9 +78,9 @@ it('requires the source snapshot for Clean and retains the existing Ask when it 
 
 it.each(['minimize', 'disable'])('keeps Ask closed after %s and reload while retaining its identity and draft', async action => {
   const fixture = await setup();
-  await act(async () => { if (action === 'minimize') fixture.current().close(); else fixture.current().toggle(); });
+  await act(async () => { if (action === 'minimize') fixture.current().close(source); else fixture.current().toggle(source); });
   await fixture.reload();
-  expect(fixture.current().openKey).toBeUndefined();
+  expect(fixture.current().isOpen(source)).toBe(false);
   expect(fixture.current().entryFor(source).record?.target?.nativeSessionId).toBe('ask-native');
   expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
 });
@@ -123,7 +124,7 @@ it.each(['failed', 'missing'])('does not create a replacement when restored rela
     if (outcome === 'failed') throw new Error('Related sessions could not be checked');
   }); });
   expect(fixture.current().entryFor(source).error).toBeTruthy();
-  expect(fixture.current().openKey).toBe(sessionKey(source));
+  expect(fixture.current().isOpen(source)).toBe(true);
   expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
   expect(fixture.requests).toHaveLength(1);
 });
@@ -160,9 +161,9 @@ it('cancels a pending restore when minimized without later reopening or attachin
   let finish!: () => void;
   const ready = new Promise<void>(resolve => { finish = resolve; });
   await act(async () => { fixture.current().restore(source, () => ready); });
-  await act(async () => fixture.current().close());
+  await act(async () => fixture.current().close(source));
   await act(async () => finish());
-  expect(fixture.current().openKey).toBeUndefined();
+  expect(fixture.current().isOpen(source)).toBe(false);
   expect(fixture.requests).toHaveLength(1);
 });
 
@@ -216,12 +217,56 @@ it('leaves another Host with the same native source untouched during restoration
   await fixture.reload();
   await act(async () => { fixture.current().restore({ ...source, hostId: 'other-host' }, async () => {}); });
   expect(fixture.requests).toHaveLength(1);
-  expect(fixture.current().openKey).toBe(sessionKey(source));
+  expect(fixture.current().isOpen(source)).toBe(true);
 });
 
 it('keeps the expanded-window state off disk when clear-on-close protection is enabled', async () => {
   localStorage.setItem('agent-remote:clear-cache-on-close', 'true');
   const fixture = await setup();
-  expect(fixture.current().openKey).toBe(sessionKey(source));
+  expect(fixture.current().isOpen(source)).toBe(true);
   expect(Object.keys(sessionStorage).filter(key => key.startsWith('agent-remote-ask:'))).toEqual([]);
+  expect(Object.keys(localStorage).filter(key => key.startsWith('agent-remote-ask:'))).toEqual([]);
+});
+
+const secondSource = { ...source, agentId: 'second-agent', nativeSessionId: 'second-native', title: 'Second' };
+it('keeps two source-bound Ask windows and preferences independent across reload', async () => {
+  const fixture = await setup();
+  await act(async () => { await fixture.current().open(state, secondSource); });
+  expect(fixture.current().isOpen(source)).toBe(true);
+  expect(fixture.current().isOpen(secondSource)).toBe(true);
+  await fixture.reload();
+  await act(async () => {
+    fixture.current().restore(source, async () => {});
+    fixture.current().restore(secondSource, async () => {});
+  });
+  expect(fixture.current().entryFor(source).attached).toBe(true);
+  expect(fixture.current().entryFor(secondSource).attached).toBe(true);
+  await act(async () => { fixture.current().toggle(source); });
+  expect(fixture.current().isEnabled(source)).toBe(false);
+  expect(fixture.current().isEnabled(secondSource)).toBe(true);
+  expect(fixture.current().isOpen(secondSource)).toBe(true);
+  await fixture.reload();
+  expect(fixture.current().isOpen(source)).toBe(false);
+  expect(fixture.current().isOpen(secondSource)).toBe(true);
+  expect(fixture.current().isEnabled(source)).toBe(false);
+  expect(fixture.current().isEnabled(secondSource)).toBe(true);
+  expect(fixture.requests.filter(request => request.path.endsWith('/create'))).toHaveLength(2);
+});
+
+it('minimizes one source without cancelling another source restoration', async () => {
+  const fixture = await setup();
+  await act(async () => { await fixture.current().open(state, secondSource); });
+  await fixture.reload();
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  await act(async () => {
+    fixture.current().restore(source, () => pending);
+    fixture.current().restore(secondSource, () => pending);
+    fixture.current().close(source);
+  });
+  await act(async () => { finish(); });
+  expect(fixture.current().entryFor(source).attached).not.toBe(true);
+  expect(fixture.current().entryFor(secondSource).attached).toBe(true);
+  expect(fixture.current().isOpen(source)).toBe(false);
+  expect(fixture.current().isOpen(secondSource)).toBe(true);
 });

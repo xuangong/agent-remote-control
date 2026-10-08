@@ -1,5 +1,5 @@
 import { useFeedbackToast } from './Toast.js';
-import { Fragment, type ReactElement, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactElement, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
 import { createTimelineRenderModel, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
 import { traceItemLabel, traceItemLabels, traceItemStatus, traceItemSummary, traceSequence, traceSessionReferences, type TraceEntryRequest } from '../trace-model.js';
@@ -12,7 +12,8 @@ export function TraceView(props: Parameters<typeof TraceBrowser>[0]) {
   return retained.current;
 }
 
-function TraceBrowser({ state, visible = true, revealEntry, onShowConversation, sessionStatus, sessionTitle, resolveSessionLink, onLoadOlder }: {
+function TraceBrowser({ state, visible = true, revealEntry, onShowConversation, sessionStatus, sessionTitle, resolveSessionLink, onLoadOlder, headingStart }: {
+  headingStart?: ReactNode;
   state?: AgentReplicaState; visible?: boolean; revealEntry?: TraceEntryRequest; onShowConversation?: (key: string) => void;
   sessionStatus?: RemoteSessionStatus; sessionTitle?: string; resolveSessionLink?: SessionLinkResolver; onLoadOlder?: () => void | Promise<void>;
 }) {
@@ -73,7 +74,7 @@ function TraceBrowser({ state, visible = true, revealEntry, onShowConversation, 
   }
 
   return <div className="lab-trace-layout" aria-label="Normalized Timeline trace">
-    <header className="lab-workbench-heading"><div><p className="lab-eyebrow">Trace</p><h2>Execution events</h2></div>
+    <header className="lab-workbench-heading"><div>{headingStart}<p className="lab-eyebrow">Trace</p><h2>Execution events</h2></div>
       <span>{timeline?.epoch ? `${timeline.epoch} · seq ${Math.max(0, timeline.nextSeq - 1)}` : 'No replica attached'}</span>
     </header>
     <div className="lab-trace-controls">

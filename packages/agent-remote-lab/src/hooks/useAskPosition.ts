@@ -80,7 +80,10 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       if (drag || resize) return;
       const size = sizeWindow(preferredSize ?? { width: 440, height: 560 });
       const button = trigger.getBoundingClientRect();
-      positionWindow(manual ?? { x: bounds.width - size.width - margin, y: button.top - bounds.top });
+      positionWindow(manual ?? {
+        x: button.left + button.width / 2 - bounds.left < bounds.width / 2 ? margin : bounds.width - size.width - margin,
+        y: button.top - bounds.top,
+      });
     };
     const persist = () => {
       try {

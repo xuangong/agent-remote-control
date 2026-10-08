@@ -27,7 +27,7 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
   }, [storageScope, ask.store, transport, key, source.agentId, visible, canRestore, enabled, expanded, synchronize]);
   if (!visible || !enabled) return null;
   return <>
-    <AskButton triggerRef={trigger} hidden={expanded} disabled={!available || (!state?.agent && !entry.record?.target)}
+    <AskButton triggerRef={trigger} storageScope={JSON.stringify([storageScope, key])} hidden={expanded} disabled={!available || (!state?.agent && !entry.record?.target)}
       observation={entry.record?.target ? observations[sessionKey(entry.record.target)] : undefined} onOpen={() => onOpen()} />
     {expanded ? <AskConversation entry={entry} store={ask.store} storageScope={JSON.stringify([storageScope, key])}
       transport={transport} replica={entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}

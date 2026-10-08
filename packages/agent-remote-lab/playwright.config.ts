@@ -31,8 +31,8 @@ export default defineConfig({
     { name: 'chromium-mobile', use: { ...devices['Pixel 7'] } },
     { name: 'webkit-mobile-sidebar', testMatch: ['mobile-sidebar.spec.ts', 'provider-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-mobile-viewport', testMatch: ['mobile-viewport.spec.ts', 'layout-diagnostics.spec.ts', 'standalone-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
-    { name: 'webkit-ask-desktop', testMatch: ['ask-composer.spec.ts', 'ask-resize.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    { name: 'webkit-ask-mobile', testMatch: ['ask-composer.spec.ts', 'ask-timeline-layout.spec.ts', 'composer-overflow.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['iPhone 13'] } },
+    { name: 'webkit-ask-desktop', testMatch: ['ask-dock.spec.ts', 'ask-composer.spec.ts', 'ask-resize.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['Desktop Safari'] } },
+    { name: 'webkit-ask-mobile', testMatch: ['ask-dock.spec.ts', 'ask-composer.spec.ts', 'ask-timeline-layout.spec.ts', 'composer-overflow.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['iPhone 13'] } },
   ],
   webServer: [
     {

@@ -186,7 +186,6 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
     <button type="button" onClick={() => void logout()}>Sign out</button>
   </>;
   if (access) return <WorkspaceReady.Provider value={ready}>
-    <div className="gateway-sign-out gateway-account-actions" hidden={securityOpen}>{accountAction}</div>
     <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, accountAction, ready)}</div>
     {securityOpen ? <SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /> : null}
     {notice && !securityOpen ? <div className="gateway-recovery" role="status">

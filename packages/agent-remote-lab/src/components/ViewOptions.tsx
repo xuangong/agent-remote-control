@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ViewOptionsProps {
+  target?: HTMLElement | null;
   triggerRef: RefObject<HTMLButtonElement>;
   headerVisible: boolean;
   sidebarVisible: boolean;
@@ -13,9 +15,15 @@ interface ViewOptionsProps {
   onToggleInspector(): void;
 }
 
-export function ViewOptions({ triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
+export function ViewOptions({ target, triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const focusedControl = useRef<string>();
+  useLayoutEffect(() => {
+    if (focusedControl.current && !inert) {
+      containerRef.current?.querySelector<HTMLElement>(`[data-view-control="${focusedControl.current}"]`)?.focus({ preventScroll: true });
+    }
+  }, [target]);
   useEffect(() => {
     if (!open) return;
     const dismiss = (event: PointerEvent) => {
@@ -31,8 +39,9 @@ export function ViewOptions({ triggerRef, headerVisible, sidebarVisible, inspect
     toggle();
   }
 
-  return <div ref={containerRef} className="lab-view-options" {...(inert ? { inert: '' } : {})}
-    onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
+  const controls = <div ref={containerRef} className="lab-view-options" {...(inert ? { inert: '' } : {})}
+    onFocusCapture={event => { focusedControl.current = (event.target as HTMLElement).dataset.viewControl; }}
+    onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) { focusedControl.current = undefined; setOpen(false); } }}
     onKeyDown={(event) => {
       if (event.key === 'Escape' && open) {
         event.preventDefault();
@@ -41,24 +50,25 @@ export function ViewOptions({ triggerRef, headerVisible, sidebarVisible, inspect
         triggerRef.current?.focus({ preventScroll: true });
       }
     }}>
-    <button ref={triggerRef} type="button" className="lab-view-options-trigger" aria-label="View options"
+    <button ref={triggerRef} data-view-control="trigger" type="button" className="lab-view-options-trigger" aria-label="View options"
       aria-expanded={open} aria-controls="lab-view-options-panel" title="View options" onClick={() => setOpen((value) => !value)}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="3" y="3" width="18" height="18" rx="3" /><path d="M3 9h18M9 9v12" />
       </svg>
       <span>View</span>
     </button>
-    {open ? <section id="lab-view-options-panel" className="lab-view-options-panel" aria-label="View options">
+    {open ? <section id="lab-view-options-panel" className="lab-view-options-panel" aria-label="View options" tabIndex={-1} data-view-control="panel">
       <div className="lab-view-options-heading">
         <p>Panels</p>
         <div className="lab-view-options-actions">
-          {!compact ? <button type="button" onClick={() => onSetAllVisible(true)}>Show all</button> : null}
-          <button type="button" onClick={() => onSetAllVisible(false)}>Hide all</button>
+          {!compact ? <button type="button" data-view-control="show-all" onClick={() => onSetAllVisible(true)}>Show all</button> : null}
+          <button type="button" data-view-control="hide-all" onClick={() => onSetAllVisible(false)}>Hide all</button>
         </div>
       </div>
-      <label><span>Header</span><input type="checkbox" checked={headerVisible} onChange={onToggleHeader} /></label>
-      <label><span>Sidebar</span><input type="checkbox" aria-controls="lab-context" checked={sidebarVisible} onChange={() => togglePanel(onToggleSidebar)} /></label>
-      <label><span>Replica Inspector</span><input type="checkbox" aria-controls="lab-inspector" checked={inspectorVisible} onChange={() => togglePanel(onToggleInspector)} /></label>
+      <label><span>Header</span><input data-view-control="header" type="checkbox" checked={headerVisible} onChange={onToggleHeader} /></label>
+      <label><span>Sidebar</span><input data-view-control="sidebar" type="checkbox" aria-controls="lab-context" checked={sidebarVisible} onChange={() => togglePanel(onToggleSidebar)} /></label>
+      <label><span>Replica Inspector</span><input data-view-control="inspector" type="checkbox" aria-controls="lab-inspector" checked={inspectorVisible} onChange={() => togglePanel(onToggleInspector)} /></label>
     </section> : null}
   </div>;
+  return target === null ? null : target ? createPortal(controls, target) : controls;
 }

@@ -66,6 +66,50 @@ async function expectContained(child: Locator, parent: Locator, fill = false) {
   }).toBe(true);
 }
 
+async function setChromePanel(page: Page, panel: 'Header' | 'Sidebar', visible: boolean) {
+  const trigger = page.getByRole('button', { name: 'View options', exact: true });
+  const options = page.getByRole('region', { name: 'View options', exact: true });
+  if (!await options.isVisible()) await trigger.click();
+  if (await options.getByRole('checkbox', { name: panel, exact: true }).isChecked() !== visible) {
+    await options.getByText(panel, { exact: true }).click();
+  }
+  if (await options.isVisible()) {
+    await expect(options.getByRole('checkbox', { name: panel, exact: true })).toBeChecked({ checked: visible });
+    await options.press('Escape');
+  }
+}
+
+async function expectBeforeTitle(control: Locator, title: Locator) {
+  await expect(control).toBeVisible();
+  await expect(title).toBeVisible();
+  await expect.poll(async () => {
+    const a = await control.boundingBox(), b = await title.boundingBox();
+    return !!a && !!b && a.x + a.width <= b.x + 1 && a.y < b.y + b.height && b.y < a.y + a.height;
+  }, { message: 'View and the owning title share one row in reading order' }).toBe(true);
+}
+
+async function openAccountFixture(page: Page) {
+  const now = Date.now();
+  await page.route('**/auth/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/auth/status') return route.fulfill({ json: {
+      basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: now + 120000,
+      user: { id: 'alice', name: 'Alice Example' },
+    } });
+    if (path === '/auth/sessions') return route.fulfill({ json: { sessions: [], authenticatedAt: now, recentAuthentication: true } });
+    if (path === '/auth/audit') return route.fulfill({ json: { events: [] } });
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
+  await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
+  await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
+  await page.goto('/e2e/fixtures/session-stars.html?gateway=1');
+  await expect(page.locator('.lab-primary-conversation')).toBeVisible();
+  const close = page.getByRole('button', { name: 'Close Context', exact: true });
+  if (await close.isVisible()) await close.click();
+}
+
 test('view menu labels apply their selection before focus leaves the trigger', async ({ page }) => {
   await page.goto('/');
   await showNewSession(page);
@@ -215,31 +259,76 @@ test('browser tab title identifies the business primary session while Side and A
   await expect(page).toHaveTitle(primaryTitle);
 });
 
-test('hidden global header and sidebar leave each narrow session heading usable below account actions', async ({ page, isMobile }, testInfo) => {
-  test.skip(isMobile, 'Desktop global account controls.');
-  const { primary, side } = await openComposition(page, false);
+test('account actions belong to the Header and View follows the visible owning title', async ({ page, isMobile }, testInfo) => {
+  if (!isMobile) await page.setViewportSize({ width: 1400, height: 900 });
+  await openAccountFixture(page);
+  const primary = page.locator('.lab-primary-conversation');
+  const draft = sourceView(primary).getByTestId('prompt-input');
+  await draft.fill('Preserve this draft while moving the shell controls');
+  const header = page.locator('.lab-app-bar');
   const globalView = page.getByRole('button', { name: 'View options', exact: true });
-  await globalView.click();
-  const globalOptions = page.getByRole('region', { name: 'View options', exact: true });
-  await globalOptions.getByRole('checkbox', { name: 'Header', exact: true }).uncheck();
-  await globalOptions.getByRole('checkbox', { name: 'Sidebar', exact: true }).uncheck();
-  await globalView.press('Escape');
-  await page.evaluate(() => {
-    const shell = document.querySelector('.lab-shell')!;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'gateway-private';
-    shell.before(wrapper);
-    wrapper.append(shell);
-    const actions = document.createElement('div');
-    actions.className = 'gateway-sign-out gateway-account-actions';
-    for (const label of ['Security', 'Hosts', 'Account', 'Sign out']) {
-      const button = document.createElement('button'); button.type = 'button'; button.textContent = label; actions.append(button);
+  const identity = page.getByLabel('Gateway account', { exact: true });
+  const security = page.getByRole('button', { name: 'Security', exact: true });
+  const signOut = page.getByRole('button', { name: 'Sign out', exact: true });
+  await expect(header).toBeHidden();
+  await expect(identity).toBeHidden();
+  await expect(security).toBeHidden();
+  await expect(signOut).toBeHidden();
+  await setChromePanel(page, 'Header', true);
+  await expect(header).toBeVisible();
+  await expect(header.getByLabel('Gateway account', { exact: true })).toHaveText('◉ Alice Example');
+  await expect(header.getByRole('button', { name: 'Security', exact: true })).toBeVisible();
+  await expect(header.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
+  await expectBeforeTitle(globalView, header.locator('.lab-brand h1'));
+  await security.click();
+  await expect(page.getByRole('main', { name: 'Security', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(security).toBeFocused();
+  await setChromePanel(page, 'Header', false);
+  await expect(header).toBeHidden();
+  await expect(identity).toBeHidden();
+  await expect(security).toBeHidden();
+  await expect(signOut).toBeHidden();
+  if (!isMobile) {
+    await expectBeforeTitle(globalView, page.locator('#lab-context .lab-rail-heading').getByText('Workspace', { exact: true }));
+    await setChromePanel(page, 'Sidebar', false);
+  }
+  const heading = sourceView(primary).locator('.lab-workbench-heading');
+  for (const width of isMobile ? [320, 402] : [1200, 1400]) {
+    await page.setViewportSize({ width, height: isMobile ? 874 : 900 });
+    await expect(globalView).toHaveCount(1);
+    await expectBeforeTitle(globalView, heading.locator('.lab-primary-title'));
+    await expectContained(globalView, heading);
+    if (!isMobile) {
+      await expect.poll(async () => Math.abs((await heading.boundingBox())!.y - (await page.locator('.lab-shell').boundingBox())!.y))
+        .toBeLessThanOrEqual(1);
     }
-    wrapper.before(actions);
-    shell.querySelector('.lab-primary-title')!.textContent = 'A long primary session title describing provider reconnection and restored conversation timelines';
-  });
+    await globalView.click();
+    const options = page.getByRole('region', { name: 'View options', exact: true });
+    await expectContained(options, page.locator('.lab-shell'));
+    await options.getByText('Panels', { exact: true }).click();
+    await expect(options).toBeVisible();
+    await options.press('Escape');
+    await expect(globalView).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+  await setChromePanel(page, 'Header', true);
+  await expect(security).toBeVisible();
+  await expectBeforeTitle(globalView, header.locator('.lab-brand h1'));
+  await expect(draft).toHaveValue('Preserve this draft while moving the shell controls');
+  await page.screenshot({ path: testInfo.outputPath('header-owned-account-actions.png') });
+});
+
+test('hidden global chrome keeps View in the primary heading without duplicating Side or Ask controls', async ({ page, isMobile }, testInfo) => {
+  test.skip(isMobile, 'Uses simultaneously visible desktop Session Views.');
+  const { primary, side, select } = await openComposition(page, false);
+  await setChromePanel(page, 'Header', false);
+  await setChromePanel(page, 'Sidebar', false);
+  const globalView = page.getByRole('button', { name: 'View options', exact: true });
   for (const width of [1200, 1400, 1900]) {
     await page.setViewportSize({ width, height: 900 });
+    await expect(globalView).toHaveCount(1);
+    await expectBeforeTitle(globalView, sourceView(primary).locator('.lab-primary-title'));
     for (const owner of [primary, side]) {
       const heading = sourceView(owner).locator('.lab-workbench-heading');
       const options = heading.getByRole('button', { name: 'Session view options', exact: true });
@@ -248,26 +337,32 @@ test('hidden global header and sidebar leave each narrow session heading usable 
       await expect(title).toBeVisible();
       await expect.poll(async () => (await title.boundingBox())!.width, { message: `Session title remains readable at ${width}px` }).toBeGreaterThan(60);
     }
-    await expect.poll(async () => {
-      const shell = (await page.locator('.lab-shell').boundingBox())!, owner = (await primary.boundingBox())!;
-      const buttons = await page.locator('.gateway-account-actions > button').all();
-      return owner.y > shell.y && (await Promise.all(buttons.map(button => button.boundingBox()))).every(box => box && box.y + box.height <= owner.y);
-    }).toBe(true);
+    await expect(sourceView(side).getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
+    await expect.poll(async () => Math.abs((await primary.boundingBox())!.y - (await page.locator('.lab-shell').boundingBox())!.y))
+      .toBeLessThanOrEqual(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    if (width === 1200) await page.screenshot({ path: testInfo.outputPath('narrow-headings-with-account-actions.png') });
+    if (width === 1200) await page.screenshot({ path: testInfo.outputPath('narrow-headings-with-inline-view.png') });
   }
+  await select(side, 1);
+  await send(sourceView(side), '/ask Keep the Ask controls local to this view');
+  const ask = askView(side);
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  await expect(ask.getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
+  await setDisplay(ask, 'Simple conversation', true);
+  await expect(globalView).toHaveCount(1);
+  await expectBeforeTitle(globalView, sourceView(primary).locator('.lab-primary-title'));
+  await ask.getByRole('button', { name: 'Minimize Ask', exact: true }).click();
+  await expectDisplay(sourceView(primary), 'Preview', true);
+  await expectDisplay(sourceView(side), 'Preview', true);
 });
 
 test('mobile primary heading and view menu remain inside the viewport with global chrome hidden', async ({ page, isMobile }, testInfo) => {
   test.skip(!isMobile, 'Mobile heading and page panning.');
-  const { primary, select } = await openComposition(page, isMobile);
+  const { primary, side, select } = await openComposition(page, isMobile);
   await select(primary, 0);
   const globalView = page.getByRole('button', { name: 'View options', exact: true });
-  await globalView.click();
-  const globalOptions = page.getByRole('region', { name: 'View options', exact: true });
-  await globalOptions.getByRole('checkbox', { name: 'Header', exact: true }).uncheck();
-  await globalOptions.getByRole('checkbox', { name: 'Sidebar', exact: true }).uncheck();
-  await globalView.press('Escape');
+  await setChromePanel(page, 'Header', false);
+  await setChromePanel(page, 'Sidebar', false);
   const view = sourceView(primary);
   const heading = view.locator('.lab-workbench-heading');
   const title = heading.locator('.lab-primary-title');
@@ -276,6 +371,9 @@ test('mobile primary heading and view menu remain inside the viewport with globa
     await page.setViewportSize({ width, height: 844 });
     await expect(title).toBeVisible();
     await expect(title).toHaveText('New session');
+    await expect(globalView).toHaveCount(1);
+    await expectBeforeTitle(globalView, title);
+    await expectContained(globalView, heading);
     await expect.poll(async () => (await title.boundingBox())!.width, { message: `Primary title remains readable at ${width}px` }).toBeGreaterThan(60);
     const actions = heading.getByRole('button', { name: 'More session actions', exact: true });
     await expectContained(actions, primary);
@@ -298,4 +396,12 @@ test('mobile primary heading and view menu remain inside the viewport with globa
     await trigger.press('Escape');
     await expect(options).toBeHidden();
   }
+  await select(side, 1);
+  await expectBeforeTitle(globalView, sourceView(side).locator('.lab-side-title-text'));
+  await expect(sourceView(primary).getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
+  await setChromePanel(page, 'Header', true);
+  await expectBeforeTitle(globalView, page.locator('.lab-app-bar .lab-brand h1'));
+  await setChromePanel(page, 'Header', false);
+  await expectBeforeTitle(globalView, sourceView(side).locator('.lab-side-title-text'));
+  await expectDisplay(sourceView(side), 'Preview', true);
 });

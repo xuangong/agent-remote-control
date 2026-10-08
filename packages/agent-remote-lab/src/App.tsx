@@ -274,6 +274,10 @@ function AppContent({
   const [trackedOnly, setTrackedOnly] = useState(false);
   const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
+  const [headerViewTarget, setHeaderViewTarget] = useState<HTMLDivElement | null>(null);
+  const [sidebarViewTarget, setSidebarViewTarget] = useState<HTMLDivElement | null>(null);
+  const [sessionViewTarget, setSessionViewTarget] = useState<HTMLDivElement | null>(null);
+  const [traceViewTarget, setTraceViewTarget] = useState<HTMLDivElement | null>(null);
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
   const compactLayoutRef = useRef(isCompactLayout());
@@ -1484,17 +1488,20 @@ function AppContent({
         {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : null}
     </nav> : null}
-    <ViewOptions triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
+    <ViewOptions target={!headerHidden ? headerViewTarget : !compactLayout && desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sessionViewTarget}
+      triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
       onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
     <header className="lab-app-bar" hidden={headerHidden}>
       <div className="lab-brand">
+        <div ref={setHeaderViewTarget} className="lab-global-view-slot" />
         <div>
           <p>Agent Remote Control</p>
           <h1>Agent conversations</h1>
         </div>
       </div>
+      {accountAction ? <div className="gateway-account-actions">{accountAction}</div> : null}
       <details
         ref={connectionSummaryRef}
         className="lab-session-summary"
@@ -1549,6 +1556,7 @@ function AppContent({
       onClose={() => setContextOpen(false)}
     >
       <div className="lab-rail-heading">
+        {!compactLayout ? <div ref={setSidebarViewTarget} className="lab-global-view-slot" /> : null}
         <p className="lab-eyebrow" title={baseUrl}>Workspace</p>
       </div>
       {!compactLayout ? <nav className="lab-sidebar-tabs" aria-label="Sidebar sections">
@@ -1559,14 +1567,12 @@ function AppContent({
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none" /><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none" /></svg>
         </button>
       </nav> : null}
-      {compactLayout && accountAction ? <div className="lab-sidebar-account">{accountAction}</div> : null}
       {compactLayout ? <nav className="lab-session-panel-actions" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
         {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
         <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel('settings')}>Settings</button>
       </nav> : null}
       <div className="lab-sidebar-content">
-      {!compactLayout && accountAction ? <div className="lab-sidebar-account">{accountAction}</div> : null}
       {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         <MobileDisplaySettings />
         <CachePrivacySettings />
@@ -1638,6 +1644,7 @@ function AppContent({
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <div className="lab-primary-conversation lab-session-composition" tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot) focusSession(stackRoot); }} onClickCapture={() => { if (stackRoot) focusSession(stackRoot); }}>
         <CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
+          headingStart={primaryExpanded ? <div ref={setSessionViewTarget} className="lab-global-view-slot" /> : undefined}
           sessionState={!accessReady || hostOffline ? remoteSessionState(state, !accessReady ? 'connecting' : 'disconnected') : sessionState}
           handoff={handoff}
           draftSessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}
@@ -1681,6 +1688,7 @@ function AppContent({
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
           key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} standalone={sessionKey(session) === detachedSideRoot} onUnlink={unlinkSide}
           navigation={viewNavigation} renderAsk={renderAsk} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
+          headingStart={!primaryExpanded && session.agentId === stackPath[stackRange.start]?.agentId ? <div ref={setSessionViewTarget} className="lab-global-view-slot" /> : undefined}
           position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}
           expanded={expandedKeys.has(sessionKey(session))}
           focused={!compositionProtected && focusedWindow !== undefined && sessionKey(focusedWindow) === sessionKey(session)}
@@ -1699,6 +1707,7 @@ function AppContent({
         hidden={activeView !== 'trace'}
       >
         <TraceView key={traceScope} state={state} visible={activeView === 'trace'}
+          headingStart={<div ref={setTraceViewTarget} className="lab-global-view-slot" />}
           sessionTitle={activeOpened?.title} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status}
           revealEntry={traceRequest?.view === 'trace' ? traceRequest : undefined}
           onShowConversation={key => inspectTimelineEntry(key, 'workbench')}

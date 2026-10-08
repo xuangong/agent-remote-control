@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { createRoot } from 'react-dom/client';
 import type { ReactNode } from 'react';
 import { GatewayController } from '../../src/GatewayController.js';
@@ -6,8 +7,11 @@ import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
 import { App } from '../../src/App.js';
 import { SessionDirectoryClient } from '../../src/directory-client.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles.js';
+import { trackFocusModality } from '../../src/focus-modality.js';
+
+const stopTrackingFocus = trackFocusModality(document);
+if (import.meta.hot) import.meta.hot.dispose(stopTrackingFocus);
 
 const baseUrl = location.origin + '/u/alice/';
 const directory = new SessionDirectoryClient(baseUrl, undefined, 'host');

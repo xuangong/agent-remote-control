@@ -40,47 +40,56 @@ test('opens session settings above the composer without moving the conversation'
   expect(composer.x + composer.width).toBeLessThanOrEqual(page.viewportSize()!.width);
 });
 
-test('keeps one View entry fixed while toggling panels and preserving the chat', async ({ page }, testInfo) => {
+test('keeps one View entry in the visible title while toggling panels and preserving the chat', async ({ page }, testInfo) => {
   await openRecordedSession(page);
   const input = page.getByTestId('prompt-input');
   await input.fill('Keep this draft');
   const trigger = page.getByRole('button', { name: 'View options', exact: true });
-  const origin = (await trigger.boundingBox())!;
-  const assertFixed = async () => {
+  const assertReachable = async () => {
     await expect(trigger).toHaveCount(1);
+    await expect(trigger).toBeVisible();
     const bounds = (await trigger.boundingBox())!;
-    expect({ x: bounds.x, y: bounds.y }).toEqual({ x: origin.x, y: origin.y });
+    const header = page.locator('.lab-app-bar');
+    const context = page.locator('#lab-context');
+    const owner = await header.isVisible() ? header
+      : testInfo.project.name === 'chromium-desktop' && await context.isVisible() ? context.locator('.lab-rail-heading')
+      : page.locator('.lab-main-stage');
+    const region = (await owner.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(region.x);
+    expect(bounds.y).toBeGreaterThanOrEqual(region.y);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(region.x + region.width);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(region.y + region.height);
   };
   const timeline = page.getByTestId('timeline');
   const height = (await timeline.boundingBox())!.height;
   await toggleViewPanel(page, 'Header');
   await expect(page.locator('.lab-app-bar')).toBeHidden();
   expect((await timeline.boundingBox())!.height).toBeGreaterThan(height);
-  await assertFixed();
+  await assertReachable();
   await expect(trigger).toBeFocused();
   if (testInfo.project.name === 'chromium-desktop') {
     const width = (await timeline.boundingBox())!.width;
     await toggleViewPanel(page, 'Sidebar');
     await expect(page.locator('#lab-context')).toBeHidden();
     expect((await timeline.boundingBox())!.width).toBeGreaterThan(width);
-    await assertFixed();
+    await assertReachable();
     await toggleViewPanel(page, 'Header');
-    await assertFixed();
+    await assertReachable();
     await toggleViewPanel(page, 'Sidebar');
     await expect(page.locator('#lab-context')).toBeVisible();
-    await assertFixed();
+    await assertReachable();
   } else {
     await toggleViewPanel(page, 'Sidebar');
     await expect(page.getByRole('dialog', { name: 'Context' })).toBeVisible();
     await page.getByRole('button', { name: 'Close Context' }).press('Escape');
     await expect(trigger).toBeFocused();
-    await assertFixed();
+    await assertReachable();
     await toggleViewPanel(page, 'Header');
   }
   await expect(input).toHaveValue('Keep this draft');
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
   await toggleViewPanel(page, 'Header');
-  await assertFixed();
+  await assertReachable();
   await toggleViewPanel(page, 'Replica Inspector');
   await expect(page.locator('#lab-inspector')).toBeVisible();
   if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Close Replica Inspector' }).press('Escape');
@@ -95,7 +104,8 @@ test('keeps one View entry fixed while toggling panels and preserving the chat',
   await expect(page.locator('.lab-app-bar')).toBeHidden();
   await expect(page.locator('#lab-context')).toBeHidden();
   await expect(page.locator('#lab-inspector')).toBeHidden();
-  await assertFixed();
+  await assertReachable();
+  await expect(page.locator('#lab-trace').getByRole('button', { name: 'View options', exact: true })).toHaveCount(1);
   if (testInfo.project.name === 'chromium-desktop') {
     await options.getByRole('button', { name: 'Show all', exact: true }).click();
     await expect(options.locator('input:checked')).toHaveCount(3);
@@ -111,7 +121,7 @@ test('keeps one View entry fixed while toggling panels and preserving the chat',
     await expect(options.getByRole('button', { name: 'Show all', exact: true })).toHaveCount(0);
     await options.getByRole('checkbox', { name: 'Header', exact: true }).check();
   }
-  await assertFixed();
+  await assertReachable();
   if (await options.isVisible()) await options.press('Escape');
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -171,7 +181,8 @@ test('meets AA contrast for operational text and primary actions', async ({ page
   await primaryAction.click();
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
 
-  const failedResource = page.locator('.agent-resources li').filter({ hasText: 'artifacts/failed.txt' });
+  const failedResource = page.getByRole('region', { name: 'Referenced resources', exact: true }).getByRole('listitem')
+    .filter({ has: page.getByText('failed.txt', { exact: true }) });
   const errorText = failedResource.getByText('Failed', { exact: true });
   await expect(errorText).toBeVisible();
 
@@ -191,6 +202,9 @@ test('renders a visible focus indicator with three-to-one contrast', async ({ pa
   await showNewSession(page);
   const provider = page.getByTestId('provider-select');
   await provider.focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(provider).toBeFocused();
 
   const outline = await provider.evaluate((element) => {
     const style = getComputedStyle(element);
@@ -251,7 +265,12 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
   test.skip(testInfo.project.name !== 'chromium-mobile');
   const browserErrors = collectBrowserErrors(page);
   await page.goto('/');
-  await assertMinimumSize(page.getByRole('button', { name: 'View options', exact: true, includeHidden: true }), 44);
+  const context = page.getByRole('dialog', { name: 'Context', exact: true });
+  await expect(context).toBeVisible();
+  await assertMinimumSize(context.getByRole('button', { name: 'Close Context', exact: true }), 44);
+  await context.getByRole('button', { name: 'Close Context', exact: true }).click();
+  await assertMinimumSize(page.getByRole('button', { name: 'Open sessions', exact: true }), 44);
+  await assertMinimumSize(page.getByRole('button', { name: 'View options', exact: true }), 44);
   await showNewSession(page);
   await assertMinimumSize(page.locator('.lab-provider-controls button'), 44);
 

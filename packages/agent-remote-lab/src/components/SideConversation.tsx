@@ -13,8 +13,9 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart }: {
   navigation?: SessionViewNavigationFactory;
+  headingStart?: ReactNode;
   renderAsk?(source: OpenedSession, state: AgentReplicaState | undefined): ReactNode;
   replica?: AgentReplica;
   standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>;
@@ -41,6 +42,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
     <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
+      headingStart={headingStart}
       conversationPath={<span className="lab-side-title" title={title}>{standalone ? null : <span className="lab-window-number">{position + 1}</span>}<span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}
       sessionManager={<><SessionLink session={session} />{standalone ? null : <button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>
         <svg className="lab-side-back-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>

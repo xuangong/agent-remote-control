@@ -3,14 +3,22 @@
 }
 .lab-ask-floating {
   position: absolute; right: 0; top: clamp(64px, 28%, 160px); z-index: 39;
+  transform: translateX(var(--ask-dock-offset, 0px));
 }
+.lab-ask-floating[data-settling="true"] { transition: transform 240ms cubic-bezier(.2, .8, .2, 1); }
 .lab-ask-floating[data-hidden="true"] { visibility: hidden; pointer-events: none; }
 .lab-ask-trigger {
-  touch-action: manipulation; user-select: none; cursor: pointer; display: flex; align-items: center; gap: 6px; min-height: 44px;
-  padding: 8px 10px; border: 1px solid var(--obs-control-border); border-right: 0; border-radius: 12px 0 0 12px;
+  touch-action: none; user-select: none; cursor: grab; display: flex; align-items: center; gap: 6px; min-height: 44px;
+  padding: 8px 10px; border: 1px solid var(--obs-control-border); border-right-color: transparent; border-radius: 12px 0 0 12px;
   background: var(--obs-surface); color: var(--obs-text); font-weight: 600;
   box-shadow: -3px 2px 9px color-mix(in oklab, var(--obs-text) 9%, transparent);
 }
+.lab-ask-floating[data-dock="left"] .lab-ask-trigger {
+  border-right-color: var(--obs-control-border); border-left-color: transparent; border-radius: 0 12px 12px 0;
+  box-shadow: 3px 2px 9px color-mix(in oklab, var(--obs-text) 9%, transparent);
+}
+.lab-ask-floating[data-dragging="true"] .lab-ask-trigger { cursor: grabbing; border-color: var(--obs-control-border); border-radius: 12px; }
+.lab-ask-trigger:active:not(:disabled) { transform: none; }
 .lab-ask-trigger > svg { flex: none; color: var(--obs-action); }
 .lab-ask-trigger:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -3px; }
 .lab-ask-viewport {
@@ -45,7 +53,7 @@
 .lab-ask-opening { flex: 1; min-height: 0; display: grid; place-content: center; padding: 12px; color: var(--obs-text-secondary); }
 .lab-ask-draft { margin: 10px; padding: 10px; min-width: 0; resize: none; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-canvas); color: var(--obs-text); }
 @keyframes ask-reveal { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .lab-ask-window { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .lab-ask-window { animation: none; } .lab-ask-floating[data-settling="true"] { transition: none; } }
 
 .lab-ask-waiting { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-text-secondary); max-height: 20%; overflow: auto; overflow-wrap: anywhere; }
 

@@ -80,7 +80,7 @@ it('logs out through the relay and removes the private controller', async () => 
     requests.push(url);
     return Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 5000 });
   });
-  const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+  const view = await render(<GatewayController>{(_baseUrl, accountAction) => <><p>Private controller</p>{accountAction}</>}</GatewayController>);
   const logout = [...view.querySelectorAll('button')].find(button => button.textContent === 'Sign out');
   expect(logout).toBeDefined();
   await act(async () => logout!.click());
@@ -209,7 +209,7 @@ it('manages browser sessions without unmounting drafts and clears private state 
     if (url === '/auth/audit') return Response.json({ events: [] });
     return Response.json({ ok: true, current: true });
   });
-  const view = await render(<GatewayController>{() => <input aria-label="Draft" defaultValue="unsent" />}</GatewayController>);
+  const view = await render(<GatewayController>{(_baseUrl, accountAction) => <><input aria-label="Draft" defaultValue="unsent" />{accountAction}</>}</GatewayController>);
   const draft = view.querySelector('input')!;
   const recoveryKey = `agent-remote:recovery:${new URL('/u/' + 'a'.repeat(64) + '/', window.location.origin).href}:drafts`;
   sessionStorage.setItem(recoveryKey, 'private draft');
@@ -247,7 +247,7 @@ it('renews frozen access as soon as the page is shown without waiting for old ti
 });
 it('shows the Gateway account identity without exposing authentication material', async () => {
   vi.stubGlobal('fetch', async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now()+60000, user: { id: 'alice', name: 'Alice Example', email: 'alice@example.com' } }));
-  const view = await render(<GatewayController>{() => <p>Conversation</p>}</GatewayController>);
+  const view = await render(<GatewayController>{(_baseUrl, accountAction) => <><p>Conversation</p>{accountAction}</>}</GatewayController>);
   expect(view.textContent).toContain('Alice Example');
   expect(view.querySelector('[aria-label="Gateway account"]')?.getAttribute('title')).toContain('alice@example.com');
 });

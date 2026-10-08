@@ -37,40 +37,15 @@
   .lab-session-heading-actions[data-open="false"] > .lab-session-heading-actions-panel { display: none; }
 }
 
-/* Shell chrome can be hidden without hiding an individual view's controls. */
-.lab-shell.lab-header-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) { display: flex; }
-@media (max-width: 1180px) {
-  .lab-shell.lab-header-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
-    padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right)); min-height: 44px;
-  }
-}
-/* Global controls keep their own row when both supporting shell panels are hidden. */
-@media (min-width: 1181px) {
-  .lab-shell.lab-header-hidden.lab-context-hidden { grid-template-rows: 38px minmax(0, 1fr); }
-  .lab-shell.lab-header-hidden.lab-context-hidden::before {
-    content: ''; grid-column: 1 / -1; grid-row: 1; background: var(--obs-surface);
-    border-bottom: 1px solid var(--obs-border); pointer-events: none;
-  }
-  .lab-shell.lab-header-hidden.lab-context-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
-    padding-left: 16px; min-height: 38px;
-  }
-  @container session-view (max-width: 760px) {
-    .lab-shell.lab-header-hidden.lab-context-hidden .lab-main-stage .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
-      padding-left: 12px; min-height: 44px;
-    }
-  }
-}
-/* Supporting views never reserve space for global controls in the page corner. */
-:is(.lab-shell.lab-header-hidden, .gateway-private > .lab-shell.lab-header-hidden) .lab-main-stage
-  :is(.lab-side-conversation, .lab-ask-window) .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
-  padding-left: 16px; min-height: 38px;
-}
 @container session-view (max-width: 760px) {
   .lab-session-view-options-trigger { min-width: 44px; min-height: 44px; padding: 4px; }
   .lab-session-view-options-trigger > span { display: none; }
   .lab-session-view-options-panel label { min-height: 44px; }
-  :is(.lab-shell.lab-header-hidden, .gateway-private > .lab-shell.lab-header-hidden) .lab-main-stage
-    :is(.lab-side-conversation, .lab-ask-window) .lab-workbench-layout > .lab-workbench-heading:has(.lab-session-view-options) {
-    padding-left: 12px; min-height: 44px;
-  }
+}
+
+@container session-view (max-width: 400px) {
+  .lab-workbench-heading:has(.lab-global-view-slot:not(:empty)) { gap: 4px; }
+  .lab-workbench-heading:has(.lab-global-view-slot:not(:empty)) > div:first-child { gap: 4px; }
+  .lab-global-view-slot .lab-view-options-trigger { width: 44px; }
+  .lab-global-view-slot .lab-view-options-trigger > span { display: none; }
 }

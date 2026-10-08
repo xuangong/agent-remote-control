@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 function entry(seq: number): AgentReplicaState['timeline']['entries'][number] {
   return { providerId: 'recorded', seqStart: seq, seqEnd: seq, timestamp: '2026-09-02T00:00:05.000Z', sourceSeqRanges: [{ startSeq: seq, endSeq: seq }], collapsed: [], resources: [], item: { type: 'assistant_message', text: `Message ${seq}.\n\n${'Readable conversation content. '.repeat(16)}`, messageId: `message-${seq}` } };

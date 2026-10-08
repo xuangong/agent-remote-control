@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { AgentInteractionRequest, AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 const command = '"C:\\WINDOWS\\system32\\cmd.exe" /c curl.exe -L --fail --max-time 20 https://raw.githubusercontent.com/openai/codex/rust-v0.153.4/codex-rs/tui/src/chatwidget.rs -o .tmp/chatwidget.rs';
 const request: Extract<AgentInteractionRequest, { kind: 'tool_approval' }> = {

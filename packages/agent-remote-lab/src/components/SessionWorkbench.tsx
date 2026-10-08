@@ -25,7 +25,7 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, compact = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; compact?: boolean; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
   const controlReadOnly = !!nativeTakeover || session.readOnly;
@@ -45,7 +45,7 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
   const [composerHidden, setComposerHidden] = useState(false);
   const composerId = useId();
   const toastAnchor = useToastAnchor(visible && !!state?.agent && !composerHidden);
-  const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent && !compact);
+  const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent);
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
   const hasReplica = state !== undefined;
@@ -97,14 +97,14 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
     : activity === 'waiting' ? 'Waiting for response'
     : activity === 'running' ? 'Working'
     : 'Ready';
-  return <SessionViewFrame className={`${compact ? ' lab-workbench-compact' : ''}${selectedCommand ? ' lab-command-details-open' : ''}`}>
+  return <SessionViewFrame className={selectedCommand ? 'lab-command-details-open' : undefined}>
     <header className="lab-workbench-heading">
       <div>
         {conversationPath}
-        <h2 hidden={compact} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
+        <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
       </div>
       {sessionManager}
-      {!compact ? workspaceLink : null}
+      {workspaceLink}
       <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span>
     </header>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
@@ -120,7 +120,7 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
         {reauthenticate ? authenticationNotice : null}
       </div>
       <div className="lab-composer-input-shell">
-        <button ref={toastToggleAnchor} hidden={compact} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
+        <button ref={toastToggleAnchor} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
           aria-label={composerHidden ? 'Show message input' : 'Hide message input'} title={composerHidden ? 'Show message input' : 'Hide message input'}
           onClick={() => setComposerHidden(hidden => !hidden)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -130,11 +130,10 @@ export function SessionWorkbench({ sessionState: suppliedSessionState, handoff, 
         <div id={composerId} className="lab-composer-body" hidden={composerHidden && !controlReadOnly}>
           <DraftComposer
             sessionState={session}
-            compact={compact}
             readOnly={readOnly}
             readOnlyCollapsed={composerHidden}
             readOnlyLabel={controlReadOnly && !recordingReadOnly ? 'Read only' : undefined}
-            readOnlyNotice={nativeTakeover ?? (!recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice handoff={handoff} control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={suppliedActions.takeControl} /> : undefined)}
+            readOnlyNotice={nativeTakeover ?? (!recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice handoff={handoff ?? session.handoff} control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={suppliedActions.takeControl} /> : undefined)}
             consoleCommands={!readOnly && sessionStatus === 'ready' ? consoleCommands : []}
             onExecuteConsoleCommand={!readOnly && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
             sessionControls={state?.agent ? <PlanningControl sessionState={session} key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}

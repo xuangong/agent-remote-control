@@ -1,4 +1,4 @@
-import { applyInteractionRequested, SessionHandoff } from '@orchardworks/agent-remote-web';
+import { applyInteractionRequested, remoteSessionState, SessionHandoff } from '@orchardworks/agent-remote-web';
 import { ToastProvider } from './Toast.js';
 import { act, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -376,6 +376,21 @@ it('keeps takeover drafts selectable without allowing edits', async () => {
   expect(input.disabled).toBe(false);
   expect(input.value).toBe('Keep and copy this');
   expect(input.closest('[hidden]')).toBeNull();
+});
+
+it.each(['checking', 'restoring', 'unknown'] as const)('renders %s handoff from the shared session state without host-specific wiring', async phase => {
+  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false,
+    nativeOwner: { kind: 'native_cli' as const, generation: 'native-one' } } };
+  const sessionState = { ...remoteSessionState(state, 'ready'), handoff: { generation: 'native-one', phase, message: phase === 'unknown' ? 'Control could not be confirmed.' : undefined } };
+  const container = await render(<LabWorkbench state={state} sessionState={sessionState} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
+  const button = container.querySelector<HTMLButtonElement>('.lab-session-control button')!;
+  if (phase === 'unknown') {
+    expect(button.getAttribute('aria-label')).toBe('Check session status');
+    expect(container.querySelector('.lab-session-control [role="alert"]')?.textContent).toBe('Control could not be confirmed.');
+  } else {
+    expect(button.disabled).toBe(true);
+    expect(container.querySelector('.lab-session-control [role="status"]')?.textContent).toContain(phase === 'checking' ? 'Checking session' : 'Restoring session');
+  }
 });
 
 it('renders shared handoff recovery after the notice remounts without owning retry policy', async () => {

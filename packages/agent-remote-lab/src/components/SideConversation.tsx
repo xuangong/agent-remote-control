@@ -1,5 +1,4 @@
-import { CommunicationNavigationContext, type CommunicationNavigation, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
-import type { TraceEntryRequest } from '../trace-model.js';
+import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
 import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
 import { useEffect, useRef } from 'react';
@@ -12,11 +11,10 @@ import { forkActions, forkCommands } from '../fork-actions.js';
 import { ForkEntries, ForkReference } from './ForkReference.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
+import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, communication, revealEntry, onOpenChildSession }: {
-  communication?(state: AgentReplicaState | undefined): CommunicationNavigation;
-  revealEntry?: TraceEntryRequest;
-  onOpenChildSession?(child: AgentChildSessionView, state: AgentReplicaState | undefined): Promise<void>;
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation }: {
+  navigation?: SessionViewNavigationFactory;
   replica?: AgentReplica;
   standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
@@ -27,6 +25,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   onFork(state: AgentReplicaState, session: OpenedSession, id: string, args: string): Promise<AgentCommandResult>; visible?: boolean;
 }) {
   const { state, sessionState, handoff, status, questions, setQuestions, actions } = useConversationSession(session, transport, cachedReplica, initialInput?.pending);
+  const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
     if (status === 'ready' && focused && expanded && visible && !panel.current?.contains(document.activeElement)) {
@@ -38,7 +37,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   const record = store.find(session);
   const title = record?.firstInput?.trim().slice(0, 72) || session.title;
   return <aside className="lab-side-conversation" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
-    <CommunicationNavigationContext.Provider value={communication?.(state)}><LabWorkbench revealEntry={revealEntry} onOpenChildSession={onOpenChildSession ? child => onOpenChildSession(child, state) : undefined} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
+    <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       conversationPath={<span className="lab-side-title" title={title}>{standalone ? null : <span className="lab-window-number">{position + 1}</span>}<span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}

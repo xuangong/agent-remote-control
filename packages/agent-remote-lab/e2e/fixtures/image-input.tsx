@@ -4,8 +4,7 @@ import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 const scope = new ReadingPositions('image-browser-fixture');
 function Fixture() {

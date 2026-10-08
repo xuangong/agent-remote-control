@@ -1,0 +1,76 @@
+/* Each host supplies the view's available width and height. */
+.lab-session-view { container: session-view / size; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.lab-composer-input-shell { container: session-composer / inline-size; }
+
+.lab-composer-dock .agent-composer { --lab-session-panel-space: 160px; }
+.lab-composer-dock .agent-composer:not([data-control-readonly]) :is(textarea, .agent-composer-editor) {
+  max-height: clamp(44px, 18cqh, 200px);
+}
+.lab-composer-dock .agent-session-panel {
+  max-height: min(360px, max(0px, calc(100cqh - var(--lab-session-panel-space))));
+  overscroll-behavior: contain;
+}
+.lab-composer-dock .agent-command-menu {
+  max-height: min(260px, 40cqh, max(0px, calc(100cqh - var(--lab-session-panel-space))));
+  overscroll-behavior: contain;
+}
+
+@container session-view (max-width: 1000px) {
+  .lab-command-details-open { grid-template-columns: minmax(0, 1fr); }
+  .lab-command-details-open > .agent-command-details {
+    grid-column: auto; grid-row: auto; position: absolute; z-index: 25; inset-block: 0; right: 0;
+    width: min(420px, 100%); box-shadow: -8px 0 24px oklch(0.2 0.01 248 / .08);
+  }
+}
+
+@container session-view (max-width: 760px) {
+  .lab-workbench-heading { min-height: 44px; padding: 0 12px; }
+  .lab-workbench-heading > div:first-child { gap: 8px; }
+  .lab-workbench-heading > span { display: none; }
+  .lab-conversation-history button { min-width: 44px; min-height: 44px; }
+  .lab-conversation-path button, .lab-timeline-scroll .agent-child-session { min-height: 44px; }
+  .lab-workbench-layout > .agent-preview-dock { top: 48px; right: 6px; }
+  .agent-preview-dock-entry { max-width: 160px; }
+  .agent-preview-dock-entry button { min-height: 40px; }
+  .lab-timeline-scroll { padding: 0 max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left)); }
+  .lab-timeline-scroll .agent-message-user { max-width: 92%; }
+  .lab-session-control-row { gap: 8px; min-height: 44px; }
+  .lab-session-control-row button { min-height: 44px; }
+  .lab-composer-dock {
+    padding-inline: max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right));
+  }
+  .lab-composer-dock .lab-control-note[role="status"] {
+    position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+
+@container session-composer (max-width: 760px) {
+  .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) { font-size: 16px; }
+  .lab-composer-dock .agent-composer textarea { min-height: 44px; }
+  .lab-composer-dock .agent-composer-actions button { min-height: 44px; }
+  .lab-composer-dock .agent-session-controls { flex: 1 1 0; }
+  .lab-composer-dock .agent-session-toolbar button { flex: 1 1 0; min-width: 0; max-width: none; padding-inline: 4px; }
+  .lab-composer-dock .agent-session-toolbar button[aria-label="Status"] { flex: 0 0 44px; min-width: 44px; }
+  .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { flex: 0 0 44px; min-width: 44px; margin-left: 0; }
+  .lab-composer-dock .agent-activity[data-active="true"] { order: -1; flex-basis: 100%; margin: 0; justify-content: space-between; }
+  .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
+  .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]) { --lab-session-panel-space: 208px; }
+}
+
+@container session-composer (max-width: 380px) {
+  .lab-composer-dock .agent-composer { --lab-session-panel-space: 208px; }
+  .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]) { --lab-session-panel-space: 256px; }
+  .lab-composer-dock .agent-session-controls { order: -1; flex-basis: 100%; }
+  .lab-composer-dock .agent-activity[data-active="true"] { order: -2; }
+  .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { margin-left: auto; }
+  .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: auto; }
+}
+
+/* Short views keep menus usable by letting them cover the composer. */
+@container session-view (max-height: 420px) {
+  .lab-composer-dock .agent-composer-input { position: static; }
+  .lab-composer-dock :is(.agent-session-panel, .agent-command-menu) {
+    bottom: 0;
+    max-height: min(360px, max(0px, calc(100cqh - 72px)));
+  }
+}

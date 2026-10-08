@@ -205,9 +205,7 @@ test('changing focus to a side conversation does not reopen the primary Ask', as
   await primary.getByTestId('prompt-input').press('Enter');
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  const expand = page.getByRole('button', { name: 'Expand window 2:', exact: false });
-  await expand.focus();
-  await expand.press('Enter');
+  await side.getByTestId('prompt-input').focus();
   await expect(ask).toHaveCount(0);
   await side.getByTestId('prompt-input').click();
   await expect(side.getByTestId('prompt-input')).toBeFocused();

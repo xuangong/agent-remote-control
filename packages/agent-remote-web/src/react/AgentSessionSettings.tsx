@@ -24,17 +24,21 @@ export function AgentSessionSettings({ state, sessionState, children, disabled, 
   const trigger = useRef<HTMLElement>();
   useEffect(() => {
     if (!view) return;
-    trigger.current = layer.current?.querySelector<HTMLElement>('[aria-expanded="true"]') ?? undefined;
+    const controls = layer.current;
+    const keyboardScope = controls?.closest<HTMLElement>('.agent-composer') ?? controls;
+    trigger.current = controls?.querySelector<HTMLElement>('[aria-expanded="true"]') ?? undefined;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !layer.current?.contains(event.target)) onView(undefined); };
     const escape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || layer.current?.closest('[hidden], [inert]')) return;
+      const dialog = 'dialog, [role="dialog"], [role="alertdialog"]';
+      if (!layer.current || !(event.target instanceof Element) || event.target.closest(dialog) !== layer.current.closest(dialog)) return;
       event.preventDefault();
       onView(undefined);
       trigger.current?.focus({ preventScroll: true });
     };
     document.addEventListener('pointerdown', dismiss);
-    document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+    keyboardScope?.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); keyboardScope?.removeEventListener('keydown', escape); };
   }, [view, onView]);
   const agent = state.agent!;
   const settings = agent.runtimeInfo.settings ?? [];

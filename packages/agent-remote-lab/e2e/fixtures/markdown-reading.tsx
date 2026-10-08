@@ -4,8 +4,7 @@ import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 const binding = { locator: './diagram.png', resourceId: 'diagram', status: 'available' as const };
 const metadata = { status: 'available' as const, mediaType: 'image/png', byteLength: 1024, sha256: 'diagram', imageDimensions: { width: 1200, height: 600 } };

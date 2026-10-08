@@ -7,8 +7,7 @@ import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
 import { TraceView } from '../../src/components/TraceView.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 const long = 'Unbroken0123456789'.repeat(40);
 const markdown = `${long}\n\n[${long}](https://example.test/${long})\n\n\`${long}\`\n\n\`\`\`text\n${long}\n\`\`\`\n\n| ${Array(8).fill('Column').join(' | ')} |\n| ${Array(8).fill('---').join(' | ')} |\n| ${Array(8).fill(long).join(' | ')} |`;

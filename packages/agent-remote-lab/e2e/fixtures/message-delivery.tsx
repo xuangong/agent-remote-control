@@ -4,8 +4,7 @@ import { useAgentReplica } from '@orchardworks/agent-remote-web/react';
 import type { ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 const replica = new AgentReplica();
 const snapshot = { protocolVersion: '1.6.0', type: 'agent_snapshot', payload: replicaState.agent! } as const;

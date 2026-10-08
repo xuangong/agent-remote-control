@@ -4,12 +4,15 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 
 const packageDirectory = fileURLToPath(new URL('..', import.meta.url));
 let installed = '';
 let cli = '';
 const fixture = fileURLToPath(new URL('../src/fixtures/stdio-adapter.mjs', import.meta.url));
+const sharedFixture = fileURLToPath(new URL('./fixtures/shared-stdio-adapter.mjs', import.meta.url));
+const test = base.extend<{ adapterPath: string }>({ adapterPath: [fixture, { option: true }] });
+const sharedTest = test.extend({ adapterPath: sharedFixture });
 const run = promisify(execFile);
 let child: ChildProcessWithoutNullStreams;
 let exited: Promise<unknown>;
@@ -18,7 +21,7 @@ let agentId: string;
 let output = '';
 let errors = '';
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ adapterPath }) => {
   output = ''; errors = '';
   installed = await mkdtemp(join(tmpdir(), 'ardb-installed-'));
   await cp(join(packageDirectory, 'dist'), join(installed, 'dist'), { recursive: true });
@@ -30,7 +33,7 @@ test.beforeEach(async () => {
     await symlink(join(packageDirectory, 'node_modules', dependency), destination, 'junction');
   }
   cli = join(installed, 'dist/cli.js');
-  child = spawn(process.execPath, [cli, 'server', '--adapter', fixture, '--jsonl'], { stdio: 'pipe', cwd: installed });
+  child = spawn(process.execPath, [cli, 'server', '--adapter', adapterPath, '--jsonl'], { stdio: 'pipe', cwd: installed });
   exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
   child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { errors += chunk; });
   await expect.poll(() => output, { timeout: 15000, message: 'Built ARDB server starts' }).toContain('server_ready');
@@ -47,7 +50,7 @@ async function command(...args: string[]) {
   return JSON.parse(result.stdout);
 }
 
-test('CLI events broadcast into the product view; page controls reach stdio; refresh and reconnect converge', async ({ page, context }, info) => {
+sharedTest('CLI events broadcast into the product view; page controls reach stdio; refresh and reconnect converge', async ({ page, context }, info) => {
   const failures: string[] = [];
   page.on('pageerror', error => failures.push(error.message));
   await page.goto(url);
@@ -85,7 +88,7 @@ test('CLI events broadcast into the product view; page controls reach stdio; ref
   await page.screenshot({ path: info.outputPath('session-view.png'), fullPage: true });
 });
 
-test('standalone Session View keeps product presentation and display preferences', async ({ page, browser }) => {
+sharedTest('standalone Session View keeps product presentation and display preferences', async ({ page, browser }) => {
   const checkPresentation = async (target: typeof page) => {
     await target.goto(url);
     await expect(target.getByTestId('prompt-input')).toBeVisible();
@@ -95,15 +98,22 @@ test('standalone Session View keeps product presentation and display preferences
         const toggle = getComputedStyle(view.querySelector('.lab-composer-toggle')!);
         const input = getComputedStyle(view.querySelector('textarea')!);
         const surface = getComputedStyle(view.querySelector('.agent-remote-surface')!);
-        return { position: toggle.position, width: toggle.width, height: toggle.height,
+        const bounds = view.getBoundingClientRect();
+        return { viewWidth: bounds.width, viewHeight: bounds.height, position: toggle.position, width: toggle.width, height: toggle.height,
           right: toggle.right, font: input.fontSize, border: input.borderColor,
           ink: surface.getPropertyValue('--agent-ink').trim() };
       };
       const standalone = inspect();
-      const host = view.parentElement!;
-      host.classList.add('lab-shell');
+      const frame = view.closest('.lab-session-view')!;
+      const bounds = frame.getBoundingClientRect();
+      const host = document.createElement('div');
+      host.className = 'lab-shell';
+      Object.assign(host.style, { width: `${bounds.width}px`, height: `${bounds.height}px`,
+        gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' });
+      frame.replaceWith(host);
+      host.append(frame);
       const product = inspect();
-      host.classList.remove('lab-shell');
+      host.replaceWith(frame);
       return { standalone, product };
     });
     expect(styles.standalone).toEqual(styles.product);

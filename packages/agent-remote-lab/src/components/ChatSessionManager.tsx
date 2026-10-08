@@ -9,15 +9,17 @@ export function ChatSessionManager({ current, entries, busy, onOpen }: { current
   useEffect(() => { setExpanded(false); }, [key]);
   useEffect(() => {
     if (!expanded) return;
+    const menu = layer.current;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !layer.current?.contains(event.target)) setExpanded(false); };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || layer.current?.closest('[hidden], [inert]')) return;
+      event.preventDefault();
       setExpanded(false);
       layer.current?.querySelector<HTMLButtonElement>('.lab-chat-sessions-heading')?.focus({ preventScroll: true });
     };
     document.addEventListener('pointerdown', dismiss);
-    document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+    menu?.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); menu?.removeEventListener('keydown', escape); };
   }, [expanded]);
   const family = sessionForest(entries).find((root) => {
     const contains = (node: typeof root): boolean => node.key === key || node.children.some(contains);

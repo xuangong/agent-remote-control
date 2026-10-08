@@ -147,6 +147,7 @@
 }
 .agent-reasoning-content { padding: 10px 12px; border-left: 1px solid var(--agent-rule); color: var(--agent-muted); }
 
+.agent-tool { container: agent-tool / inline-size; }
 .agent-tool .agent-item-header { min-width: 0; }
 .agent-tool-toggle {
   display: grid;
@@ -167,10 +168,22 @@
 .agent-tool-chevron { color: var(--agent-muted); }
 .agent-tool-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--agent-muted); font-size: .92em; }
 .agent-tool-references, .agent-tool-description { white-space: normal; overflow-wrap: anywhere; }
-.agent-tool-linked { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; cursor: default; }
+.agent-tool .agent-tool-linked { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; cursor: default; }
 .agent-tool-name-toggle { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .agent-session-reference { color: var(--agent-signal); text-decoration: underline; text-underline-offset: 3px; }
 .agent-session-reference:focus-visible, .agent-tool-name-toggle:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+@container agent-tool (max-width: 620px) {
+  .agent-tool-toggle { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; row-gap: 4px; }
+  .agent-tool-toggle > .agent-tool-chevron { grid-column: 1; grid-row: 1; }
+  .agent-tool-toggle > .agent-timeline-title { grid-column: 2; grid-row: 1; }
+  .agent-tool-toggle > .agent-state-label { grid-column: 3; grid-row: 1; white-space: nowrap; }
+  .agent-tool-toggle > .agent-tool-summary { grid-column: 1 / -1; grid-row: 2; white-space: normal; overflow-wrap: anywhere; }
+  .agent-tool-toggle strong { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .agent-tool-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  .agent-tool .agent-tool-linked { grid-template-columns: minmax(0, 1fr) auto; align-items: start; row-gap: 4px; }
+  .agent-tool-linked > .agent-state-label { grid-column: 2; }
+  .agent-tool-name-toggle { grid-column: 1; grid-row: 1; align-items: baseline; }
+}
 .agent-tool-details { min-width: 0; padding-top: 4px; }
 .agent-tool-detail { display: flex; flex-wrap: wrap; gap: 7px 12px; align-items: baseline; min-width: 0; }
 .agent-tool-detail code { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -668,12 +681,12 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-preview-browser-address .agent-preview-address-arrow { flex: 0 0 auto; }
 @media (min-width: 761px) {
   .agent-preview-workspace[data-preview-open]:has(> .agent-preview-browser[open]:not([data-motion="minimizing"])) > .agent-preview-workspace-content { width: calc(100% - var(--agent-preview-width, 50%)); }
-  .agent-preview-workspace > .agent-preview-browser { position: absolute; width: var(--agent-preview-width, 50%); height: 100%; max-height: 100%; z-index: 1; }
-  .agent-preview-workspace:has(> .agent-preview-browser[open]:not([data-motion="minimizing"])) > .agent-preview-divider { display: block; position: absolute; z-index: 4; inset: 0 auto 0 calc(100% - var(--agent-preview-width, 50%) - 4px); width: 8px; cursor: col-resize; touch-action: none; }
+  .agent-preview-workspace > .agent-preview-browser { position: absolute; width: var(--agent-preview-width, 50%); height: 100%; max-height: 100%; z-index: var(--agent-preview-layer, 1); }
+  .agent-preview-workspace:has(> .agent-preview-browser[open]:not([data-motion="minimizing"])) > .agent-preview-divider { display: block; position: absolute; z-index: calc(var(--agent-preview-layer, 1) + 3); inset: 0 auto 0 calc(100% - var(--agent-preview-width, 50%) - 4px); width: 8px; cursor: col-resize; touch-action: none; }
   .agent-preview-divider::after { content: ''; position: absolute; left: 3px; width: 2px; height: 100%; background: transparent; }
   .agent-preview-divider:hover::after, .agent-preview-divider:focus-visible::after { background: var(--agent-signal); }
   .agent-preview-divider:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: -2px; }
-  .agent-preview-workspace:has(> .agent-preview-browser[open]:not([data-motion="minimizing"])) > .agent-preview-resize-shield { display: block; position: absolute; inset: 0; z-index: 3; cursor: col-resize; user-select: none; }
+  .agent-preview-workspace:has(> .agent-preview-browser[open]:not([data-motion="minimizing"])) > .agent-preview-resize-shield { display: block; position: absolute; inset: 0; z-index: calc(var(--agent-preview-layer, 1) + 2); cursor: col-resize; user-select: none; }
 }
 .agent-timeline-entry:has(> .agent-entry-actions) { position: relative; }
 .agent-entry-actions { position: absolute; top: 2px; right: 2px; z-index: 2; display: flex; align-items: center; gap: 6px; opacity: 0; }

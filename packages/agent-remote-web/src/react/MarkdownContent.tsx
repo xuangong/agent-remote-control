@@ -21,7 +21,7 @@ const components: Components = {
       const { resourceContext, sourceLocator, prefix } = useContext(MarkdownContext);
       const locator = (node?.data as { localResourceLocator?: string } | undefined)?.localResourceLocator;
       if (locator) return preview && resourceContext
-        ? <button type="button" className="agent-resource-link" title={locator} onClick={() => preview.open({ locator, sourceLocator, context: resourceContext })}>{children}</button>
+        ? <button type="button" className="agent-resource-link" title={locator} onClick={event => preview.open({ locator, sourceLocator, context: resourceContext, returnFocus: event.currentTarget })}>{children}</button>
         : <span title={`Local file: ${locator}`}>{children}</span>;
       return href ? <a {...props} href={href} rel="noreferrer" aria-describedby={describedBy === 'footnote-label' ? `${prefix}footnote-label` : describedBy}>{children}</a> : <>{children}</>;
     },

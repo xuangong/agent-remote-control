@@ -1,8 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 const state = { ...replicaState, pendingInteractions: [], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null,
   capabilities: { ...replicaState.agent!.capabilities, sessionSettings: true },

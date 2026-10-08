@@ -21,7 +21,7 @@ export function PreviewWorkspace({ children, className, style, resourceScope, ..
   useEffect(() => { if (browserOpen) setFile(undefined); }, [browserOpen]);
   const openFile = useCallback((request: FilePreviewRequest) => {
     context?.hide?.();
-    setFile(current => ({ request: { ...request, returnFocus: document.activeElement instanceof HTMLElement ? document.activeElement : undefined }, scope: resourceScope, version: (current?.version ?? 0) + 1 }));
+    setFile(current => ({ request: { ...request, returnFocus: request.returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : undefined) }, scope: resourceScope, version: (current?.version ?? 0) + 1 }));
   }, [context?.hide, resourceScope]);
   const setContainer = context?.setContainer;
   const attach = useCallback((element: HTMLDivElement | null) => { container.current = element; setContainer?.(element); }, [setContainer]);

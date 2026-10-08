@@ -13,8 +13,10 @@ const snapshots = {
   parent,
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; rootReference?: boolean; directChild?: boolean } = {}) {
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear(); window.sessionStorage.clear(); window.history.replaceState(null, '', '/'); });
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; rootReference?: boolean; directChild?: boolean; ask?: boolean } = {}) {
+  if (options.ask) localStorage.setItem('agent-remote-ask-enabled', 'true');
+  if (options.ask) vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: options.desktop ? query.includes('min-width: 1181px') : query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   let connections = 0;
   let releaseChild: (() => void) | undefined;
@@ -25,12 +27,18 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   if (options.nested) sessionSnapshots.child = { ...sessionSnapshots.child, runtimeInfo: Object.assign({}, sessionSnapshots.child.runtimeInfo, { childSessions: [{ ...child, nativeSessionId: 'native-grandchild', title: '/root/review/evidence', status: 'running' as const }] }) };
   if (options.images) sessionSnapshots.parent = { ...sessionSnapshots.parent, capabilities: { ...sessionSnapshots.parent.capabilities, imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } };
   Object.assign(sessionSnapshots, { grandchild: { ...snapshots.child, id: 'grandchild', runtimeInfo: { providerId: 'codex', sessionId: 'native-grandchild', status: 'idle' } } });
+  Object.assign(sessionSnapshots, {
+    ask: { ...parent, id: 'ask', persistence: { providerId: 'codex', sessionId: 'native-ask', opaque: 'native-ask' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-ask', status: 'idle', childSessions: [{ ...child, nativeSessionId: 'native-ask-child', title: 'Ask reviewer' }] } },
+    'ask-child': { ...snapshots.child, id: 'ask-child', runtimeInfo: { providerId: 'codex', sessionId: 'native-ask-child', status: 'idle' } },
+  });
   if (options.letters) sessionSnapshots.parent = { ...sessionSnapshots.parent, runtimeInfo: { ...sessionSnapshots.parent.runtimeInfo, childSessions: [{ ...child, title: '/root/review' }] } };
   const attachments: unknown[] = [];
+  const resourceReads: { agentId: string; locator: string }[] = [];
   const directoryFetch: typeof fetch = async (input, init) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith('/catalog')) return Response.json({ items: options.discover ? [{providerId: 'codex', nativeSessionId: 'native-parent', title: 'Discovered parent', state: 'unknown', createdAt: '2026-09-10', updatedAt: '2026-09-10'}] : [], hasMore: false, revision: '1' });
     if (path.endsWith('/workspaces')) return Response.json({ workspaces: [] });
+    if (options.ask && path.endsWith('/create')) return Response.json({ agentId: 'ask', nativeSessionId: 'native-ask' });
     if (path.endsWith('/attach')) {
       attachments.push({ path, body: JSON.parse(String(init?.body)) });
       if (path.endsWith('/child/attach')) await childReady;
@@ -49,7 +57,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     fetchSnapshot: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] }),
     fetchTimeline: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
       requestId: 'page', agentId, epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false,
-      window: { minSeq: 1, maxSeq: options.letters ? (options.rootReference && agentId === 'child' ? 4 : 3) : options.navigation ? 1 : 0, nextSeq: options.letters ? (options.rootReference && agentId === 'child' ? 5 : 4) : options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.letters ? letterEntries(agentId, options.rootReference) : options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
+      window: { minSeq: 1, maxSeq: options.ask && agentId === 'ask' ? 2 : options.letters ? (options.rootReference && agentId === 'child' ? 4 : 3) : options.navigation ? 1 : 0, nextSeq: options.ask && agentId === 'ask' ? 3 : options.letters ? (options.rootReference && agentId === 'child' ? 5 : 4) : options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.ask && agentId === 'ask' ? [activityEntry('native-ask-child'), { ...activityEntry('native-ask-child'), seqStart: 2, seqEnd: 2, item: { type: 'assistant_message', text: 'Read [the source](./ask-source.ts).' } }] : options.letters ? letterEntries(agentId, options.rootReference) : options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
     } }),
     connect: (agentId, listener) => {
       connections++;
@@ -60,6 +68,15 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
         listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] });
       });
       return { close() {}, send(message) {
+        if (message.type === 'resource_resolve_request') {
+          resourceReads.push({ agentId, locator: message.payload.locator });
+          queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'resource_resolve_response', payload: {
+            requestId: message.payload.requestId, agentId, binding: { locator: message.payload.locator, resourceId: 'ask-source', status: 'unavailable' },
+          } }));
+        }
+        if (message.type === 'resource_request') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'resource_response', payload: {
+          requestId: message.payload.requestId, agentId, resourceId: message.payload.resourceId, state: { status: 'unavailable', reason: 'Ask source file is unavailable in this fixture.' },
+        } }));
         if (message.type === 'session_control_request') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } }));
         if (message.type === 'timeline_subscription') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } }));
       } };
@@ -80,7 +97,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     </>;
   }
   const container = await render(<Harness />);
-  return { container, attachments, sendMessage, respondToInteraction, releaseChild, resumeAgent, connections: () => connections };
+  return { container, attachments, resourceReads, sendMessage, respondToInteraction, releaseChild, resumeAgent, connections: () => connections };
 
 }
 it('focuses the current discovered session without another attachment or stream connection', async () => {
@@ -100,6 +117,72 @@ async function draft(container: HTMLElement, text: string) {
   const input = container.querySelector<HTMLTextAreaElement>('textarea')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }
+
+async function openAsk(container: HTMLElement) {
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!.click());
+  const ask = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Ask"]')!;
+  expect(ask).not.toBeNull();
+  await act(async () => ask.querySelector<HTMLButtonElement>('[aria-label="Simple view"]')!.click());
+  return ask;
+}
+
+it.each([false, true])('opens an independent Ask child through its own native parent (desktop=%s)', async desktop => {
+  const f = await setup(false, { live: true, desktop, ask: true });
+  const ask = await openAsk(f.container);
+  const open = ask.querySelector<HTMLButtonElement>('[data-child-session-id="native-ask-child"]')!;
+  expect(open.disabled).toBe(false);
+  await act(async () => { open.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(f.attachments).toContainEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-ask', nativeSessionId: 'native-ask-child' } });
+  expect(f.attachments).not.toContainEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-ask-child' } });
+  if (desktop) {
+    expect(f.container.querySelector('.lab-primary-conversation [data-child-session-id="native-ask-child"]')).not.toBeNull();
+    const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+    expect(side.hidden).toBe(false);
+    expect(side.textContent).toContain('Ask reviewer');
+  } else await waitForSession(f.container, 'ask-child');
+});
+
+it('resolves Ask activity references within the Ask family', async () => {
+  const f = await setup(false, { live: true, desktop: true, ask: true });
+  const ask = await openAsk(f.container);
+  const sessionLink = ask.querySelector<HTMLAnchorElement>('.agent-session-reference');
+  expect(sessionLink).not.toBeNull();
+  expect(new URL(sessionLink!.href).searchParams.get('session')).toBe('native-ask-child');
+  await act(async () => { sessionLink!.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(f.attachments).toContainEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-ask', nativeSessionId: 'native-ask-child' } });
+});
+
+it('shares the file preview host with Ask', async () => {
+  const previousShow = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'show');
+  Object.defineProperty(HTMLDialogElement.prototype, 'show', { configurable: true, value(this: HTMLDialogElement) { this.open = true; } });
+  try {
+    const f = await setup(false, { live: true, desktop: true, ask: true });
+    const ask = await openAsk(f.container);
+    const fileLink = ask.querySelector<HTMLButtonElement>('.agent-resource-link');
+    expect(fileLink?.textContent).toBe('the source');
+    expect(f.container.querySelectorAll('.agent-preview-workspace')).toHaveLength(1);
+    await act(async () => { fileLink!.focus(); fileLink!.click(); });
+    expect(f.resourceReads).toEqual([{ agentId: 'ask', locator: './ask-source.ts' }]);
+    const preview = f.container.querySelector<HTMLDialogElement>('[aria-label="File preview"]')!;
+    expect(preview.open).toBe(true);
+    expect(preview.textContent).toContain('Ask source file is unavailable in this fixture.');
+    await act(async () => preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(f.container.querySelector('[aria-label="File preview"]')).toBeNull();
+    expect(f.container.querySelector('[role="dialog"][aria-label="Ask"]')).toBe(ask);
+    expect(document.activeElement).toBe(fileLink);
+  } finally {
+    if (previousShow) Object.defineProperty(HTMLDialogElement.prototype, 'show', previousShow);
+    else Reflect.deleteProperty(HTMLDialogElement.prototype, 'show');
+  }
+});
+
+it('resolves Side activity references within its source family', async () => {
+  const f = await setup(false, { live: true, desktop: true, navigation: true });
+  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-child-session-id="native-child"]')!.click());
+  const link = f.container.querySelector<HTMLAnchorElement>('.lab-side-conversation .agent-session-reference');
+  expect(link).not.toBeNull();
+  expect(new URL(link!.href).searchParams.get('session')).toBe('native-sibling');
+});
 it('opens a native child through its loaded parent and restores each conversation draft through breadcrumbs', async () => {
   const f = await setup();
   await draft(f.container, 'Parent draft');

@@ -7,15 +7,22 @@ const colors = {
   closed: 'oklch(0.485 0.029 246.6)',
 };
 
-test('session titles track work, pending input, idle and closed across surfaces', async ({ page }, testInfo) => {
+test('session titles track work, pending input, idle and closed across surfaces', async ({ page, isMobile }, testInfo) => {
   await page.goto('/e2e/fixtures/session-title-status.html');
+  const collapsedTitle = page.getByRole('navigation', { name: 'Earlier windows', includeHidden: true }).locator('.lab-collapsed-title');
+  const titles = [
+    page.getByRole('heading', { name: 'Conversation', exact: true }),
+    page.getByRole('region', { name: 'Chat sessions' }).locator('.lab-session-row strong'),
+    page.getByRole('region', { name: 'Discover sessions' }).locator('.lab-session-row strong'),
+  ];
+  if (isMobile) await expect(collapsedTitle).toBeHidden();
+  else titles.push(collapsedTitle);
   for (const mode of ['running', 'pending', 'running', 'idle', 'closed'] as const) {
     await page.getByRole('navigation', { name: 'Fixture state' }).getByRole('button', { name: mode, exact: true }).click();
     await page.locator('.lab-chat-sessions-heading').click();
     const expected = mode === 'pending' ? 'waiting' : mode;
-    const titles = page.locator('.lab-workbench-heading h2, .lab-session-row strong, .lab-collapsed-title');
-    await expect(titles).toHaveCount(5);
-    for (const title of await titles.all()) {
+    for (const title of titles) {
+      await expect(title).toBeVisible();
       await expect(title).toHaveAttribute('data-session-status', expected);
       await expect(title).toHaveCSS('color', colors[expected]);
     }

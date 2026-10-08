@@ -5,8 +5,7 @@ import { PreviewWorkspace, TimelineDisplay } from '@orchardworks/agent-remote-we
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 const imageBytes = new Uint8Array(await (await fetch(new URL('./markdown-wide.png', import.meta.url))).arrayBuffer());
 const options = new URLSearchParams(location.search);

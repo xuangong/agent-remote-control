@@ -18,6 +18,7 @@ import { PendingSendQueue } from './PendingSendQueue.js';
 
 export interface AgentComposerProps {
   sessionState?: RemoteSessionState;
+  /** @deprecated Layout follows the containing Session View; this option no longer hides controls. */
   compact?: boolean;
   /** Prevent editing while preserving capabilities and the current draft. */
   readOnly?: boolean;
@@ -70,7 +71,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
-export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, compact = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
@@ -416,10 +417,10 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
       <div className="agent-composer-secondary-controls">
         {richEnabled ? <><button type="button" aria-label="Add images" disabled={!state?.agent || readOnly || busy} onClick={() => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); }}>Image</button>
           <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(imageDraft.addFiles(files)); }} /></> : null}
-        <button hidden={compact} type="button" aria-label="Open chat commands" disabled={!ready || busy || (readOnly && consoleCommands.length === 0)} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); focusInput(); }}>/</button>
+        <button type="button" aria-label="Open chat commands" disabled={!ready || busy || (readOnly && consoleCommands.length === 0)} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); focusInput(); }}>/</button>
         {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={!session.operations.queue_message.allowed || waiting.items.length > 0 || !ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent)} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}
       </div>
-      {state?.agent && !compact ? <AgentSessionSettings sessionState={session} key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
+      {state?.agent ? <AgentSessionSettings sessionState={session} key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
         onSelect={onSetSessionSetting} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : null}

@@ -309,14 +309,16 @@ describe('MarkdownContent', () => {
 
 it('opens local file links through resource RPC without navigating the site', async () => {
   const opened: string[] = [];
+  const triggers: (HTMLElement | undefined)[] = [];
   const resourceContext = { scopeKey: 'file-links', bindings: [], resources: {}, resolveResource: vi.fn(), requestResource: vi.fn() };
-  const container = await render(<FilePreviewContext.Provider value={{ open: request => { opened.push(request.locator); } }}>
+  const container = await render(<FilePreviewContext.Provider value={{ open: request => { opened.push(request.locator); triggers.push(request.returnFocus); } }}>
     <MarkdownContent markdown={'[Absolute](/workspace/report.md) [Relative](./src/main.ts) [File](file:///workspace/report.md) [Web](https://example.com) [Anchor](#details)'} resourceContext={resourceContext} />
   </FilePreviewContext.Provider>);
   const local = Array.from(container.querySelectorAll<HTMLButtonElement>('button'));
   expect(local.map(button => button.textContent)).toEqual(['Absolute', 'Relative', 'File']);
   for (const button of local) await act(async () => button.click());
   expect(opened).toEqual(['/workspace/report.md', './src/main.ts', 'file:///workspace/report.md']);
+  expect(triggers).toEqual(local);
   expect(container.querySelector('a[href="https://example.com"]')).not.toBeNull();
   expect(container.querySelector('a[href="#details"]')).not.toBeNull();
   expect(resourceContext.resolveResource).not.toHaveBeenCalled();

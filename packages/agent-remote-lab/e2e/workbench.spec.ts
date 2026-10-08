@@ -207,8 +207,7 @@ test('protects reading after dragging the scrollbar', async ({ page }, testInfo)
 test('keeps an earlier control in view when reached with Tab', async ({ page }) => {
   const timeline = page.getByTestId('timeline');
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
-  await page.getByRole('button', { name: 'Switch Agent' }).focus();
-  await page.keyboard.press('Tab');
+  await timeline.focus();
   await expect(timeline).toBeFocused();
   await page.keyboard.press('Tab');
   const load = page.getByRole('button', { name: 'Load earlier activity' });

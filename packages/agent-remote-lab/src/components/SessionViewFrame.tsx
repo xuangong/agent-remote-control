@@ -9,6 +9,8 @@ export function SessionViewFrame({ children, className = '', displayMode }: {
 }) {
   const inheritedMode = useContext(TimelineDisplay);
   return <TimelineDisplay.Provider value={displayMode ?? inheritedMode}>
-    <div className={`lab-session-view lab-workbench-layout${className ? ` ${className}` : ''}`}>{children}</div>
+    <div className="lab-session-view">
+      <div className={`lab-workbench-layout${className ? ` ${className}` : ''}`}>{children}</div>
+    </div>
   </TimelineDisplay.Provider>;
 }

@@ -4,7 +4,7 @@ import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 export function SessionTimelineTools({ collapsible, searchOpen, children }: {
   collapsible: boolean; searchOpen: boolean; children: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const contentId = useId();
   const content = useRef<HTMLDivElement>(null);
   const hidden = collapsible && collapsed && !searchOpen;

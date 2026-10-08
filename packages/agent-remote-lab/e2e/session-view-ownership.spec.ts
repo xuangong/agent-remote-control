@@ -9,6 +9,11 @@ async function send(view: Locator, text: string) {
   await view.getByTestId('prompt-input').press('Enter');
 }
 
+async function expandSessionActions(view: Locator) {
+  const expand = view.getByRole('button', { name: 'Expand session actions', exact: true });
+  if (await expand.isVisible()) await expand.click();
+}
+
 async function openComposition(page: Page, isMobile: boolean) {
   if (!isMobile) await page.setViewportSize({ width: 1900, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -34,6 +39,7 @@ async function openComposition(page: Page, isMobile: boolean) {
 }
 
 async function setDisplay(view: Locator, mode: string, letters: boolean) {
+  await expandSessionActions(view);
   const trigger = view.getByRole('button', { name: 'Session view options', exact: true });
   await trigger.click();
   const options = view.getByRole('region', { name: 'Session view options', exact: true });
@@ -48,6 +54,7 @@ async function setDisplay(view: Locator, mode: string, letters: boolean) {
 }
 
 async function expectDisplay(view: Locator, mode: string, letters: boolean) {
+  await expandSessionActions(view);
   const trigger = view.getByRole('button', { name: 'Session view options', exact: true });
   await trigger.click();
   const options = view.getByRole('region', { name: 'Session view options', exact: true });
@@ -131,6 +138,7 @@ test('view menu labels apply their selection before focus leaves the trigger', a
   await page.getByTestId('session-create').click();
   const view = sourceView(page.locator('.lab-primary-conversation'));
   await expect(view.getByTestId('prompt-input')).toBeEnabled();
+  await expandSessionActions(view);
   const trigger = view.getByRole('button', { name: 'Session view options', exact: true });
   await trigger.click();
   const options = view.getByRole('region', { name: 'Session view options', exact: true });
@@ -382,6 +390,7 @@ test('mobile navigation keeps one title and session tools beside search with glo
   await setChromePanel(page, 'Header', false);
   await setChromePanel(page, 'Sidebar', false);
   const view = sourceView(primary);
+  await expandSessionActions(view);
   const heading = view.locator('.lab-workbench-heading');
   const navigation = page.locator('.lab-mobile-navigation');
   const title = navigation.getByRole('combobox', { name: 'Side path' });
@@ -446,7 +455,7 @@ test('mobile navigation keeps one title and session tools beside search with glo
   await page.screenshot({ path: testInfo.outputPath('mobile-ask-centered.png') });
 });
 
-test('mobile session actions collapse to the edge without moving the reading position', async ({ page, isMobile }, testInfo) => {
+test('mobile session actions start collapsed and toggle without moving the reading position', async ({ page, isMobile }, testInfo) => {
   test.skip(!isMobile, 'Uses the mobile Session View toolbar.');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
@@ -469,8 +478,12 @@ test('mobile session actions collapse to the edge without moving the reading pos
     view.getByRole('button', { name: 'Search this session', exact: true }),
     view.getByRole('button', { name: 'More session actions', exact: true }),
   ] as const;
+  await expect(expand).toBeVisible();
+  await expect(collapse).toBeHidden();
+  for (const control of controls) await expect(control).toBeHidden();
   for (const width of [320, 402]) {
     await page.setViewportSize({ width, height: 844 });
+    await expandSessionActions(view);
     await expect(collapse).toBeVisible();
     await expect(expand).toBeHidden();
     for (const control of controls) await expect(control).toBeVisible();

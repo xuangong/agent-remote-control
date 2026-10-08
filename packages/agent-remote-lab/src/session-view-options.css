@@ -25,6 +25,7 @@
   color: var(--obs-text); font-size: 12px;
 }
 .lab-session-heading-leading .lab-session-view-options-panel { left: 0; right: auto; }
+.lab-timeline-tools .lab-session-view-options { position: static; }
 .lab-session-view-options-panel fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .lab-session-view-options-panel legend { padding: 5px 7px; color: var(--obs-text-secondary); font-size: 11px; font-weight: 600; }
 .lab-session-view-options-panel label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; margin: 0; padding: 6px 7px; border-radius: 5px; cursor: pointer; }

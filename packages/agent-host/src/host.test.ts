@@ -898,6 +898,62 @@ it('reports a confirmed attach failure over a real uplink without classifying it
   } finally { await host.close(); await broker.close(); }
 });
 
+it.each(['workspace', 'resume'] as const)('preserves confirmed native session unavailability from %s through the Host and Relay uplink', async stage => {
+  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 1000 });
+  const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));
+  const { key } = await pairing!.json();
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await once(server, 'listening');
+  server.on('connection', async socket => {
+    const prepared = await broker.prepareUpgrade(new Request('http://relay.test/ws/remote-host', { headers: { authorization: `Bearer ${key}` } }));
+    if (!prepared || prepared instanceof Response) { socket.close(); return; }
+    prepared.accept({
+      get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
+      send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
+      onMessage(listener) { const receive = (data: import('ws').RawData, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
+      onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
+      onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
+    });
+  });
+  const nativeSessionId = '00000000-0000-4000-8000-000000000031';
+  const apps: ReturnType<typeof createScriptedAppServer>[] = [];
+  const adapter = new CodexAppServerProvider({ spawn: () => {
+    const app = createScriptedAppServer({
+      'thread/read': () => { throw Object.assign(new Error(`thread not loaded: ${nativeSessionId}`), { code: -32600 }); },
+      'thread/resume': () => { throw Object.assign(new Error(`no rollout found for thread id ${nativeSessionId}`), { code: -32600 }); },
+    });
+    apps.push(app); return app.child;
+  } });
+  const diagnostics: unknown[] = [];
+  const host = createAgentHost({ registrations: [{ adapter, directory: createCodexSessionDirectory(adapter, []) }],
+    installationId: 'unavailable-host', name: 'Host',
+    ...(stage === 'workspace' ? { executionPolicy: { defaultWorkspace: '/workspace', allowedWorkspaceRoots: ['/workspace'], lockPermissions: true } } : {}),
+    uplink: { url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, remoteKey: key },
+    onRequestDiagnostic(diagnostic) { diagnostics.push(diagnostic); } });
+  try {
+    const { hostId } = await host.ready;
+    const response = await broker.handleRequest(new Request(`http://relay.test/v1/remote/hosts/${hostId}/attach`, {
+      method: 'POST', body: JSON.stringify({ providerId: 'codex', nativeSessionId }),
+    }));
+    expect(response?.status).toBe(404);
+    const failure = await response!.json();
+    expect(failure).toMatchObject({ code: 'native_session_unavailable', error: expect.stringContaining('could not find this session'), requestId: expect.any(String) });
+    expect(failure.error).not.toMatch(/00000000|rollout|empty|deleted/);
+    expect(diagnostics).toContainEqual(expect.objectContaining({ event: 'host_request_completed', requestId: failure.requestId,
+      operation: 'session_attach', code: 'native_session_unavailable', status: 404 }));
+    const methods = apps.flatMap(app => app.requests.map(request => request.method));
+    expect(methods).not.toContain('thread/start');
+    expect(methods).not.toContain('turn/start');
+    if (stage === 'workspace') expect(methods).toEqual(['initialize', 'thread/read']);
+    else expect(methods).toContain('thread/resume');
+    expect(broker.snapshot().bindings).toHaveLength(0);
+  } finally {
+    await host.close(); broker.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}, 10_000);
+
 
 it('reuses a slow native opening after a Relay timeout over a real WebSocket', async () => {
   const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 50 });

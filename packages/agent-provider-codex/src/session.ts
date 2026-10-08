@@ -33,6 +33,7 @@ import { mapCodexElicitation, mapCodexElicitationResponse } from './elicitation.
 import { mapCodexPermissions } from './permissions.js';
 import { mapCodexToolApproval } from './tool-approval.js';
 import { CodexAppServerRpcError, CodexAppServerTransport, CodexServerRequestCanceled } from './app-server-transport.js';
+import { sessionLookupError } from './session-lookup-error.js';
 import { readCodexHistoryPage } from '@orchardworks/codex-daemon-client';
 import { collectCodexThreadHistoryItems, latestCodexTurnFailure, projectCodexThreadHistory } from './history.js';
 import { CodexImageRegistry } from './images.js';
@@ -466,7 +467,7 @@ export class CodexAppServerSession implements AgentSession {
         && error.message === `thread ${handle.sessionId} already has an active writer`) {
         throw new AgentSessionInUseError('This session is in use by another Codex client. Close the original Codex client, then try opening this session again.');
       }
-      throw error;
+      throw sessionLookupError(error, handle.sessionId, 'thread/resume');
     });
     session.setThreadFromResponse(resumed, 'thread/resume');
     const statusRevision = session.statusRevision;

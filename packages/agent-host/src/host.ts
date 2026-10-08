@@ -565,7 +565,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       throw new HostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
     } catch (error) {
       if (error instanceof NativeSessionOwnerError) return json(409, {error: error.message, code: error.code, ...(error.owner ? {nativeOwner: error.owner} : {})});
-      if (error instanceof AgentRuntimeError) return json(503, { error: error.message, code: error.code });
+      if (error instanceof AgentRuntimeError) return json(error.code === 'native_session_unavailable' ? 404 : 503, { error: error.message, code: error.code });
       if (error instanceof AgentSessionInUseError) return json(409, { error: error.message, code: 'session_in_use' });
       if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
       if (error instanceof WorkspaceFolderError) return json(error.status, { error: error.message, code: error.code });

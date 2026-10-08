@@ -633,16 +633,17 @@ it.each([
   if (code === 'host_read_timeout') expect(error.error).not.toContain('operation outcome');
 });
 
-it.each(['native_file_limit', 'native_runtime_unavailable', 'native_resume_timeout', 'native_history_timeout', 'session_in_use', 'local_execution_policy'])
+it.each(['native_file_limit', 'native_runtime_unavailable', 'native_session_unavailable', 'native_resume_timeout', 'native_history_timeout', 'session_in_use', 'local_execution_policy'])
   ('preserves the safe recovery reason %s after Host registration', async code => {
     const { broker, native } = await restoredFixture();
     native.onMessage(data => {
       const message = JSON.parse(data);
       if (message.type === 'rpc_request') native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId,
-        status: code === 'session_in_use' ? 409 : code === 'local_execution_policy' ? 403 : 503,
+        status: code === 'native_session_unavailable' ? 404 : code === 'session_in_use' ? 409 : code === 'local_execution_policy' ? 403 : 503,
         body: JSON.stringify({ code, error: 'untrusted native details arc_secret /private/path' }) }));
     });
     const response = await broker.handleRequest(new Request('https://relay.example/v1/sessions/agent/snapshot'));
+    expect(response?.status).toBe(code === 'native_session_unavailable' ? 404 : code === 'session_in_use' ? 409 : code === 'local_execution_policy' ? 403 : 503);
     const error = await response!.json();
     expect(error.code).toBe(code);
     expect(error.error).not.toMatch(/arc_secret|private\/path/);

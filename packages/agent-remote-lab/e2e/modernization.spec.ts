@@ -53,7 +53,7 @@ test('keeps one View entry in the visible title while toggling panels and preser
     const context = page.locator('#lab-context');
     const owner = await header.isVisible() ? header
       : testInfo.project.name === 'chromium-desktop' && await context.isVisible() ? context.locator('.lab-rail-heading')
-      : page.locator('.lab-main-stage');
+      : testInfo.project.name === 'chromium-mobile' ? page.locator('.lab-mobile-navigation') : page.locator('.lab-main-stage');
     const region = (await owner.boundingBox())!;
     expect(bounds.x).toBeGreaterThanOrEqual(region.x);
     expect(bounds.y).toBeGreaterThanOrEqual(region.y);
@@ -189,7 +189,7 @@ test('meets AA contrast for operational text and primary actions', async ({ page
   const measured = {
     primaryAction: primaryContrast,
     sessionSummary: await renderedContrast(page.getByTestId('connection-summary')),
-    secondaryText: await renderedContrast(page.getByTestId('workbench').locator('.lab-workbench-heading > span')),
+    secondaryText: await renderedContrast(page.getByTestId('workbench').locator('.lab-conversation-status')),
     errorText: await renderedContrast(errorText),
   };
   for (const [name, ratio] of Object.entries(measured)) expect(ratio, name).toBeGreaterThanOrEqual(4.5);

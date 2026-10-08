@@ -15,6 +15,7 @@ HTTP failures retain `code`, `error`, and an optional `requestId`. The Relay ass
 | `host_timeout` | Another operation did not return before the Relay deadline; its outcome is uncertain. | Check the session before retrying. Preserve the operation identity. |
 | `native_file_limit` | A shared Codex daemon RPC reported file descriptor exhaustion. | Review active work, then optionally copy the daemon restart command and run it on the Host. All attached sessions disconnect and running work can be interrupted. |
 | `native_runtime_unavailable` | The adapter could not establish or retain its native connection. | Check the daemon and the Controller's configured local socket. |
+| `native_session_unavailable` | A direct native identity lookup or resume confirmed that the runtime could not find the requested session. This does not establish whether it was empty, deleted, or previously used. | Directory attachment restoration stops with HTTP 404. Check the native client and Controller diagnostics, then explicitly retry the same identity. |
 | `native_resume_timeout` | The native resume request reached its own deadline. | Inspect Controller diagnostics and reopen the session. |
 | `native_history_timeout` | The native history request reached its own deadline. | Inspect Controller diagnostics and reopen the session. |
 | `native_request_timeout` | Another native initialization or catalog request reached its deadline. | Inspect Controller diagnostics. |
@@ -31,6 +32,8 @@ Missing and inaccessible session bindings have identical responses. Unknown nati
 Opening and unconfirmed wait deadlines appear as status messages. Confirmed native failures appear as alerts, even when automatic restoration will retry. Connection details disclose the code, HTTP status, and request ID when available. Browser wait deadlines cannot include an ID that the browser never received. Successful restoration clears the notice; changing selection prevents an obsolete response from attaching the previous session.
 
 A wait deadline does not prove the native session failed, and never proves that native work is still running. `rpc_cancel` suppresses a late RPC response; it does not abort the Controller's native opening. The Controller reuses an in-flight opening or an existing native binding. Retrying attachment does not recreate a session or replay user messages.
+
+An Ask with a saved target subscribes to its Session View only after attachment succeeds. Failed attachment keeps the saved relation and draft and exposes Retry; it does not start a second timeline recovery loop. Clean remains an explicit request to create a fresh Ask. Failing to create that replacement does not invalidate an already attached Ask.
 
 ## Notification presentation
 

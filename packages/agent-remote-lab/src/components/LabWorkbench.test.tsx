@@ -57,7 +57,7 @@ describe('LabWorkbench', () => {
   ] as const)('reports %s Agent state with %s synchronization accurately', async (agentStatus, sessionStatus, expected) => {
     const state = { ...replicaState, agent: { ...replicaState.agent!, status: agentStatus } };
     const container = await render(<LabWorkbench state={state} sessionStatus={sessionStatus} actions={{}} />);
-    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe(expected);
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe(expected);
     if (sessionStatus !== 'ready') {
       expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(expected);
       expect(container.querySelector('[data-testid="cancel-submit"]')?.matches(':disabled')).toBe(true);
@@ -67,7 +67,7 @@ describe('LabWorkbench', () => {
   it('indicates a pending answer even before an Agent status change arrives', async () => {
     const state = applyInteractionRequested(replicaState, { kind: 'plan_approval', requestId: 'plan-1', plan: 'Review this plan.', allowedActions: ['approve'] });
     const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{}} />);
-    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Waiting for response');
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Waiting for response');
   });
 
   it.each([
@@ -126,7 +126,7 @@ describe('LabWorkbench', () => {
       }}
     />);
 
-    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe(heading);
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe(heading);
     expect(container.textContent).toContain(notice);
     expect(container.textContent).toContain(composerNotice);
     expect(container.textContent).toContain('Waiting for connection to respond.');
@@ -185,7 +185,7 @@ describe('LabWorkbench', () => {
 
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Timeline synchronization is reconnecting.');
     expect(container.querySelector('[role="alert"]')?.textContent).not.toContain('Agent connection failed');
-    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Reconnecting');
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Reconnecting');
   });
 
   it.each([
@@ -204,7 +204,7 @@ describe('LabWorkbench', () => {
     expect(alert).not.toBeNull();
     expect(alert!.textContent).toContain('Agent failed');
     expect(alert!.textContent).toContain(expectedReason);
-    expect(container.querySelector('.lab-workbench-heading > span')?.textContent).toBe('Agent failed');
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Agent failed');
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
   });
 });

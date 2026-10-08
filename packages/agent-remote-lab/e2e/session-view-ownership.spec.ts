@@ -88,6 +88,21 @@ async function expectBeforeTitle(control: Locator, title: Locator) {
   }, { message: 'View and the owning title share one row in reading order' }).toBe(true);
 }
 
+async function expectCenteredHeading(view: Locator) {
+  const heading = view.locator('.lab-session-heading');
+  const title = heading.locator('.lab-session-heading-title > :visible').first();
+  await expect(title).toBeVisible();
+  await expect.poll(async () => {
+    const region = (await heading.boundingBox())!, label = (await title.boundingBox())!;
+    return Math.abs(label.x + label.width / 2 - region.x - region.width / 2);
+  }, { message: 'Session title is centered in its view' }).toBeLessThanOrEqual(1);
+  const label = (await title.boundingBox())!;
+  const leading = (await heading.locator('.lab-session-heading-leading').boundingBox())!;
+  const trailing = (await heading.locator('.lab-session-heading-trailing').boundingBox())!;
+  expect(label.x).toBeGreaterThanOrEqual(leading.x + leading.width);
+  expect(label.x + label.width).toBeLessThanOrEqual(trailing.x);
+}
+
 async function openAccountFixture(page: Page) {
   const now = Date.now();
   await page.route('**/auth/**', route => {
@@ -293,11 +308,12 @@ test('account actions belong to the Header and View follows the visible owning t
     await expectBeforeTitle(globalView, page.locator('#lab-context .lab-rail-heading').getByText('Workspace', { exact: true }));
     await setChromePanel(page, 'Sidebar', false);
   }
-  const heading = sourceView(primary).locator('.lab-workbench-heading');
+  const heading = isMobile ? page.locator('.lab-mobile-navigation') : sourceView(primary).locator('.lab-workbench-heading');
+  const title = isMobile ? heading.locator('.lab-favorites-title') : heading.locator('.lab-primary-title');
   for (const width of isMobile ? [320, 402] : [1200, 1400]) {
     await page.setViewportSize({ width, height: isMobile ? 874 : 900 });
     await expect(globalView).toHaveCount(1);
-    await expectBeforeTitle(globalView, heading.locator('.lab-primary-title'));
+    await expectBeforeTitle(globalView, title);
     await expectContained(globalView, heading);
     if (!isMobile) {
       await expect.poll(async () => Math.abs((await heading.boundingBox())!.y - (await page.locator('.lab-shell').boundingBox())!.y))
@@ -330,6 +346,7 @@ test('hidden global chrome keeps View in the primary heading without duplicating
     await expect(globalView).toHaveCount(1);
     await expectBeforeTitle(globalView, sourceView(primary).locator('.lab-primary-title'));
     for (const owner of [primary, side]) {
+      await expectCenteredHeading(sourceView(owner));
       const heading = sourceView(owner).locator('.lab-workbench-heading');
       const options = heading.getByRole('button', { name: 'Session view options', exact: true });
       await expectContained(options, owner);
@@ -347,6 +364,7 @@ test('hidden global chrome keeps View in the primary heading without duplicating
   await send(sourceView(side), '/ask Keep the Ask controls local to this view');
   const ask = askView(side);
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  await expectCenteredHeading(ask);
   await expect(ask.getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
   await setDisplay(ask, 'Simple conversation', true);
   await expect(globalView).toHaveCount(1);
@@ -356,7 +374,7 @@ test('hidden global chrome keeps View in the primary heading without duplicating
   await expectDisplay(sourceView(side), 'Preview', true);
 });
 
-test('mobile primary heading and view menu remain inside the viewport with global chrome hidden', async ({ page, isMobile }, testInfo) => {
+test('mobile navigation keeps one title and session tools beside search with global chrome hidden', async ({ page, isMobile }, testInfo) => {
   test.skip(!isMobile, 'Mobile heading and page panning.');
   const { primary, side, select } = await openComposition(page, isMobile);
   await select(primary, 0);
@@ -365,23 +383,34 @@ test('mobile primary heading and view menu remain inside the viewport with globa
   await setChromePanel(page, 'Sidebar', false);
   const view = sourceView(primary);
   const heading = view.locator('.lab-workbench-heading');
-  const title = heading.locator('.lab-primary-title');
-  const trigger = heading.getByRole('button', { name: 'Session view options', exact: true });
-  for (const width of [320, 390]) {
+  const navigation = page.locator('.lab-mobile-navigation');
+  const title = navigation.getByRole('combobox', { name: 'Side path' });
+  const trigger = view.getByRole('button', { name: 'Session view options', exact: true });
+  for (const width of [320, 402]) {
     await page.setViewportSize({ width, height: 844 });
     await expect(title).toBeVisible();
-    await expect(title).toHaveText('New session');
+    await expect(title.locator('option:checked')).toHaveText('Root · New session');
+    await expect(heading).toBeHidden();
     await expect(globalView).toHaveCount(1);
     await expectBeforeTitle(globalView, title);
-    await expectContained(globalView, heading);
+    await expectContained(globalView, navigation);
     await expect.poll(async () => (await title.boundingBox())!.width, { message: `Primary title remains readable at ${width}px` }).toBeGreaterThan(60);
-    const actions = heading.getByRole('button', { name: 'More session actions', exact: true });
+    const actions = view.getByRole('button', { name: 'More session actions', exact: true });
     await expectContained(actions, primary);
     await actions.click();
-    await expect(heading.getByRole('button', { name: 'Share session link', exact: true })).toBeVisible();
+    await expect(view.getByRole('button', { name: 'Share session link', exact: true })).toBeVisible();
     await actions.press('Escape');
     await expect(actions).toHaveAttribute('aria-expanded', 'false');
     await expect(actions).toBeFocused();
+    const search = view.getByRole('button', { name: 'Search this session', exact: true });
+    await expectContained(search, primary);
+    const searchBounds = (await search.boundingBox())!, modeBounds = (await trigger.boundingBox())!;
+    expect(Math.abs(searchBounds.y + searchBounds.height / 2 - modeBounds.y - modeBounds.height / 2)).toBeLessThanOrEqual(1);
+    expect(modeBounds.x + modeBounds.width).toBeLessThanOrEqual(searchBounds.x);
+    await search.click();
+    await expect(view.getByRole('searchbox')).toBeVisible();
+    await view.getByRole('searchbox').press('Escape');
+    await expect(search).toBeVisible();
     await expectContained(trigger, primary);
     await trigger.click();
     const options = view.getByRole('region', { name: 'Session view options', exact: true });
@@ -397,11 +426,22 @@ test('mobile primary heading and view menu remain inside the viewport with globa
     await expect(options).toBeHidden();
   }
   await select(side, 1);
-  await expectBeforeTitle(globalView, sourceView(side).locator('.lab-side-title-text'));
+  await expectBeforeTitle(globalView, title);
+  await expect(sourceView(side).locator('.lab-workbench-heading')).toBeHidden();
   await expect(sourceView(primary).getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
   await setChromePanel(page, 'Header', true);
   await expectBeforeTitle(globalView, page.locator('.lab-app-bar .lab-brand h1'));
   await setChromePanel(page, 'Header', false);
-  await expectBeforeTitle(globalView, sourceView(side).locator('.lab-side-title-text'));
+  await expectBeforeTitle(globalView, title);
   await expectDisplay(sourceView(side), 'Preview', true);
+  await send(sourceView(side), '/ask Keep the narrow session title centered');
+  const ask = askView(side);
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  for (const width of [320, 402]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectCenteredHeading(ask);
+    await setDisplay(ask, 'Simple conversation', true);
+    await expectContained(ask.getByRole('button', { name: 'Minimize Ask', exact: true }), ask);
+  }
+  await page.screenshot({ path: testInfo.outputPath('mobile-ask-centered.png') });
 });

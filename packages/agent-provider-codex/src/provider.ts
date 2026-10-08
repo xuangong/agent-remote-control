@@ -23,6 +23,7 @@ import { initializeCodexTransport } from './initialize.js';
 import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
 import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
 import { windowsCodexSharedEndpoint } from './platform/windows/daemon.js';
+import { sessionLookupError } from './session-lookup-error.js';
 
 export interface CodexAppServerProviderOptions {
   executable?: string;
@@ -86,7 +87,8 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const transport = await this.createTransport();
     try {
       await initializeCodexTransport(transport);
-      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false });
+      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false })
+        .catch(error => { throw sessionLookupError(error, nativeSessionId, 'thread/read'); });
       if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== nativeSessionId) throw new Error('Native session metadata is unavailable.');
       return readString(response.thread.name);
     } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); }
@@ -168,7 +170,8 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const transport = await this.createTransport();
     try {
       await initializeCodexTransport(transport);
-      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false });
+      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false })
+        .catch(error => { throw sessionLookupError(error, nativeSessionId, 'thread/read'); });
       if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== nativeSessionId) throw new Error('Source session metadata is unavailable.');
       return readString(response.thread.cwd);
     } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); } finally { await transport.dispose(); }

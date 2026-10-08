@@ -1,6 +1,16 @@
 .lab-session-view-options { position: relative; flex: 0 0 auto; }
 .lab-primary-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-session-title[role="button"] { cursor: text; touch-action: manipulation; }
+.lab-session-heading { position: relative; }
+.lab-workbench-heading.lab-session-heading > .lab-session-heading-leading,
+.lab-workbench-heading.lab-session-heading > .lab-session-heading-trailing { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-width: 0; }
+.lab-session-heading > .lab-session-heading-trailing { margin-left: auto; }
+.lab-session-heading > .lab-session-heading-title {
+  position: absolute; inset-inline: var(--lab-heading-inset, 25%); display: flex;
+  align-items: center; justify-content: center; min-width: 0; pointer-events: none;
+}
+.lab-session-heading-title > :not([hidden]) { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; }
+.lab-session-heading .lab-conversation-status { font-size: 11px; color: var(--obs-text-secondary); }
 .lab-session-view-options-trigger {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   min-height: 32px; padding: 4px 7px; border-color: transparent; background: transparent;
@@ -14,6 +24,7 @@
   background: var(--obs-surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--obs-text) 14%, transparent);
   color: var(--obs-text); font-size: 12px;
 }
+.lab-session-heading-leading .lab-session-view-options-panel { left: 0; right: auto; }
 .lab-session-view-options-panel fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .lab-session-view-options-panel legend { padding: 5px 7px; color: var(--obs-text-secondary); font-size: 11px; font-weight: 600; }
 .lab-session-view-options-panel label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; margin: 0; padding: 6px 7px; border-radius: 5px; cursor: pointer; }
@@ -22,7 +33,7 @@
 .lab-session-view-options-panel .lab-session-letters-option { margin-top: 5px; border-top: 1px solid var(--obs-border); border-radius: 0; padding-top: 10px; }
 .lab-session-heading-actions, .lab-session-heading-actions-panel { display: contents; }
 .lab-session-heading-actions-trigger { display: none; }
-@container session-view (max-width: 520px) {
+@container session-view (max-width: 760px) {
   .lab-session-heading-actions { display: block; position: relative; flex: 0 0 auto; }
   .lab-session-heading-actions-trigger {
     display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px;
@@ -36,6 +47,8 @@
     background: var(--obs-surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--obs-text) 14%, transparent);
   }
   .lab-session-heading-actions[data-open="false"] > .lab-session-heading-actions-panel { display: none; }
+  .lab-session-heading .lab-conversation-status { display: none; }
+  .lab-timeline-tools .lab-session-heading-actions { position: static; }
 }
 
 @container session-view (max-width: 760px) {

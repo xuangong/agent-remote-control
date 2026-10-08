@@ -53,3 +53,20 @@ it('reports a browser wait deadline and retries only the existing session', asyn
     expect(open).toHaveBeenCalledTimes(2);
   } finally { stop(); }
 });
+
+it('stops automatic restoration after native session unavailability even when the browser reconnects', async () => {
+  vi.useFakeTimers();
+  const error = new DirectoryError('The native runtime could not find this session.', 'native_session_unavailable', 404);
+  const open = vi.fn(async () => { throw error; });
+  const failed = vi.fn(), restored = vi.fn();
+  const stop = restoreSession({ active: () => true, open, failed, restored });
+  try {
+    await vi.advanceTimersByTimeAsync(20_000);
+    window.dispatchEvent(new Event('online'));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(open).toHaveBeenCalledOnce();
+    expect(failed).toHaveBeenCalledExactlyOnceWith(error, false);
+    expect(restored).not.toHaveBeenCalled();
+  } finally { stop(); }
+});

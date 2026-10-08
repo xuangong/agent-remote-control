@@ -5,6 +5,7 @@ import { createReplicaState } from '../replica/reducer.js';
 import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
+import { TimelineDisplay } from './TimelineDisplay.js';
 
 const child = (nativeSessionId: string, parentTurnId?: string): AgentChildSession => ({
   nativeSessionId, title: `Review ${nativeSessionId}`, role: 'Reviewer', description: 'Check the native flow',
@@ -29,6 +30,21 @@ function state(children: AgentChildSession[], entries: ProjectedTimelineEntry[])
 }
 
 describe('AgentTimeline child sessions', () => {
+  it('keeps collapsible child navigation available in content-only views', async () => {
+    const opened: string[] = [];
+    const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline
+      state={state([child('review')], [entry(1, 'turn', 'Review requested')])}
+      onOpenChildSession={item => { opened.push(item.nativeSessionId); }}
+    /></TimelineDisplay.Provider>);
+    const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]');
+    expect(details).not.toBeNull();
+    expect(container.querySelector('.agent-timeline-entries')!.nextElementSibling).toBe(details);
+    expect(details!.open).toBe(false);
+    await act(async () => details!.querySelector('summary')!.click());
+    await act(async () => details!.querySelector<HTMLButtonElement>('[data-child-session-id="review"]')!.click());
+    expect(opened).toEqual(['review']);
+  });
+
   it('keeps children from every turn in one collapsible tail list and opens the selected native chat', async () => {
     const selected: string[] = [];
     const entries = [entry(1, 'turn-one', 'Starting review'), entry(2, 'turn-one', 'Review underway'), entry(3, 'turn-two', 'Other reply')];

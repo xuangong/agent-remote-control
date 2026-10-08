@@ -1,5 +1,9 @@
 /* Each host supplies the view's available width and height. */
 .lab-session-view { container: session-view / size; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.lab-workbench-toolbar-heading { grid-template-rows: minmax(0, 1fr) auto; }
+.lab-mobile-navigation > .lab-global-view-slot:empty { display: none; }
+.lab-mobile-navigation .lab-global-view-slot .lab-view-options-trigger { width: 44px; padding: 0; }
+.lab-mobile-navigation .lab-global-view-slot .lab-view-options-trigger > span { display: none; }
 .lab-composer-input-shell { container: session-composer / inline-size; }
 
 .lab-composer-dock .agent-composer { --lab-session-panel-space: 160px; }

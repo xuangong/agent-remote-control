@@ -14,7 +14,7 @@ afterEach(() => { conversationLocalStorage.clear(); conversationSessionStorage.c
 
 async function setup() {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  let attachError: string | undefined;
+  let attachError: { message: string; status: number; code?: string } | undefined;
   let createError: string | undefined;
   let attachPause: Promise<void> | undefined;
   const directory = new SessionDirectoryClient(baseUrl, async (url, init) => {
@@ -22,7 +22,7 @@ async function setup() {
     const body = JSON.parse(String(init?.body));
     requests.push({ path, body });
     if (path.endsWith('/attach') && attachPause) { const pending = attachPause; attachPause = undefined; await pending; }
-    if (path.endsWith('/attach') && attachError) return Response.json({ error: attachError }, { status: 503 });
+    if (path.endsWith('/attach') && attachError) return Response.json({ error: attachError.message, code: attachError.code }, { status: attachError.status });
     if (path.endsWith('/create') && createError) return Response.json({ error: createError }, { status: 504 });
     return Response.json({ agentId: path.endsWith('/attach') ? 'restored-agent' : 'created-agent', nativeSessionId: body.nativeSessionId ?? 'ask-native' });
   });
@@ -30,7 +30,7 @@ async function setup() {
   function Harness() { ask = useAskConversations(baseUrl, {} as never, directory); return null; }
   let container = await render(<Harness />);
   await act(async () => { await ask.open(state, source); ask.setDraft(sessionKey(source), 'Unsent Ask draft'); });
-  return { requests, current: () => ask, failAttach: (message?: string) => { attachError = message; },
+  return { requests, current: () => ask, failAttach: (message?: string, status = 503, code?: string) => { attachError = message ? { message, status, code } : undefined; },
     failCreate: (message?: string) => { createError = message; },
     pauseAttach: () => { let finish!: () => void; attachPause = new Promise<void>(resolve => { finish = resolve; }); return finish; },
     reload: async () => { await unmount(container); container = await render(<Harness />); return container; } };
@@ -72,7 +72,31 @@ it('requires the source snapshot for Clean and retains the existing Ask when it 
   const fixture = await setup();
   await act(async () => { await expect(fixture.current().open(undefined, source, '', true)).rejects.toThrow('Open the source session'); });
   expect(fixture.requests).toHaveLength(1);
-  expect(fixture.current().entryFor(source)).toMatchObject({ busy: false, record: { target: { nativeSessionId: 'ask-native' } } });
+  expect(fixture.current().entryFor(source)).toMatchObject({ busy: false, attached: true, record: { target: { nativeSessionId: 'ask-native' } } });
+  expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
+});
+
+it('invalidates a previous attachment when the native Ask is unavailable and retains its identity and draft for Retry', async () => {
+  const fixture = await setup();
+  expect(fixture.current().entryFor(source).attached).toBe(true);
+  fixture.failAttach('The native runtime could not find this session.', 404, 'native_session_unavailable');
+  await act(async () => { await expect(fixture.current().open(undefined, source)).rejects.toThrow('could not find this session'); });
+  expect(fixture.current().entryFor(source)).toMatchObject({ attached: false, busy: false,
+    error: 'The native runtime could not find this session.', record: { target: { nativeSessionId: 'ask-native' } } });
+  expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
+  await act(async () => { fixture.current().restore(source, async () => {}); });
+  expect(fixture.requests.map(item => item.path)).toEqual(['/v1/remote/create', '/v1/remote/attach']);
+  fixture.failAttach();
+  await act(async () => { await fixture.current().open(undefined, source); });
+  expect(fixture.current().entryFor(source)).toMatchObject({ attached: true, error: undefined });
+  expect(fixture.requests.at(-1)).toEqual({ path: '/v1/remote/attach', body: { providerId: 'codex', nativeSessionId: 'ask-native' } });
+});
+
+it('retains the attached Ask when an attempted Clean fails to create its replacement', async () => {
+  const fixture = await setup();
+  fixture.failCreate('Creation outcome is unknown');
+  await act(async () => { await expect(fixture.current().open(state, source, '', true)).rejects.toThrow('Creation outcome is unknown'); });
+  expect(fixture.current().entryFor(source)).toMatchObject({ attached: true, record: { target: { nativeSessionId: 'ask-native' } } });
   expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
 });
 

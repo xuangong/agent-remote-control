@@ -1,9 +1,10 @@
 import { act, useState, type ComponentProps } from 'react';
+import { AgentReplica } from '@orchardworks/agent-remote-web';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { DraftStore } from '../draft-store.js';
-import { ForkStore } from '../session-forks.js';
+import { ForkStore, referenceForkContext } from '../session-forks.js';
 import { sessionKey } from '../session-tree.js';
 import type { AskEntry } from '../hooks/useAskConversations.js';
 import { SessionAsk } from './SessionAsk.js';
@@ -93,4 +94,53 @@ it('retires the previous restoration when the owning workspace or transport chan
   await act(async () => { switchTransport(); });
   expect(stop).toHaveBeenCalledTimes(2);
   expect(restore).toHaveBeenCalledTimes(3);
+});
+
+it.each(['restoring', 'failed'])('does not subscribe to a saved Ask while its attachment is %s and preserves the draft', async phase => {
+  const entry: AskEntry = { source, attached: false, restoring: phase === 'restoring',
+    error: phase === 'failed' ? 'The native runtime could not find this session.' : undefined };
+  const { ask, props } = fixture([entry]);
+  const record = ask.store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  ask.store.bind(record.id, { ...sibling, title: 'Ask' });
+  entry.record = ask.store.get(record.id);
+  ask.drafts.set(sessionKey(source), 'Keep this unsent question');
+  const replicaFor = vi.fn(props.replicaFor);
+  const connect = vi.fn();
+  const container = await render(<SessionAsk {...props} source={source} replicaFor={replicaFor} transport={{ ...props.transport, connect }} />);
+  expect(replicaFor).not.toHaveBeenCalled();
+  expect(connect).not.toHaveBeenCalled();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Ask draft"]')?.value).toBe('Keep this unsent question');
+  expect(container.textContent).not.toContain('Timeline synchronization');
+  expect(container.querySelector('[aria-label="Clean Ask"]')).not.toBeNull();
+  if (phase === 'failed') {
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('The native runtime could not find this session.');
+    await act(async () => { container.querySelector<HTMLButtonElement>('[role="alert"] button')!.click(); });
+    expect(props.onOpen).toHaveBeenCalledExactlyOnceWith();
+  }
+});
+
+it('mounts the ordinary Ask session only after attachment succeeds', async () => {
+  const entry: AskEntry = { source, attached: false, restoring: true };
+  const { ask, props } = fixture([entry]);
+  const record = ask.store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  ask.store.bind(record.id, { ...sibling, title: 'Ask' });
+  entry.record = ask.store.get(record.id);
+  ask.drafts.set(sessionKey(source), 'Continue this question');
+  const replica = new AgentReplica();
+  const replicaFor = vi.fn(() => replica);
+  const connect = vi.fn(() => ({ close: vi.fn(), send: vi.fn() }));
+  const transport = { ...props.transport, connect, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };
+  let attach!: () => void;
+  function Harness() {
+    const [, changed] = useState(0);
+    attach = () => { entry.attached = true; entry.restoring = false; changed(value => value + 1); };
+    return <SessionAsk {...props} source={source} replicaFor={replicaFor} transport={transport} />;
+  }
+  const container = await render(<Harness />);
+  expect(connect).not.toHaveBeenCalled();
+  await act(async () => { attach(); });
+  expect(replicaFor).toHaveBeenCalledWith(sibling.agentId);
+  expect(connect).toHaveBeenCalledOnce();
+  expect(container.querySelector('[aria-label="Ask draft"]')).toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')?.value).toBe('Continue this question');
 });

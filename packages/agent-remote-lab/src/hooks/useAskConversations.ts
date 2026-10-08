@@ -198,7 +198,11 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
         record = store.prepare(referenceForkContext(source), options, settings, key);
         update(key, { pending: record });
       }
-      const result = record.target ? await target.attach(source.providerId, record.target.nativeSessionId, preparation.signal)
+      const restoringCurrent = record.id === entry.record?.id;
+      const result = record.target ? await target.attach(source.providerId, record.target.nativeSessionId, preparation.signal).catch(error => {
+        if (restoringCurrent && !preparation.signal.aborted) update(key, { attached: false });
+        throw error;
+      })
         : await target.create(source.providerId, record.id, record.options);
       store.bind(record.id, { agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? record.target?.nativeSessionId ?? result.agentId,
         providerId: source.providerId, hostId: source.hostId ?? 'local', title: 'Ask', createdAt: record.capturedAt });

@@ -5,6 +5,7 @@ import { useFeedbackToast, useToastAnchor } from './Toast.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
 import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -17,6 +18,7 @@ import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineR
 
 import { PlanningControl } from './PlanningControl.js';
 import { SessionViewOptions, type SessionDisplayPreferences } from './SessionViewOptions.js';
+import { SessionHeading } from './SessionHeading.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 import { useRecoveryNotice } from '../hooks/useRecoveryNotice.js';
@@ -26,7 +28,7 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'preview', sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { displayPreferences?: SessionDisplayPreferences; onDisplayPreferencesChange?(preferences: SessionDisplayPreferences): void; defaultDisplayMode?: TimelineDisplayMode; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; headingStart?: ReactNode; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'preview', sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { displayPreferences?: SessionDisplayPreferences; onDisplayPreferencesChange?(preferences: SessionDisplayPreferences): void; defaultDisplayMode?: TimelineDisplayMode; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; headingStart?: ReactNode; headingMode?: 'inline' | 'toolbar'; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const displayScope = draftSessionKey ?? state?.agent?.runtimeInfo.sessionId ?? attachingAgentId;
   const [localDisplay, setLocalDisplay] = useState(() => ({ scope: displayScope, value: { mode: defaultDisplayMode, lettersVisible: true } }));
   let localPreferences = localDisplay.value;
@@ -69,6 +71,7 @@ export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChang
   const readingPositions = suppliedReadingPositions ?? localPositions;
   const [composerHidden, setComposerHidden] = useState(false);
   const composerId = useId();
+  const [timelineToolsTarget, setTimelineToolsTarget] = useState<HTMLDivElement | null>(null);
   const toastAnchor = useToastAnchor(visible && !!state?.agent && !composerHidden);
   const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent);
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
@@ -122,24 +125,23 @@ export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChang
     : activity === 'waiting' ? 'Waiting for response'
     : activity === 'running' ? 'Working'
     : 'Ready';
-  return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}><SessionViewFrame className={selectedCommand ? 'lab-command-details-open' : undefined}>
-    <header className="lab-workbench-heading">
-      <div>
-        {headingStart}
+  const viewOptions = <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />;
+  const tools = <>{sessionManager}{workspaceLink}{viewOptions}</>;
+  const layoutClass = [selectedCommand ? 'lab-command-details-open' : '', headingMode === 'toolbar' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
+  return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}><SessionViewFrame className={layoutClass}>
+    <SessionHeading hidden={headingMode === 'toolbar'}
+      leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}</> : undefined}
+      trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
         {conversationPath}
         <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
-      </div>
-      {sessionManager}
-      {workspaceLink}
-      <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />
-      <span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span>
-    </header>
+    </SessionHeading>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
-    <WorkbenchTimeline nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
+    <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       agentFailure={failureInTimeline ? undefined : agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
       questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} />
+    {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(tools, timelineToolsTarget) : null}
     <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover} data-collapsed={composerHidden || undefined}>
       <div hidden={composerHidden}>
         {composerContext}
@@ -229,8 +231,8 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
-  questionDrafts, onQuestionDraftChange }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
-    readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; agentFailure?: string;
+  questionDrafts, onQuestionDraftChange, toolsTargetRef }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
+    readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; agentFailure?: string;
     connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
   const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
@@ -263,11 +265,14 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
         event.preventDefault(); event.stopPropagation(); setOpenSearchScope(searchScope);
       }
     }}>
+      <div className="lab-timeline-tools" role="toolbar" aria-label="Session actions">
+      <div className="lab-timeline-session-tools" ref={toolsTargetRef} />
       {state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
         hidden={searchOpen} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
         onClick={() => setOpenSearchScope(searchScope)}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
       </button> : null}
+      </div>
       {searchOpen && state ? <TimelineSearch key={searchScope} state={state} search={actions.searchTimeline} onClose={closeSearch} onClearSelection={() => setSearchSelection(undefined)}
         onSelect={async (match, signal) => {
           if (actions.loadSearchMatch) await scroll.loadOlder(() => actions.loadSearchMatch!(match, { signal }));

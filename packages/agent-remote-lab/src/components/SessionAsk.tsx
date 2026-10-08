@@ -30,7 +30,7 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
     <AskButton triggerRef={trigger} storageScope={JSON.stringify([storageScope, key])} hidden={expanded} disabled={!available || (!state?.agent && !entry.record?.target)}
       observation={entry.record?.target ? observations[sessionKey(entry.record.target)] : undefined} onOpen={() => onOpen()} />
     {expanded ? <AskConversation entry={entry} store={ask.store} storageScope={JSON.stringify([storageScope, key])}
-      transport={transport} replica={entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}
+      transport={transport} replica={entry.attached && entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}
       triggerRef={trigger} navigation={navigation} onSendInput={(id, send) => ask.sendInput(key, id, send)}
       draftBinding={{ store: ask.drafts, key }} onClose={() => ask.close(source)} onToggleEnabled={() => ask.toggle(source)}
       onClean={() => onOpen(true)} onRetry={() => onOpen()} /> : null}

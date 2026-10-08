@@ -69,6 +69,33 @@ async function revealHiddenLetterFromSearch(page: Page) {
   await view.click();
 }
 
+for (const engine of [chromium, webkit]) it(`keeps child navigation at the content-only tail on mobile ${engine.name()}`, async () => {
+  const browser = await engine.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true });
+    page.setDefaultTimeout(8000);
+    await page.goto(url);
+    await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
+    const primary = page.locator('.lab-primary-conversation');
+    const view = primary.getByRole('button', { name: 'Session view options', exact: true });
+    await view.click();
+    await primary.getByRole('radio', { name: 'Content only', exact: true }).check();
+    await view.click();
+    await browserExpect(primary.locator('.lab-workbench-heading')).toBeHidden();
+    const children = primary.locator('details[aria-label="Session subagents"]');
+    await browserExpect(children).toHaveCount(1);
+    await browserExpect(children).not.toHaveAttribute('open');
+    await children.locator('summary').click();
+    await browserExpect(children).toHaveAttribute('open', '');
+    const child = children.locator('[data-child-session-id="child"]');
+    await browserExpect(child).toBeVisible();
+    await page.screenshot({ path: `/tmp/arc-content-subagents-${engine.name()}-mobile.png` });
+    await child.click();
+    await browserExpect(page).toHaveURL(/[?&]session=child(?:&|$)/);
+    await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
+  } finally { await browser.close(); }
+}, 30000);
+
 for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(`keeps the letter title visible while toggling Details without navigation on ${mobile ? 'mobile' : 'desktop'} ${engine.name()}`, async () => {
   const browser = await engine.launch({ headless: true });
   try {
@@ -159,7 +186,7 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
       const panel = (await primary.getByRole('region', { name: 'Session view options', exact: true }).boundingBox())!;
       expect(panel.x).toBeGreaterThanOrEqual(0);
       expect(panel.x + panel.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-      const heading = (await primary.locator('.lab-workbench-heading').boundingBox())!;
+      const heading = (await primary.locator(mobile ? '.lab-timeline-tools' : '.lab-workbench-heading').boundingBox())!;
       expect(heading.x).toBeGreaterThanOrEqual(0);
       expect(heading.x + heading.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     };
@@ -219,8 +246,8 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
       for (const width of [320, 402]) {
         await page.setViewportSize({ width, height: 874 });
         await expectFits();
-        const title = primary.locator('.lab-primary-title');
-        expect((await title.boundingBox())!.width).toBeGreaterThanOrEqual(90);
+        const title = page.locator('.lab-mobile-session-title');
+        expect((await title.boundingBox())!.width).toBeGreaterThanOrEqual(60);
         await page.screenshot({ path: `/tmp/arc-session-heading-${width}-${engine.name()}.png` });
         await view.click();
         const more = primary.getByRole('button', { name: 'More session actions', exact: true });

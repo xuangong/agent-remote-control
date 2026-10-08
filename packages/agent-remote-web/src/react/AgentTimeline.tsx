@@ -164,7 +164,7 @@ export function AgentTimeline({
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
     </div>
 
-    {!contentOnly ? <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} /> : null}
+    <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
 
     {state.pendingInteractions.length > 0 ? <aside className="agent-interactions" aria-label="Pending interactions">
       {state.pendingInteractions.map((request) => <fieldset

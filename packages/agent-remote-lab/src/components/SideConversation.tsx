@@ -14,9 +14,10 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, onRenameTitle }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, headingMode, onRenameTitle }: {
   navigation?: SessionViewNavigationFactory;
   headingStart?: ReactNode;
+  headingMode?: 'inline' | 'toolbar';
   onRenameTitle?(): void;
   renderAsk?(source: OpenedSession, state: AgentReplicaState | undefined): ReactNode;
   replica?: AgentReplica;
@@ -45,6 +46,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       headingStart={headingStart}
+      headingMode={headingMode}
       conversationPath={<span className="lab-side-title" title={title}>{standalone ? null : <span className="lab-window-number">{position + 1}</span>}<SessionTitle as="span" className="lab-side-title-text" title={title} status={activity} onRename={onRenameTitle} /></span>}
       sessionManager={<><SessionLink session={session} />{standalone ? null : <button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>
         <svg className="lab-side-back-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>

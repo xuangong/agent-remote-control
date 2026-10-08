@@ -1465,12 +1465,23 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 :is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-copy { min-width: 0; }
 :is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-dismiss { min-width: 28px; }
 
-.lab-timeline-tools { position: absolute; z-index: 7; top: 8px; right: 12px; display: flex; align-items: center; gap: 4px; }
-.lab-timeline-tools:empty { display: none; }
+.lab-timeline-tools { position: absolute; z-index: 7; top: 8px; right: 12px; display: flex; align-items: stretch; max-width: calc(100% - 12px); pointer-events: none; }
+.lab-timeline-tools-content { display: flex; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
 .lab-timeline-session-tools { display: contents; }
 .lab-timeline-session-tools > * { background: var(--obs-surface); border-radius: 8px; }
-.lab-timeline-tools:has(.lab-timeline-session-tools:not(:empty)) { padding: 2px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); }
+.lab-timeline-tools-content:has(.lab-timeline-session-tools:not(:empty)) { padding: 2px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); }
 .lab-timeline-tools:has(.lab-timeline-session-tools:not(:empty)) .lab-timeline-search-trigger { border-color: transparent; }
+.lab-timeline-tools[data-collapsible] { right: max(0px, env(safe-area-inset-right)); transform: translateX(-12px); transition: transform 180ms cubic-bezier(.22, 1, .36, 1); }
+.lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content { border-right: 0; border-radius: 10px 0 0 10px; transition: opacity 140ms ease-out, transform 180ms cubic-bezier(.22, 1, .36, 1), visibility 0s; }
+.lab-timeline-tools-toggle { position: relative; display: grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 1px solid var(--obs-border); border-left: 0; border-radius: 0 10px 10px 0; color: var(--obs-text-secondary); background: var(--obs-surface); pointer-events: auto; }
+.lab-timeline-tools-toggle > svg { position: relative; }
+.lab-timeline-tools-toggle:is(:hover, :focus-visible) { color: var(--obs-action); }
+.lab-timeline-tools[data-collapsed] { transform: none; }
+.lab-timeline-tools[data-collapsed] > .lab-timeline-tools-content { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(20px); transition: opacity 140ms ease-out, transform 180ms cubic-bezier(.22, 1, .36, 1), visibility 0s 180ms; }
+.lab-timeline-tools[data-collapsed] > .lab-timeline-tools-toggle { background: transparent; border-color: transparent; }
+.lab-timeline-tools[data-collapsed] > .lab-timeline-tools-toggle::before { content: ''; position: absolute; inset: 0 -1px 0 13px; border: 1px solid var(--obs-border); border-radius: 12px 0 0 12px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); }
+.lab-timeline-tools[data-collapsed] > .lab-timeline-tools-toggle > svg { transform: translateX(7px); }
+@media (prefers-reduced-motion: reduce) { .lab-timeline-tools[data-collapsible], .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content { transition: none; } }
 .lab-timeline-search-trigger { display: inline-grid; place-items: center; width: 34px; min-height: 34px; padding: 0; color: var(--obs-text-secondary); background: var(--obs-surface); border: 1px solid var(--obs-border); border-radius: 8px; }
 .lab-timeline-search-trigger[hidden] { display: none; }
 .lab-timeline-stage > .agent-session-search { position: absolute; z-index: 7; top: 6px; right: 6px; width: min(440px, calc(100% - 12px)); max-height: min(50%, 360px); overflow: auto; }

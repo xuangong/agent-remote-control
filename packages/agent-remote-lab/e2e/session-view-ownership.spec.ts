@@ -445,3 +445,110 @@ test('mobile navigation keeps one title and session tools beside search with glo
   }
   await page.screenshot({ path: testInfo.outputPath('mobile-ask-centered.png') });
 });
+
+test('mobile session actions collapse to the edge without moving the reading position', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Uses the mobile Session View toolbar.');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/');
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const primary = page.locator('.lab-primary-conversation');
+  const view = sourceView(primary);
+  const input = view.getByTestId('prompt-input');
+  await expect(input).toBeEnabled();
+  const message = Array.from({ length: 24 }, (_, index) => `Reading line ${index + 1}: keep this conversation in place when hiding its actions.`).join('\n');
+  await send(view, message);
+  await expect(view.locator('.agent-message-assistant').last()).toContainText('Reading line 24');
+  await input.fill('Keep this unsent draft');
+  const timeline = view.getByTestId('timeline');
+  const tools = view.getByRole('toolbar', { name: 'Session actions', exact: true });
+  const collapse = tools.getByRole('button', { name: 'Collapse session actions', exact: true });
+  const expand = tools.getByRole('button', { name: 'Expand session actions', exact: true });
+  const controls = [
+    view.getByRole('button', { name: 'Session view options', exact: true }),
+    view.getByRole('button', { name: 'Search this session', exact: true }),
+    view.getByRole('button', { name: 'More session actions', exact: true }),
+  ] as const;
+  for (const width of [320, 402]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(collapse).toBeVisible();
+    await expect(expand).toBeHidden();
+    for (const control of controls) await expect(control).toBeVisible();
+    await timeline.focus();
+    await timeline.evaluate(element => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -180, bubbles: true }));
+      element.scrollTop = -180;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await expect.poll(() => timeline.evaluate(element => element.scrollTop)).toBe(-180);
+    const readingTop = await timeline.evaluate(element => element.scrollTop);
+    const viewport = (await timeline.boundingBox())!;
+    const originalTools = await Promise.all(controls.map(async control => ({ element: (await control.elementHandle())!, box: (await control.boundingBox())! })));
+    await collapse.click();
+    await expect(expand).toBeVisible();
+    for (const control of controls) await expect(control).toBeHidden();
+    for (const { element, box } of originalTools) {
+      expect(await element.evaluate((node, point) => {
+        const target = document.elementFromPoint(point.x, point.y);
+        (node as HTMLElement).focus();
+        return { focused: document.activeElement === node, clickable: target !== null && node.contains(target) };
+      }, { x: box.x + box.width / 2, y: box.y + box.height / 2 })).toEqual({ focused: false, clickable: false });
+    }
+    await expand.focus();
+    await expand.press('Tab');
+    for (const { element } of originalTools) expect(await element.evaluate(node => document.activeElement === node)).toBe(false);
+    await expectContained(expand, primary);
+    await expect.poll(async () => {
+      const owner = (await primary.boundingBox())!, button = (await expand.boundingBox())!;
+      return owner.x + owner.width - button.x - button.width;
+    }, { message: 'Collapsed actions stay against the right edge of their Session View' }).toBeLessThanOrEqual(12);
+    expect(await timeline.boundingBox()).toEqual(viewport);
+    await expect.poll(() => timeline.evaluate(element => element.scrollTop)).toBe(readingTop);
+    await expect(input).toHaveValue('Keep this unsent draft');
+    expect(await page.evaluate(() => ({ left: scrollX, width: document.documentElement.scrollWidth }))).toEqual({ left: 0, width });
+    await page.screenshot({ path: testInfo.outputPath(`mobile-session-actions-collapsed-${width}.png`) });
+    await expand.click();
+    await expect(collapse).toBeVisible();
+    for (const control of controls) await expect(control).toBeVisible();
+    expect(await timeline.boundingBox()).toEqual(viewport);
+    await expect.poll(() => timeline.evaluate(element => element.scrollTop)).toBe(readingTop);
+    await expectDisplay(view, 'Preview', true);
+    await controls[1].click();
+    await expect(view.getByRole('searchbox')).toBeVisible();
+    await view.getByRole('searchbox').press('Escape');
+    await controls[2].click();
+    await expect(view.getByRole('button', { name: 'Share session link', exact: true })).toBeVisible();
+    await controls[2].press('Escape');
+    await collapse.click();
+    await expect(expand).toBeVisible();
+    await timeline.focus();
+    await timeline.press('Control+f');
+    await expect(view.getByRole('searchbox')).toBeVisible();
+    await expect(collapse).toBeVisible();
+    await view.getByRole('searchbox').press('Escape');
+    await expect(controls[1]).toBeVisible();
+    await expect(controls[1]).toBeFocused();
+    await expect(input).toHaveValue('Keep this unsent draft');
+    expect(await page.evaluate(() => ({ left: scrollX, width: document.documentElement.scrollWidth }))).toEqual({ left: 0, width });
+    await page.screenshot({ path: testInfo.outputPath(`mobile-session-actions-expanded-${width}.png`) });
+    for (const { element } of originalTools) await element.dispose();
+  }
+});
+
+test('desktop standalone search does not gain the mobile action toggle', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Uses the desktop inline Session View heading.');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const view = sourceView(page.locator('.lab-primary-conversation'));
+  await expect(view.getByTestId('prompt-input')).toBeEnabled();
+  await expect(view.getByRole('button', { name: 'Collapse session actions', exact: true })).toHaveCount(0);
+  await expect(view.getByRole('button', { name: 'Expand session actions', exact: true })).toHaveCount(0);
+  const search = view.getByRole('button', { name: 'Search this session', exact: true });
+  await expect(search).toBeVisible();
+  await search.click();
+  await expect(view.getByRole('searchbox')).toBeVisible();
+  await view.getByRole('searchbox').press('Escape');
+  await expect(search).toBeVisible();
+});

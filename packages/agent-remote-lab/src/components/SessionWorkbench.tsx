@@ -19,6 +19,7 @@ import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineR
 import { PlanningControl } from './PlanningControl.js';
 import { SessionViewOptions, type SessionDisplayPreferences } from './SessionViewOptions.js';
 import { SessionHeading } from './SessionHeading.js';
+import { SessionTimelineTools } from './SessionTimelineTools.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 import { useRecoveryNotice } from '../hooks/useRecoveryNotice.js';
@@ -136,7 +137,7 @@ export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChang
         <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
     </SessionHeading>
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
-    <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
+    <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       agentFailure={failureInTimeline ? undefined : agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
@@ -231,15 +232,15 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
-  questionDrafts, onQuestionDraftChange, toolsTargetRef }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
-    readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; agentFailure?: string;
+  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
+    readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; toolsCollapsible: boolean; toolsScope?: string; agentFailure?: string;
     connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
   const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
   const [openSearchScope, setOpenSearchScope] = useState<string>();
   const [searchSelection, setSearchSelection] = useState<{ scope: string; key: string; request: number }>();
   const searchTrigger = useRef<HTMLButtonElement>(null);
-  const searchOpen = visible && !!state?.timeline.initialized && openSearchScope === searchScope;
+  const searchOpen = !!visible && !!state?.timeline.initialized && openSearchScope === searchScope;
   const selectedSearchKey = searchSelection?.scope === searchScope ? searchSelection.key : undefined;
   function closeSearch() { setOpenSearchScope(undefined); setSearchSelection(undefined); requestAnimationFrame(() => searchTrigger.current?.focus()); }
   const display = useContext(TimelineDisplay);
@@ -265,14 +266,14 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
         event.preventDefault(); event.stopPropagation(); setOpenSearchScope(searchScope);
       }
     }}>
-      <div className="lab-timeline-tools" role="toolbar" aria-label="Session actions">
+      <SessionTimelineTools key={toolsScope} collapsible={toolsCollapsible} searchOpen={searchOpen}>
       <div className="lab-timeline-session-tools" ref={toolsTargetRef} />
       {state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
         hidden={searchOpen} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
         onClick={() => setOpenSearchScope(searchScope)}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
       </button> : null}
-      </div>
+      </SessionTimelineTools>
       {searchOpen && state ? <TimelineSearch key={searchScope} state={state} search={actions.searchTimeline} onClose={closeSearch} onClearSelection={() => setSearchSelection(undefined)}
         onSelect={async (match, signal) => {
           if (actions.loadSearchMatch) await scroll.loadOlder(() => actions.loadSearchMatch!(match, { signal }));

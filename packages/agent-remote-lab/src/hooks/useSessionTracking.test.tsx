@@ -317,7 +317,7 @@ it('renames only the matching tracked identity without restarting observation', 
   const unrelated = { ...star, nativeSessionId: 'other' };
   await act(async () => { tracking.toggle(star); tracking.toggle(unrelated); });
   expect(start).toHaveBeenCalledTimes(2);
-  await act(async () => tracking.rename({ ...star, title: 'Renamed', revision: 1 }));
+  await act(async () => tracking.rename({ ...star, title: 'Renamed' }));
   expect(tracking.sessions).toEqual([{ ...star, title: 'Renamed' }, unrelated]);
   expect(readTrackedSessions('alice')).toEqual(tracking.sessions);
   expect(start).toHaveBeenCalledTimes(2); expect(stop).not.toHaveBeenCalled();

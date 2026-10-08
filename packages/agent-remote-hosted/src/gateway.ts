@@ -1,6 +1,7 @@
 import { createDiagnosticJournal } from './diagnostic-journal.js';
 import type { RelayDiagnosticStore, RelayDiagnosticContext } from './relay-diagnostics.js';
 import { createFavorites } from './favorites.js';
+import { createSessionTitles, pruneSessionTitles } from './session-titles.js';
 import { createSessionMigrations } from './session-migrations.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
@@ -67,6 +68,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   };
   const stars = createSessionStars(state, starAccess);
   const favorites = createFavorites(state, starAccess);
+  const sessionTitles = createSessionTitles(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
   const migrations = createSessionMigrations(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
   function publishMigrations(socket: RelaySocket, channel: { subject: string; migrations?: Set<string> }) {
     if (!channel.migrations || socket.readyState !== 1) return;
@@ -82,12 +84,19 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (!channel.titles || socket.readyState !== 1) return;
     const snapshot = favorites.list(channel.subject);
     const keys = new Set<string>();
+    const titles = new Map(sessionTitles.list(channel.subject).map(session => [JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]), session]));
     for (const star of snapshot.stars) {
-      if (!star.available) continue;
-      const { hostId, providerId, nativeSessionId, title } = star;
+      const key = JSON.stringify([star.hostId, star.providerId, star.nativeSessionId]);
+      if (star.available && !titles.has(key)) {
+        const { hostId, providerId, nativeSessionId, title } = star;
+        titles.set(key, { hostId, providerId, nativeSessionId, title, revision: snapshot.revision });
+      }
+    }
+    for (const session of titles.values()) {
+      const { hostId, providerId, nativeSessionId, title } = session;
       const key = JSON.stringify([hostId, providerId, nativeSessionId]); keys.add(key);
       if (channel.titles.get(key) === title) continue;
-      const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_title_updated', session: { hostId, providerId, nativeSessionId, title, revision: snapshot.revision } });
+      const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_title_updated', session });
       if (encoded.status !== 'ok') continue;
       if ((socket.bufferedAmount ?? 0) + encoded.json.length * 3 > 16 * 1024 * 1024) { socket.close(1013, 'Title update backlog'); return; }
       try { socket.send(encoded.json); channel.titles.set(key, title); } catch { socket.close(1011, 'Title update delivery failed'); return; }
@@ -199,6 +208,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
           const previous = draft.tenants.find(value => value.namespace === grant.namespace);
           if (previous) previous.broker = broker;
           else draft.tenants.push({ subject: grant.subject, namespace: grant.namespace, broker });
+          pruneSessionTitles(draft);
         }); await scheduling; },
         onPairing(_key, expiresAt) { const owned = tenants.get(grant.namespace); if (owned) owned.expiresAt = Math.max(owned.expiresAt, expiresAt); },
       });
@@ -541,12 +551,11 @@ export function createHostedRelay(options: HostedRelayOptions) {
         const input = await readJson(relative.clone());
         if (typeof input?.providerId !== 'string' || typeof input.nativeSessionId !== 'string') return json(400, { error: 'A native session identity is required.' });
         const identity = { hostId: decodeURIComponent(renameRoute[1]!), providerId: input.providerId, nativeSessionId: input.nativeSessionId };
-        if (!favorites.list(grant.subject).stars.some(star => star.hostId === identity.hostId && star.providerId === identity.providerId && star.nativeSessionId === identity.nativeSessionId && star.available)) return json(403, { error: 'Choose an accessible favorite session to rename.' });
         return withHostKey('session-name:' + JSON.stringify(identity), async () => {
           const response = await destination.broker.handleRequest(relative, context(request, grant));
           if (response?.ok) {
             const result = await response.clone().json() as { title: string };
-            await favorites.renameSession(identity, result.title);
+            await sessionTitles.record(identity, result.title);
           }
           return response;
         });

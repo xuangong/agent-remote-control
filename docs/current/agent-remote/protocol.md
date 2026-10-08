@@ -189,10 +189,11 @@ version 1.5.0 requires matching browser and Host releases; the Remote Host uplin
 envelope remains version 2. This feature branch has not been deployed.
 
 
-## Native session names from Favorites
+## Native session names
 
-Favorites exposes **Rename session…** in a saved session's action menu. This is a
-native metadata mutation, not a favorite-only alias. The initial provider is Codex:
+Favorites exposes **Rename session…** in a saved session's action menu; the main
+Session View title opens the same action on double-click, including unsaved sessions.
+This is a native metadata mutation, not a favorite-only alias. The initial provider is Codex:
 `thread/name/set { threadId, name }` followed by metadata-only `thread/read` confirms
 the persisted name. It does not resume, fork, or load conversation history. Native
 session IDs, favorite IDs, folders, order, and tracking identities remain unchanged.
@@ -200,10 +201,10 @@ session IDs, favorite IDs, folders, order, and tracking identities remain unchan
 A Host advertises optional `sessionRename: true` on its provider registration.
 The menu is hidden without that capability and disabled while the Host is offline.
 The hosted endpoint `POST /v1/remote/hosts/:hostId/session/rename` accepts
-`{ providerId, nativeSessionId, title, operationId }`. It requires an accessible
-favorite, existing Host/session authorization, and the Host's native workspace
-policy. Names are trimmed, limited to 512 characters, and cannot contain control
-characters. The Host deduplicates retries by operation ID and intent. An uncertain
+`{ providerId, nativeSessionId, title, operationId }`. It requires existing
+Host/session authorization and the Host's native workspace policy; a favorite is
+not required and is not created by renaming. Names are trimmed, limited to 512
+characters, and cannot contain control characters. The Host deduplicates retries by operation ID and intent. An uncertain
 outcome is reconciled by reading the native title; it never blindly resends the
 write while that intent is retained. Retrying a completed operation reads current
 metadata instead of restoring an older cached name. The operation cache retains
@@ -216,13 +217,17 @@ Transport coverage verifies the rename response and subsequent heartbeat on the
 same Host connection.
 
 Only after native confirmation does the hosted service update matching favorites
-by `(hostId, providerId, nativeSessionId)`, including other accounts' saved copies.
+by `(hostId, providerId, nativeSessionId)`, including other accounts' saved copies
+that still have access. It also records the confirmed title independently of
+favorites, retaining at most 16,384 recently changed identities. These titles and
+the revision watermark survive Relay restarts; Host removal clears its titles.
 Session-channel clients opt into title notifications with `titles=1`. The optional
 `session_title_updated` frame carries `session: { hostId, providerId,
-nativeSessionId, title, revision }`; revision is the recipient's Favorites revision.
-Accessible saved titles replay on reconnect, and subsequent unchanged titles are
-suppressed. Clients discard duplicate or older revisions per session across their
-content/activity channels. Favorites, open windows, and local Track labels update
+nativeSessionId, title, revision }`. Confirmed titles use a persisted monotonic
+revision above existing Favorites revisions; legacy favorite-only titles retain
+the recipient's Favorites revision. Accessible retained titles replay on reconnect,
+and subsequent unchanged titles are suppressed. Clients discard duplicate or older
+revisions per session across their content/activity channels. Favorites, open windows, and local Track labels update
 without replacing the session or restarting its observation. Older clients do not
 opt in and receive no new frame type. Deploy the server before upgraded Controllers;
 the UI requires the new Controller capability before exposing the action.

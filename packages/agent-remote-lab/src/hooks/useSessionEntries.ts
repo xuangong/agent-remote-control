@@ -3,7 +3,7 @@ import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 
-export function useSessionEntries(opened: readonly OpenedSession[], state?: AgentReplicaState): SessionEntry[] {
+export function useSessionEntries(opened: readonly OpenedSession[], state?: AgentReplicaState, confirmedTitles?: ReadonlyMap<string, string>): SessionEntry[] {
   const [observed, setObserved] = useState<{ entries: SessionEntry[]; childTitles: Map<string, string> }>(() => ({ entries: [], childTitles: new Map() }));
   const agent = state?.agent;
   const activity = state?.agent?.status;
@@ -25,9 +25,16 @@ export function useSessionEntries(opened: readonly OpenedSession[], state?: Agen
         childTitles.set(sessionKey(entry), child.title);
       }
     }
+    // Explicit native renames take precedence over older child metadata in snapshots.
+    for (const [key, title] of confirmedTitles ?? []) {
+      const entry = items.get(key);
+      if (!entry) continue;
+      items.set(key, { ...entry, title });
+      if (childTitles.has(key)) childTitles.set(key, title);
+    }
     return { entries: [...items.values()], childTitles };
-  }, [observed, opened, agent, activity]);
+  }, [observed, opened, agent, activity, confirmedTitles]);
   // Cache relationships independently of the active chat subscription and opened views.
-  useEffect(() => { setObserved(merged); }, [opened, agent, activity]);
+  useEffect(() => { setObserved(merged); }, [opened, agent, activity, confirmedTitles]);
   return merged.entries;
 }

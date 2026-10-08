@@ -1,9 +1,9 @@
 import { createHmac } from 'node:crypto';
 import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
 
-type RecordKind = 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
+type RecordKind = 'sessionTitle' | 'sessionTitleRevision' | 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
 type StoredRecord = { kind: RecordKind; owner: string; key: string; version: number; value: string };
-const recordTable = (kind: RecordKind) => kind === 'favoritesTree' ? 'relay_favorites_trees' : kind === 'sessionMigration' ? 'relay_session_migrations' : kind === 'sessionStar' ? 'relay_session_stars' : kind === 'preview' ? 'relay_previews' : kind === 'securityEvent' ? 'relay_security_events' : 'relay_records';
+const recordTable = (kind: RecordKind) => kind === 'sessionTitle' || kind === 'sessionTitleRevision' ? 'relay_session_titles' : kind === 'favoritesTree' ? 'relay_favorites_trees' : kind === 'sessionMigration' ? 'relay_session_migrations' : kind === 'sessionStar' ? 'relay_session_stars' : kind === 'preview' ? 'relay_previews' : kind === 'securityEvent' ? 'relay_security_events' : 'relay_records';
 const recordId = (record: Pick<StoredRecord, 'kind' | 'owner' | 'key'>) => JSON.stringify([record.kind, record.owner, record.key]);
 
 /** Each independently bounded domain record occupies its own versioned SQL row. */
@@ -26,17 +26,18 @@ export class SqliteRelayStore implements RelayStateStore {
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_session_stars (kind TEXT NOT NULL CHECK (kind = 'sessionStar'), owner TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 1), value TEXT NOT NULL CHECK (json_valid(value)), PRIMARY KEY (kind, owner, key))`);
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_session_migrations (kind TEXT NOT NULL CHECK (kind = 'sessionMigration'), owner TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 1), value TEXT NOT NULL CHECK (json_valid(value)), PRIMARY KEY (kind, owner, key))`);
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_favorites_trees (kind TEXT NOT NULL CHECK (kind = 'favoritesTree'), owner TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 1), value TEXT NOT NULL CHECK (json_valid(value)), PRIMARY KEY (kind, owner, key))`);
+      storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_session_titles (kind TEXT NOT NULL CHECK (kind IN ('sessionTitle', 'sessionTitleRevision')), owner TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 1), value TEXT NOT NULL CHECK (json_valid(value)), PRIMARY KEY (kind, owner, key))`);
       const metadata = storage.sql.exec('SELECT * FROM relay_metadata WHERE id = 1').toArray()[0];
       if (metadata) {
         if (metadata.version !== 2 || metadata.origin !== auth.origin || metadata.issuer !== auth.issuer || metadata.fingerprint !== fingerprint) {
           throw new Error('Relay configuration does not match persisted state.');
         }
       } else {
-        if (storage.sql.exec('SELECT key FROM relay_favorites_trees LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_session_migrations LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_session_stars LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_records LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_security_events LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_previews LIMIT 1').toArray().length) throw new Error('Relay metadata is missing.');
+        if (storage.sql.exec('SELECT key FROM relay_session_titles LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_favorites_trees LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_session_migrations LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_session_stars LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_records LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_security_events LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_previews LIMIT 1').toArray().length) throw new Error('Relay metadata is missing.');
         storage.sql.exec('INSERT INTO relay_metadata (id, version, origin, issuer, fingerprint) VALUES (1, 2, ?, ?, ?)', auth.origin, auth.issuer, fingerprint);
       }
     });
-    const rows = [...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_favorites_trees').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_session_migrations').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_session_stars').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_records').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_security_events').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_previews').toArray()];
+    const rows = [...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_session_titles').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_favorites_trees').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_session_migrations').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_session_stars').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_records').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_security_events').toArray(), ...storage.sql.exec<StoredRecord>('SELECT kind, owner, key, version, value FROM relay_previews').toArray()];
     this.records = new Map(rows.map(row => [recordId(row), row]));
     this.initial = validateRelayState(decode(rows, auth), auth);
   }
@@ -63,6 +64,8 @@ function encode(state: HostedRelayState) {
   function add(kind: RecordKind, owner: string, key: string, value: unknown) {
     const row = { kind, owner, key, version: 1, value: JSON.stringify(value) }; records.set(recordId(row), row);
   }
+  if (state.sessionTitleRevision !== undefined) add('sessionTitleRevision', '', 'revision', state.sessionTitleRevision);
+  for (const session of state.sessionTitles ?? []) add('sessionTitle', '', JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]), session);
   for (const item of state.sessionMigrations ?? []) add('sessionMigration', item.subject, item.id, item);
   for (const tree of state.favoritesTrees ?? []) add('favoritesTree', tree.subject, 'tree', tree);
   for (const star of state.sessionStars ?? []) add('sessionStar', star.subject, JSON.stringify([star.hostId, star.providerId, star.nativeSessionId]), star);
@@ -97,6 +100,8 @@ function decode(rows: StoredRecord[], auth: GatewayAuthOptions): HostedRelayStat
     if (row.owner && !broker && row.kind !== 'sessionStar' && row.kind !== 'sessionMigration' && row.kind !== 'favoritesTree') throw new Error('Relay record owner is missing.');
     switch (row.kind) {
       case 'tenant': break;
+      case 'sessionTitleRevision': state.sessionTitleRevision = value; break;
+      case 'sessionTitle': (state.sessionTitles ??= []).push(value); break;
       case 'sessionMigration': (state.sessionMigrations ??= []).push(value); break;
       case 'favoritesTree': (state.favoritesTrees ??= []).push(value); break;
       case 'sessionStar': (state.sessionStars ??= []).push(value); break;

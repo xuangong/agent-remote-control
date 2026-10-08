@@ -2,7 +2,7 @@
   position: relative; isolation: isolate; width: 100%; height: 100%; min-width: 0; min-height: 0;
 }
 .lab-ask-floating {
-  position: absolute; right: 0; top: clamp(64px, 28%, 160px); z-index: 39;
+  position: absolute; right: 0; top: var(--ask-dock-top, clamp(64px, 28%, 160px)); z-index: 39;
   transform: translateX(var(--ask-dock-offset, 0px));
 }
 .lab-ask-floating[data-settling="true"] { transition: transform 240ms cubic-bezier(.2, .8, .2, 1); }

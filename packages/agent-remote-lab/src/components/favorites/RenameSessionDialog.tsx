@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SessionStars } from '../../hooks/useSessionStars.js';
-import type { VisibleSessionStar } from '../../session-stars-client.js';
+import type { StarInput } from '../../session-stars-client.js';
 import { SessionDirectoryClient } from '../../directory-client.js';
 
-export function RenameSessionDialog({ favorites, session, onClose }: { favorites: SessionStars; session: VisibleSessionStar; onClose(): void }) {
+export function RenameSessionDialog({ favorites, session, onClose, onRenamed }: { favorites: SessionStars; session: StarInput; onClose(): void; onRenamed?(session: StarInput): void }) {
   const providerName = session.providerId === 'codex' ? 'Codex' : session.providerId === 'copilot' ? 'GitHub Copilot' : session.providerId === 'claude' ? 'Claude Code' : session.providerId === 'opencode' ? 'OpenCode' : session.providerId;
   const dialog = useRef<HTMLDialogElement>(null), label = useId();
   const [title, setTitle] = useState(session.title), [saving, setSaving] = useState(false), [error, setError] = useState<string>();
@@ -24,7 +24,8 @@ export function RenameSessionDialog({ favorites, session, onClose }: { favorites
     inFlight.current = true; setSaving(true); setError(undefined);
     try {
       const directory = new SessionDirectoryClient(favorites.scope, undefined, session.hostId);
-      await directory.rename(session.providerId, session.nativeSessionId, name, intent.current.operationId);
+      const result = await directory.rename(session.providerId, session.nativeSessionId, name, intent.current.operationId);
+      if (mounted.current) onRenamed?.({ ...session, title: result.title });
       await favorites.refresh();
       if (mounted.current) onClose();
     } catch (error) {

@@ -21,6 +21,9 @@ import { useSessionMigrations } from './hooks/useSessionMigrations.js';
 import { ReplicaCache } from './replica-cache.js';
 import { DraftStore } from './draft-store.js';
 import { useSessionStars } from './hooks/useSessionStars.js';
+import type { StarInput } from './session-stars-client.js';
+import { RenameSessionDialog } from './components/favorites/RenameSessionDialog.js';
+import { SessionTitle } from './components/SessionTitle.js';
 import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
@@ -176,6 +179,13 @@ function AppContent({
     };
   }, [transport, injectedTransport]);
   const favorites = useSessionStars(baseUrl, userScoped && accessReady, transport);
+  const [renamingSession, setRenamingSession] = useState<{ scope: string; session: StarInput }>();
+  const [confirmedTitleState, setConfirmedTitleState] = useState<{ scope: string; titles: ReadonlyMap<string, string> }>();
+  const confirmedTitles = confirmedTitleState?.scope === baseUrl ? confirmedTitleState.titles : undefined;
+  const withConfirmedTitle = useCallback((session: OpenedSession): OpenedSession => {
+    const title = confirmedTitles?.get(sessionKey(session));
+    return title !== undefined && title !== session.title ? { ...session, title } : session;
+  }, [confirmedTitles]);
   const [requested] = useState<{ target?: ControllerLocation; error?: string }>(() => {
     try {
       const target = readControllerLocation(new URLSearchParams(window.location.search));
@@ -207,13 +217,15 @@ function AppContent({
   const previewClient = useMemo(() => new HttpPreviewClient(baseUrl, workspaceFetch), [baseUrl]);
   const directory = useMemo(() => !activated ? undefined : injectedDirectory ?? (!injectedTransport && !initialState ? new SessionDirectoryClient(baseUrl, undefined, selectedHost.id) : undefined), [baseUrl, injectedDirectory, injectedTransport, initialState, selectedHost.id, activated]);
   const restoredHostSelection = useRef(false);
-  const [openedSessions, setOpenedSessions] = useState<OpenedSession[]>(() => directory || cachedState || savedComposition ? readOpenedSessions(baseUrl) : []);
+  const [openedSessionRecords, setOpenedSessions] = useState<OpenedSession[]>(() => directory || cachedState || savedComposition ? readOpenedSessions(baseUrl) : []);
+  const openedSessions = useMemo(() => openedSessionRecords.map(withConfirmedTitle), [openedSessionRecords, withConfirmedTitle]);
   const openedSessionsRef = useRef(openedSessions);
   openedSessionsRef.current = openedSessions;
   const forkStore = useMemo(() => new ForkStore(baseUrl), [baseUrl]);
   const [forkRevision, setForkRevision] = useState(0);
   useEffect(() => forkStore.subscribe(() => setForkRevision((value) => value + 1)), [forkStore]);
-  const [sideSessions, setSideSessions] = useState<OpenedSession[]>([]);
+  const [sideSessionRecords, setSideSessions] = useState<OpenedSession[]>([]);
+  const sideSessions = useMemo(() => sideSessionRecords.map(withConfirmedTitle), [sideSessionRecords, withConfirmedTitle]);
   const [letterReveals, setLetterReveals] = useState<Record<string, { key: string; requestId: number; align: 'start' }>>({});
   const letterRequest = useRef<AbortController>();
   useEffect(() => () => letterRequest.current?.abort(), [baseUrl, transport]);
@@ -917,7 +929,7 @@ function AppContent({
     ancestors.unshift(ancestor);
     ancestorId = ancestor.parentAgentId;
   }
-  const observedSessionEntries = useSessionEntries(openedSessions, state);
+  const observedSessionEntries = useSessionEntries(openedSessions, state, confirmedTitles);
   const sessionEntries = useMemo(() => {
     const entries = new Map(observedSessionEntries.map(entry => [sessionKey(entry), entry]));
     for (const session of sideSessions) {
@@ -976,6 +988,12 @@ function AppContent({
     providerId: state.agent.providerId, hostId: 'local', title: 'Conversation',
   } : undefined);
   const visibleStackRoot = sideSessions.find(session => sessionKey(session) === detachedSideRoot) ?? stackRoot;
+  const renameHost = remoteHosts.find(host => host.id === visibleStackRoot?.hostId);
+  const canRenamePrimary = userScoped && accessReady && renameHost?.online === true
+    && renameHost.providers?.some(provider => provider.providerId === visibleStackRoot?.providerId && provider.sessionRename === true);
+  const renamePrimaryTitle = canRenamePrimary && visibleStackRoot?.hostId ? () => {
+    setRenamingSession({ scope: baseUrl, session: { ...visibleStackRoot, hostId: visibleStackRoot.hostId! } });
+  } : undefined;
   useEffect(() => {
     document.title = visibleStackRoot?.title?.trim() ? `${visibleStackRoot.title.trim()} · Agent Remote Control` : 'Agent Remote Control';
     return () => { document.title = 'Agent Remote Control'; };
@@ -1050,18 +1068,26 @@ function AppContent({
   const visibleWindows = openWindows.filter(session => activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(sessionKey(session)));
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady, visibleWindows);
   useEffect(() => trackedViews.retain(tracking.sessions), [trackedViews, tracking.sessions]);
+  const applySessionTitle = useCallback((session: StarInput) => {
+    setConfirmedTitleState(current => {
+      const titles = current?.scope === baseUrl ? current.titles : undefined;
+      if (titles?.get(sessionKey(session)) === session.title) return current;
+      return { scope: baseUrl, titles: new Map(titles).set(sessionKey(session), session.title) };
+    });
+    const update = (items: OpenedSession[]) => {
+      if (!items.some(item => sessionKey(item) === sessionKey(session) && item.title !== session.title)) return items;
+      return items.map(item => sessionKey(item) === sessionKey(session) ? { ...item, title: session.title } : item);
+    };
+    setOpenedSessions(update); setSideSessions(update); tracking.rename(session);
+  }, [baseUrl, tracking.rename]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const remove = transport.onSessionTitle?.(session => {
-      const update = (items: OpenedSession[]) => {
-        if (!items.some(item => sessionKey(item) === sessionKey(session) && item.title !== session.title)) return items;
-        return items.map(item => sessionKey(item) === sessionKey(session) ? { ...item, title: session.title } : item);
-      };
-      setOpenedSessions(update); setSideSessions(update); tracking.rename(session);
+      applySessionTitle(session);
       clearTimeout(timer); timer = setTimeout(() => setDirectoryRevision(value => value + 1), 100);
     });
     return () => { remove?.(); clearTimeout(timer); };
-  }, [transport, tracking.rename]);
+  }, [transport, applySessionTitle]);
   const displayChanged = useRef<() => void>(() => undefined);
   useEffect(() => displayChanged.current(), [state, addressSession, accessReady, status]);
   const latestDisplay = useRef<{ target?: OpenedSession; state?: AgentReplicaState; allowed: boolean }>({ allowed: false });
@@ -1675,8 +1701,8 @@ function AppContent({
               <button type="button" className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === ancestor.agentId)?.status} disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
               <span aria-hidden="true"> / </span>
             </span>)}
-            <span className="agent-session-title" data-session-status={state?.agent?.status} aria-current="page">{activeOpened?.title}</span>
-          </nav> : stackRoot ? <strong className="agent-session-title lab-primary-title" data-session-status={state?.agent?.status}>{stackRoot.title}</strong> : null}
+            <SessionTitle as="span" current title={activeOpened?.title ?? ''} status={state?.agent?.status} onRename={!detachedSideRoot ? renamePrimaryTitle : undefined} />
+          </nav> : stackRoot ? <SessionTitle className="lab-primary-title" title={stackRoot.title} status={state?.agent?.status} onRename={!detachedSideRoot ? renamePrimaryTitle : undefined} /> : null}
           draftBinding={activeAgentId ? { store: messageDrafts, key: activeAgentId } : undefined}
           questionDrafts={activeAgentId ? questionDrafts[activeAgentId] ?? {} : undefined}
           onQuestionDraftChange={activeAgentId ? (requestId, draft) => setQuestionDrafts((current) => ({
@@ -1687,6 +1713,7 @@ function AppContent({
         </div>
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
           key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} standalone={sessionKey(session) === detachedSideRoot} onUnlink={unlinkSide}
+          onRenameTitle={sessionKey(session) === detachedSideRoot ? renamePrimaryTitle : undefined}
           navigation={viewNavigation} renderAsk={renderAsk} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
           headingStart={!primaryExpanded && session.agentId === stackPath[stackRange.start]?.agentId ? <div ref={setSessionViewTarget} className="lab-global-view-slot" /> : undefined}
           position={stackPath.findIndex((entry) => sessionKey(entry) === sessionKey(session))}
@@ -1714,6 +1741,8 @@ function AppContent({
           resolveSessionLink={primaryNavigation.resolveSessionLink} onLoadOlder={!hostOffline ? conversationActions.loadOlder : undefined} />
       </section>
     </PreviewWorkspace>
+    {renamingSession?.scope === baseUrl ? <RenameSessionDialog favorites={favorites} session={renamingSession.session}
+      onRenamed={session => { applySessionTitle(session); setDirectoryRevision(value => value + 1); }} onClose={() => setRenamingSession(undefined)} /> : null}
     <SupportingRail
       id="lab-inspector"
       label="Replica Inspector"

@@ -16,7 +16,8 @@ export function AskButton({ observation, hidden, disabled, onOpen, triggerRef, s
     data-status={status} data-alert={alert}>
     <button ref={triggerRef} className="lab-ask-trigger" type="button" aria-label="Ask about this session" aria-haspopup="dialog" aria-expanded={hidden}
       tabIndex={hidden ? -1 : undefined} disabled={disabled} onClick={onOpen}
-      aria-keyshortcuts="ArrowLeft ArrowRight" aria-description="Drag left or right, or use the arrow keys, to dock along this session's edge."
+      aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+      aria-description="Drag anywhere in this session and release to dock at that height. Left and right arrow keys choose an edge; up and down move vertically."
       title={label}>
       <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M16.5 9.2a6.5 6.5 0 0 1-9.3 5.9L3 16l.9-4.2a6.5 6.5 0 1 1 12.6-2.6Z" />

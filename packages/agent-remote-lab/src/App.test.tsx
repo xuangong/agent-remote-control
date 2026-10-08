@@ -10,6 +10,7 @@ import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from './App.js';
 import { render, unmount } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
+import { SessionDirectoryClient } from './directory-client.js';
 
 describe('App', () => {
   const letterState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
@@ -773,6 +774,52 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   const promise = new Promise<T>((accept) => { resolve = accept; });
   return { promise, resolve };
 }
+
+it('keeps a confirmed title when an older session attachment finishes afterward', async () => {
+  const baseUrl = 'http://localhost/title-race/';
+  const target = { providerId: 'recorded', nativeSessionId: 'target-session', title: 'Old target title',
+    state: 'idle' as const, createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z' };
+  const attachment = deferred<{ agentId: string; nativeSessionId: string }>();
+  const directory = new SessionDirectoryClient(baseUrl);
+  const attach = vi.spyOn(directory, 'attach').mockReturnValue(attachment.promise);
+  vi.spyOn(directory, 'list').mockResolvedValue({ items: [target], hasMore: false, revision: '1' });
+  vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [] });
+  let receiveTitle!: Parameters<NonNullable<LabTransport['onSessionTitle']>>[0];
+  const transport = labTransport({
+    onSessionTitle: listener => { receiveTitle = listener; return () => {}; },
+    connect: (agentId, listener) => {
+      queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {
+        ...replicaState.agent!, id: agentId,
+        runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId === 'target-agent' ? target.nativeSessionId : 'recorded-session' },
+      } }));
+      return { close: () => {}, send: message => {
+        if (message.type === 'timeline_subscription') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION,
+          type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } }));
+      } };
+    },
+  });
+  window.history.replaceState(null, '', '/?agent=agent-1');
+  try {
+    const container = await render(<App baseUrl={baseUrl} directory={directory} transport={transport}
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Pairing is not used'); } }} />);
+    const row = container.querySelector<HTMLButtonElement>('[aria-label="Discover sessions"] .lab-session-row');
+    expect(row?.textContent).toContain(target.title);
+    await act(async () => row!.click());
+    expect(attach).toHaveBeenCalledOnce();
+    await act(async () => receiveTitle({ hostId: 'local', providerId: target.providerId,
+      nativeSessionId: target.nativeSessionId, title: 'Confirmed target title', revision: 1 }));
+    await act(async () => { attachment.resolve({ agentId: 'target-agent', nativeSessionId: target.nativeSessionId }); await attachment.promise; });
+    expect(container.querySelector('.lab-primary-title')?.textContent).toBe('Confirmed target title');
+    expect(document.title).toBe('Confirmed target title · Agent Remote Control');
+    expect(JSON.parse(localStorage.getItem(`agent-remote-opened:${baseUrl}`) ?? '[]')).toContainEqual(expect.objectContaining({
+      nativeSessionId: target.nativeSessionId, title: 'Confirmed target title',
+    }));
+  } finally {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    window.history.replaceState(null, '', '/');
+  }
+});
 
 
 it('shows recovery waiting without a failure alert and clears it after a successful retry', async () => {

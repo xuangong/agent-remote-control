@@ -1,5 +1,6 @@
 .lab-session-view-options { position: relative; flex: 0 0 auto; }
 .lab-primary-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-session-title[role="button"] { cursor: text; touch-action: manipulation; }
 .lab-session-view-options-trigger {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   min-height: 32px; padding: 4px 7px; border-color: transparent; background: transparent;

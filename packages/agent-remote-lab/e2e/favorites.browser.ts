@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { chromium, webkit, expect as browserExpect, type Page } from '@playwright/test';
 import { expect, it } from 'vitest';
 import { createRelayState } from '@orchardworks/agent-remote-hosted/state';
-import { createFavorites } from '@orchardworks/agent-remote-hosted/favorites';
+import { createFavorites, updateFavoriteSessionTitles } from '@orchardworks/agent-remote-hosted/favorites';
 const auth={origin:'http://localhost',issuer:'https://issuer.example',secret:'s'.repeat(32)};
 async function seed() {
  const state=createRelayState(auth,undefined,()=>{},()=>{}), favorites=createFavorites(state,()=>({online:true,hostName:'zhangxians-Mac-mini.local',canRename:true}));
@@ -13,7 +13,7 @@ async function seed() {
  await favorites.execute('alice',{type:'create-folder',revision:1,id:'child',parentId:'work',title:'Research'});
  await favorites.execute('alice',{type:'save-session',revision:2,folderId:null,session:{hostId:'mac',providerId:'codex',nativeSessionId:'1',title:'核实 dsh 集成链路及 BPP 事件上报机制'}});
  await favorites.execute('alice',{type:'save-session',revision:3,folderId:null,session:{hostId:'win',providerId:'codex',nativeSessionId:'2',title:'核实 dsh 集成链路及 BPP 事件上报机制'}});
- return favorites;
+ return { ...favorites, state };
 }
 async function drag(page:Page,source:string,target:string,ratio=.5) {
  await browserExpect(page.locator(`[data-favorite-id="${source}"] .lab-favorite-drag`)).toBeEnabled();
@@ -33,7 +33,7 @@ it.each(['chromium','webkit'] as const)('organizes favorites over HTTP with desk
   if(req.url==='/v1/remote/hosts/mac/session/rename' && req.method==='POST') {
    let body='';for await(const chunk of req)body+=chunk;
    const input=JSON.parse(body);expect(input.providerId).toBe('codex');expect(input.nativeSessionId).toBe('1');expect(input.operationId).toBeTruthy();
-   await favorites.renameSession({hostId:'mac',providerId:input.providerId,nativeSessionId:input.nativeSessionId},input.title);
+   await favorites.state.mutate(draft=>updateFavoriteSessionTitles(draft,{hostId:'mac',providerId:input.providerId,nativeSessionId:input.nativeSessionId},input.title,()=>true));
    res.setHeader('content-type','application/json');res.end(JSON.stringify({title:input.title}));return;
   }
   if(req.url==='/v1/favorites') {

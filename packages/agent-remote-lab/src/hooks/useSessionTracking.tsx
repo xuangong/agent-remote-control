@@ -137,7 +137,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     catch { setError('Tracking order changed for this page, but this browser could not save it for the next visit.'); }
     current.current = next; setSelection({ scope: baseUrl, sessions: next });
   }
-  const rename = useCallback((session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate) => {
+  const rename = useCallback((session: Pick<import('@orchardworks/agent-remote-protocol').SessionTitleUpdate, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'>) => {
     const key = sessionKey(session);
     setSelection(previous => {
       if (previous.scope !== baseUrl || !previous.sessions.some(item => sessionKey(item) === key && item.title !== session.title)) return previous;

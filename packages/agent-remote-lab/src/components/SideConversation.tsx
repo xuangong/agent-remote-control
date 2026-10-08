@@ -1,6 +1,7 @@
 import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
 import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
+import { SessionTitle } from './SessionTitle.js';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
@@ -13,9 +14,10 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, onRenameTitle }: {
   navigation?: SessionViewNavigationFactory;
   headingStart?: ReactNode;
+  onRenameTitle?(): void;
   renderAsk?(source: OpenedSession, state: AgentReplicaState | undefined): ReactNode;
   replica?: AgentReplica;
   standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>;
@@ -37,13 +39,13 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   const activity = state?.agent?.status;
   useEffect(() => { onActivityChange?.(session.agentId, activity); }, [session.agentId, activity, onActivityChange]);
   const record = store.find(session);
-  const title = record?.firstInput?.trim().slice(0, 72) || session.title;
+  const title = standalone ? session.title : record?.firstInput?.trim().slice(0, 72) || session.title;
   return <aside className="lab-side-conversation lab-session-composition" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
     <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       headingStart={headingStart}
-      conversationPath={<span className="lab-side-title" title={title}>{standalone ? null : <span className="lab-window-number">{position + 1}</span>}<span className="lab-side-title-text agent-session-title" data-session-status={activity}>{title}</span></span>}
+      conversationPath={<span className="lab-side-title" title={title}>{standalone ? null : <span className="lab-window-number">{position + 1}</span>}<SessionTitle as="span" className="lab-side-title-text" title={title} status={activity} onRename={onRenameTitle} /></span>}
       sessionManager={<><SessionLink session={session} />{standalone ? null : <button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>
         <svg className="lab-side-back-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
         <span className="lab-side-back-label" aria-hidden="true">Back</span><span className="lab-side-close-icon" aria-hidden="true">×</span>

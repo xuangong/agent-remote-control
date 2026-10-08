@@ -62,6 +62,18 @@ export function advanceFavorites(draft: HostedRelayState, tree: SavedFavoritesTr
   if (tree.revision >= Number.MAX_SAFE_INTEGER) fail(409, 'favorites_limit', 'The favorites revision limit has been reached.');
   normalize(draft, tree); tree.revision++;
 }
+export function updateFavoriteSessionTitles(draft: HostedRelayState, identity: StarIdentity, title: string, access: (subject: string, session: StarIdentity) => boolean): void {
+  const changed = new Set<string>();
+  for (const star of draft.sessionStars ?? []) {
+    if (starKey(star) !== starKey(identity) || star.title === title || !access(star.subject, identity)) continue;
+    star.title = title; changed.add(star.subject);
+  }
+  for (const subject of changed) advanceFavorites(draft, organizeFavorites(draft, subject));
+}
+/** Preserve the last authorized native name when a stale browser saves a favorite. */
+export function confirmedFavoriteTitle(draft: HostedRelayState, session: StarIdentity & { title: string }): string {
+  return draft.sessionTitles?.find(item => starKey(item) === starKey(session))?.title ?? session.title;
+}
 function validStructure(tree: SavedFavoritesTree, stars: SavedSessionStar[]): boolean {
   const ids = new Set<string>(); const positions = new Set<string>();
   const folders = new Map(tree.folders.map(folder => [folder.id, folder]));
@@ -115,24 +127,15 @@ function validCommand(value: unknown): value is FavoriteCommand {
 export function createFavorites(state: RelayState, access: Access) {
   function snapshot(draft: HostedRelayState, subject: string): FavoritesSnapshot {
     const tree = organizeFavorites(draft, subject);
+    const titles = new Map(draft.sessionTitles?.map(session => [starKey(session), session.title]));
     return { revision: tree.revision, folders: sorted(tree.folders), stars: sorted(savedStars(draft, subject)).map(({ subject: _, ...star }) => {
       const host = access(subject, star);
-      return { ...star, available: !!host, online: host?.online ?? false, ...(host ? { hostName: host.hostName, ...(host.canRename ? { canRename: true } : {}) } : {}) };
+      const title = host ? titles.get(starKey(star)) ?? star.title : star.title;
+      return { ...star, title, available: !!host, online: host?.online ?? false, ...(host ? { hostName: host.hostName, ...(host.canRename ? { canRename: true } : {}) } : {}) };
     }) };
   }
   return {
     list(subject: string): FavoritesSnapshot { return snapshot(structuredClone(state.read()), subject); },
-    async renameSession(identity: StarIdentity, title: string): Promise<void> {
-      if (!label(title, 512)) fail(502, 'invalid_session_title', 'The native session name is invalid.');
-      await state.mutate(draft => {
-        const changed = new Set<string>();
-        for (const star of draft.sessionStars ?? []) {
-          if (starKey(star) !== starKey(identity) || star.title === title) continue;
-          star.title = title; changed.add(star.subject);
-        }
-        for (const subject of changed) advanceFavorites(draft, organizeFavorites(draft, subject));
-      });
-    },
     async execute(subject: string, body: unknown): Promise<FavoritesSnapshot> {
       if (!validCommand(body)) fail(400, 'invalid_favorite', 'The favorites command is invalid.');
       const command = body as FavoriteCommand;
@@ -173,16 +176,17 @@ export function createFavorites(state: RelayState, access: Access) {
           case 'save-session': {
             destination(command.folderId);
             if (!access(subject, command.session)) fail(404, 'session_unavailable', 'This session is not available to your account.');
+            const session = { ...command.session, title: confirmedFavoriteTitle(draft, command.session) };
             const stars = draft.sessionStars ??= [];
-            const previous = stars.find(item => item.subject === subject && starKey(item) === starKey(command.session));
+            const previous = stars.find(item => item.subject === subject && starKey(item) === starKey(session));
             if (previous) {
-              Object.assign(previous, command.session);
+              Object.assign(previous, session);
               if (previous.folderId !== command.folderId) { previous.order = siblings(draft, tree, command.folderId).length; previous.folderId = command.folderId; }
             } else {
               if (savedStars(draft, subject).length >= MAX_USER_STARS || stars.length >= 16384) fail(409, 'star_limit', 'Your favorites are full. Remove a star before adding another.');
-              const favoriteId = newFavoriteIdentity(draft, subject, command.session);
+              const favoriteId = newFavoriteIdentity(draft, subject, session);
               if (tree.folders.some(item => item.id === favoriteId)) fail(409, 'favorite_exists', 'This favorite identity already exists.');
-              stars.push({ ...command.session, subject, starredAt: Date.now(), favoriteId, folderId: command.folderId, order: siblings(draft, tree, command.folderId).length });
+              stars.push({ ...session, subject, starredAt: Date.now(), favoriteId, folderId: command.folderId, order: siblings(draft, tree, command.folderId).length });
             }
             break;
           }

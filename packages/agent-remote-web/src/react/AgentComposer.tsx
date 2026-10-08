@@ -15,6 +15,7 @@ import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
+import type { ComposerAction } from './AgentActionToolbar.js';
 
 export interface AgentComposerProps {
   sessionState?: RemoteSessionState;
@@ -360,7 +361,20 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     void run('send');
   }
 
+  const toolbarActions: ComposerAction[] = [];
+  if (richEnabled) toolbarActions.push({ id: 'images', label: 'Add images', content: 'Image', priority: 20,
+    disabled: !state?.agent || readOnly || busy,
+    run: () => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); } });
+  toolbarActions.push({ id: 'commands', label: 'Open chat commands', content: '/',
+    disabled: !ready || busy || (readOnly && consoleCommands.length === 0),
+    run: () => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh(value => value + 1); focusInput(); } });
+  if (canQueue) toolbarActions.push({ id: 'queue', label: pending === 'queue' ? 'Queueing…' : 'Queue for next turn', content: pending === 'queue' ? 'Queueing…' : 'Queue', testId: 'queue-submit',
+    title: 'Let the native Provider handle this after the current turn',
+    disabled: !session.operations.queue_message.allowed || waiting.items.length > 0 || !ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent),
+    run: () => void run('queue') });
+
   return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy} data-control-readonly={ownershipReadOnly || undefined}>
+    {richEnabled ? <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(imageDraft.addFiles(files)); }} /> : null}
     <PendingSendQueue items={waiting.items} onCancel={waiting.cancel} onRetry={waiting.retry} />
     <div className="agent-composer-input">
     {forcedReadOnly ? readOnlyNotice : null}
@@ -414,16 +428,10 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     </div>
     <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly ? '' : ' agent-visually-hidden'}`}>{readOnly ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
     {!ownershipReadOnly ? <div className="agent-composer-actions">
-      <div className="agent-composer-secondary-controls">
-        {richEnabled ? <><button type="button" aria-label="Add images" disabled={!state?.agent || readOnly || busy} onClick={() => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); }}>Image</button>
-          <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(imageDraft.addFiles(files)); }} /></> : null}
-        <button type="button" aria-label="Open chat commands" disabled={!ready || busy || (readOnly && consoleCommands.length === 0)} onClick={() => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh((value) => value + 1); focusInput(); }}>/</button>
-        {canQueue ? <button type="button" data-testid="queue-submit" aria-label={pending === 'queue' ? 'Queueing…' : 'Queue for next turn'} disabled={!session.operations.queue_message.allowed || waiting.items.length > 0 || !ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent)} title="Let the native Provider handle this after the current turn" onClick={() => void run('queue')}>{pending === 'queue' ? 'Queueing…' : 'Queue'}</button> : null}
-      </div>
-      {state?.agent ? <AgentSessionSettings sessionState={session} key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
+      {state?.agent ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
-        onSelect={onSetSessionSetting} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : null}
+        onSelect={onSetSessionSetting} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : <div className="agent-composer-secondary-controls">{toolbarActions.map(action => <button key={action.id} type="button" aria-label={action.label} disabled={action.disabled} onClick={action.run}>{action.content}</button>)}</div>}
       {state?.agent ? <AgentActivityStatus sessionState={session} visible={activityVisible} state={state} disabled={disabled} disabledLabel={disabledLabel}
         commandPending={pending === 'command'}
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}

@@ -74,7 +74,7 @@ test('desktop Ask resizing keeps its position, draft and session through minimiz
   await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep this question while resizing');
   await expect.poll(() => ask.boundingBox()).toEqual(resized);
   await page.reload();
-  await trigger.click();
+  await expect(ask).toBeVisible();
   await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep this question while resizing');
   await expect.poll(() => ask.boundingBox()).toEqual(resized);
   expect(creations()).toBe(1);

@@ -48,22 +48,11 @@
   .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) { font-size: 16px; }
   .lab-composer-dock .agent-composer textarea { min-height: 44px; }
   .lab-composer-dock .agent-composer-actions button { min-height: 44px; }
-  .lab-composer-dock .agent-session-controls { flex: 1 1 0; }
-  .lab-composer-dock .agent-session-toolbar button { flex: 1 1 0; min-width: 0; max-width: none; padding-inline: 4px; }
-  .lab-composer-dock .agent-session-toolbar button[aria-label="Status"] { flex: 0 0 44px; min-width: 44px; }
+  .lab-composer-dock .agent-session-toolbar { --agent-toolbar-target: 44px; }
   .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { flex: 0 0 44px; min-width: 44px; margin-left: 0; }
   .lab-composer-dock .agent-activity[data-active="true"] { order: -1; flex-basis: 100%; margin: 0; justify-content: space-between; }
   .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
   .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]) { --lab-session-panel-space: 208px; }
-}
-
-@container session-composer (max-width: 380px) {
-  .lab-composer-dock .agent-composer { --lab-session-panel-space: 208px; }
-  .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]) { --lab-session-panel-space: 256px; }
-  .lab-composer-dock .agent-session-controls { order: -1; flex-basis: 100%; }
-  .lab-composer-dock .agent-activity[data-active="true"] { order: -2; }
-  .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { margin-left: auto; }
-  .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: auto; }
 }
 
 /* Short views keep menus usable by letting them cover the composer. */

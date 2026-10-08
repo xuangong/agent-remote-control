@@ -552,6 +552,19 @@
 .agent-session-controls { margin-bottom: 8px; min-width: 0; }
 .agent-session-toolbar { display: flex; gap: 6px; flex-wrap: wrap; }
 .agent-session-toolbar button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-composer-actions > .agent-session-controls { flex: 1 1 0; }
+.agent-action-toolbar { position: relative; min-width: 0; width: 100%; flex-wrap: nowrap; overflow: hidden; overflow: clip; }
+.agent-session-toolbar.agent-action-toolbar > .agent-toolbar-action:focus-visible { outline-offset: -3px; }
+.agent-session-toolbar.agent-action-toolbar .agent-toolbar-action {
+  display: inline-block; flex: none; box-sizing: border-box; min-width: var(--agent-toolbar-target, 34px); max-width: 180px;
+  min-height: var(--agent-toolbar-target, 34px); padding: 4px 7px; border: 1px solid transparent;
+  font: inherit; font-size: 12px; line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agent-session-toolbar.agent-action-toolbar .agent-toolbar-more { width: var(--agent-toolbar-target, 34px); }
+.agent-toolbar-measure { display: flex; position: absolute; visibility: hidden; pointer-events: none; width: 0; height: 0; overflow: hidden; top: 0; left: 0; }
+.agent-toolbar-menu { display: grid; gap: 4px; }
+.agent-toolbar-menu > button { text-align: left; }
+@media (pointer: coarse) { .agent-action-toolbar { --agent-toolbar-target: 44px; } }
 .agent-session-panel { margin-top: 8px; padding: 12px; background: var(--agent-panel-raised); border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); max-height: 320px; overflow-y: auto; }
 .agent-session-panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .agent-session-setting { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; margin-bottom: 12px; font-size: 12px; }

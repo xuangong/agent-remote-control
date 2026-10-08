@@ -15,7 +15,7 @@ const state: AgentReplicaState = {
       ...replicaState.agent!.capabilities, steer: true, cancel: true, commands: true, planning: true, sessionSettings: true,
       imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 },
     },
-    runtimeInfo: { ...replicaState.agent!.runtimeInfo, status: 'running', planning: { active: false } },
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, model: 'GPT-6-Astra extended', status: 'running', planning: { active: false } },
   },
 };
 

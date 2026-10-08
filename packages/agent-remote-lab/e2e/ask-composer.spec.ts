@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { showNewSession } from './session-navigation';
+import { activateComposerAction, revealComposerAction } from './composer-actions';
 
 for (const running of [false, true]) test(`Ask exposes shared composer controls while ${running ? 'working' : 'idle'} without moving the conversation or losing its draft`, async ({ page }, info) => {
   let primaryAgent: string | undefined;
@@ -36,23 +37,23 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
   await expect(ask.getByRole('button', { name: 'Hide message input', exact: true })).toBeVisible();
   if (running) await expect(ask.getByTestId('agent-activity-label')).toHaveText('Working');
   if (running) await expect(ask.getByTestId('turn-elapsed')).toBeVisible();
-  await expect(ask.getByRole('button', { name: 'Add images' })).toBeVisible();
-  const commands = ask.getByRole('button', { name: 'Open chat commands' });
-  await expect(commands).toBeVisible();
-  await commands.click();
+  const images = await revealComposerAction(ask, 'Add images');
+  await expect(images.action).toBeVisible();
+  if (await ask.getByRole('region', { name: 'More actions', exact: true }).isVisible()) await page.keyboard.press('Escape');
+  await activateComposerAction(ask, 'Open chat commands');
   await expect(ask.getByRole('listbox', { name: 'Native commands' })).toBeVisible();
   await input.press('Escape');
   await input.fill('Keep this Ask draft');
 
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const [trigger, label] of [
-      [ask.getByTestId('session-model-button'), 'Model settings'],
-      [ask.getByTestId('session-permissions-button'), 'Permission settings'],
-      [ask.getByRole('button', { name: 'Status', exact: true }), 'Session status'],
+    for (const [action, label] of [
+      ['Model', 'Model settings'],
+      ['Permissions', 'Permission settings'],
+      ['Status', 'Session status'],
     ] as const) {
       const before = (await ask.getByTestId('timeline').boundingBox())!;
-      await trigger.click();
+      const trigger = await activateComposerAction(ask, action, true);
       const panel = ask.getByRole('region', { name: label, exact: true });
       await expect(panel).toBeVisible();
       if (label === 'Session status') await expect(panel.getByRole('switch', { name: 'Planning mode' })).toBeVisible();
@@ -62,7 +63,7 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
       expect(menu.y).toBeGreaterThanOrEqual(bounds.y);
       expect(menu.x + menu.width).toBeLessThanOrEqual(bounds.x + bounds.width);
       expect((await ask.getByTestId('timeline').boundingBox())!.height).toBe(before.height);
-      await trigger.press('Escape');
+      await page.keyboard.press('Escape');
       await expect(ask).toBeVisible();
       await expect(panel).toBeHidden();
       await expect(trigger).toBeFocused();
@@ -78,19 +79,21 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
     expect(actions).toBe(true);
     if (running) {
       const activity = (await ask.locator('.agent-activity').boundingBox())!;
-      const controls = (await commands.boundingBox())!;
+      const controls = (await ask.locator('.agent-session-toolbar').boundingBox())!;
       expect(activity.y + activity.height).toBeLessThanOrEqual(controls.y);
       await expect(ask.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await ask.screenshot({ path: info.outputPath(`ask-composer-${width}.png`) });
   }
-  await ask.getByTestId('session-model-button').click();
-  await commands.focus();
-  await expect(commands).toBeFocused();
+  const modelTrigger = await activateComposerAction(ask, 'Model', true);
+  const send = ask.getByRole('button', { name: 'Send message', exact: true });
+  await send.focus();
+  await expect(send).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(ask).toBeVisible();
   await expect(ask.getByRole('region', { name: 'Model settings', exact: true })).toBeHidden();
+  await expect(modelTrigger).toBeFocused();
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   await expect(input).toContainText('Keep this Ask draft');
@@ -113,7 +116,7 @@ test('Ask handles Escape within its own settings and window without dismissing b
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
 
-  await primary.getByTestId('session-model-button').click();
+  await activateComposerAction(primary, 'Model');
   const backgroundSettings = primary.getByRole('region', { name: 'Model settings', exact: true });
   await expect(backgroundSettings).toBeVisible();
   await openAsk.focus();
@@ -121,12 +124,10 @@ test('Ask handles Escape within its own settings and window without dismissing b
   await expect(ask).toBeFocused();
   await expect(backgroundSettings).toBeVisible();
 
-  const askModel = ask.getByTestId('session-model-button');
-  await askModel.focus();
-  await askModel.press('Enter');
+  const askModel = await activateComposerAction(ask, 'Model', true);
   const askSettings = ask.getByRole('region', { name: 'Model settings', exact: true });
   await expect(askSettings).toBeVisible();
-  await askModel.press('Escape');
+  await page.keyboard.press('Escape');
   await expect(askSettings).toBeHidden();
   await expect(backgroundSettings).toBeVisible();
   await expect(askModel).toBeFocused();

@@ -498,7 +498,7 @@ test('desktop Ask title dragging shares the button position and survives minimiz
   expect((await ask.boundingBox())!.x).toBeCloseTo(moved.x, 0);
   expect((await ask.boundingBox())!.y).toBeCloseTo(moved.y, 0);
   await page.reload();
-  await button.click();
+  await expect(ask).toBeVisible();
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   expect((await ask.boundingBox())!.x).toBeCloseTo(moved.x, 0);
   expect((await ask.boundingBox())!.y).toBeCloseTo(moved.y, 0);

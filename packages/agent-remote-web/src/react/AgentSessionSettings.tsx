@@ -2,13 +2,15 @@ import { remoteSessionState, type RemoteSessionState } from '../client/session-s
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentSessionSetting } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
+import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
 
-export type SessionControlView = 'status' | 'model' | 'permissions';
+export type SessionControlView = 'status' | 'model' | 'permissions' | 'actions';
 
 interface Props {
   sessionState?: RemoteSessionState;
   state: AgentReplicaState;
   children?: ReactNode;
+  actions?: readonly ComposerAction[];
   disabled: boolean;
   readOnly?: boolean;
   view?: SessionControlView;
@@ -19,14 +21,18 @@ interface Props {
   renderError?(error: unknown): ReactNode;
 }
 
-export function AgentSessionSettings({ state, sessionState, children, disabled, readOnly = false, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
+export function AgentSessionSettings({ state, sessionState, children, actions = [], disabled, readOnly = false, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
   const layer = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLElement>();
+  const restoreFocus = () => {
+    const target = trigger.current?.isConnected ? trigger.current : layer.current?.querySelector<HTMLElement>('.agent-toolbar-more');
+    target?.focus({ preventScroll: true });
+  };
   useEffect(() => {
     if (!view) return;
     const controls = layer.current;
     const keyboardScope = controls?.closest<HTMLElement>('.agent-composer') ?? controls;
-    trigger.current = controls?.querySelector<HTMLElement>('[aria-expanded="true"]') ?? undefined;
+    trigger.current = controls?.querySelector<HTMLElement>('.agent-session-toolbar [aria-expanded="true"]') ?? undefined;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !layer.current?.contains(event.target)) onView(undefined); };
     const escape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || layer.current?.closest('[hidden], [inert]')) return;
@@ -34,7 +40,7 @@ export function AgentSessionSettings({ state, sessionState, children, disabled, 
       if (!layer.current || !(event.target instanceof Element) || event.target.closest(dialog) !== layer.current.closest(dialog)) return;
       event.preventDefault();
       onView(undefined);
-      trigger.current?.focus({ preventScroll: true });
+      restoreFocus();
     };
     document.addEventListener('pointerdown', dismiss);
     keyboardScope?.addEventListener('keydown', escape);
@@ -72,13 +78,17 @@ export function AgentSessionSettings({ state, sessionState, children, disabled, 
   const modelLabel = model ? selectedLabel(model) : agent.runtimeInfo.model;
   const permissionLabel = permissions.map(selectedLabel).filter((label) => label !== 'Unavailable').join(' · ');
   return <div className="agent-session-controls" ref={layer}>
-    <div className="agent-session-toolbar" aria-label="Session controls">
-      <button type="button" data-testid="session-model-button" title={`Model: ${modelLabel ?? 'Unavailable'}`} aria-expanded={view === 'model'} onClick={() => onView(view === 'model' ? undefined : 'model')}>{modelLabel && modelLabel !== 'Unavailable' ? modelLabel : 'Model'}<span aria-hidden="true"> ▾</span></button>
-      <button type="button" data-testid="session-permissions-button" title={`Permissions: ${permissions.length ? permissions.map(selectedLabel).join(' · ') : 'Unavailable'}`} aria-expanded={view === 'permissions'} onClick={() => onView(view === 'permissions' ? undefined : 'permissions')}>{permissionLabel || 'Permissions'}<span aria-hidden="true"> ▾</span></button>
-      <button type="button" aria-expanded={view === 'status'} onClick={() => onView(view === 'status' ? undefined : 'status')} aria-label="Status" title="Session status and planning"><span aria-hidden="true">•••</span></button>
-    </div>
-    <section hidden={!view} className="agent-session-panel" aria-label={view === 'status' ? 'Session status' : `${view === 'model' ? 'Model' : 'Permission'} settings`}>
-      <div className="agent-session-panel-heading"><strong>{view === 'status' ? 'Session status' : view === 'model' ? 'Model settings' : 'Permission settings'}</strong><button type="button" aria-label="Close session controls" onClick={() => { onView(undefined); trigger.current?.focus({ preventScroll: true }); }}>Close</button></div>
+    <AgentActionToolbar active={view} overflowOpen={view === 'actions'} onOverflow={open => onView(open ? 'actions' : undefined)} onStatus={() => onView(view === 'status' ? undefined : 'status')}
+      actions={[...actions,
+        { id: 'model', label: 'Model', testId: 'session-model-button', priority: 100,
+          title: `Model: ${modelLabel ?? 'Unavailable'}`, expanded: view === 'model',
+          content: <>{modelLabel && modelLabel !== 'Unavailable' ? modelLabel : 'Model'}<span aria-hidden="true"> ▾</span></>, run: () => onView(view === 'model' ? undefined : 'model') },
+        { id: 'permissions', label: 'Permissions', testId: 'session-permissions-button', priority: 10,
+          title: `Permissions: ${permissions.length ? permissions.map(selectedLabel).join(' · ') : 'Unavailable'}`, expanded: view === 'permissions',
+          content: <>{permissionLabel || 'Permissions'}<span aria-hidden="true"> ▾</span></>, run: () => onView(view === 'permissions' ? undefined : 'permissions') },
+      ]} />
+    <section hidden={!view || view === 'actions'} className="agent-session-panel" aria-label={view === 'status' ? 'Session status' : `${view === 'model' ? 'Model' : 'Permission'} settings`}>
+      <div className="agent-session-panel-heading"><strong>{view === 'status' ? 'Session status' : view === 'model' ? 'Model settings' : 'Permission settings'}</strong><button type="button" aria-label="Close session controls" onClick={() => { onView(undefined); restoreFocus(); }}>Close</button></div>
       {recovery}
       <div hidden={view !== 'status'}>{children}</div>
       {view === 'status' ? <dl className="agent-session-facts">

@@ -37,8 +37,12 @@ async function setDisplay(view: Locator, mode: string, letters: boolean) {
   const trigger = view.getByRole('button', { name: 'Session view options', exact: true });
   await trigger.click();
   const options = view.getByRole('region', { name: 'Session view options', exact: true });
-  await options.getByRole('radio', { name: mode, exact: true }).check();
-  await options.getByRole('checkbox', { name: 'Show letters', exact: true }).setChecked(letters);
+  await options.getByText(mode, { exact: true }).click();
+  await expect(options.getByRole('radio', { name: mode, exact: true })).toBeChecked();
+  if (await options.getByRole('checkbox', { name: 'Show letters', exact: true }).isChecked() !== letters) {
+    await options.getByText('Show letters', { exact: true }).click();
+  }
+  await expect(options.getByRole('checkbox', { name: 'Show letters', exact: true })).toBeChecked({ checked: letters });
   await trigger.press('Escape');
   await expect(options).toBeHidden();
 }
@@ -61,6 +65,38 @@ async function expectContained(child: Locator, parent: Locator, fill = false) {
     return edges.every(edge => edge >= -1 && (!fill || edge <= 1));
   }).toBe(true);
 }
+
+test('view menu labels apply their selection before focus leaves the trigger', async ({ page }) => {
+  await page.goto('/');
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const view = sourceView(page.locator('.lab-primary-conversation'));
+  await expect(view.getByTestId('prompt-input')).toBeEnabled();
+  const trigger = view.getByRole('button', { name: 'Session view options', exact: true });
+  await trigger.click();
+  const options = view.getByRole('region', { name: 'Session view options', exact: true });
+  await options.getByText('Display', { exact: true }).click();
+  await expect(options).toBeVisible();
+  await options.getByText('Content only', { exact: true }).click();
+  await expect(options.getByRole('radio', { name: 'Content only', exact: true })).toBeChecked();
+  await expect(options).toBeVisible();
+  await options.getByText('Show letters', { exact: true }).click();
+  await expect(options.getByRole('checkbox', { name: 'Show letters', exact: true })).not.toBeChecked();
+  await options.getByRole('radio', { name: 'Simple conversation', exact: true }).click();
+  await expect(options.getByRole('radio', { name: 'Simple conversation', exact: true })).toBeChecked();
+  await options.getByRole('checkbox', { name: 'Show letters', exact: true }).click();
+  await expect(options.getByRole('checkbox', { name: 'Show letters', exact: true })).toBeChecked();
+  await options.getByRole('checkbox', { name: 'Show letters', exact: true }).focus();
+  await options.getByRole('checkbox', { name: 'Show letters', exact: true }).press('Tab');
+  await expect(options).toBeHidden();
+  await trigger.click();
+  await expect(options.getByRole('radio', { name: 'Simple conversation', exact: true })).toBeChecked();
+  await trigger.press('Escape');
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await view.getByTestId('prompt-input').click();
+  await expect(options).toBeHidden();
+});
 
 test('display mode and letters belong to each Session View and survive reload', async ({ page, isMobile }) => {
   const { primary, side, select } = await openComposition(page, isMobile);

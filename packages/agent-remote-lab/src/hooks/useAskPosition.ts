@@ -99,8 +99,9 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
     const down = (event: PointerEvent) => {
       if (!floating || !event.isPrimary || event.button !== 0 || !(event.target instanceof Element) || drag || resize) return;
       const handle = event.target.closest<HTMLButtonElement>('.lab-ask-resize');
-      if (!handle && (!event.target.closest('.lab-workbench-heading, .lab-ask-heading')
-        || event.target.closest('button, a, input, textarea, select, [role="button"], [contenteditable]'))) return;
+      const heading = event.target.closest('.lab-workbench-heading, .lab-ask-heading');
+      const control = event.target.closest('button, a, input, textarea, select, label, [tabindex], [role="button"], [contenteditable]');
+      if (!handle && (!heading || control && heading.contains(control))) return;
       const bounds = viewport.getBoundingClientRect();
       const rect = element.getBoundingClientRect();
       const start = { x: event.clientX, y: event.clientY };

@@ -45,7 +45,7 @@ export function SessionViewOptions({ preferences, onChange }: {
       </svg>
       <span>View</span>
     </button>
-    {open ? <section id={id} className="lab-session-view-options-panel" aria-label="Session view options">
+    {open ? <section id={id} className="lab-session-view-options-panel" aria-label="Session view options" tabIndex={-1}>
       <fieldset><legend>Display</legend>
         {modes.map(mode => <label key={mode.value}>
           <span>{mode.label}</span>

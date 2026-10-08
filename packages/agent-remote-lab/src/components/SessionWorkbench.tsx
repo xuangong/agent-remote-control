@@ -127,7 +127,7 @@ export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChang
     : activity === 'running' ? 'Working'
     : 'Ready';
   const viewOptions = <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />;
-  const tools = <>{sessionManager}{workspaceLink}{viewOptions}</>;
+  const tools = <>{sessionManager}{viewOptions}</>;
   const layoutClass = [selectedCommand ? 'lab-command-details-open' : '', headingMode === 'toolbar' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
   return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}><SessionViewFrame className={layoutClass}>
     <SessionHeading hidden={headingMode === 'toolbar'}

@@ -21,7 +21,8 @@ export function SessionTimelineTools({ collapsible, searchOpen, children }: {
         setCollapsed(!hidden);
       }}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d={hidden ? 'm14 6-6 6 6 6' : 'm10 6 6 6-6 6'} />
+        <path className="lab-timeline-tools-expand-icon" d="m14 6-6 6 6 6" />
+        <path className="lab-timeline-tools-collapse-icon" d="m10 6 6 6-6 6" />
       </svg>
     </button> : null}
   </div>;

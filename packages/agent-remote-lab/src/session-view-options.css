@@ -52,6 +52,10 @@
   .lab-timeline-tools .lab-session-heading-actions { position: static; }
 }
 
+.lab-timeline-tools .lab-session-heading-actions,
+.lab-timeline-tools .lab-session-heading-actions > .lab-session-heading-actions-panel { display: contents; }
+.lab-timeline-tools .lab-session-heading-actions > .lab-session-heading-actions-trigger { display: none; }
+
 @container session-view (max-width: 760px) {
   .lab-session-view-options-trigger { min-width: 44px; min-height: 44px; padding: 4px; }
   .lab-session-view-options-trigger > span { display: none; }

@@ -14,6 +14,14 @@ async function expandSessionActions(view: Locator) {
   if (await expand.isVisible()) await expand.click();
 }
 
+async function buttonAppearance(button: Locator) {
+  return button.evaluate(element => {
+    const style = getComputedStyle(element);
+    return { color: style.color, background: style.backgroundColor, border: style.borderColor,
+      shadow: style.boxShadow, outline: style.outlineStyle, outlineWidth: style.outlineWidth };
+  });
+}
+
 async function openComposition(page: Page, isMobile: boolean) {
   if (!isMobile) await page.setViewportSize({ width: 1900, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -404,13 +412,12 @@ test('mobile navigation keeps one title and session tools beside search with glo
     await expectBeforeTitle(globalView, title);
     await expectContained(globalView, navigation);
     await expect.poll(async () => (await title.boundingBox())!.width, { message: `Primary title remains readable at ${width}px` }).toBeGreaterThan(60);
-    const actions = view.getByRole('button', { name: 'More session actions', exact: true });
-    await expectContained(actions, primary);
-    await actions.click();
-    await expect(view.getByRole('button', { name: 'Share session link', exact: true })).toBeVisible();
-    await actions.press('Escape');
-    await expect(actions).toHaveAttribute('aria-expanded', 'false');
-    await expect(actions).toBeFocused();
+    const tools = view.getByRole('toolbar', { name: 'Session actions', exact: true });
+    await expect(tools.getByRole('button', { name: 'More session actions', exact: true })).toHaveCount(0);
+    await expect(tools.locator('.lab-vscode-workspace')).toHaveCount(0);
+    for (const name of ['Share session link', 'Back to previous conversation', 'Forward to next conversation']) {
+      await expectContained(tools.getByRole('button', { name, exact: true }), primary);
+    }
     const search = view.getByRole('button', { name: 'Search this session', exact: true });
     await expectContained(search, primary);
     const searchBounds = (await search.boundingBox())!, modeBounds = (await trigger.boundingBox())!;
@@ -476,10 +483,15 @@ test('mobile session actions start collapsed and toggle without moving the readi
   const controls = [
     view.getByRole('button', { name: 'Session view options', exact: true }),
     view.getByRole('button', { name: 'Search this session', exact: true }),
-    view.getByRole('button', { name: 'More session actions', exact: true }),
+    view.getByRole('button', { name: 'Share session link', exact: true }),
+    view.getByRole('button', { name: 'Back to previous conversation', exact: true }),
+    view.getByRole('button', { name: 'Forward to next conversation', exact: true }),
   ] as const;
+  await expect(tools.getByRole('button', { name: 'More session actions', exact: true })).toHaveCount(0);
+  await expect(tools.locator('.lab-vscode-workspace')).toHaveCount(0);
   await expect(expand).toBeVisible();
   await expect(collapse).toBeHidden();
+  await expect(tools.getByRole('button')).toHaveCount(1);
   for (const control of controls) await expect(control).toBeHidden();
   for (const width of [320, 402]) {
     await page.setViewportSize({ width, height: 844 });
@@ -530,8 +542,10 @@ test('mobile session actions start collapsed and toggle without moving the readi
     await expect(view.getByRole('searchbox')).toBeVisible();
     await view.getByRole('searchbox').press('Escape');
     await controls[2].click();
-    await expect(view.getByRole('button', { name: 'Share session link', exact: true })).toBeVisible();
-    await controls[2].press('Escape');
+    const share = page.getByRole('dialog', { name: 'Share session', exact: true });
+    await expect(share).toBeVisible();
+    await share.getByRole('button', { name: 'Close session link', exact: true }).click();
+    await expect(controls[2]).toBeFocused();
     await collapse.click();
     await expect(expand).toBeVisible();
     await timeline.focus();
@@ -545,6 +559,105 @@ test('mobile session actions start collapsed and toggle without moving the readi
     expect(await page.evaluate(() => ({ left: scrollX, width: document.documentElement.scrollWidth }))).toEqual({ left: 0, width });
     await page.screenshot({ path: testInfo.outputPath(`mobile-session-actions-expanded-${width}.png`) });
     for (const { element } of originalTools) await element.dispose();
+  }
+});
+
+test('mobile action taps settle to a neutral appearance with normal motion', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile, 'Uses real touch input for the floating session actions.');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto('/');
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const primary = page.locator('.lab-primary-conversation');
+  const view = sourceView(primary);
+  await expect(view.getByTestId('prompt-input')).toBeEnabled();
+  const timeline = view.getByTestId('timeline');
+  const tools = view.getByRole('toolbar', { name: 'Session actions', exact: true });
+  const expand = tools.getByRole('button', { name: 'Expand session actions', exact: true });
+  const collapse = tools.getByRole('button', { name: 'Collapse session actions', exact: true });
+  const mode = tools.getByRole('button', { name: 'Session view options', exact: true });
+  const share = tools.getByRole('button', { name: 'Share session link', exact: true });
+  const search = tools.getByRole('button', { name: 'Search this session', exact: true });
+  const options = view.getByRole('region', { name: 'Session view options', exact: true });
+  const settleTools = () => expect.poll(() => tools.evaluate(element =>
+    element.getAnimations({ subtree: true }).filter(animation => animation.playState === 'running').length)).toBe(0);
+  expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false);
+  for (const width of [320, 402]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(expand).toBeVisible();
+    await expect(tools.getByRole('button')).toHaveCount(1);
+    const idleCollapsed = await buttonAppearance(expand);
+    const before = await timeline.evaluate(element => ({ top: element.scrollTop, height: element.clientHeight, y: element.getBoundingClientRect().y }));
+    await tools.evaluate(element => {
+      (element.querySelector('.lab-timeline-tools-toggle') as HTMLButtonElement).click();
+      (element.querySelector('.lab-session-view-options-trigger') as HTMLButtonElement).click();
+    });
+    await expect(options).toBeVisible();
+    const menuOffsets = await options.evaluate(async element => {
+      const content = element.closest('.lab-timeline-tools-content')!;
+      const offsets = [];
+      const started = performance.now();
+      do {
+        offsets.push(element.getBoundingClientRect().right - content.getBoundingClientRect().right);
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      } while (performance.now() - started < 360);
+      return offsets;
+    });
+    expect(Math.max(...menuOffsets) - Math.min(...menuOffsets), 'The menu keeps its anchor while the toolbar finishes expanding').toBeLessThan(1);
+    await expectContained(options, primary);
+    await mode.tap();
+    await expect(options).toBeHidden();
+    await collapse.tap();
+    await settleTools();
+    await expand.tap();
+    const frames = await timeline.evaluate(async element => {
+      const samples = [];
+      const started = performance.now();
+      do {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        samples.push({ top: element.scrollTop, height: element.clientHeight, y: element.getBoundingClientRect().y,
+          pageLeft: scrollX, pageWidth: document.documentElement.scrollWidth });
+      } while (performance.now() - started < 360);
+      return samples;
+    });
+    for (const frame of frames) expect(frame).toEqual({ ...before, pageLeft: 0, pageWidth: width });
+    await expect(collapse).toBeVisible();
+    await expect(mode).toBeVisible();
+    await expect(share).toBeVisible();
+    await expect(search).toBeVisible();
+    await expect(tools.getByRole('button', { name: 'More session actions', exact: true })).toHaveCount(0);
+    await expect(tools.locator('.lab-vscode-workspace')).toHaveCount(0);
+    const idleMode = await buttonAppearance(mode);
+    await mode.tap();
+    await expect(options).toBeVisible();
+    await expectContained(options, primary);
+    await mode.tap();
+    await expect(options).toBeHidden();
+    await expect.poll(() => buttonAppearance(mode)).toEqual(idleMode);
+    const idleShare = await buttonAppearance(share);
+    await share.tap();
+    const dialog = page.getByRole('dialog', { name: 'Share session', exact: true });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close session link', exact: true }).tap();
+    await expect(dialog).toBeHidden();
+    await expect.poll(() => buttonAppearance(share)).toEqual(idleShare);
+    const idleSearch = await buttonAppearance(search);
+    await search.tap();
+    await expect(view.getByRole('searchbox')).toBeVisible();
+    await view.getByRole('button', { name: 'Close session search', exact: true }).tap();
+    await expect(view.getByRole('searchbox')).toBeHidden();
+    await expect.poll(() => buttonAppearance(search)).toEqual(idleSearch);
+    await settleTools();
+    await page.screenshot({ path: testInfo.outputPath(`mobile-actions-touch-expanded-${width}.png`) });
+    await collapse.tap();
+    await expect(expand).toBeVisible();
+    await expect(tools.getByRole('button')).toHaveCount(1);
+    await expect.poll(() => buttonAppearance(expand)).toEqual(idleCollapsed);
+    expect(await expand.evaluate(element => element.matches(':focus-visible'))).toBe(false);
+    await settleTools();
+    await expect(tools.locator('.lab-timeline-tools-content')).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath(`mobile-actions-touch-collapsed-${width}.png`) });
   }
 });
 

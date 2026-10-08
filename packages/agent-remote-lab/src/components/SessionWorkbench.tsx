@@ -242,7 +242,11 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const searchOpen = !!visible && !!state?.timeline.initialized && openSearchScope === searchScope;
   const selectedSearchKey = searchSelection?.scope === searchScope ? searchSelection.key : undefined;
-  function closeSearch() { setOpenSearchScope(undefined); setSearchSelection(undefined); requestAnimationFrame(() => searchTrigger.current?.focus()); }
+  function closeSearch(options?: { restoreFocus?: boolean }) {
+    setOpenSearchScope(undefined);
+    setSearchSelection(undefined);
+    if (options?.restoreFocus !== false) requestAnimationFrame(() => searchTrigger.current?.focus({ preventScroll: true }));
+  }
   const display = useContext(TimelineDisplay);
   const lettersVisible = useContext(TimelineLettersVisible);
   useLayoutEffect(() => { setSearchSelection(undefined); }, [lettersVisible]);

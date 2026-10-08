@@ -16,7 +16,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
   state: AgentReplicaState;
   search?: SessionViewActions['searchTimeline'];
   onSelect(match: TimelineSearchMatch, signal: AbortSignal): Promise<void>;
-  onClose(): void;
+  onClose(options?: { restoreFocus?: boolean }): void;
   onClearSelection?(): void;
 }) {
   const [query, setQuery] = useState('');
@@ -29,11 +29,23 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
   const [jumpError, setJumpError] = useState<string>();
   const [showResults, setShowResults] = useState(true);
   const [limit, setLimit] = useState(30);
+  const panel = useRef<HTMLElement>(null);
   const scan = useRef<AbortController>();
   const jump = useRef<AbortController>();
-  const latest = useRef({ state, search, onSelect, onClearSelection });
-  latest.current = { state, search, onSelect, onClearSelection };
+  const latest = useRef({ state, search, onSelect, onClose, onClearSelection });
+  latest.current = { state, search, onSelect, onClose, onClearSelection };
   const canSearch = !!search;
+
+  useEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    const ownerDocument = element.ownerDocument;
+    const dismissOutside = (event: PointerEvent) => {
+      if (!event.composedPath().includes(element)) latest.current.onClose({ restoreFocus: false });
+    };
+    ownerDocument.addEventListener('pointerdown', dismissOutside, true);
+    return () => ownerDocument.removeEventListener('pointerdown', dismissOutside, true);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -91,7 +103,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
     if (match) void choose(match);
   }
 
-  return <section className="agent-session-search" aria-label="Search this session" onKeyDown={event => {
+  return <section ref={panel} className="agent-session-search" aria-label="Search this session" onKeyDown={event => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); }
   }}>
     <div className="agent-session-search-input">
@@ -102,7 +114,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
         }} />
       <button type="button" aria-label="Previous search result" title="Previous result (Shift+Enter)" disabled={!matches.length || jumping} onClick={() => move(-1)}>↑</button>
       <button type="button" aria-label="Next search result" title="Next result (Enter)" disabled={!matches.length || jumping} onClick={() => move(1)}>↓</button>
-      <button type="button" aria-label="Close session search" onClick={onClose}>×</button>
+      <button type="button" aria-label="Close session search" onClick={() => onClose()}>×</button>
     </div>
     <select aria-label="Search scope" value={scope} onChange={event => { setScope(event.target.value as TimelineSearchScope); setShowResults(true); }}>
       <option value="messages">User / Assistant messages</option><option value="all">All activity</option>

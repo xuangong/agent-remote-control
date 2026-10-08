@@ -10,6 +10,7 @@ import { sessionKey } from '../session-tree.js';
 export type AskInputSender = (text: string, operationId: string) => Promise<unknown>;
 export interface AskInput { id: string; text: string }
 export interface AskEntry { attached?: boolean; restoring?: boolean; restoreOnly?: boolean; inputs?: AskInput[]; source: OpenedSession; record?: SessionFork; pending?: SessionFork; busy?: boolean; error?: string }
+interface AskOpenOptions { synchronize?: () => Promise<void>; restoring?: AbortController }
 
 export function useAskConversations(baseUrl: string, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void) {
   const preparations = useRef(new Map<string, AbortController>());
@@ -122,14 +123,16 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       entries.set(key, entry);
     }
     if (!entry.busy && (!entry.attached || !windows.expanded.has(key)) && !entry.pending) {
-      const latest = store.all().filter(record => record.target && !record.creationKey && sessionKey(record.source) === key).at(-1);
-      if (latest) {
-        if (entry.record?.id !== latest.id) entry.attached = false;
-        entry.record = latest;
-      }
-      else if (entry.record?.remote) entry.record = undefined;
+      entry = withLatestRecord(key, entry);
+      entries.set(key, entry);
     }
     return entry;
+  }
+  function withLatestRecord(key: string, entry: AskEntry): AskEntry {
+    if (entry.pending) return entry;
+    const latest = store.all().filter(record => record.target && !record.creationKey && sessionKey(record.source) === key).at(-1);
+    if (latest) return { ...entry, record: latest, attached: entry.record?.id === latest.id ? entry.attached : false };
+    return entry.record?.remote ? { ...entry, record: undefined, attached: false } : entry;
   }
   function restore(source: OpenedSession, synchronize: () => Promise<void>) {
     const key = sessionKey(source);
@@ -141,7 +144,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     update(key, { restoring: true, restoreOnly: true, error: undefined });
     void synchronize().then(async () => {
       if (preparation.signal.aborted || !windows.expanded.has(key) || !isEnabled(source)) return;
-      await open(undefined, source, '', false, preparation);
+      await open(undefined, source, '', false, { restoring: preparation });
     }).catch(error => {
       if (!preparation.signal.aborted) update(key, { error: error instanceof Error ? error.message : 'Ask could not restore. Retry to reconnect.' });
     }).finally(() => {
@@ -152,17 +155,17 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     });
     return () => preparation.abort();
   }
-  async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args = '', clean = false, restoring?: AbortController) {
+  async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args = '', clean = false, { synchronize, restoring }: AskOpenOptions = {}) {
     if (!restoring) setEnabled(source, true);
     const key = sessionKey(source);
-    const entry = entryFor(source);
+    let entry = entryFor(source);
     if (!restoring) setOpen(key, true);
     if (entry.busy) {
       if (preparations.current.get(key)?.signal.aborted && !args.trim() && !clean) {
         if (restoring) {
           await preparationSettlements.current.get(key);
           if (restoring.signal.aborted || !isEnabled(source) || !windows.expanded.has(key)) return {};
-          return open(sourceState, source, '', false, restoring);
+          return open(sourceState, source, '', false, { synchronize, restoring });
         }
         resumeRequested.current.add(key);
         return {};
@@ -171,7 +174,6 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     }
     if (clean && entry.inputs?.length) throw new Error('Wait for the saved Ask question to send before clearing.');
     if (!directory) throw new Error('Open the source session before starting Ask.');
-    const replacing = clean || !!(entry.pending && entry.record && entry.pending.id !== entry.record.id);
     const draftAtStart = drafts.get(key);
     const target = (source.hostId ?? 'local') === selectedHostId ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
     update(key, { busy: true, restoring: !!restoring, error: undefined });
@@ -186,6 +188,13 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     preparationSettlements.current.set(key, new Promise<void>(resolve => { finishPreparation = resolve; }));
     preparations.current.set(key, preparation);
     try {
+      if (synchronize) {
+        await waitForAskRelations(synchronize, preparation.signal);
+        preparation.signal.throwIfAborted();
+        entry = withLatestRecord(key, entries.get(key)!);
+        update(key, entry);
+      }
+      const replacing = clean || !!(entry.pending && entry.record && entry.pending.id !== entry.record.id);
       let record = entry.pending ?? (!clean ? entry.record : undefined);
       if (restoring && !record?.target || entry.restoreOnly && !clean && !record) throw new Error('The saved Ask session is not available yet. Retry to reconnect.');
       if (!record) {
@@ -225,9 +234,21 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       update(key, { busy: false });
       finishPreparation();
       if (resumeRequested.current.delete(key) && isEnabled(source) && windows.expanded.has(key)) {
-        void open(sourceState, source).catch(() => {});
+        void open(sourceState, source, '', false, { synchronize }).catch(() => {});
       }
     }
   }
   return { revision, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, setDraft, sendInput, restore, open, close };
+}
+
+async function waitForAskRelations(synchronize: () => Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  let onAbort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  // Closing this window releases its wait without cancelling the shared query.
+  try { await Promise.race([synchronize(), cancelled]); }
+  finally { signal.removeEventListener('abort', onAbort); }
 }

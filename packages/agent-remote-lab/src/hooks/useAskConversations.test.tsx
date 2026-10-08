@@ -140,6 +140,53 @@ it('waits for shared Ask relations before reconnecting a record discovered on an
   expect(fixture.current().entryFor(source).record?.target?.nativeSessionId).toBe('shared-native');
 });
 
+it('retains the open Ask and its draft when an explicit relation check fails', async () => {
+  const fixture = await setup();
+  await act(async () => { fixture.current().close(source); });
+  await act(async () => {
+    await expect(fixture.current().open(state, source, '', false, {
+      synchronize: async () => { throw new Error('Related sessions could not be checked'); },
+    })).rejects.toThrow('Related sessions could not be checked');
+  });
+  expect(fixture.current().isOpen(source)).toBe(true);
+  expect(fixture.current().entryFor(source)).toMatchObject({ busy: false, error: 'Related sessions could not be checked' });
+  expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
+  expect(fixture.requests).toHaveLength(1);
+});
+
+it('releases a cancelled opening before its shared relation query finishes', async () => {
+  const fixture = await setup();
+  await act(async () => { fixture.current().close(source); });
+  let finish!: () => void;
+  const relations = new Promise<void>(resolve => { finish = resolve; });
+  let opening!: Promise<unknown>;
+  await act(async () => { opening = fixture.current().open(state, source, '', false, { synchronize: () => relations }); });
+  expect(fixture.current().entryFor(source).busy).toBe(true);
+  await act(async () => { fixture.current().close(source); });
+  expect(fixture.current().entryFor(source).busy).toBe(false);
+  await act(async () => { await fixture.current().open(state, source, '', false, { synchronize: async () => {} }); });
+  expect(fixture.current().entryFor(source).attached).toBe(true);
+  await act(async () => { finish(); await opening; });
+  expect(fixture.current().isOpen(source)).toBe(true);
+  expect(fixture.requests.filter(item => item.path.endsWith('/attach'))).toHaveLength(1);
+});
+
+it('keeps an uncertain creation identity when a relation check discovers another Ask', async () => {
+  const fixture = await setup();
+  fixture.failCreate('Creation outcome is unknown');
+  await act(async () => { await expect(fixture.current().open(state, source, '', true)).rejects.toThrow('Creation outcome is unknown'); });
+  const operationId = fixture.current().entryFor(source).pending!.id;
+  fixture.failCreate();
+  await act(async () => {
+    await fixture.current().open(state, source, '', false, { synchronize: async () => {
+      fixture.current().store.setSharedRelations([{ id: 'other-ask', kind: 'ask', createdAt: '2099-01-01T00:00:00.000Z', source,
+        target: { ...source, agentId: 'other-agent', nativeSessionId: 'other-native', title: 'Other Ask' } }]);
+    } });
+  });
+  expect(fixture.requests.at(-1)).toMatchObject({ path: '/v1/remote/create', body: { operationId } });
+  expect(fixture.current().entryFor(source)).toMatchObject({ attached: true, pending: undefined, record: { id: operationId } });
+});
+
 it.each(['failed', 'missing'])('does not create a replacement when restored relations are %s', async outcome => {
   const fixture = await setup();
   for (const key of Object.keys(sessionStorage)) if (key.startsWith('agent-remote-forks:ask:')) sessionStorage.removeItem(key);

@@ -1043,7 +1043,7 @@ function AppContent({
   }
   function openAsk(source: OpenedSession, sourceState: AgentReplicaState | undefined, clean = false) {
     cancelCompositionRecovery();
-    void refreshRelations().then(() => ask.open(sourceState, source, '', clean)).catch(error => setFailure(message(error, 'Ask could not open.')));
+    void ask.open(sourceState, source, '', clean, { synchronize: refreshRelations }).catch(error => setFailure(message(error, 'Ask could not open.')));
   }
   useEffect(() => focusCatchUp(addressSession ? replicas.get(addressSession.agentId) : undefined), [addressSession?.agentId, replicas, focusCatchUp]);
   const primaryIsBound = initialState?.agent?.id === stackRoot?.agentId || (primaryBinding.current?.baseUrl === baseUrl
@@ -1393,7 +1393,7 @@ function AppContent({
     const agent = sourceState.agent;
     if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
     if (id === 'console:ask' && !args.trim()) { ask.toggle(saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }); return {}; }
-    if (id === 'console:ask') { await refreshRelations(); return ask.open(sourceState, saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }, args); }
+    if (id === 'console:ask') return ask.open(sourceState, saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' }, args, false, { synchronize: refreshRelations });
     if (forkBusy.current) throw new Error('A session fork is already being created.');
     forkBusy.current = true;
     try {

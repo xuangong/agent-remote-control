@@ -270,7 +270,14 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
         event.preventDefault(); event.stopPropagation(); setOpenSearchScope(searchScope);
       }
     }}>
-      <SessionTimelineTools key={toolsScope} collapsible={toolsCollapsible} searchOpen={searchOpen}>
+      <SessionTimelineTools key={toolsScope} collapsible={toolsCollapsible} searchOpen={searchOpen} timelineRef={scroll.viewportRef} onDismissSearch={() => closeSearch({ restoreFocus: false })}
+        searchPanel={searchOpen && state ? <TimelineSearch key={searchScope} state={state} search={actions.searchTimeline} onClose={closeSearch} onClearSelection={() => setSearchSelection(undefined)}
+          onSelect={async (match, signal) => {
+            if (actions.loadSearchMatch) await scroll.loadOlder(() => actions.loadSearchMatch!(match, { signal }));
+            else if (!state.timeline.entries.some(entry => entry.seqStart === match.seq)) throw new Error('Reconnect to load this result.');
+            signal.throwIfAborted();
+            setSearchSelection(previous => ({ scope: searchScope, key: match.key, request: (previous?.request ?? 0) + 1 }));
+          }} /> : null}>
       <div className="lab-timeline-session-tools" ref={toolsTargetRef} />
       {state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
         hidden={searchOpen} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
@@ -278,13 +285,6 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
       </button> : null}
       </SessionTimelineTools>
-      {searchOpen && state ? <TimelineSearch key={searchScope} state={state} search={actions.searchTimeline} onClose={closeSearch} onClearSelection={() => setSearchSelection(undefined)}
-        onSelect={async (match, signal) => {
-          if (actions.loadSearchMatch) await scroll.loadOlder(() => actions.loadSearchMatch!(match, { signal }));
-          else if (!state.timeline.entries.some(entry => entry.seqStart === match.seq)) throw new Error('Reconnect to load this result.');
-          signal.throwIfAborted();
-          setSearchSelection(previous => ({ scope: searchScope, key: match.key, request: (previous?.request ?? 0) + 1 }));
-        }} /> : null}
       <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
         <div className="lab-conversation-content" ref={scroll.contentRef}>
           {hasReplica ? <>

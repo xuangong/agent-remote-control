@@ -1465,6 +1465,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 :is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-copy { min-width: 0; }
 :is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-dismiss { min-width: 28px; }
 
+.lab-timeline-controls { display: contents; }
 .lab-timeline-tools { position: absolute; z-index: 7; top: 8px; right: 12px; display: flex; align-items: stretch; max-width: calc(100% - 12px); pointer-events: none; }
 .lab-timeline-tools-content { display: flex; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
 .lab-timeline-session-tools { display: contents; }
@@ -1499,5 +1500,5 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 }
 .lab-timeline-search-trigger { display: inline-grid; place-items: center; width: 34px; min-height: 34px; padding: 0; color: var(--obs-text-secondary); background: var(--obs-surface); border: 1px solid var(--obs-border); border-radius: 8px; }
 .lab-timeline-search-trigger[hidden] { display: none; }
-.lab-timeline-stage > .agent-session-search { position: absolute; z-index: 7; top: 6px; right: 6px; width: min(440px, calc(100% - 12px)); max-height: min(50%, 360px); overflow: auto; }
+.lab-timeline-controls > .agent-session-search { position: absolute; z-index: 7; top: 6px; right: 6px; width: min(440px, calc(100% - 12px)); max-height: min(50%, 360px); overflow: auto; }
 @media (pointer: coarse) { .lab-timeline-search-trigger { width: 40px; min-height: 40px; } }

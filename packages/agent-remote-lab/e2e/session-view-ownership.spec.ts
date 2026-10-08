@@ -499,6 +499,8 @@ test('mobile session actions start collapsed and toggle without moving the readi
     await expect(collapse).toBeVisible();
     await expect(expand).toBeHidden();
     for (const control of controls) await expect(control).toBeVisible();
+    const viewport = (await timeline.boundingBox())!;
+    const originalTools = await Promise.all(controls.map(async control => ({ element: (await control.elementHandle())!, box: (await control.boundingBox())! })));
     await timeline.focus();
     await timeline.evaluate(element => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -180, bubbles: true }));
@@ -507,9 +509,6 @@ test('mobile session actions start collapsed and toggle without moving the readi
     });
     await expect.poll(() => timeline.evaluate(element => element.scrollTop)).toBe(-180);
     const readingTop = await timeline.evaluate(element => element.scrollTop);
-    const viewport = (await timeline.boundingBox())!;
-    const originalTools = await Promise.all(controls.map(async control => ({ element: (await control.elementHandle())!, box: (await control.boundingBox())! })));
-    await collapse.click();
     await expect(expand).toBeVisible();
     for (const control of controls) await expect(control).toBeHidden();
     for (const { element, box } of originalTools) {

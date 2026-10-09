@@ -345,7 +345,6 @@ it.runIf(executable && process.platform !== 'win32')('takes a private writer int
     const resumed = await directory.open(id, {takeOver: failure.owner.generation});
     expect(privateProcess!.exitCode !== null || privateProcess!.signalCode !== null).toBe(true);
     expect(await resumed.runtimeInfo()).toMatchObject({sessionId: id});
-    expect(resumed.capabilities.sessionControl).toBe('shared');
     const resumedStream = resumed.observe()[Symbol.asyncIterator]();
     const history: ProviderStreamItem[] = [];
     while (true) { const next = await resumedStream.next(); if (next.done || next.value.type === 'history_boundary') break; history.push(next.value); }

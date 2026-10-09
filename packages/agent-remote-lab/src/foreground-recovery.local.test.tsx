@@ -171,7 +171,7 @@ async function fixture(sessionControl: 'shared' | 'exclusive' = 'shared', compos
       catch (error) { if (performance.now() >= deadline) throw error; }
     }
   };
-  await waitFor(() => expect(current.status).toBe('ready'));
+  await waitFor(() => expect(current?.status, view.textContent ?? '').toBe('ready'));
   const primary = connections.find(opened)!;
   const commands = (type: ClientMessage['type']) => sent.flatMap(({ frame }) => frame.type === 'message' && frame.message.type === type ? [frame.message] : []);
   const subscriptions = () => sent.filter(({ frame }) => frame.type === 'subscribe');
@@ -258,7 +258,7 @@ it('replaces a silent dead foreground channel, recovers its cursor and does not 
     additionalSockets: 1, historyDirection: 'after', nativeInputDispatches: app.sendMessage.mock.calls.length });
 }, 15_000);
 
-it('honors another browser taking exclusive control while the foreground channel was unreachable', async () => {
+it('keeps both pages authorized when another page opens while the foreground channel is unreachable', async () => {
   const app = await fixture('exclusive');
   expect(app.primary.replica.getState().sessionControl?.access).toBe('control');
   await app.visibilityChange('hidden');
@@ -267,25 +267,26 @@ it('honors another browser taking exclusive control while the foreground channel
     webSocketFactory: url => new WebSocket(url, { origin: window.location.origin }) as unknown as WebSocketLike });
   cleanups.push(() => transport.dispose());
   const replica = new AgentReplica();
-  const successor = new RemoteSessionClient('agent', transport, replica, { requireSessionControl: true, clientKind: 'web' });
-  cleanups.push(() => successor.stop());
+  const otherPage = new RemoteSessionClient('agent', transport, replica, { requireSessionControl: true, clientKind: 'web' });
+  cleanups.push(() => otherPage.stop());
   let status = '';
-  successor.subscribeStatus(value => { status = value; });
-  successor.start();
+  otherPage.subscribeStatus(value => { status = value; });
+  otherPage.start();
   await app.waitFor(() => expect(status).toBe('ready'));
-  expect(replica.getState().sessionControl?.access).toBe('read_only');
-  await successor.takeControl();
   expect(replica.getState().sessionControl?.access).toBe('control');
+  await otherPage.sendMessage('Other page while the first is away');
   await app.visibilityChange('visible');
   await app.waitFor(() => {
+    expect(app.sockets).toHaveLength(2);
     expect(app.current().status).toBe('ready');
-    expect(app.primary.replica.getState().sessionControl?.access).toBe('read_only');
+    expect(app.primary.replica.getState().sessionControl?.access).toBe('control');
   }, 8000);
-  expect(app.current().sessionState.operations.send_message.allowed).toBe(false);
-  await act(async () => { await expect(app.primary.client.sendMessage('Old owner cannot write')).rejects.toMatchObject({ code: 'session_read_only' }); });
-  expect(app.sendMessage).not.toHaveBeenCalled();
-  await successor.sendMessage('New owner can write');
-  expect(app.sendMessage.mock.calls).toEqual([['New owner can write']]);
+  expect(app.current().sessionState.operations.send_message.allowed).toBe(true);
+  let input!: ReturnType<RemoteSessionClient['sendMessage']>;
+  await act(async () => { input = app.primary.client.sendMessage('First page after foreground recovery'); });
+  await input;
+  await otherPage.sendMessage('Other page still usable');
+  expect(app.sendMessage.mock.calls).toEqual([['Other page while the first is away'], ['First page after foreground recovery'], ['Other page still usable']]);
   expect(replica.getState().sessionControl?.access).toBe('control');
   await app.completeRenewals();
 }, 15_000);

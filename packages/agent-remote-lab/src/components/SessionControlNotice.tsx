@@ -30,7 +30,7 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
   const label = phase === 'restoring' ? 'Restoring session…' : phase === 'checking' ? 'Checking session…'
     : phase === 'taking' ? 'Taking control…'
     : control.access === 'unsupported' ? 'Controller update needed'
-    : control.access === 'checking' ? 'Checking control…'
+    : control.access === 'checking' ? 'Checking access…'
     : control.nativeOwner?.kind === 'native_cli' ? 'Native CLI has control'
     : control.nativeOwner ? 'Another Controller has control'
     : control.available ? 'Ready to take control'

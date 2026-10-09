@@ -127,7 +127,6 @@ test('shares native sessions, emits a history boundary and native input echo, an
   const f = await fixture();
   const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
   const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() });
-  expect(session.capabilities.sessionControl).toBe('shared');
   const items = observe(session);
   await waitFor(() => items.some(i => i.type === 'history_boundary'));
   await session.sendMessage('Hello');

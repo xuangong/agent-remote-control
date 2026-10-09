@@ -680,10 +680,12 @@ it.each([0, 250])('separates a rebuilt baseline from live content arriving %i ms
   } finally { wire.close(); vi.useRealTimers(); }
 });
 
-it('fences an operation if control changes while asynchronous validation is pending', async () => {
+it.each(['page-access', 'native-owner'] as const)('checks %s changes after asynchronous validation without confusing page access with native ownership', async change => {
   const { SessionControlRegistry } = await import('./session-control.js');
   const registry = new SessionControlRegistry();
   const { agent } = fakeAgent();
+  const snapshot = agent.snapshot(); snapshot.payload.capabilities.sessionControl = 'shared';
+  agent.snapshot = () => snapshot;
   let finish!: () => void;
   const validation = new Promise<void>(resolve => { finish = resolve; });
   agent.validateMessageContent = () => validation;
@@ -704,9 +706,15 @@ it('fences an operation if control changes while asynchronous validation is pend
       payload: { agentId: 'agent-1', requestId: 'send', operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', content: [{ type: 'text', text: 'late' }] },
     }));
     await b.receive(request(latest(bMessages).revision));
+    if (change === 'native-owner') registry.setNativeOwner(agent.agentId, { kind: 'native_cli', generation: 'external' });
     finish(); await pending;
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(aMessages.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send', code: 'session_read_only' } });
+    if (change === 'native-owner') {
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(aMessages.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send', code: 'session_read_only' } });
+    } else {
+      expect(dispatch).toHaveBeenCalledOnce();
+      expect(aMessages.at(-1)).toMatchObject({ type: 'command_acknowledged', payload: { requestId: 'send' } });
+    }
   } finally { a.close(); b.close(); registry.close(); }
 });
 

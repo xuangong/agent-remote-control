@@ -493,6 +493,117 @@ describe('Agent Host runtime', () => {
     } finally { await host.close(); await broker.close(); }
   });
 
+  it('shares one native session across independently controlled pages over real uplink streams', async () => {
+    const broker = await uplinkBroker('shared-pages-host');
+    const registration = fixture('codex');
+    const session = new Session('codex', 'native', [{ type: 'history_boundary' }], { ...capabilities, sessionControl: 'exclusive' });
+    let opens = 0;
+    registration.directory.open = async () => { opens += 1; return session; };
+    registration.directory.canReleaseSession = () => true;
+    const host = createAgentHost({ registrations: [registration], idleGraceMs: 150,
+      installationId: 'shared-pages-host', name: 'Host', uplink: { url: broker.url, remoteKey: 'key' } });
+    try {
+      await host.ready;
+      const [first, second] = await Promise.all([
+        broker.rpc('POST', '/remote/attach', 'first-proposal', { providerId: 'codex', nativeSessionId: 'native' }),
+        broker.rpc('POST', '/remote/attach', 'second-proposal', { providerId: 'codex', nativeSessionId: 'native' }),
+      ]);
+      expect(first.status).toBe(200);
+      expect(JSON.parse(first.body)).toEqual({ agentId: 'first-proposal', nativeSessionId: 'native' });
+      expect(second).toEqual(first);
+      expect(opens).toBe(1);
+      expect(session.observeCount).toBe(1);
+
+      const firstToken = await openControlledPage(broker, 'first-page', 'first-proposal');
+      const secondToken = await openControlledPage(broker, 'second-page', 'first-proposal');
+      expect(secondToken).not.toBe(firstToken);
+      for (const streamId of ['first-page', 'second-page']) {
+        broker.sendStream(streamId, { protocolVersion: '1.6.0', type: 'timeline_subscription', payload: {
+          requestId: `subscribe-${streamId}`, agentIds: ['first-proposal'],
+        } });
+        await expect.poll(() => broker.streamMessage(streamId, 'timeline_subscribed', `subscribe-${streamId}`)).toBeDefined();
+      }
+      for (const [streamId, token, text] of [
+        ['first-page', firstToken, 'From the first page.'],
+        ['second-page', secondToken, 'From the second page.'],
+      ] as const) {
+        broker.sendStream(streamId, { protocolVersion: '1.6.0', type: 'send_message', controlToken: token, payload: {
+          agentId: 'first-proposal', requestId: `send-${streamId}`, operationId: operationId(`shared-${streamId}`), text,
+        } });
+        await expect.poll(() => broker.streamMessage(streamId, 'command_acknowledged', `send-${streamId}`)).toBeDefined();
+      }
+      expect(session.sentMessages).toEqual(['From the first page.', 'From the second page.']);
+      session.emit({ type: 'observation', sourceKey: 'shared-output', occurredAt: 1, delivery: 'live', event: {
+        type: 'timeline', provider: 'codex', item: { type: 'assistant_message', messageId: 'shared-output', text: 'Visible on both pages.' },
+      } });
+      for (const streamId of ['first-page', 'second-page']) {
+        await expect.poll(() => broker.streamMessage(streamId, 'agent_stream')).toMatchObject({ payload: {
+          agentId: 'first-proposal', event: { type: 'timeline', item: { type: 'assistant_message', text: 'Visible on both pages.' } },
+        } });
+      }
+      expect(broker.streamMessage('second-page', 'agent_stream')).toEqual(broker.streamMessage('first-page', 'agent_stream'));
+
+      broker.closeStream('first-page');
+      await new Promise(resolve => setTimeout(resolve, 220));
+      expect(session.disposed).toBe(false);
+      broker.sendStream('second-page', { protocolVersion: '1.6.0', type: 'send_message', controlToken: secondToken, payload: {
+        agentId: 'first-proposal', requestId: 'send-after-close', operationId: operationId('shared-after-close'), text: 'Still connected.',
+      } });
+      await expect.poll(() => broker.streamMessage('second-page', 'command_acknowledged', 'send-after-close')).toBeDefined();
+      expect(session.sentMessages).toEqual(['From the first page.', 'From the second page.', 'Still connected.']);
+      expect(opens).toBe(1);
+      expect(session.observeCount).toBe(1);
+    } finally { await host.close(); await broker.close(); }
+  });
+
+  it('resolves concurrent page approvals once over real uplink streams', async () => {
+    const broker = await uplinkBroker('shared-approval-host');
+    const registration = fixture('codex');
+    const approval = { kind: 'plan_approval' as const, requestId: 'shared-approval', plan: 'Run the checks.', allowedActions: ['approve' as const] };
+    const session = new Session('codex', 'native', [
+      { type: 'observation', sourceKey: 'shared-approval', occurredAt: 1, delivery: 'live',
+        event: { type: 'interaction_requested', provider: 'codex', request: approval } },
+      { type: 'history_boundary' },
+    ], { ...capabilities, sessionControl: 'exclusive', interactions: { ...capabilities.interactions, planApproval: true } });
+    let releaseApproval!: () => void;
+    const approving = new Promise<void>(resolve => { releaseApproval = resolve; });
+    const respond = session.respondToInteraction.bind(session);
+    session.respondToInteraction = async (requestId, response) => {
+      await respond(requestId, response);
+      await approving;
+      session.emit({ type: 'observation', sourceKey: 'shared-approval-resolved', occurredAt: 2, delivery: 'live',
+        event: { type: 'interaction_resolved', provider: 'codex', requestId, response } });
+    };
+    registration.directory.open = async () => session;
+    const host = createAgentHost({ registrations: [registration], installationId: 'shared-approval-host', name: 'Host',
+      uplink: { url: broker.url, remoteKey: 'key' } });
+    try {
+      await host.ready;
+      expect((await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
+      const firstToken = await openControlledPage(broker, 'first-page', 'agent');
+      const secondToken = await openControlledPage(broker, 'second-page', 'agent');
+      for (const [streamId, token] of [['first-page', firstToken], ['second-page', secondToken]] as const) {
+        expect(broker.streamMessage(streamId, 'agent_snapshot')).toMatchObject({ payload: { pendingInteractions: [approval] } });
+        broker.sendStream(streamId, { protocolVersion: '1.6.0', type: 'interaction_response', controlToken: token, payload: {
+          agentId: 'agent', requestId: approval.requestId, submissionId: `approval-${streamId}`,
+          operationId: operationId(`shared-approval-${streamId}`), response: { kind: 'plan_approval', action: 'approve' },
+        } });
+      }
+      await expect.poll(() => session.interactionResponses.length).toBe(1);
+      await expect.poll(() => broker.streamMessage('second-page', 'protocol_error', 'approval-second-page')).toMatchObject({
+        payload: { code: 'stale_interaction' },
+      });
+      releaseApproval();
+      for (const streamId of ['first-page', 'second-page']) {
+        await expect.poll(() => broker.streamMessage(streamId, 'interaction_resolved', approval.requestId)).toMatchObject({ payload: {
+          agentId: 'agent', requestId: approval.requestId, response: { kind: 'plan_approval', action: 'approve' },
+        } });
+      }
+      await expect.poll(() => broker.streamMessage('first-page', 'command_acknowledged', 'approval-first-page')).toBeDefined();
+      expect(session.interactionResponses).toEqual([{ requestId: approval.requestId, response: { kind: 'plan_approval', action: 'approve' } }]);
+    } finally { releaseApproval(); await host.close(); await broker.close(); }
+  });
+
   it('starts a new operation-cache lifetime when the Host is recreated', async () => {
     const broker = await uplinkBroker('host');
     const codex = fixture('codex');
@@ -770,6 +881,22 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
 function summary(providerId: string, nativeSessionId: string) {
   return { providerId, nativeSessionId, title: nativeSessionId, createdAt: '2026-09-11T00:00:00.000Z',
     updatedAt: '2026-09-11T00:00:00.000Z', state: 'idle' as const };
+}
+
+async function openControlledPage(broker: Awaited<ReturnType<typeof uplinkBroker>>, streamId: string, agentId: string): Promise<string> {
+  broker.openStream(streamId, agentId);
+  await expect.poll(() => broker.streamOpened(streamId)).toBe(true);
+  broker.sendStream(streamId, { protocolVersion: '1.6.0', type: 'negotiate' });
+  await expect.poll(() => broker.streamMessage(streamId, 'agent_snapshot')).toBeDefined();
+  await expect.poll(() => broker.streamMessage(streamId, 'session_control')).toBeDefined();
+  const initial = broker.streamMessage(streamId, 'session_control')!.payload as { revision: string };
+  broker.sendStream(streamId, { protocolVersion: '1.6.0', type: 'session_control_request', payload: {
+    agentId, requestId: `acquire-${streamId}`, action: 'acquire', revision: initial.revision,
+  } });
+  await expect.poll(() => broker.streamMessage(streamId, 'session_control', `acquire-${streamId}`)).toMatchObject({
+    payload: { agentId, access: 'control', token: expect.any(String) },
+  });
+  return (broker.streamMessage(streamId, 'session_control', `acquire-${streamId}`)!.payload as { token: string }).token;
 }
 
 it('stops projected native sessions and reports unsupported and failed cancellation separately', async () => {

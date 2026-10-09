@@ -19,6 +19,7 @@ export const AgentStatus = Type.Union([
 export type AgentStatus = Static<typeof AgentStatus>;
 
 export const AgentCapabilities = Strict({
+  // Legacy snapshots and recordings may contain either value; live Relay snapshots advertise shared access.
   sessionControl: Type.Optional(Type.Union([Type.Literal('shared'), Type.Literal('exclusive')])),
   imageInput: Type.Optional(ImageInputCapabilities),
   history: Type.Boolean(),

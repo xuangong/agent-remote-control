@@ -227,16 +227,17 @@ it('distinguishes missing commands from failures after native command dispatch',
 }, 2000);
 
 
-it.each(['exclusive', 'shared'] as const)('checks queued %s operations at native dispatch over real WebSockets', async mode => {
+it.each(['page-access', 'native-owner', 'connection-close'] as const)('checks queued operations across %s at native dispatch over real WebSockets', async change => {
   const native = provider();
   const create = native.adapter.createSession.bind(native.adapter);
-  native.adapter.createSession = async config => { const session = await create(config); Object.assign(session.capabilities, { sessionControl: mode }); return session; };
+  native.adapter.createSession = async config => { const session = await create(config); Object.assign(session.capabilities, { sessionControl: 'shared' }); return session; };
   const relay = createAgentRemoteRelay({ providers: [native.adapter] });
   await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: { requestId: 'create', operationId: randomUUID(), agentId: 'agent', providerId: 'test', config: { sessionId: 'native' } } });
   const server = createAgentRemoteHttpServer(relay, { websocketAuthorizer: { authenticate: () => ({ subject: 'owner' }), authorize: () => true } });
   const { url } = await server.listen();
   const clients: WebSocket[] = [];
   const connect = async () => {
+    const serverClosed = new Promise<void>(resolve => server.server.once('connection', socket => socket.once('close', () => resolve())));
     const socket = new WebSocket(url.replace('http:', 'ws:') + '/v1/sessions/agent/events'); clients.push(socket);
     const messages: any[] = [];
     socket.on('message', data => messages.push(JSON.parse(data.toString())));
@@ -252,7 +253,7 @@ it.each(['exclusive', 'shared'] as const)('checks queued %s operations at native
       send('session_control_request', { agentId: 'agent', requestId, action: 'take_over', revision });
       return (await next('session_control', requestId)).payload.token;
     };
-    return { send, next, take };
+    return { socket, serverClosed, send, next, take, control: () => messages.findLast(message => message.type === 'session_control')?.payload };
   };
   let release!: () => void, started!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -271,17 +272,29 @@ it.each(['exclusive', 'shared'] as const)('checks queued %s operations at native
     const operationId = randomUUID();
     a.send('send_message', { agentId: 'agent', requestId: 'queued', operationId, text: 'queued' }, token);
     await queued;
-    await b.take('b-control');
+    const secondToken = await b.take('b-control');
+    if (change === 'native-owner') relay.sessionControls.setNativeOwner('agent', { kind: 'native_cli', generation: 'external' });
+    if (change === 'connection-close') {
+      const closed = new Promise<void>(resolve => a.socket.once('close', () => resolve()));
+      a.socket.close(); await Promise.all([closed, a.serverClosed]);
+    }
     release(); await first;
-    if (mode === 'exclusive') {
-      expect((await a.next('protocol_error', 'queued')).payload.code).toBe('session_read_only');
+    if (change !== 'page-access') {
+      if (change === 'native-owner') {
+        expect((await a.next('protocol_error', 'queued')).payload.code).toBe('session_read_only');
+        relay.sessionControls.setNativeOwner('agent', undefined);
+        await expect.poll(() => b.control()).toMatchObject({ available: true, access: 'read_only' });
+      }
       expect(sent).toEqual(['first']);
-      const renewed = await a.take('a-again');
-      a.send('send_message', { agentId: 'agent', requestId: 'retry', operationId, text: 'queued' }, renewed);
-      expect((await a.next('protocol_error', 'retry')).payload.code).toBe('session_read_only');
+      const renewed = change === 'native-owner' ? await b.take('b-again') : secondToken;
+      b.send('send_message', { agentId: 'agent', requestId: 'retry', operationId, text: 'queued' }, renewed);
+      expect((await b.next('protocol_error', 'retry')).payload.code).toBe('session_read_only');
       expect(sent).toEqual(['first']);
     } else {
       await a.next('command_acknowledged', 'queued');
+      expect(sent).toEqual(['first', 'queued']);
+      b.send('send_message', { agentId: 'agent', requestId: 'retry', operationId, text: 'queued' }, secondToken);
+      await b.next('command_acknowledged', 'retry');
       expect(sent).toEqual(['first', 'queued']);
     }
   } finally { release(); for (const socket of clients) socket.terminate(); await server.close(); await relay.close(); }

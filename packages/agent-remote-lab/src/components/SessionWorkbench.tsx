@@ -114,7 +114,7 @@ export function SessionWorkbench({ displayPreferences, onDisplayPreferencesChang
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
     : sessionStatus === 'connecting' ? 'Opening session'
-    : session.controlChecking ? 'Checking control'
+    : session.controlChecking ? 'Checking access'
     : sessionStatus === 'catching_up' ? 'Synchronizing'
     : sessionStatus === 'idle' ? 'Disconnected'
     : !state?.agent ? 'Opening session'

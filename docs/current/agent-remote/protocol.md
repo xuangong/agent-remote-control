@@ -266,66 +266,64 @@ updated strict-schema Server participants before capability-advertising Hosts.
 
 ## Session interaction control
 
-The common session wire advertises `negotiated.sessionControl: true`. This is a
-Relay/Controller authority boundary, separate from normalized Agent state and
-native process ownership. The adapter's `capabilities.sessionControl` selects
-`shared` or `exclusive`; absence defaults to `exclusive`. Codex shared daemon
-sessions, including their child sessions, declare `shared`. Private Codex and
-stdio adapters retain exclusive control. The Relay must not infer this from a
-provider ID or browser-supplied options. This does not implement native CLI
-handoff or restart the provider process.
+The common session wire advertises `negotiated.sessionControl: true`. It authorizes
+Remote operations independently of normalized Agent state and native process
+ownership. Every authorized content client shares the Host-owned Session and its
+single native observation. Opening another page or an ARDB command does not
+transfer that Session or revoke another client's access.
 
-Shared sessions grant an independent, connection-scoped proof to every authorized
-client. Acquiring or taking control never revokes another shared client's proof;
-closing or reconnecting one connection does not affect other writers. Shared
-connections have no exclusive `ownerKind` or native takeover notice. Proofs are
-still required for mutations and remain subject to the existing authorization
-checks. Recordings retain the normalized capability, but never restore live
-control proofs or exclusive ownership from replay.
+The public Agent snapshot advertises `capabilities.sessionControl: "shared"` for
+all providers. The Provider SDK field is deprecated compatibility metadata;
+`shared`, `exclusive` and omission remain valid in old snapshots and recordings,
+but adapters no longer choose page authorization. Native transport types, such
+as stdio or a shared daemon socket, do not determine Remote writer policy.
 
-The ownership and takeover rules below apply to exclusive sessions.
+This `shared` value describes access through the Host, not native connection
+mode. Codex/OpenCode native shared services can also admit compatible local tools
+directly. Claude/Copilot private SDK runtimes provide shared access through their
+owning Host; other tools must use that Host's Remote protocol to participate
+without native handoff. See [native sharing and sharing through the Host](providers.md#native-sharing-and-sharing-through-the-host)
+for the external-client, ownership and recovery boundaries.
 
 Each content connection receives `session_control` with `agentId`, `revision`,
-`access` (`control` or `read_only`), and `available`. Only controlling connections
-receive the private `token`. `session_control_request` uses an explicit `action`
-(`acquire` or `take_over`), the last observed `revision`, and an optional
-`resumeToken`. A racing takeover with an outdated revision is rejected. Acquire
-never replaces another owner. The initial open may acquire an unowned session;
-subsequent broadcasts never automatically take over a session.
+`access` (`control` or `read_only`), and `available`. An authorized acquisition
+returns a private, connection-scoped `token`. The compatible
+`session_control_request` actions `acquire` and `take_over` both authorize only
+the requesting connection. Neither action revokes another Remote client's
+proof or interrupts native work. An outdated revision is rejected.
 
-Remote clients identify themselves with optional `clientKind` (`web`, `headless`,
-or `unknown`) when acquiring control. The Relay retains this kind for the owner
-generation and broadcasts it as `ownerKind`; joining with a resume proof cannot
-relabel the owner. Missing identification is `unknown`, and an unowned session
-has no `ownerKind`. This is presentation metadata, not authentication or evidence
-of native CLI ownership. A headless ARDB client shares the Controller-owned
-process just as a web page does. Native CLI release requires separate verified
-Controller lifecycle capabilities and cannot be requested by changing this label.
+Legacy `resumeToken`, `retainOnDisconnect` and `clientKind` request fields remain
+accepted, but do not reserve a page owner or grant authority on a new connection.
+Each reconnect acquires a fresh proof after authorization. `ownerKind` remains
+readable in old frames and recordings; current shared connections do not publish
+an exclusive Remote owner. A headless ARDB command uses the same shared Session
+as a page. Native CLI ownership is reported separately by `nativeOwner`, which
+clients cannot forge by changing `clientKind`.
 
 All session mutations carry the current top-level `controlToken`: message send,
 steer, cancel, planning, settings, native commands, interaction responses, and
 image uploads. The wire checks the connection and proof before processing and
-again immediately before native dispatch, after asynchronous validation. Stale
-requests return `session_read_only` without reaching the provider. Already
-admitted operations may settle normally; their acknowledgement does not grant
-control back to the old page. Reads and observation remain available.
+again immediately before native dispatch, after asynchronous validation. Closing
+a connection invalidates only its proof. A native ownership change invalidates
+all Remote proofs for that Session and rejects further remote acquisition until
+the Host resumes it. Stale requests return `session_read_only` without reaching
+the provider; already admitted operations may still settle normally. An
+acknowledgement never grants authority. Reads and observation remain available.
 
-Control proofs stay in page memory, shared only by session views using the same
-transport. Reconnect can resume the same authority, but a revoked or expired
-proof cannot reacquire control. Disconnected browser ownership is reserved for
-30 seconds; expiry leaves observers read-only until a deliberate takeover.
-Activity subscriptions and ARDB recording/observation do not acquire control.
-Short-lived headless commands set `retainOnDisconnect: false` to release their
-control when they close. Neither expiry nor takeover cancels an Agent task.
+Shared access does not remove operation admission: native busy state, supported
+input delivery modes, operation deduplication and one accepted answer per pending
+interaction remain enforced by the public session layer and adapter. Disconnect
+or lost acknowledgement does not automatically replay an uncertain mutation.
 
-The product fails closed with a Controller update notice if the Host does not
-advertise this capability. Legacy mutation frames without a control proof are
-rejected by updated Hosts. Control proofs are excluded from protocol traces and
-recording exports; replay does not restore live authority.
+Activity subscriptions and ARDB observation do not acquire control. The product
+fails closed with a Controller update notice if the Host does not advertise this
+capability. Legacy mutation frames without a control proof are rejected by
+updated Hosts. Proofs are excluded from protocol traces and recording exports;
+replay does not restore live authority or native ownership.
 
 ### Native stdio handoff
 
-`session_control.nativeOwner` optionally contains `{kind: "native_cli" | "controller", generation}`. It is set only by the Host, never by browser `clientKind`. While present the session is read-only and remote control acquisition is rejected. It describes native ownership, not normalized Agent activity. Clearing it after native resume makes existing content clients reconnect and resynchronize. The requester then explicitly acquires browser interaction control.
+`session_control.nativeOwner` optionally contains `{kind: "native_cli" | "controller", generation}`. It is set only by the Host, never by browser `clientKind`. While present the session is read-only and remote control acquisition is rejected. It describes native ownership, not normalized Agent activity. Clearing it after native resume makes existing content clients reconnect and resynchronize. Each authorized client then acquires a fresh connection proof; there is no exclusive browser owner.
 
 A directory attach may return HTTP 409 `native_session_owned` / `native_session_released` with this public owner identity. An explicit attach with `takeOver: generation` interrupts that exact managed native owner. Ordinary attach, Track and reconnect never supply it. Stale generations, incomplete shutdown, and unmanaged native clients fail without starting a replacement writer. Loopback management addresses and tokens are never part of this contract.
 

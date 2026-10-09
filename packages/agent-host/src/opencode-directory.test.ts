@@ -4,7 +4,7 @@ import type { AgentCapabilities, AgentSession, AgentSessionConfig } from '@orcha
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { createHostExecutionPolicy, protectHostDirectory } from './execution-policy.js';
 
-const capabilities: AgentCapabilities = { sessionControl: 'shared', history: true, sendMessage: true, steer: false,
+const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false,
   cancel: true, readResource: false, interactions: { question: true, planApproval: false, toolApproval: true } };
 function fixture(cwd = '/work') {
   const summaries = new Map([['native', { id: 'native', title: 'Native title', cwd, updatedAt: '2026-09-25T00:00:00.000Z' }]]);
@@ -33,7 +33,7 @@ it('creates and reuses shared sessions without ownership leases, and closes with
   const id = await directory.create({ workspaceId: 'work', model: 'provider/model' });
   expect(id).toBe('created'); expect(f.config()).toMatchObject({ cwd: '/work', model: 'provider/model' });
   const session = await directory.open(id);
-  expect(session.capabilities.sessionControl).toBe('shared'); expect(directory.setSessionHandoffHandler).toBeUndefined();
+  expect(directory.setSessionHandoffHandler).toBeUndefined();
   expect(await directory.list()).toContainEqual(expect.objectContaining({ nativeSessionId: id, providerId: 'opencode', workspace: '/work', state: 'idle' }));
   await directory.close(); await directory.close();
   expect(f.counts()).toEqual({ closes: 1, resumes: 0, renames: 0, aborts: 0 });

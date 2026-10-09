@@ -1,124 +1,124 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SessionControlRegistry } from './session-control.js';
 
-describe('session interaction ownership', () => {
-  it('reports the remote owner kind and preserves it across proof-based reconnects', () => {
-    const registry = new SessionControlRegistry();
-    const a = registry.attach('one', vi.fn());
-    const b = registry.attach('one', vi.fn());
-    const first = a.request('acquire', a.state().revision, undefined, true, 'web');
-    expect(b.state()).toMatchObject({ ownerKind: 'web', access: 'read_only' });
-    a.close();
-    const resumed = registry.attach('one', vi.fn());
-    resumed.request('acquire', resumed.state().revision, first.token, true, 'headless');
-    expect(b.state()).toMatchObject({ ownerKind: 'web' });
-    b.request('take_over', b.state().revision, undefined, false, 'headless');
-    expect(resumed.state()).toMatchObject({ ownerKind: 'headless', access: 'read_only' });
-    b.close();
-    expect(resumed.state()).not.toHaveProperty('ownerKind');
-    resumed.request('take_over', resumed.state().revision);
-    expect(resumed.state()).toMatchObject({ ownerKind: 'unknown' });
-    resumed.close(); registry.close();
-  });
-  it('permits one writer and fences delayed operations after takeover', () => {
+describe('shared session connection access', () => {
+  it('authorizes each client independently and never transfers access between pages', () => {
     const registry = new SessionControlRegistry();
     const a = registry.attach('session', vi.fn());
     const b = registry.attach('session', vi.fn());
-    const first = a.request('acquire', a.state().revision);
-    expect(first.access).toBe('control');
-    expect(b.request('acquire', b.state().revision).access).toBe('read_only');
-    const revision = b.state().revision;
-    const second = b.request('take_over', revision);
-    expect(second.access).toBe('control');
-    expect(() => a.assert(first.token)).toThrowError(/read.only/i);
-    expect(() => a.request('take_over', revision)).toThrowError(/changed/i);
-    expect(() => b.assert(second.token)).not.toThrow();
-    const third = a.request('take_over', a.state().revision);
-    expect(() => a.assert(first.token)).toThrowError(/read.only/i);
-    expect(() => a.assert(third.token)).not.toThrow();
-    a.close(); b.close(); registry.close();
+    try {
+      const first = a.request('acquire', a.state().revision, undefined, true, 'web');
+      const second = b.request('acquire', b.state().revision, undefined, false, 'headless');
+      expect(first.access).toBe('control');
+      expect(second.access).toBe('control');
+      expect(first.token).not.toBe(second.token);
+      expect(a.state()).not.toHaveProperty('ownerKind');
+      expect(b.state()).not.toHaveProperty('ownerKind');
+      b.request('take_over', b.state().revision);
+      expect(() => a.assert(first.token)).not.toThrow();
+      expect(() => b.assert(second.token)).not.toThrow();
+    } finally { a.close(); b.close(); registry.close(); }
   });
 
-  it('resumes a disconnected owner without allowing a revoked owner to reclaim', () => {
+  it('binds revisions and proofs to one connection even when a legacy resume token is supplied', () => {
     const registry = new SessionControlRegistry();
     const a = registry.attach('session', vi.fn());
-    const first = a.request('acquire', a.state().revision);
-    a.close();
     const b = registry.attach('session', vi.fn());
-    expect(b.request('acquire', b.state().revision).access).toBe('read_only');
-    const resumed = registry.attach('session', vi.fn());
-    const second = resumed.request('acquire', resumed.state().revision, first.token);
-    expect(second.access).toBe('control');
-    b.request('take_over', b.state().revision);
-    const stale = registry.attach('session', vi.fn());
-    expect(stale.request('acquire', stale.state().revision, second.token).access).toBe('read_only');
-    b.close(); resumed.close(); stale.close(); registry.close();
+    const other = registry.attach('other', vi.fn());
+    try {
+      const first = a.request('acquire', a.state().revision);
+      expect(() => b.assert(first.token)).toThrow(/read.only/i);
+      expect(() => b.request('acquire', first.revision)).toThrow(/changed/i);
+      const second = b.request('acquire', b.state().revision, first.token);
+      expect(second.access).toBe('control');
+      expect(second.token).not.toBe(first.token);
+      expect(() => b.assert(first.token)).toThrow(/read.only/i);
+      expect(() => other.assert(second.token)).toThrow(/read.only/i);
+      expect(() => b.assert(second.token)).not.toThrow();
+    } finally { a.close(); b.close(); other.close(); registry.close(); }
   });
 
-  it('reserves control during mobile disconnects, then releases without selecting a viewer', () => {
-    vi.useFakeTimers();
-    const registry = new SessionControlRegistry({ graceMs: 30_000 });
+  it('reconnects immediately without a page owner or disconnect grace and keeps other pages active', () => {
+    const registry = new SessionControlRegistry();
     const a = registry.attach('session', vi.fn());
     const b = registry.attach('session', vi.fn());
-    const first = a.request('acquire', a.state().revision);
-    a.close();
-    vi.advanceTimersByTime(29_999);
-    expect(b.state().available).toBe(false);
-    vi.advanceTimersByTime(1);
-    expect(b.state()).toMatchObject({ access: 'read_only', available: true });
-    expect(b.request('acquire', b.state().revision, first.token).access).toBe('read_only');
-    expect(b.request('take_over', b.state().revision).access).toBe('control');
-    b.close(); registry.close(); vi.useRealTimers();
-  });
-});
-
-it('shares proof within a page and releases short-lived headless ownership on close', () => {
-  const registry = new SessionControlRegistry();
-  const a = registry.attach('one', vi.fn());
-  const token = a.request('acquire', a.state().revision, undefined, false).token;
-  const samePage = registry.attach('one', vi.fn());
-  samePage.request('acquire', samePage.state().revision, token, false);
-  a.close();
-  expect(() => samePage.assert(token)).not.toThrow();
-  const viewer = registry.attach('one', vi.fn());
-  expect(viewer.state().available).toBe(false);
-  samePage.close();
-  expect(viewer.state()).toMatchObject({ available: true, access: 'read_only' });
-  viewer.close(); registry.close();
-});
-
-it('fences all browser writers while a native CLI owns the session', () => {
-  const registry = new SessionControlRegistry();
-  const updates: unknown[] = [];
-  const page = registry.attach('native', state => updates.push(state));
-  const granted = page.request('acquire', page.state().revision);
-  registry.setNativeOwner('native', {kind:'native_cli',generation:'generation-one'});
-  expect(page.state()).toMatchObject({access:'read_only',available:false,nativeOwner:{kind:'native_cli',generation:'generation-one'}});
-  expect(()=>page.assert(granted.token)).toThrow(/read.only/);
-  expect(()=>page.request('take_over',page.state().revision)).toThrow(/native/i);
-  registry.setNativeOwner('native', undefined);
-  expect(page.state()).toMatchObject({available:true,access:'read_only'});
-  expect(updates.length).toBeGreaterThan(1);
-  page.close();registry.close();
-});
-
-it('keeps shared control independent across clients and invalidates proofs only on their own close', () => {
-  const registry = new SessionControlRegistry();
-  const a = registry.attachShared('shared');
-  const b = registry.attachShared('shared');
-  try {
     const first = a.request('acquire', a.state().revision);
     const second = b.request('acquire', b.state().revision);
-    expect(first.access).toBe('control'); expect(second.access).toBe('control');
-    expect(first.token).not.toBe(second.token);
-    expect(a.state()).not.toHaveProperty('ownerKind');
-    b.request('take_over', b.state().revision);
-    expect(() => a.assert(first.token)).not.toThrow();
-    expect(() => b.assert(first.token)).toThrow(/read.only/i);
     a.close();
-    expect(() => a.assert(first.token)).toThrow(/read.only/i);
-    expect(() => b.assert(second.token)).not.toThrow();
+    const resumed = registry.attach('session', vi.fn());
+    try {
+      expect(resumed.state().available).toBe(true);
+      const next = resumed.request('acquire', resumed.state().revision, first.token);
+      expect(next.access).toBe('control');
+      expect(next.token).not.toBe(first.token);
+      expect(() => a.assert(first.token)).toThrow(/read.only/i);
+      expect(() => resumed.assert(first.token)).toThrow(/read.only/i);
+      expect(() => b.assert(second.token)).not.toThrow();
+      expect(() => resumed.assert(next.token)).not.toThrow();
+    } finally { b.close(); resumed.close(); registry.close(); }
+  });
+
+  it('revokes every page before publishing a native ownership change and requires fresh grants after release', () => {
+    const registry = new SessionControlRegistry();
+    const updates: unknown[] = [];
+    let verifyOther: (() => void) | undefined;
+    const a = registry.attach('native', state => { updates.push(state); verifyOther?.(); });
+    const b = registry.attach('native', state => updates.push(state));
+    const first = a.request('acquire', a.state().revision);
+    const second = b.request('acquire', b.state().revision);
+    const owner = {kind: 'native_cli' as const, generation: 'generation-one'};
+    verifyOther = () => expect(() => b.assert(second.token)).toThrow(/read.only/i);
+    try {
+      registry.setNativeOwner('native', owner);
+      for (const page of [a, b]) {
+        expect(page.state()).toMatchObject({access: 'read_only', available: false, nativeOwner: owner});
+        expect(page.state()).not.toHaveProperty('token');
+        expect(() => page.request('take_over', page.state().revision)).toThrow(/native/i);
+      }
+      expect(() => a.assert(first.token)).toThrow(/read.only/i);
+      registry.setNativeOwner('native', undefined);
+      for (const page of [a, b]) {
+        expect(page.state()).toMatchObject({access: 'read_only', available: true});
+        expect(page.state()).not.toHaveProperty('nativeOwner');
+      }
+      expect(updates).toHaveLength(4);
+      expect(() => a.request('acquire', first.revision)).toThrow(/changed/i);
+      const next = a.request('acquire', a.state().revision, first.token);
+      const also = b.request('acquire', b.state().revision, second.token);
+      expect(next.access).toBe('control'); expect(also.access).toBe('control');
+      expect(() => a.assert(first.token)).toThrow(/read.only/i);
+      expect(() => b.assert(second.token)).toThrow(/read.only/i);
+      expect(() => a.assert(next.token)).not.toThrow();
+      expect(() => b.assert(also.token)).not.toThrow();
+    } finally { a.close(); b.close(); registry.close(); }
+  });
+
+  it('keeps a native owner authoritative when every page disconnects', () => {
+    const registry = new SessionControlRegistry();
+    registry.setNativeOwner('native', {kind: 'controller', generation: 'external-controller'});
+    const first = registry.attach('native', vi.fn());
+    expect(() => first.request('acquire', first.state().revision)).toThrow(/native/i);
+    first.close();
+    const next = registry.attach('native', vi.fn());
+    try {
+      expect(next.state()).toMatchObject({access: 'read_only', available: false, nativeOwner: {generation: 'external-controller'}});
+      registry.setNativeOwner('native', undefined);
+      expect(next.request('acquire', next.state().revision).access).toBe('control');
+    } finally { next.close(); registry.close(); }
+  });
+
+  it('revokes all outstanding grants when the registry closes', () => {
+    const registry = new SessionControlRegistry();
+    const a = registry.attach('one', vi.fn());
+    const b = registry.attach('two', vi.fn());
+    const first = a.request('acquire', a.state().revision);
+    const second = b.request('acquire', b.state().revision);
     registry.close();
-    expect(() => b.assert(second.token)).toThrow(/read.only/i);
-  } finally {a.close(); b.close(); registry.close();}
+    for (const [page, token] of [[a, first.token], [b, second.token]] as const) {
+      expect(page.state()).toMatchObject({access: 'read_only', available: false});
+      expect(() => page.assert(token)).toThrow(/read.only/i);
+      expect(() => page.request('acquire', page.state().revision)).toThrow(/closed/i);
+      page.close();
+    }
+  });
 });

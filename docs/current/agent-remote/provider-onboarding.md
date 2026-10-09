@@ -14,6 +14,7 @@ A Provider is ready for basic integration only when these invariants have eviden
 - Answers are validated against the exact outstanding request, allowed choices and scope; stale answers are rejected. Native sensitivity must be mapped so shared receipt/trace redaction can work.
 - Read authority comes from a session-owned resource reference, never a user-supplied path. Bounded/truncated/unavailable outcomes are explicit.
 - Root, child and observer ownership are separate. Dispose only owned native work; reject cross-provider and cross-parent attachment. Reconnect must not duplicate an owned process.
+- Document [native sharing separately from sharing through the Host](providers.md#native-sharing-and-sharing-through-the-host): identify whether external native tools can join the same live service/session or must use the Host protocol. A private SDK connection does not require exclusive Remote page access, and Remote `sessionControl: shared` does not prove native multi-client support.
 - Runtime configuration/authentication stays in the native profile/environment. No hidden Borgee dependency or credentials in source, fixtures, committed reports or browser state.
 
 Prefer the corresponding public native client or service directly. Do not use private methods, Query replacement, synthetic queues or inferred metadata to turn a missing capability into apparent support. Record the gap and keep its flag disabled when native semantics differ.

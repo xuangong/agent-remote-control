@@ -144,7 +144,6 @@ export class CodexAppServerSession implements AgentSession {
       this.transport.request('thread/read', { threadId: id, includeTurns: false }));
     this.runtime = runtime ?? new CodexSessionRuntime(transport, this,
       (thread, history, buffered) => this.createNativeChild(thread, history, buffered), recoveryPlan);
-    this.capabilities.sessionControl = this.runtime.sessionControl;
     this.ownsRuntime = runtime === undefined;
     this.sharedInteractionIdentity = recoveryPlan ? randomUUID() : undefined;
   }

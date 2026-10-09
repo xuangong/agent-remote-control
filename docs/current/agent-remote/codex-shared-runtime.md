@@ -89,9 +89,11 @@ connections retain their native argument semantics.
 
 ## Ownership and permission boundaries
 
-- `shared` is the default Controller connection mode. Explicit
-  `AGENT_HOST_CODEX_CONNECTION=private` settings and managed Gateway sessions
-  retain isolated app-server processes. `shared` never silently falls
+- Controller registrations, including managed Gateway sessions, use `shared`.
+  The legacy `AGENT_HOST_CODEX_CONNECTION=private` setting is ignored with a
+  diagnostic. Direct Provider construction still supports private stdio runtimes
+  for embedded/debugging use; see [the two sharing boundaries](providers.md#native-sharing-and-sharing-through-the-host).
+  `shared` never silently falls
   back to a private runtime if the daemon is missing or disconnected.
 - Shared mode uses native WebSocket JSON-RPC over the local Unix socket or an
   authenticated Windows loopback connection. The
@@ -123,8 +125,11 @@ connections retain their native argument semantics.
   other client's exact answer, so no answer is fabricated there.
 - An external CLI or desktop app holding a thread in a private runtime still
   causes a writer conflict. This feature cannot convert that live process into
-  a shared daemon. Release it once, then reopen the saved thread through the
-  shared daemon. Never remove a live writer lock. Compatibility with a desktop
+  a shared daemon in place. For a verified, controllable owner, an explicit
+  takeover interrupts that owner and resumes the same native session ID in the
+  shared daemon. Ordinary open and reconnect do not request takeover. Otherwise,
+  release the private owner through its native interface before reopening the
+  saved thread. Never remove a live writer lock. Compatibility with a desktop
   app that does not expose the native socket is not established.
 - Windows adds an authenticated TCP listener bound only to `127.0.0.1`; Unix
   continues to use its native socket. This adds no cloud endpoint, new Remote

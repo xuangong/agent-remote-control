@@ -193,9 +193,7 @@ export function createSessionWire(
         const cursor = activityOnly ? boundAgent.timelineCursor?.() : undefined;
         sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', ...(options.sessionControls ? { sessionControl: true as const } : {}) });
         if (!activityOnly && options.sessionControls) {
-          control = snapshot.payload.capabilities.sessionControl === 'shared'
-            ? options.sessionControls.attachShared(boundAgent.agentId)
-            : options.sessionControls.attach(boundAgent.agentId, state => {
+          control = options.sessionControls.attach(boundAgent.agentId, state => {
               if (!closed) {
                 try { sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: state }); }
                 catch (error) { failSession({ kind: 'manager_event_delivery', error: error instanceof Error ? error : new Error('Control state delivery failed.') }); }

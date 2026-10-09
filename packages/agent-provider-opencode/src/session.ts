@@ -56,7 +56,7 @@ export class OpenCodeSession implements AgentSession {
     this.images = new OpenCodeImages(nativeId, { allowLocalFiles: transport.local });
     this.controls = new OpenCodeSettings(transport, nativeId, config.cwd, config);
     this.commands = new OpenCodeCommands(transport, nativeId, config.cwd);
-    this.capabilities = { sessionControl: 'shared', history: true, sendMessage: !transport.restricted, steer: !transport.restricted, cancel: !transport.restricted, readResource: true, imageInput: IMAGE_INPUT_CAPABILITIES, sessionSettings: !transport.restricted, commands: !transport.restricted, planning: !transport.restricted, interactions: { question: true, planApproval: false, toolApproval: true } };
+    this.capabilities = { history: true, sendMessage: !transport.restricted, steer: !transport.restricted, cancel: !transport.restricted, readResource: true, imageInput: IMAGE_INPUT_CAPABILITIES, sessionSettings: !transport.restricted, commands: !transport.restricted, planning: !transport.restricted, interactions: { question: true, planApproval: false, toolApproval: true } };
   }
   async start(): Promise<void> {
     const deadline = setTimeout(() => this.initialReject(new Error('OpenCode session observation did not become ready.')), this.transport.timeout);

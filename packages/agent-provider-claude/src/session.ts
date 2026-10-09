@@ -37,7 +37,7 @@ export class ClaudeShutdownError extends Error {
 }
 
 export class ClaudeAgentSession implements AgentSession {
-  readonly capabilities: AgentCapabilities = { sessionControl: 'exclusive', imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
+  readonly capabilities: AgentCapabilities = { imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
     planning: true, commands: true, sessionSettings: true, interactions: { question: true, toolApproval: true, planApproval: true } };
   private readonly input = new Channel<SDKUserMessage>();
   private readonly output = new Channel<ProviderStreamItem>();

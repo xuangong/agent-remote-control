@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { decodeClientMessage, decodeServerMessage, PROTOCOL_VERSION } from './index.js';
 
 describe('session control wire contract', () => {
-  it('negotiates exclusive control and distinguishes authority from normalized Agent state', () => {
+  it('decodes current and legacy control frames independently of normalized Agent state', () => {
     for (const message of [
       { type: 'negotiated', sessionControl: true },
       { type: 'session_control', payload: { agentId: 'one', access: 'read_only', available: false, revision: 'generation' } },
@@ -25,7 +25,7 @@ describe('session control wire contract', () => {
   });
 });
 
-it('accepts explicit shared and exclusive adapter control semantics and rejects native transport names', () => {
+it('retains shared, exclusive and omitted capability metadata for snapshot and recording compatibility', () => {
   const capabilities = {history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
     interactions: {question: false, planApproval: false, toolApproval: false}};
   expect(Value.Check(AgentCapabilities, capabilities)).toBe(true);

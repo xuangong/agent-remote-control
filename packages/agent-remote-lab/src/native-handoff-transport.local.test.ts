@@ -29,6 +29,7 @@ it('broadcasts native handoff over real browser sockets and reconnects both view
       await vi.waitFor(()=>expect(status).toBe('ready'),{timeout:5000});return{replica,client,get status(){return status;}};
     }
     const a=await page(),b=await page();
+    for(const view of [a,b])expect(view.replica.getState().sessionControl?.access).toBe('control');
     await a.client.sendMessage('WEB_RUNNING');await vi.waitFor(()=>expect(f.requests).toHaveLength(1));
     const state=join(f.home,'controller');await mkdir(state);
     await writeFile(join(state,'connection.json'),JSON.stringify({serverUrl:'https://relay.invalid',remoteKey:'fixture',environment:{AGENT_HOST_COPILOT_HOME:join(f.home,'profile')}}));
@@ -44,8 +45,7 @@ it('broadcasts native handoff over real browser sockets and reconnects both view
     const result=await attach(a.replica.getState().sessionControl!.nativeOwner!.generation);
     expect(result.status,result.body).toBe(200);expect(JSON.parse(result.body)).toMatchObject({agentId:'agent',nativeSessionId:nativeId});
     expect(await exited).toBe(0);
-    for(const view of [a,b])await vi.waitFor(()=>{expect(view.status).toBe('ready');expect(view.replica.getState().sessionControl?.nativeOwner).toBeUndefined();},{timeout:5000});
-    await a.client.takeControl();
+    for(const view of [a,b])await vi.waitFor(()=>{expect(view.status).toBe('ready');expect(view.replica.getState().sessionControl?.nativeOwner).toBeUndefined();expect(view.replica.getState().sessionControl?.access).toBe('control');},{timeout:5000});
     await a.client.sendMessage('WEB_AFTER_HANDOFF');
     for(const view of [a,b])await vi.waitFor(()=>expect(JSON.stringify(view.replica.getState().timeline)).toContain('WEB_RESUMED'),{timeout:5000});
     expect(f.requests).toHaveLength(3);

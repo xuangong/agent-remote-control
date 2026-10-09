@@ -281,7 +281,6 @@ async function harness(settings: NonNullable<ConstructorParameters<typeof CodexA
   });
   const session = await provider.createSession({ sessionId: 'remote', cwd: '/workspace' });
   sessions.push(session);
-  expect(session.capabilities.sessionControl).toBe('shared');
   let consumer: AsyncIterator<ProviderStreamItem> | undefined;
   const iterator: AsyncIterator<ProviderStreamItem> = { next: () => (consumer ??= session.observe()[Symbol.asyncIterator]()).next() };
   if (observe) await expect(iterator.next()).resolves.toEqual({ value: { type: 'history_boundary' }, done: false });
@@ -559,7 +558,6 @@ describe('shared Codex recovery', () => {
     });
     await expect.poll(async () => (await session.runtimeInfo()).childSessions?.map(child => child.nativeSessionId)).toContain('child');
     const child = await provider.openChildSession('root', 'child');
-    expect(child.capabilities.sessionControl).toBe('shared');
     sessions.push(child);
 
     const childReadEntered = deferred();
@@ -811,7 +809,6 @@ describe('shared Codex recovery', () => {
     await expect.poll(async () => (await session.runtimeInfo()).childSessions?.map(child => child.nativeSessionId)).toContain('child');
 
     const child = await provider.openChildSession('root', 'child');
-    expect(child.capabilities.sessionControl).toBe('shared');
     sessions.push(child);
     const childIterator = child.observe()[Symbol.asyncIterator]();
     while ((await childIterator.next()).value?.type !== 'history_boundary') { /* Drain saved native history. */ }

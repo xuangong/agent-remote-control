@@ -341,6 +341,7 @@ export class AgentManager {
 
   private effectiveCapabilities(): AgentSession['capabilities'] {
     const capabilities = structuredClone(this.session.capabilities);
+    capabilities.sessionControl = 'shared';
     if (!this.inputImageStore || !this.session.sendMessageContent || !capabilities.sendMessage) delete capabilities.imageInput;
     return capabilities;
   }

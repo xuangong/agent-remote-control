@@ -10,6 +10,26 @@ The Provider layer terminates Provider-native protocols and exposes the common A
 
 `@orchardworks/agent-provider-sdk` owns the adapter/Session contract and `AgentStreamEvent`; `@orchardworks/agent-provider-dsh`, `@orchardworks/agent-provider-codex`, and `@orchardworks/agent-provider-claude` own their native projection, response mapping, and runtime lifecycle.
 
+## Native sharing and sharing through the Host
+
+Native connection mode and Remote client sharing are separate properties. Both native modes support multiple authorized pages and headless clients through one Host binding, but their sharing boundaries differ:
+
+| Boundary | Native shared connection | Private native connection shared through the Host |
+| --- | --- | --- |
+| Current Controller integrations | Codex shared app-server daemon; OpenCode HTTP server. | Claude Code Agent SDK Query; Copilot SDK stdio runtime. |
+| Native access | The Host connects to a service that can also serve compatible native clients. | The Host's adapter owns the private SDK connection and runtime. |
+| Other local tools | Compatible tools can connect directly to the same native service and session, subject to its protocol, authentication and permissions. They can share live work outside Agent Remote Control. | Tools can share live work by using the Host's public Remote protocol. A separate native CLI cannot join the Host's private SDK connection merely by opening the same saved session ID. |
+| Multiple Remote clients | Pages and ARDB reuse one Host binding and its native observation; the Host distributes events and accepts authorized operations. | The same Host-level sharing applies; additional pages do not create separate SDK sessions or transfer native ownership. |
+| Lifecycle and recovery | The adapter reconnects to the native service and restores observation according to native semantics. | The adapter manages its private runtime and SDK recovery/resume; resuming saved history is not attachment to an independently running process. |
+
+Sharing a private runtime through the Host leaves its native connection private. Its shared access boundary is that Host, including other authorized tools that use the Host protocol. Native shared mode additionally permits direct participation by compatible tools outside that boundary. Such tools must target the same native service and session; an unrelated private CLI process is not automatically part of it.
+
+The public `capabilities.sessionControl: "shared"` describes Remote client access only. It does not advertise a native daemon, external-tool interoperability, or safe concurrent private processes. Native mode, process ownership, recovery and verified handoff stay in adapter/Host lifecycle implementations.
+
+Common authorization, operation settlement and interaction claims apply to operations routed through the Host; the native service coordinates clients that connect directly to it. One native observation is reused per Host binding, not globally across external native clients. See [Session interaction control](protocol.md#session-interaction-control).
+
+Implementation anchors: `packages/agent-host/src/registrations.ts`, `packages/agent-provider-codex/src/provider.ts`, `packages/agent-provider-opencode/src/transport.ts`, `packages/agent-provider-claude/src/session.ts`, `packages/agent-provider-copilot/src/provider.ts`, and `packages/agent-remote-relay/src/session-control.ts`.
+
 ## Collaborators
 
 | Module | Direction | Responsibility |
@@ -58,7 +78,9 @@ Native `sleep` items map to ordinary `clock.sleep` tool calls. Started and compl
 
 The process launcher verifies an explicitly selected working directory before spawning Codex. Missing directories and paths that are not directories produce workspace-specific errors; the launcher does not substitute another project (`packages/agent-provider-codex/src/native.ts`).
 
-The independent Agent Host composes the real Codex Provider and owns one app-server process per opened root session tree. The default Lab backend composes Recorded and the Host broker without constructing Codex. Codex receives JSONL events over stdio, retains a bounded stderr tail for exit diagnostics, and uses the selected native home and login. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-host/src/directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
+The Controller connects its Codex Provider to the shared native app-server daemon through a local Unix socket or an authenticated Windows loopback WebSocket. Controller registration uses shared mode even when legacy configuration requests private mode. Direct Provider construction still supports a private stdio app-server for embedded/debugging use; this is a separate native connection mode, and its Remote clients can still share the owning Host/Relay session. See [shared Codex setup and ownership](codex-shared-runtime.md).
+
+The default Lab backend composes Recorded and the Host broker without constructing Codex. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-host/src/directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
 
 ## Claude process and native directory
 

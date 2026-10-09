@@ -3,7 +3,7 @@ import type { AgentInteractionResponse } from './control.js';
 import type { AgentRuntimeInfo, ProviderStreamItem } from './observation.js';
 
 export interface AgentCapabilities {
-  /** Remote writer policy; omitted values retain exclusive control. Only adapters can declare shared control. */
+  /** @deprecated Compatibility-only metadata. Remote clients share the host-owned session; adapters do not choose page authorization. */
   sessionControl?: 'shared' | 'exclusive';
   imageInput?: ImageInputCapabilities;
   history: boolean;

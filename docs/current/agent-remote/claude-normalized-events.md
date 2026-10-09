@@ -58,9 +58,9 @@ Idle model/permission changes, planning, discovered skills, interrupt, image inp
 
 ## Ownership and recovery
 
-- Claude advertises exclusive session control. Multiple browser views can observe; only the controlling connection writes. Browser-to-browser takeover retains the Query.
+- All authorized browser views and headless Remote clients share the Host-owned Query and its single observation stream. Opening, closing or reconnecting a page does not transfer native ownership or revoke another page's ability to operate.
 - `agent-remote-controller claude resume <native-id>` participates in the same profile-scoped lease as the Host. `--take-over` explicitly interrupts the old managed writer; the successor starts only after confirmed native process exit.
-- Browser reconnect does not seize control back from the CLI. A transferred session requires explicit takeover. Existing shared Codex semantics are unchanged.
+- Browser reconnect does not seize control back from the CLI. A transferred session requires explicit native takeover; every authorized page can use the restored Host-owned Query after synchronization.
 - The cwd lookup uses native ID directly, independent of paged catalog discovery. Unknown cwd fails closed; it never silently resumes in the Controller's working directory.
 - A failed shutdown retains its ownership lease. Handoff preserves the latest available persistence settings.
 - Claude has no public external-session lock probe. Direct unmanaged `claude` processes, new CLI sessions without an explicit ID, and `resume --last` are outside this coordination. Use the wrapper with an explicit ID for managed handoff.

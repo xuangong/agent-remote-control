@@ -34,7 +34,6 @@ const restorationScheduler = new CodexRestorationSemaphore(4);
 
 /** Projects native client callbacks into Provider sessions and child descriptors. */
 export class CodexSessionRuntime {
-  readonly sessionControl: 'shared' | 'exclusive';
   private readonly sessions = new Map<string, CodexThreadSession>();
   private readonly children = new Map<string, ChildEntry>();
   private readonly client: CodexDaemonClient;
@@ -45,7 +44,6 @@ export class CodexSessionRuntime {
     private readonly createChild: (thread: Record<string, unknown>, history: unknown, buffered: CodexRawNotification[]) => CodexThreadSession,
     recoveryPlan?: CodexSharedRecoveryPlan,
   ) {
-    this.sessionControl = recoveryPlan ? 'shared' : 'exclusive';
     this.client = new CodexDaemonClient({ paginatedHistory: true, transport, initialization: providerInitialization, recovery: recoveryPlan, restorationScheduler,
       callbacks: {
         onNotification: (method, params) => {

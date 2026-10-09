@@ -1528,3 +1528,55 @@ it('retains historical usage without replaying historical execution state', asyn
     expect(manager.snapshot().payload).toMatchObject({ status: 'running', activeTurn: null, lastUsage: { inputTokens: 20 } });
   } finally { await manager.close(); }
 });
+
+it.each([undefined, 1])('applies live completion after its historical usage without restoring that usage: revision %s', async nativeRevision => {
+  const stream = new ManualProviderStream();
+  const manager = await AgentManager.attach({ agentId: 'a', provider: { providerId: 'codex', displayName: 'Codex' },
+    epoch: 'e', session: sessionFor(stream) });
+  const events: AgentManagerEvent[] = [];
+  manager.subscribe(event => events.push(event));
+  const completion = (delivery: 'history' | 'live'): ProviderStreamItem => ({
+    type: 'observation', sourceKey: 'completed-a',
+    ...(nativeRevision === undefined ? {} : { nativeRevision }), occurredAt: 2, delivery,
+    event: { type: 'turn_completed', provider: 'codex', turnId: 'a', usage: { tokenScope: 'session', totalTokens: 10 } },
+  });
+  try {
+    stream.push(completion('history'));
+    stream.push({ type: 'observation', sourceKey: 'newer-usage', occurredAt: 3, delivery: 'history',
+      event: { type: 'usage_updated', provider: 'codex', usage: { tokenScope: 'session', totalTokens: 30 } } });
+    stream.push({ type: 'observation', sourceKey: 'started-a', occurredAt: 1, delivery: 'live',
+      event: { type: 'turn_started', provider: 'codex', turnId: 'a' } });
+    stream.push(completion('live'));
+    stream.push({ type: 'history_boundary' });
+    await manager.ready;
+    expect(manager.snapshot().payload).toMatchObject({ activeTurn: null, lastUsage: { totalTokens: 30 } });
+    const completed = events.filter(event => event.type === 'agent_stream' && event.event.type === 'turn_completed');
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ event: { type: 'turn_completed', turnId: 'a' } });
+    expect(completed[0]).not.toHaveProperty('event.usage');
+  } finally { await manager.close(); }
+});
+
+it.each(['identity', 'revision'] as const)('does not restore stale usage across the history/live boundary: %s', async mode => {
+  const stream = new ManualProviderStream();
+  const observation = (value: number, delivery: 'history' | 'live' = 'history'): ProviderStreamItem => ({
+    type: 'observation', sourceKey: mode === 'identity' ? `usage:${value}` : 'native-usage',
+    ...(mode === 'revision' ? { nativeRevision: value } : {}), occurredAt: value, delivery,
+    event: { type: 'usage_updated', provider: 'codex', usage: { tokenScope: 'session', totalTokens: value } },
+  });
+  stream.push(observation(10));
+  stream.push(observation(30));
+  stream.push(observation(mode === 'identity' ? 10 : 20));
+  stream.push({ type: 'history_boundary' });
+  const manager = await AgentManager.attach({ agentId: 'a', provider: { providerId: 'codex', displayName: 'Codex' },
+    epoch: 'e', session: sessionFor(stream) });
+  try {
+    await manager.ready;
+    expect(manager.snapshot().payload.lastUsage?.totalTokens).toBe(30);
+    stream.push(observation(mode === 'identity' ? 10 : 20, 'live'));
+    await nextEventLoopTurn();
+    expect(manager.snapshot().payload.lastUsage?.totalTokens).toBe(30);
+    stream.push(observation(40, 'live'));
+    await expect.poll(() => manager.snapshot().payload.lastUsage?.totalTokens).toBe(40);
+  } finally { await manager.close(); }
+});

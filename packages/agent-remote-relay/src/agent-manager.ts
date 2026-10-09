@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
-import { reduceSessionState, sessionOperationAvailability, type SessionOperationKind } from '@orchardworks/agent-remote-protocol';
+import { reduceSessionState, sessionOperationAvailability, updateUsageSnapshot, type SessionOperationKind } from '@orchardworks/agent-remote-protocol';
 import { InputImageStore, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
 import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
@@ -644,7 +644,8 @@ export class AgentManager {
     // Persisted lifecycle records describe the past, not callable interactions or current execution.
     if (observation.delivery === 'history' && event.type !== 'timeline') {
       if ((event.type === 'usage_updated' || event.type === 'turn_completed') && event.usage) {
-        this.state.payload.lastUsage = structuredClone(event.usage);
+        if (!this.acceptUsageObservation(observation)) return;
+        this.state.payload.lastUsage = updateUsageSnapshot(this.state.payload.lastUsage, event.usage);
       }
       if (event.type === 'interaction_requested') {
         this.historicalInteractions.set(event.request.requestId, event.request);
@@ -662,10 +663,16 @@ export class AgentManager {
       }
       return;
     }
-    if (event.type !== 'timeline' && observation.nativeRevision !== undefined) {
-      const revision = this.nativeStateVersions.get(observation.sourceKey);
-      if (revision !== undefined && observation.nativeRevision <= revision) return;
-      this.nativeStateVersions.set(observation.sourceKey, observation.nativeRevision);
+    if (event.type !== 'timeline' && !this.acceptNativeStateRevision(observation)) return;
+    if ((event.type === 'usage_updated' || event.type === 'turn_completed') && event.usage
+      && !this.acceptUsageObservation(observation)) {
+      if (event.type === 'usage_updated') {
+        this.remember(observation);
+        return;
+      }
+      // History may retain usage before the same live completion closes its active turn.
+      event = { ...event };
+      delete event.usage;
     }
     if (event.type === 'timeline' && event.item.type === 'interaction') {
       event = { ...event, item: { ...event.item, request: redactInteractionRequest(event.item.request), response: redactInteractionResponse(event.item.request, event.item.response) } };
@@ -790,15 +797,31 @@ export class AgentManager {
     this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot(), cursor: this.timeline.cursor });
   }
 
-  private isDuplicate(observation: ProviderObservation): boolean {
-    return this.seenProviderRecords.get(observation.sourceKey)?.has(observation.nativeRevision ?? null) ?? false;
+  private isDuplicate(observation: ProviderObservation, domain: 'event' | 'usage' = 'event'): boolean {
+    return this.seenProviderRecords.get(JSON.stringify([domain, observation.sourceKey]))?.has(observation.nativeRevision ?? null) ?? false;
   }
 
-  private remember(observation: ProviderObservation): void {
+  private acceptNativeStateRevision(observation: ProviderObservation, domain: 'event' | 'usage' = 'event'): boolean {
+    if (observation.nativeRevision === undefined) return true;
+    const key = JSON.stringify([domain, observation.sourceKey]);
+    const revision = this.nativeStateVersions.get(key);
+    if (revision !== undefined && observation.nativeRevision <= revision) return false;
+    this.nativeStateVersions.set(key, observation.nativeRevision);
+    return true;
+  }
+
+  private acceptUsageObservation(observation: ProviderObservation): boolean {
+    if (this.isDuplicate(observation, 'usage') || !this.acceptNativeStateRevision(observation, 'usage')) return false;
+    this.remember(observation, 'usage');
+    return true;
+  }
+
+  private remember(observation: ProviderObservation, domain: 'event' | 'usage' = 'event'): void {
+    const key = JSON.stringify([domain, observation.sourceKey]);
     const revision = observation.nativeRevision ?? null;
-    const revisions = this.seenProviderRecords.get(observation.sourceKey);
+    const revisions = this.seenProviderRecords.get(key);
     if (revisions) revisions.add(revision);
-    else this.seenProviderRecords.set(observation.sourceKey, new Set([revision]));
+    else this.seenProviderRecords.set(key, new Set([revision]));
   }
 
   private emitStream(

@@ -296,12 +296,13 @@ describe('CodexEventProjector', () => {
     expect(projector.projectNotification('thread/tokenUsage/updated', {
       threadId: 'thread-1', turnId: 'turn-1', tokenUsage: {
         total: { inputTokens: 7, cachedInputTokens: 2, outputTokens: 3, totalTokens: 10 },
+        last: { totalTokens: 4 },
         modelContextWindow: 100,
       },
     })).toMatchObject({
       event: { type: 'usage_updated', usage: {
-        inputTokens: 7, cachedInputTokens: 2, outputTokens: 3,
-        contextWindowMaxTokens: 100, contextWindowUsedTokens: 10,
+        tokenScope: 'session', inputTokens: 5, cachedInputTokens: 2, cacheCreationInputTokens: 0, outputTokens: 3, totalTokens: 10,
+        contextScope: 'current', contextWindowMaxTokens: 100, contextWindowUsedTokens: 4,
       } },
     });
     expect(projector.projectNotification('turn/started', {

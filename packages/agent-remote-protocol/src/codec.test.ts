@@ -39,6 +39,33 @@ import {
 
 const version = '1.6.0';
 
+describe('usage snapshot wire contract', () => {
+  const message = (usage: unknown) => ({ protocolVersion: version, type: 'agent_stream', payload: {
+    agentId: 'agent-7', timestamp: '2026-10-09T00:00:00.000Z', event: { type: 'usage_updated', providerId: 'codex', usage },
+  } });
+  it.each(['session', 'turn', 'call'])('round trips %s token scope with independent context values', tokenScope => {
+    const update = message({ tokenScope, inputTokens: 10, cachedInputTokens: 20, cacheCreationInputTokens: 0,
+      outputTokens: 5, totalTokens: 35, contextScope: 'current', contextWindowUsedTokens: 15, contextWindowMaxTokens: 200 });
+    expect(decodeAgentStreamMessage(JSON.stringify(update))).toEqual({ status: 'ok', value: update });
+  });
+  it.each([{}, { inputTokens: 10 }, { contextWindowUsedTokens: 0 }, { tokenScope: 'call' },
+    { contextScope: 'current', contextWindowUsedTokens: 0 }])('accepts partial and legacy snapshots: %j', usage => {
+    const update = message(usage);
+    expect(decodeAgentStreamMessage(JSON.stringify(update))).toEqual({ status: 'ok', value: update });
+  });
+  it('rejects an unsupported context scope', () => {
+    expect(decodeAgentStreamMessage(JSON.stringify(message({ contextScope: 'session' }))).status).toBe('rejected');
+  });
+  it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1])('rejects unsafe token values: %s', value => {
+    for (const field of ['cacheCreationInputTokens', 'totalTokens']) {
+      expect(decodeAgentStreamMessage(JSON.stringify(message({ [field]: value }))).status).toBe('rejected');
+    }
+  });
+  it('rejects unknown token scopes', () => {
+    expect(decodeAgentStreamMessage(JSON.stringify(message({ tokenScope: 'lifetime' }))).status).toBe('rejected');
+  });
+});
+
 it.each([null, 'native-active-turn'])('round trips authoritative active turn %s on runtime updates', activeTurnId => {
   const message = { protocolVersion: version, type: 'agent_stream', payload: {
     agentId: 'agent-7', timestamp: '2026-09-18T00:00:00.000Z', event: {

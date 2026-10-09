@@ -17,7 +17,7 @@ export class ClaudeUsage {
       if (this.seenContext.has(message.uuid)) return;
       this.seenContext.add(message.uuid);
     }
-    const usage = { contextWindowUsedTokens: value.total_tokens, contextWindowMaxTokens: value.raw_max_tokens };
+    const usage: AgentUsage = { contextScope: 'current', contextWindowUsedTokens: value.total_tokens, contextWindowMaxTokens: value.raw_max_tokens };
     this.context = { model, usage };
     return usage;
   }
@@ -29,6 +29,13 @@ export class ClaudeUsage {
       if (tokens(message.usage.input_tokens)) usage.inputTokens = message.usage.input_tokens;
       if (tokens(message.usage.output_tokens)) usage.outputTokens = message.usage.output_tokens;
       if (tokens(message.usage.cache_read_input_tokens)) usage.cachedInputTokens = message.usage.cache_read_input_tokens;
+      if (tokens(message.usage.cache_creation_input_tokens)) usage.cacheCreationInputTokens = message.usage.cache_creation_input_tokens;
+      if (Object.keys(usage).length) usage.tokenScope = 'turn';
+      const counts = [usage.inputTokens, usage.outputTokens, usage.cachedInputTokens, usage.cacheCreationInputTokens];
+      if (counts.every(tokens)) {
+        const total = counts.reduce((sum, value) => sum + value, 0);
+        if (tokens(total)) usage.totalTokens = total;
+      }
     }
     const cost = message.total_cost_usd;
     if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) this.previousCost = undefined;
@@ -36,8 +43,6 @@ export class ClaudeUsage {
       if (this.previousCost !== undefined) usage.totalCostUsd = cost >= this.previousCost ? cost - this.previousCost : cost;
       this.previousCost = cost;
     }
-    const nativeModel = model && record(message.modelUsage) ? message.modelUsage[model] : undefined;
-    if (record(nativeModel) && tokens(nativeModel.contextWindow) && nativeModel.contextWindow > 0) usage.contextWindowMaxTokens = nativeModel.contextWindow;
     if (this.context && this.context.model === model) Object.assign(usage, this.context.usage);
     return usage;
   }

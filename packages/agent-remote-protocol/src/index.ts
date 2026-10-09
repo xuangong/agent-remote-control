@@ -31,3 +31,4 @@ export * from './session-control.js';
 export * from './host-providers.js';
 
 export * from './session-state.js';
+export * from './usage-state.js';

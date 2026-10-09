@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentSessionSetting } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
 import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
+import { AgentSessionUsage } from './AgentSessionUsage.js';
 
 export type SessionControlView = 'status' | 'model' | 'permissions' | 'actions';
 
@@ -91,12 +92,12 @@ export function AgentSessionSettings({ state, sessionState, children, actions = 
       <div className="agent-session-panel-heading"><strong>{view === 'status' ? 'Session status' : view === 'model' ? 'Model settings' : 'Permission settings'}</strong><button type="button" aria-label="Close session controls" onClick={() => { onView(undefined); restoreFocus(); }}>Close</button></div>
       {recovery}
       <div hidden={view !== 'status'}>{children}</div>
-      {view === 'status' ? <dl className="agent-session-facts">
+      {view === 'status' ? <><dl className="agent-session-facts">
           <dt>Provider</dt><dd>{agent.providerId}</dd><dt>Session</dt><dd>{agent.runtimeInfo.sessionId ?? 'Unavailable'}</dd>
           <dt>Connection</dt><dd>{disconnected ? 'Unavailable' : connectionLabel(runtimeConnection?.state)}</dd><dt>Runtime</dt><dd>{session.activity}{disconnected || !runtimeConnected ? ' (last known)' : ''}</dd>
           <dt>Directory</dt><dd>{agent.runtimeInfo.cwd ?? 'Unavailable'}</dd>
           {settings.map((setting) => <div key={setting.id}><dt>{setting.label}</dt><dd>{selectedLabel(setting)}</dd></div>)}
-        </dl>
+        </dl><AgentSessionUsage usage={agent.lastUsage} lastKnown={disconnected || !runtimeConnected} /></>
         : <>
           {settings.filter(({ category }) => category === view).map((setting) => <label className="agent-session-setting" key={setting.id}>
             <span>{setting.label}</span>

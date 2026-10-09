@@ -11,6 +11,67 @@ const snapshot = (): AgentSnapshotPayload => ({
 const question = { kind: 'question' as const, requestId: 'q', questions: [{ questionId: 'choice', header: 'Confirm', prompt: 'Continue?', required: true, selection: 'single' as const, options: [{ value: 'yes', label: 'Yes' }], allowCustomText: false, allowDismiss: false }] };
 const operations: SessionOperationKind[] = ['send_message', 'queue_message', 'steer', 'cancel', 'set_planning', 'set_session_setting', 'execute_command', 'interaction_response'];
 
+describe('current usage snapshots', () => {
+  it('retains explicit current context without requiring a token measurement', () => {
+    const usage = { contextScope: 'current' as const, contextWindowUsedTokens: 0, contextWindowMaxTokens: 200 };
+    const state = reduceSessionState(snapshot(), { type: 'usage_updated', usage }, 'context');
+    expect(state.lastUsage).toEqual(usage);
+    expect(reduceSessionState(state, { type: 'usage_updated', usage: { contextScope: 'current' } }, 'unknown').lastUsage)
+      .toEqual({ contextScope: 'current' });
+  });
+
+  it('does not carry current-context semantics onto a subsequent legacy measurement', () => {
+    const previous = { ...snapshot(), lastUsage: { tokenScope: 'session' as const, totalTokens: 100,
+      contextScope: 'current' as const, contextWindowUsedTokens: 20, contextWindowMaxTokens: 200 } };
+    const state = reduceSessionState(previous, { type: 'usage_updated', usage: { contextWindowUsedTokens: 5_000 } }, 'legacy');
+    expect(state.lastUsage).toEqual({ tokenScope: 'session', totalTokens: 100, contextWindowUsedTokens: 5_000 });
+  });
+
+  const initial = () => reduceSessionState(snapshot(), { type: 'usage_updated', usage: {
+    tokenScope: 'session', inputTokens: 100, cachedInputTokens: 50, cacheCreationInputTokens: 0,
+    outputTokens: 20, totalTokens: 170, contextWindowUsedTokens: 120, contextWindowMaxTokens: 200,
+  } }, 'first');
+
+  it('replaces context independently from token counters and permits lower occupancy after compaction', () => {
+    const previous = initial();
+    const state = reduceSessionState(previous, { type: 'usage_updated', usage: {
+      contextWindowUsedTokens: 30, contextWindowMaxTokens: 200,
+    } }, 'compacted');
+    expect(state.lastUsage).toEqual({ ...previous.lastUsage, contextWindowUsedTokens: 30 });
+    expect(previous.lastUsage?.contextWindowUsedTokens).toBe(120);
+  });
+
+  it('replaces token snapshots without adding totals or carrying missing buckets from an earlier call', () => {
+    const event = { type: 'usage_updated' as const, usage: { tokenScope: 'call' as const, totalTokens: 12 } };
+    let state = reduceSessionState(initial(), event, 'call');
+    state = reduceSessionState(state, event, 'repeat');
+    expect(state.lastUsage).toEqual({ tokenScope: 'call', totalTokens: 12, contextWindowUsedTokens: 120, contextWindowMaxTokens: 200 });
+    state = reduceSessionState(state, { type: 'usage_updated', usage: { tokenScope: 'call' } }, 'unknown-call');
+    expect(state.lastUsage).toEqual({ tokenScope: 'call', contextWindowUsedTokens: 120, contextWindowMaxTokens: 200 });
+  });
+
+  it('treats undefined fields like omitted JSON properties and preserves the last snapshot on an empty update', () => {
+    const previous = initial();
+    for (const usage of [{}, { inputTokens: undefined, tokenScope: undefined, contextWindowUsedTokens: undefined }]) {
+      expect(reduceSessionState(previous, { type: 'usage_updated', usage }, 'empty').lastUsage).toEqual(previous.lastUsage);
+      const serialized = JSON.parse(JSON.stringify(usage));
+      expect(reduceSessionState(previous, { type: 'usage_updated', usage: serialized }, 'wire').lastUsage).toEqual(previous.lastUsage);
+    }
+    expect(reduceSessionState(snapshot(), { type: 'usage_updated', usage: {} }, 'empty').lastUsage).toBeUndefined();
+  });
+
+  it('uses the same token replacement rule at turn completion and keeps legacy scope unknown', () => {
+    const state = reduceSessionState(initial(), { type: 'turn_completed', usage: { inputTokens: 0, outputTokens: 0 } }, 'done');
+    expect(state.lastUsage).toEqual({ inputTokens: 0, outputTokens: 0, contextWindowUsedTokens: 120, contextWindowMaxTokens: 200 });
+  });
+
+  it('does not combine context readings from different updates and preserves the independent legacy cost', () => {
+    const state = reduceSessionState(initial(), { type: 'usage_updated', usage: { contextWindowUsedTokens: 0, totalCostUsd: 0 } }, 'partial');
+    expect(state.lastUsage).toEqual({ tokenScope: 'session', inputTokens: 100, cachedInputTokens: 50,
+      cacheCreationInputTokens: 0, outputTokens: 20, totalTokens: 170, contextWindowUsedTokens: 0, totalCostUsd: 0 });
+  });
+});
+
 describe('session lifecycle', () => {
   it('retains native activity underneath a pending interaction across recovery', () => {
     let state = reduceSessionState(snapshot(), { type: 'runtime_updated', runtimeInfo: { ...snapshot().runtimeInfo, status: 'running' }, activeTurnId: 'turn' }, 'start');

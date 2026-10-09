@@ -121,7 +121,9 @@ it('does not finish a later turn on duplicate results and reports per-turn Query
     const completed = { type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: 'result-one', user_message_uuid: first.uuid,
       usage: { input_tokens: 10, output_tokens: 2 }, total_cost_usd: 2, modelUsage: { root: { contextWindow: 200000 } } };
     native.push(completed);
-    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: first.uuid, usage: { inputTokens: 10, totalCostUsd: 2, contextWindowMaxTokens: 200000 } });
+    const firstResult = await nextEvent(output, 'turn_completed');
+    expect(firstResult).toMatchObject({ turnId: first.uuid, usage: { tokenScope: 'turn', inputTokens: 10, totalCostUsd: 2 } });
+    expect(firstResult).not.toHaveProperty('usage.contextWindowMaxTokens');
     await session.sendMessage('Second');
     const second = (await native.nextInput()).value;
     native.push(completed);
@@ -143,8 +145,8 @@ it('keeps native inline context usage and final accounting in the same turn', as
     native.push({ type: 'assistant', session_id: 'native', uuid: 'context-result', context_usage: { model: 'root', total_tokens: 123, raw_max_tokens: 200000 },
       message: { id: 'context-message', content: [{ type: 'text', text: 'Context table' }] } });
     native.push({ type: 'result', subtype: 'success', session_id: 'native', uuid: 'context-done', user_message_uuid: input.uuid, usage: {}, total_cost_usd: 0 });
-    expect(await nextEvent(output, 'usage_updated')).toMatchObject({ turnId: input.uuid, usage: { contextWindowUsedTokens: 123, contextWindowMaxTokens: 200000 } });
-    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: input.uuid, usage: { contextWindowUsedTokens: 123, contextWindowMaxTokens: 200000 } });
+    expect(await nextEvent(output, 'usage_updated')).toMatchObject({ turnId: input.uuid, usage: { contextScope: 'current', contextWindowUsedTokens: 123, contextWindowMaxTokens: 200000 } });
+    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: input.uuid, usage: { contextScope: 'current', contextWindowUsedTokens: 123, contextWindowMaxTokens: 200000 } });
   } finally { await session.dispose(); }
 });
 

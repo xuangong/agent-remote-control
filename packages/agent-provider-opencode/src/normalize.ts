@@ -19,26 +19,40 @@ export interface OpenCodeUsageContext {
   contextWindows?: ReadonlyMap<string, number>;
 }
 const nonnegative = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-function contextTokens(info: AssistantMessage): number | undefined {
-  // Match the native context UI, including cache creation and reasoning exactly once.
-  const values = [info.tokens?.input, info.tokens?.output, info.tokens?.reasoning, info.tokens?.cache?.read, info.tokens?.cache?.write];
-  return values.every(nonnegative) ? values.reduce((sum, value) => sum + value, 0) : undefined;
+const tokenCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+function sumTokens(values: unknown[]): number | undefined {
+  if (!values.every(tokenCount)) return undefined;
+  const sum = values.reduce((total, value) => total + value, 0);
+  return tokenCount(sum) ? sum : undefined;
+}
+function tokenBuckets(tokens: AssistantMessage['tokens'] | NonNullable<Session['tokens']> | undefined): unknown[] {
+  // Native input, cache read/write, output, and reasoning are disjoint buckets.
+  return [tokens?.input, tokens?.output, tokens?.reasoning, tokens?.cache?.read, tokens?.cache?.write];
+}
+function snapshotTotal(tokens: AssistantMessage['tokens'] | NonNullable<Session['tokens']> | undefined): number | undefined {
+  return sumTokens(tokenBuckets(tokens));
 }
 export function usage(messages: NativeMessage[], context: OpenCodeUsageContext = {}): AgentUsage {
   const assistants = messages.flatMap(({ info }) => info.role === 'assistant' ? [info] : []);
-  const latest = [...assistants].reverse().find(info => (contextTokens(info) ?? 0) > 0) ?? assistants.at(-1);
+  const latest = [...assistants].reverse().find(info => tokenBuckets(info.tokens).some(value => tokenCount(value) && value > 0)) ?? assistants.at(-1);
   // Session counters are native aggregates. History pages alone never establish a session total.
   const tokens = context.session?.tokens ?? latest?.tokens;
   const result: AgentUsage = {};
-  if (nonnegative(tokens?.input)) result.inputTokens = tokens.input;
-  if (nonnegative(tokens?.cache?.read)) result.cachedInputTokens = tokens.cache.read;
-  if (nonnegative(tokens?.output) && nonnegative(tokens?.reasoning)) result.outputTokens = tokens.output + tokens.reasoning;
+  if (tokenCount(tokens?.input)) result.inputTokens = tokens.input;
+  if (tokenCount(tokens?.cache?.read)) result.cachedInputTokens = tokens.cache.read;
+  if (tokenCount(tokens?.cache?.write)) result.cacheCreationInputTokens = tokens.cache.write;
+  const output = sumTokens([tokens?.output, tokens?.reasoning]);
+  const total = snapshotTotal(tokens);
+  if (output !== undefined) result.outputTokens = output;
+  if (total !== undefined) result.totalTokens = total;
+  if (Object.keys(result).length) result.tokenScope = context.session?.tokens ? 'session' : 'call';
   if (nonnegative(context.session?.cost)) result.totalCostUsd = context.session.cost;
   if (latest) {
-    const used = contextTokens(latest);
+    const used = snapshotTotal(latest.tokens);
     const capacity = context.contextWindows?.get(`${latest.providerID}/${latest.modelID}`);
     if (used !== undefined) result.contextWindowUsedTokens = used;
-    if (nonnegative(capacity) && capacity > 0) result.contextWindowMaxTokens = capacity;
+    if (tokenCount(capacity) && capacity > 0) result.contextWindowMaxTokens = capacity;
+    if (result.contextWindowUsedTokens !== undefined || result.contextWindowMaxTokens !== undefined) result.contextScope = 'current';
   }
   return result;
 }

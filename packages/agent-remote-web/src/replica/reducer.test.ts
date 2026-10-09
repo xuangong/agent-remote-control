@@ -32,6 +32,25 @@ const capabilities = {
   interactions: { question: true, planApproval: true, toolApproval: true },
 };
 
+it('replays only the latest usage groups and restores them identically from a snapshot', () => {
+  const usage = { tokenScope: 'session' as const, inputTokens: 100, cachedInputTokens: 20, outputTokens: 10, totalTokens: 130 };
+  const updates = [usage, { contextScope: 'current' as const, contextWindowUsedTokens: 50, contextWindowMaxTokens: 200 },
+    usage, { tokenScope: 'call' as const, totalTokens: 8 }, { contextWindowUsedTokens: 10 }];
+  let state = applyAgentSnapshot(createReplicaState(), snapshot());
+  for (const [index, update] of updates.entries()) {
+    const message: AgentStreamMessage = { protocolVersion: '1.6.0', type: 'agent_stream', payload: {
+      agentId: 'agent-one', timestamp: `2026-10-09T00:00:0${index}.000Z`,
+      event: { type: 'usage_updated', providerId: 'provider-neutral', usage: update },
+    } };
+    state = reduceTimelineEvent(state, JSON.parse(JSON.stringify(message))).state;
+  }
+  expect(state.agent?.lastUsage).toEqual({ tokenScope: 'call', totalTokens: 8, contextWindowUsedTokens: 10 });
+  const restored = applyAgentSnapshot(createReplicaState(), { ...snapshot(), payload: state.agent! });
+  expect(restored.agent?.lastUsage).toEqual(state.agent?.lastUsage);
+  const replaced = applyAgentSnapshot(restored, snapshot());
+  expect(replaced.agent?.lastUsage).toBeUndefined();
+});
+
 it.each([undefined, null, 'old-turn', 'actual-turn'])('reconciles authoritative runtime turn %s in live delivery and snapshot replay', activeTurnId => {
   const original = snapshot('running');
   original.payload.activeTurn = { turnId: 'old-turn', startedAt: '2026-09-10T00:00:00.000Z' };

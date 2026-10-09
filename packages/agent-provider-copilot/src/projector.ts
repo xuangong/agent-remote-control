@@ -5,6 +5,7 @@ import {provider, record, detail} from './native.js';
 export {provider, record, detail} from './native.js';
 import {interactionRequest, interactionResponse} from './interaction-mapping.js';
 import {copilotToolResult, patchFiles} from './tool-result.js';
+import {copilotCallUsage, copilotContextUsage} from './usage.js';
 /** Assistant text observations are append-only; durable messages contribute only an unsent suffix. */
 export class Projector {
   private readonly tools = new Map<string, { name: string; detail: AgentToolDetail }>();
@@ -157,8 +158,14 @@ export class Projector {
         const result = copilotToolResult(tool.name, tool.detail, event.data.result, this.toolPaths.get(event.data.toolCallId));
         return timeline({ type: 'tool_call', callId: event.data.toolCallId, ...tool, result, ...(event.data.success ? {status: 'completed' as const, error: null} : {status: 'failed' as const, error: event.data.error?.message ?? 'Native tool failed'}) }, `tool:${event.data.toolCallId}`);
       }
-      case 'session.usage_info': return wrap({type: 'usage_updated', provider, turnId, usage: {contextWindowUsedTokens: event.data.currentTokens, contextWindowMaxTokens: event.data.tokenLimit}});
-      case 'assistant.usage': return wrap({ type: 'usage_updated', provider, usage: { inputTokens: event.data.inputTokens, outputTokens: event.data.outputTokens, cachedInputTokens: event.data.cacheReadTokens }, turnId });
+      case 'session.usage_info': {
+        const usage = copilotContextUsage(d);
+        return usage && wrap({type: 'usage_updated', provider, turnId, usage});
+      }
+      case 'assistant.usage': {
+        const usage = copilotCallUsage(d);
+        return usage && wrap({type: 'usage_updated', provider, turnId, usage});
+      }
       case 'session.compaction_start': return timeline({type: 'compaction', status: 'loading'});
       case 'session.compaction_complete': return event.data.success
         ? timeline({type: 'compaction', status: 'completed', trigger: event.data.trigger === 'manual' ? 'manual' : event.data.trigger ? 'auto' : undefined, preTokens: event.data.preCompactionTokens})

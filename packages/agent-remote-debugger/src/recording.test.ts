@@ -106,3 +106,27 @@ it('records and replays agent communication without turning it into an editable 
   const player = new RecordingPlayer(parseRecording(jsonl(records)));
   expect(player.state.timeline.entries[0]!.item).toEqual(history.payload.entries[0]!.item);
 });
+
+it('preserves current scoped usage through recording and backwards seek without accumulating snapshots', () => {
+  const replica = new AgentReplica();
+  const usage = { tokenScope: 'session' as const, inputTokens: 10, cachedInputTokens: 20, cacheCreationInputTokens: 0,
+    outputTokens: 5, totalTokens: 35, contextScope: 'current' as const, contextWindowUsedTokens: 30, contextWindowMaxTokens: 100 };
+  replica.applySnapshot({ ...snapshot, payload: { ...snapshot.payload, lastUsage: usage } });
+  replica.applyHistory(page('task'));
+  const records: DebuggerRecord[] = [];
+  let time = 0;
+  const stop = observeReplica('demo', replica, { subscribeStatus(listener: (s: RemoteSessionStatus) => void) { listener('ready'); return () => {}; } },
+    record => records.push({ ...record, timestamp: new Date(Date.UTC(2026, 9, 9) + time).toISOString() }));
+  time = 1000;
+  const updated = { ...usage, totalTokens: 50, inputTokens: 25, contextWindowUsedTokens: 15 };
+  replica.applySnapshot({ ...snapshot, payload: { ...snapshot.payload, lastUsage: updated } });
+  time = 2000;
+  replica.applySnapshot({ ...snapshot, payload: { ...snapshot.payload, lastUsage: updated } });
+  stop();
+  const player = new RecordingPlayer(parseRecording(jsonl(records)));
+  expect(player.state.agent?.lastUsage).toEqual(usage);
+  player.seek(player.recording.duration);
+  expect(player.state.agent?.lastUsage).toEqual(updated);
+  player.seek(0);
+  expect(player.state.agent?.lastUsage).toEqual(usage);
+});

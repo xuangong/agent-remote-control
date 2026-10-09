@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { codexToolResult } from './tool-result.js';
 import { CodexImageRegistry } from './images.js';
 import { codexImagePlaceholderLabel } from './message-content.js';
+import { codexUsage } from './usage.js';
 import type {
   AgentStreamEvent,
   AgentUserMessagePart,
@@ -376,17 +377,8 @@ export class CodexEventProjector {
     params: unknown,
     turnId: string | undefined,
   ): ProviderObservation | null {
-    if (!isRecord(params) || !isRecord(params.tokenUsage) || !isRecord(params.tokenUsage.total)) {
-      return null;
-    }
-    const total = params.tokenUsage.total;
-    const usage = {
-      inputTokens: readNumber(total.inputTokens),
-      cachedInputTokens: readNumber(total.cachedInputTokens),
-      outputTokens: readNumber(total.outputTokens),
-      contextWindowMaxTokens: readNumber(params.tokenUsage.modelContextWindow),
-      contextWindowUsedTokens: readNumber(total.totalTokens),
-    };
+    const usage = isRecord(params) ? codexUsage(params.tokenUsage) : null;
+    if (!usage) return null;
     return this.observation(`turn:${turnId ?? 'unknown'}:usage:${stringifyJson(usage)}`, {
       type: 'usage_updated', provider: PROVIDER_ID, turnId, usage,
     });

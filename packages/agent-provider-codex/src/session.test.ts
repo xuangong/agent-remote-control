@@ -47,6 +47,30 @@ function respond(harness: ReturnType<typeof createSessionHarness>, id: number, r
 }
 
 describe('CodexAppServerSession', () => {
+  it('preserves the native usage snapshot replayed while an existing session is opening', async () => {
+    const harness = createSessionHarness();
+    const starting = CodexAppServerSession.resume(harness.transport, { providerId: 'codex', sessionId: 'thread-1', opaque: '{}' });
+    respond(harness, (await waitForRequest(harness, 'initialize')).id, {});
+    respond(harness, (await waitForRequest(harness, 'thread/resume')).id, { thread: { id: 'thread-1' } });
+    const request = await waitForRequest(harness, 'thread/read');
+    harness.child.stdout.write(`${JSON.stringify({ method: 'thread/tokenUsage/updated', params: {
+      threadId: 'thread-1', turnId: 'turn-old', tokenUsage: {
+        total: { inputTokens: 100, cachedInputTokens: 40, outputTokens: 20, totalTokens: 120 },
+        last: { totalTokens: 12 }, modelContextWindow: 200_000,
+      },
+    } })}\n`);
+    respond(harness, request.id, { thread: { id: 'thread-1', status: { type: 'idle' }, turns: [] } });
+    const session = await starting;
+    try {
+      const iterator = session.observe()[Symbol.asyncIterator]();
+      await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'history_boundary' } });
+      await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'observation', event: { type: 'usage_updated', usage: {
+        tokenScope: 'session', inputTokens: 60, cachedInputTokens: 40, cacheCreationInputTokens: 0, outputTokens: 20, totalTokens: 120,
+        contextScope: 'current', contextWindowUsedTokens: 12, contextWindowMaxTokens: 200_000,
+      } } } });
+    } finally { await session.dispose(); }
+  });
+
   it.each([
     { native: { type: 'active', activeFlags: [] }, expected: 'running' },
     { native: { type: 'active', activeFlags: ['waitingOnApproval'] }, expected: 'waiting' },

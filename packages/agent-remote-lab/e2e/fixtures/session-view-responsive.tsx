@@ -15,7 +15,14 @@ const state: AgentReplicaState = {
       ...replicaState.agent!.capabilities, steer: true, cancel: true, commands: true, planning: true, sessionSettings: true,
       imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 },
     },
-    runtimeInfo: { ...replicaState.agent!.runtimeInfo, model: 'GPT-6-Astra extended', status: 'running', planning: { active: false } },
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, model: 'gpt-6-astra', status: 'running', planning: { active: false }, settings: [
+      { id: 'model', category: 'model', label: 'Model', value: 'gpt-6-astra', options: [{ value: 'gpt-6-astra', label: 'GPT-6-Astra' }], mutable: true, scope: 'session' },
+      { id: 'effort', category: 'model', label: 'Reasoning effort', value: 'ultra', options: [{ value: 'ultra', label: 'ultra' }], mutable: true, scope: 'session' },
+      { id: 'approval', category: 'permissions', label: 'Approval policy', value: 'never', options: [{ value: 'never', label: 'Never ask' }], mutable: true, scope: 'session' },
+      { id: 'sandbox', category: 'permissions', label: 'Sandbox', value: 'dangerFullAccess', options: [{ value: 'dangerFullAccess', label: 'Full access' }], mutable: true, scope: 'session' },
+    ] },
+    lastUsage: { tokenScope: 'session', inputTokens: 6_100, outputTokens: 622_500, cachedInputTokens: 305_300_000,
+      cacheCreationInputTokens: 0, totalTokens: 305_928_600, contextScope: 'current', contextWindowUsedTokens: 82_400, contextWindowMaxTokens: 128_000 },
   },
 };
 

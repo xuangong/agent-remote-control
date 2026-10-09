@@ -2,6 +2,7 @@ import { Clone } from '@sinclair/typebox/value';
 import type { PublicAgentNonTimelineEvent } from './envelope.js';
 import type { AgentInteractionRequest } from './interactions.js';
 import type { AgentSnapshotPayload, AgentStatus } from './snapshot.js';
+import { updateUsageSnapshot } from './usage-state.js';
 
 /** Native and wire events share the same state transitions, without transport or Provider identity interpretation. */
 export type SessionStateEvent = PublicAgentNonTimelineEvent extends infer Event
@@ -36,7 +37,7 @@ export function reduceSessionState(
     case 'turn_completed':
       if (!finishesCurrentTurn(event.turnId)) break;
       state.activeTurn = null;
-      if (event.usage) state.lastUsage = Clone(event.usage);
+      if (event.usage) state.lastUsage = updateUsageSnapshot(state.lastUsage, event.usage);
       break;
     case 'turn_failed':
       if (!finishesCurrentTurn(event.turnId)) break;
@@ -48,7 +49,7 @@ export function reduceSessionState(
       state.activeTurn = null;
       break;
     case 'usage_updated':
-      state.lastUsage = Clone(event.usage);
+      state.lastUsage = updateUsageSnapshot(state.lastUsage, event.usage);
       break;
     case 'runtime_updated':
       state.runtimeInfo = Clone(event.runtimeInfo);

@@ -12,7 +12,7 @@ Verified against Agent SDK **0.3.247** and Claude Code **2.1.247**. This invento
 | `turn_failed` | Native error result or unexpected Query termination. Ambiguous input is not automatically replayed. |
 | `turn_canceled` | Public interrupt followed by native turn settlement. |
 | `timeline` | Items below, identified by native message/content-block and tool-call identities. |
-| `usage_updated` | Native context occupancy and turn accounting; absent fields stay absent. |
+| `usage_updated` | Native root-model context occupancy and `turn` token snapshots with separate uncached input, output, cache read/write, and known total; absent fields stay absent. Query-lifetime model accounting is not a session total. |
 | `runtime_updated` | Native identity, cwd, model, permission/planning state, lifecycle and direct child descriptors. |
 | `interaction_requested` | A live native callback with an actionable, validated response shape. |
 | `interaction_resolved` | Answer, denial, dismissal or cancellation of that callback. |

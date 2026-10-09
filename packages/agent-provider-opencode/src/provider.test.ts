@@ -412,8 +412,30 @@ test('reports latest native token usage without claiming a total cost for a trun
   const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
   await waitFor(() => items.some(i => i.type === 'history_boundary'));
   const usage = items.flatMap(i => i.type === 'observation' && i.event.type === 'usage_updated' ? [i.event.usage] : []).at(-1);
-  expect(usage).toMatchObject({ inputTokens: 2, cachedInputTokens: 1, outputTokens: 3 });
+  expect(usage).toMatchObject({ tokenScope: 'call', inputTokens: 2, cachedInputTokens: 1, cacheCreationInputTokens: 0, outputTokens: 3, totalTokens: 6 });
   expect(usage).not.toHaveProperty('totalCostUsd');
+}, 10000);
+
+test('reads native session totals on attach and replaces them after native updates and reconnects', async () => {
+  const f = await fixture();
+  const tokens = { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } };
+  f.nativeSelection = { tokens };
+  f.messages = [assistant('Latest answer')];
+  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
+  const session = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) });
+  const items = observe(session);
+  const snapshots = () => items.flatMap(item => item.type === 'observation' && item.event.type === 'usage_updated' ? [item.event.usage] : []);
+  await waitFor(() => items.some(item => item.type === 'history_boundary'));
+  expect(snapshots().at(-1)).toMatchObject({ tokenScope: 'session', inputTokens: 100, outputTokens: 25, cachedInputTokens: 40, cacheCreationInputTokens: 10, totalTokens: 175, contextScope: 'current', contextWindowUsedTokens: 6 });
+  f.emit('session.updated', { info: f.native() });
+  f.nativeSelection = { tokens: { ...tokens, input: 110 } };
+  f.emit('session.updated', { info: f.native() });
+  await waitFor(() => snapshots().at(-1)?.totalTokens === 185);
+  expect(snapshots()).toHaveLength(2);
+  f.nativeSelection = { tokens: { ...tokens, input: 120 } };
+  f.disconnect();
+  await waitFor(() => snapshots().at(-1)?.totalTokens === 195);
+  expect(snapshots().at(-1)).toMatchObject({ tokenScope: 'session', inputTokens: 120, contextScope: 'current', contextWindowUsedTokens: 6 });
 }, 10000);
 
 test('does not resurrect a canceled native turn while reconciling its retained error message', async () => {

@@ -371,3 +371,49 @@ activity also searches communication text and attribution. Recording, replay,
 source-key deduplication, and reconnect use the ordinary timeline contract.
 All strict-schema Remote participants must upgrade together to protocol 1.6.0;
 this does not change the independent Host uplink envelope version.
+
+## Current session usage
+
+Session status reads `AgentSnapshot.lastUsage`. Usage notifications replace the
+latest snapshot; they do not create a usage ledger, historical curve, or model
+distribution. Token scope is explicit:
+
+| Adapter | Token snapshot | Current context |
+| --- | --- | --- |
+| Codex | Native `tokenUsage.total`, scope `session` | `tokenUsage.last.totalTokens` and native model capacity |
+| OpenCode | Native session aggregate when available, scope `session`; otherwise the latest populated assistant snapshot, scope `call` | Latest assistant token footprint and native model catalog capacity |
+| Claude Code | Native result main-loop usage, scope `turn` | Matching root-model `context_usage`, when supplied |
+| Copilot | Native `assistant.usage`, scope `call` | Independent `session.usage_info` current tokens and limit |
+
+Within a scoped snapshot, `inputTokens` excludes cache reads and writes;
+`cachedInputTokens`, `cacheCreationInputTokens`, and `outputTokens` are disjoint
+buckets. `totalTokens` comes from the same native measurement or its complete
+breakdown. The UI never estimates a total from incomplete fields. Missing means
+unknown; zero is a valid value. Legacy usage without `tokenScope` still decodes
+but cannot be labeled as normalized session usage.
+
+Independent `contextScope: 'current'` establishes that context fields measure
+current occupancy. It does not require a token snapshot. Older Codex adapters
+reported cumulative tokens in the context-used field; unmarked context remains
+decodable but is not displayed as current context or used to calculate utilization.
+
+Token fields (scope and counters), context fields (scope, used and capacity), and the
+legacy cost field update as independent groups. Any defined field replaces its
+whole group; omitted fields in that group become unknown. Other groups remain
+last known. Empty updates do nothing. The shared `updateUsageSnapshot` function
+governs retained history facts and live state. Source identities and revisions
+prevent duplicate or superseded usage records from regressing recovered state.
+
+Browser reconnect restores the retained current snapshot, including in ARDB
+record/replay. Cold Host attach only displays measurements actually supplied by
+the native runtime; it does not reconstruct usage history. Existing snapshots
+do not promise persistence across Host restarts. Experimental metrics APIs,
+account quota, cost presentation, and historical aggregation are outside this
+feature.
+
+The optional usage fields extend the strict 1.6 schema: old unscoped records
+remain readable by updated clients, but old strict clients reject new fields.
+Deploy Relay and browser assets first and refresh open clients before updating
+Controllers to emit scoped usage. Older Controllers can remain connected; their
+unscoped token and context measurements appear as unavailable. The independent
+Host uplink version is unchanged.

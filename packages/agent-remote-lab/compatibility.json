@@ -120,7 +120,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:929343f31ed09e78b0528e4e6e248a830806419e8a247439ba647ecac6668962"
+      "digest": "sha256:eb5c469bd732b5bd9cda6633a1cb70dfcef01a176d3e7ff0708d277a412df305"
     }
   },
   "providers": [
@@ -273,7 +273,7 @@
         {
           "capability": "events.resources-usage",
           "status": "degraded",
-          "reason": "Tool output is bounded native text; skill Markdown uses refreshed native locators and bounded regular-file reads. Output images, todos, context capacity, cost and terminal control are not mapped."
+          "reason": "Tool output is bounded native text; skill Markdown uses refreshed native locators and bounded regular-file reads. Tokens describe the latest native call; session.usage_info supplies independent current context. No inferred session total. Output images, todos, cost and terminal control are not mapped."
         },
         {
           "capability": "controls.immediate-input",
@@ -317,7 +317,7 @@
         {
           "capability": "events.usage",
           "status": "degraded",
-          "reason": "Uses native session token/cost aggregates when present. Otherwise tokens describe the latest available model step; partial history does not establish lifetime totals."
+          "reason": "Uses native session token/cost aggregates when present, with session token scope. Otherwise tokens describe the latest populated model step with call scope; partial history does not establish lifetime totals."
         },
         {
           "capability": "interactions.native-producers",

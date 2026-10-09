@@ -53,13 +53,31 @@ test('uses native session aggregate while context remains the latest populated m
   const earlier = assistant();
   const pending = { ...assistant('msg_pending'), time: { created: 201 }, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } };
   const messages: NativeMessage[] = [{ info: earlier, parts: [] }, { info: pending, parts: [] }];
-  expect(usage(messages, { session: { cost: 1.5, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } } }, contextWindows: new Map([['test/model', 200000]]) })).toEqual({ inputTokens: 100, outputTokens: 25, cachedInputTokens: 40, totalCostUsd: 1.5, contextWindowMaxTokens: 200000, contextWindowUsedTokens: 40 });
-  expect(usage(messages)).toEqual({ inputTokens: 20, outputTokens: 5, cachedInputTokens: 10, contextWindowUsedTokens: 40 });
+  expect(usage(messages, { session: { cost: 1.5, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } } }, contextWindows: new Map([['test/model', 200000]]) })).toEqual({ tokenScope: 'session', inputTokens: 100, outputTokens: 25, cachedInputTokens: 40, cacheCreationInputTokens: 10, totalTokens: 175, totalCostUsd: 1.5, contextScope: 'current', contextWindowMaxTokens: 200000, contextWindowUsedTokens: 40 });
+  expect(usage(messages)).toEqual({ tokenScope: 'call', inputTokens: 20, outputTokens: 5, cachedInputTokens: 10, cacheCreationInputTokens: 5, totalTokens: 40, contextScope: 'current', contextWindowUsedTokens: 40 });
 });
 
 test('does not claim partial history cost as a session total and uses the native context UI token breakdown', () => {
   const info = assistant(); info.tokens.total = 45;
-  expect(usage([{ info, parts: [] }])).toEqual({ inputTokens: 20, cachedInputTokens: 10, outputTokens: 5, contextWindowUsedTokens: 40 });
+  expect(usage([{ info, parts: [] }])).toEqual({ tokenScope: 'call', inputTokens: 20, cachedInputTokens: 10, cacheCreationInputTokens: 5, outputTokens: 5, totalTokens: 40, contextScope: 'current', contextWindowUsedTokens: 40 });
+});
+
+test('selects the latest populated call even when its token snapshot is incomplete', () => {
+  const earlier = assistant();
+  const latest = { ...assistant('msg_latest'), time: { created: 201 }, tokens: { input: 15 } as AssistantMessage['tokens'] };
+  const messages = [{ info: earlier, parts: [] }, { info: latest, parts: [] }];
+  expect(usage(messages)).toEqual({ tokenScope: 'call', inputTokens: 15 });
+  expect(usage(messages, { contextWindows: new Map([['test/model', 200_000]]) })).toEqual({
+    tokenScope: 'call', inputTokens: 15, contextScope: 'current', contextWindowMaxTokens: 200_000,
+  });
+});
+
+test('marks known current context capacity even when token amounts are unavailable', () => {
+  const info = { ...assistant(), tokens: {} as AssistantMessage['tokens'] };
+  expect(usage([{ info, parts: [] }], { contextWindows: new Map([['test/model', 200_000]]) })).toEqual({
+    contextScope: 'current', contextWindowMaxTokens: 200_000,
+  });
+  expect(usage([{ info, parts: [] }])).toEqual({});
 });
 
 test('keeps failed tool diagnostics and timing without claiming unapplied file changes', () => {
@@ -82,7 +100,34 @@ test('bounds structured native results and does not create shell metrics from in
 test('omits unknown token metrics and accepts aggregate cost without history', () => {
   expect(usage([], { session: { cost: 0 } })).toEqual({ totalCostUsd: 0 });
   const info = assistant(); info.tokens.input = Number.NaN; info.tokens.cache.read = -1;
-  expect(usage([{ info, parts: [] }], { contextWindows: new Map([['test/model', -1]]) })).toEqual({ outputTokens: 5 });
+  expect(usage([{ info, parts: [] }], { contextWindows: new Map([['test/model', -1]]) })).toEqual({ tokenScope: 'call', outputTokens: 5, cacheCreationInputTokens: 5 });
+});
+
+test('keeps a zero native session snapshot without replacing it with historical call usage', () => {
+  const tokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
+  expect(usage([{ info: assistant(), parts: [] }], { session: { tokens } })).toEqual({
+    tokenScope: 'session', inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, totalTokens: 0, contextScope: 'current', contextWindowUsedTokens: 40,
+  });
+  expect(usage([{ info: { ...assistant(), tokens }, parts: [] }])).toEqual({
+    tokenScope: 'call', inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, totalTokens: 0, contextScope: 'current', contextWindowUsedTokens: 0,
+  });
+});
+
+test('ignores fractional, unsafe and missing buckets without summing partial snapshots', () => {
+  const info = assistant();
+  info.tokens = { input: 1.5, output: Number.MAX_SAFE_INTEGER, reasoning: 1, cache: { read: 10, write: Number.NaN } };
+  expect(usage([{ info, parts: [] }])).toEqual({ tokenScope: 'call', cachedInputTokens: 10 });
+  const partial = { input: 10, output: 4, cache: { read: 2 } } as AssistantMessage['tokens'];
+  expect(usage([], { session: { tokens: partial } })).toEqual({ tokenScope: 'session', inputTokens: 10, cachedInputTokens: 2 });
+});
+
+test('never accumulates previous messages or repeated native session snapshots', () => {
+  const message = { info: assistant(), parts: [] };
+  const tokens = { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } };
+  const expected = usage([message], { session: { tokens } });
+  expect(usage([message, message], { session: { tokens } })).toEqual(expected);
+  expect(usage([message], { session: { tokens } })).toEqual(expected);
+  expect(usage([message, message]).totalTokens).toBe(40);
 });
 
 test('marks oversized native file diffs truncated even when no textual output follows', () => {

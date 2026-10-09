@@ -68,10 +68,14 @@ export const AgentTimelineItem = Type.Union([
 export type AgentTimelineItem = Static<typeof AgentTimelineItem>;
 
 export const AgentUsage = Strict({
+  tokenScope: Type.Optional(Type.Union([Type.Literal('session'), Type.Literal('turn'), Type.Literal('call')])),
   inputTokens: Type.Optional(SafeNonNegativeInteger),
   cachedInputTokens: Type.Optional(SafeNonNegativeInteger),
+  cacheCreationInputTokens: Type.Optional(SafeNonNegativeInteger),
   outputTokens: Type.Optional(SafeNonNegativeInteger),
+  totalTokens: Type.Optional(SafeNonNegativeInteger),
   totalCostUsd: Type.Optional(Type.Number({ minimum: 0 })),
+  contextScope: Type.Optional(Type.Literal('current')),
   contextWindowMaxTokens: Type.Optional(SafeNonNegativeInteger),
   contextWindowUsedTokens: Type.Optional(SafeNonNegativeInteger),
 });

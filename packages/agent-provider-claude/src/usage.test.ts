@@ -3,9 +3,9 @@ import { ClaudeUsage } from './usage.js';
 
 it('differences cumulative Query cost while preserving per-turn main-loop token usage', () => {
   const usage = new ClaudeUsage();
-  expect(usage.result({ usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2 }, total_cost_usd: 0.25 }, 'root')).toEqual({ inputTokens: 10, outputTokens: 5, cachedInputTokens: 2, totalCostUsd: 0.25 });
+  expect(usage.result({ usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2, cache_creation_input_tokens: 3 }, total_cost_usd: 0.25 }, 'root')).toEqual({ tokenScope: 'turn', inputTokens: 10, outputTokens: 5, cachedInputTokens: 2, cacheCreationInputTokens: 3, totalTokens: 20, totalCostUsd: 0.25 });
   expect(usage.result({ usage: { input_tokens: 3, output_tokens: 1 }, total_cost_usd: 0.5,
-    modelUsage: { root: { inputTokens: 500, outputTokens: 200, contextWindow: 200000 }, child: { contextWindow: 1000000 } } }, 'root')).toEqual({ inputTokens: 3, outputTokens: 1, totalCostUsd: 0.25, contextWindowMaxTokens: 200000 });
+    modelUsage: { root: { inputTokens: 500, outputTokens: 200, contextWindow: 200000 }, child: { contextWindow: 1000000 } } }, 'root')).toEqual({ tokenScope: 'turn', inputTokens: 3, outputTokens: 1, totalCostUsd: 0.25 });
 });
 
 it('handles cost resets and gaps without charging another turn or a zeroed error twice', () => {
@@ -19,8 +19,9 @@ it('handles cost resets and gaps without charging another turn or a zeroed error
   expect(usage.result({ total_cost_usd: 1.5 }, 'root')).toEqual({ totalCostUsd: 0.5 });
 });
 
-it('uses only exact model context capacity and never infers used context from cumulative model usage', () => {
+it('does not turn Query-lifetime model accounting into a session total or context snapshot', () => {
   const usage = new ClaudeUsage();
+  expect(usage.result({ modelUsage: { root: { inputTokens: 500, outputTokens: 200, contextWindow: 200000 } } }, 'root')).toEqual({});
   expect(usage.result({ modelUsage: { child: { contextWindow: 1000000, inputTokens: 90 } } }, 'root')).toEqual({});
   expect(usage.result({ modelUsage: { child: { contextWindow: 1000000 } } }, undefined)).toEqual({});
   expect(usage.result({ usage: { input_tokens: -1, output_tokens: Infinity, cache_read_input_tokens: 0.5 }, total_cost_usd: NaN,
@@ -29,10 +30,40 @@ it('uses only exact model context capacity and never infers used context from cu
 
 it('preserves native inline context estimates only within their matching root turn', () => {
   const usage = new ClaudeUsage();
-  expect(usage.observe({ type: 'assistant', uuid: 'context', context_usage: { model: 'root', total_tokens: 210000, raw_max_tokens: 200000 } }, 'root')).toEqual({ contextWindowUsedTokens: 210000, contextWindowMaxTokens: 200000 });
+  expect(usage.observe({ type: 'assistant', uuid: 'context', context_usage: { model: 'root', total_tokens: 210000, raw_max_tokens: 200000 } }, 'root')).toEqual({ contextScope: 'current', contextWindowUsedTokens: 210000, contextWindowMaxTokens: 200000 });
   expect(usage.observe({ type: 'assistant', uuid: 'context', context_usage: { model: 'root', total_tokens: 210000, raw_max_tokens: 200000 } }, 'root')).toBeUndefined();
-  expect(usage.result({ usage: { input_tokens: 5 } }, 'root')).toEqual({ inputTokens: 5, contextWindowUsedTokens: 210000, contextWindowMaxTokens: 200000 });
+  expect(usage.result({ usage: { input_tokens: 5 } }, 'root')).toEqual({ tokenScope: 'turn', inputTokens: 5, contextScope: 'current', contextWindowUsedTokens: 210000, contextWindowMaxTokens: 200000 });
   usage.startTurn();
   expect(usage.result({}, 'root')).toEqual({});
   expect(usage.observe({ type: 'assistant', context_usage: { model: 'child', total_tokens: 1, raw_max_tokens: 100 } }, 'root')).toBeUndefined();
+});
+
+it('marks a native current-context snapshot independently of token usage and rejects invalid context', () => {
+  const usage = new ClaudeUsage();
+  for (const context of [
+    { model: 'root', total_tokens: -1, raw_max_tokens: 100 },
+    { model: 'root', total_tokens: 0, raw_max_tokens: 0 },
+    { model: 'root', total_tokens: Number.MAX_SAFE_INTEGER + 1, raw_max_tokens: 100 },
+    { model: 'root', raw_max_tokens: 100 },
+  ]) {
+    expect(usage.observe({ type: 'assistant', context_usage: context }, 'root')).toBeUndefined();
+  }
+  expect(usage.result({}, 'root')).not.toHaveProperty('contextScope');
+  expect(usage.observe({ type: 'assistant', context_usage: { model: 'root', total_tokens: 0, raw_max_tokens: 100 } }, 'root')).toEqual({
+    contextScope: 'current', contextWindowUsedTokens: 0, contextWindowMaxTokens: 100,
+  });
+});
+
+it('keeps incomplete and invalid token components unknown while retaining a valid zero snapshot', () => {
+  const usage = new ClaudeUsage();
+  expect(usage.result({ usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, 'root')).toEqual({
+    tokenScope: 'turn', inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, totalTokens: 0,
+  });
+  expect(usage.result({ usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 7 } }, 'root')).toEqual({
+    tokenScope: 'turn', inputTokens: 3, outputTokens: 2, cachedInputTokens: 7,
+  });
+  expect(usage.result({ usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 7, cache_creation_input_tokens: -1 } }, 'root')).toEqual({
+    tokenScope: 'turn', inputTokens: 3, outputTokens: 2, cachedInputTokens: 7,
+  });
+  expect(usage.result({ usage: { input_tokens: Number.MAX_SAFE_INTEGER, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, 'root')).not.toHaveProperty('totalTokens');
 });

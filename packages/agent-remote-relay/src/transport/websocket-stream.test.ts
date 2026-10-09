@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { decodeServerMessage, type AgentUsage } from '@orchardworks/agent-remote-protocol';
 import type { AgentManagerEvent } from '../agent-manager-events.js';
 import { AgentManager } from '../agent-manager.js';
 import type { AgentRemoteRelay } from '../relay.js';
@@ -299,6 +300,68 @@ it('preserves native execution authority across turn results and socket reattach
       expect((await restored.next('agent_snapshot')).payload).toMatchObject({ status: 'running', activeTurn: null, runtimeInfo: { status: 'running' } });
       push({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { providerId: 'fake', sessionId: 'session-1', status: 'idle' }, activeTurnId: null });
       expect((await restored.next('agent_update')).payload).toMatchObject({ status: 'idle', activeTurn: null });
+    } finally { reconnected.close(); }
+  } finally { socket.close(); await manager.close(); }
+}, 5000);
+
+it('restores current token and context snapshots across real socket reconnection without accumulating usage', async () => {
+  const tokens: AgentUsage = { tokenScope: 'session', inputTokens: 100, cachedInputTokens: 60,
+    cacheCreationInputTokens: 0, outputTokens: 40, totalTokens: 200 };
+  const context = { contextScope: 'current' as const, contextWindowUsedTokens: 90, contextWindowMaxTokens: 500 };
+  const values: ProviderStreamItem[] = [tokens, context].map((usage, index) => ({
+    type: 'observation', sourceKey: `history:${index}`, occurredAt: index, delivery: 'history',
+    event: { type: 'usage_updated', provider: 'fake', usage },
+  }));
+  values.push({ type: 'history_boundary' });
+  let wake: (() => void) | undefined;
+  let closed = false;
+  let sequence = 0;
+  const session: AgentSession = {
+    ...boundarySession('/workspace'),
+    async *observe() {
+      while (!closed) {
+        if (values.length) yield values.shift()!;
+        else await new Promise<void>(resolve => { wake = resolve; });
+      }
+    },
+    async dispose() { closed = true; wake?.(); },
+  };
+  const push = (usage: AgentUsage) => {
+    values.push({ type: 'observation', sourceKey: `live:${++sequence}`, occurredAt: sequence + 10,
+      delivery: 'live', event: { type: 'usage_updated', provider: 'fake', usage } });
+    wake?.();
+  };
+  const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'fake', displayName: 'Fake' }, session, epoch: 'e' });
+  await manager.ready;
+  const socket = await openControlledSocket(manager);
+  const inbox = socketInbox(socket);
+  try {
+    socket.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    const first = await inbox.next('agent_snapshot');
+    expect(decodeServerMessage(JSON.stringify(first))).toMatchObject({ status: 'ok' });
+    expect(first.payload).toMatchObject({ lastUsage: { ...tokens, ...context } });
+    for (let index = 0; index < 2; index++) {
+      push({ tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3 });
+      const update = await inbox.next('agent_update');
+      expect(decodeServerMessage(JSON.stringify(update))).toMatchObject({ status: 'ok' });
+      expect((update.payload as { lastUsage: AgentUsage }).lastUsage).toEqual({ tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3, ...context });
+      const live = await inbox.next('agent_stream');
+      expect(decodeServerMessage(JSON.stringify(live))).toMatchObject({ status: 'ok' });
+    }
+    const disconnected = socketClose(socket);
+    socket.close(); await disconnected;
+    const reconnected = new WebSocket(socket.url);
+    const restored = socketInbox(reconnected);
+    await new Promise<void>((resolve, reject) => { reconnected.once('open', resolve); reconnected.once('error', reject); });
+    try {
+      reconnected.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+      expect((await restored.next('agent_snapshot')).payload).toMatchObject({ lastUsage: {
+        tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3, ...context,
+      } });
+      push({ contextWindowUsedTokens: 0 });
+      expect(((await restored.next('agent_update')).payload as { lastUsage: AgentUsage }).lastUsage).toEqual({
+        tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3, contextWindowUsedTokens: 0,
+      });
     } finally { reconnected.close(); }
   } finally { socket.close(); await manager.close(); }
 }, 5000);

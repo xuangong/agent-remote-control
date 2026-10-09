@@ -19,6 +19,7 @@
 - Never automatically replay an uncertain native operation after a process restart.
 - User pause, native ownership, Host workspace policy, and native permission rules remain authoritative.
 - Ordinary Session View handles TPM conversation rendering, input, recovery, and drafts.
+- TPM view follows Track visibility conventions: `/tpm` toggles; `on/off/enable/disable` set explicitly; the View menu exposes the same preference. Default visible on mobile/coarse-pointer devices, hidden on desktop; an explicit saved preference wins. Hiding never pauses background work, and Track visibility is independent.
 - No credentials, native persistence opaque payloads, or executable callbacks are exposed in public work records.
 - Use isolated worktrees, test state roots, ports, and native sessions. Preserve running user services.
 - Every test run has per-test and outer process deadlines. Root test runners already provide both.
@@ -152,6 +153,7 @@ function canStartReview(s: ReviewReadiness): boolean {
 **Files:**
 - Create `packages/agent-remote-lab/src/hooks/useTpmWork.ts`, `components/TpmMenu.tsx`, `components/TpmWorkspace.tsx`, and their tests.
 - Modify `packages/agent-remote-lab/src/App.tsx` and relevant menu/command assembly.
+- Reuse command parsing, device classification, and preference conventions from `hooks/useSessionAttention.tsx`, with an independent TPM visibility key and View-menu control.
 - Reuse or extract the floating shell from `components/AskConversation.tsx`, `AskResize.tsx`, and existing positioning hooks without coupling TPM state to Ask records.
 - Add scoped TPM styles, reusing existing tokens and responsive behavior.
 
@@ -159,6 +161,8 @@ function canStartReview(s: ReviewReadiness): boolean {
 **Produces:** A Track-like work list and an Ask-like ordinary Session View workspace.
 
 - [ ] Test list loading, empty/unavailable states, work creation from the current main session, and selection without accidental dismissal.
+- [ ] Add `/tpm`, `/tpm on`, `/tpm off`, `/tpm enable`, and `/tpm disable`, plus the View-menu toggle. Test explicit saved preferences overriding mobile/desktop defaults and ensure invalid arguments do not mutate visibility.
+- [ ] Test hiding the entry/list/workspace during active work without pause/resume requests, lease release, or heartbeat cancellation. Re-enable and verify the same work, draft, and conversation remain accessible; changing Track visibility must not change TPM visibility.
 - [ ] Render work phase and waiting/health state distinctly from native session execution status.
 - [ ] Reuse `useConversationSession` and `LabWorkbench`; retain full chatbox functions, pending input behavior, settings, resources, search, and view modes.
 - [ ] Add specification access, main-session navigation, explicit pause/resume, minimize, and return-to-list controls. Hiding a panel must only change presentation state.

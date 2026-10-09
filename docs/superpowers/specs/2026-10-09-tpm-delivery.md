@@ -14,6 +14,9 @@ The first release supports a TPM and its main session on the same Controller. It
 ## Agreed experience
 
 - A global floating TPM entry opens a compact list, similar to Track view.
+- TPM view visibility follows Track view: `/tpm` toggles it, and `/tpm on`, `/tpm off`, `/tpm enable`, and `/tpm disable` set it explicitly. The View menu exposes the same setting.
+- Without a saved preference, TPM view is visible on mobile/coarse-pointer devices and hidden on desktop, using the same device classification as Track. Persist the user's explicit choice independently of Track visibility.
+- Disabling TPM view hides its entry, list, and workspace only. It preserves work records, drafts, background leases, event subscriptions, and heartbeat scheduling. Re-enabling restores access to existing work without creating or restarting TPM sessions. View visibility never changes work pause/resume state.
 - Each row represents a work item: title, delivery state, unread activity, and a needs-user indicator. Rows open the TPM workspace; they do not imply implementation-session focus.
 - The workspace resembles Ask: a resizable desktop dialog and a small-screen overlay, rendering the normal Session View and full chatbox.
 - The workspace exposes the related main session, current specification, and explicit pause/resume controls. Closing, minimizing, navigating, or disconnecting a browser never pauses the work item.
@@ -169,6 +172,7 @@ Update public schemas, protocol fixtures, replay support, and compatibility meta
 10. In desktop and mobile browsers, open the global list, select a work item, interact with the ordinary chatbox, minimize/reopen, and verify draft/position continuity.
 11. Exercise authorization failure, provider disablement, CLI ownership transfer, revision conflict, inaccessible artifacts, and an old Controller; display truthful recoverable states.
 12. Use ARDB plus real transport tests to cover event handoff, operation receipts, replayed history, and closed-browser execution. Native smoke tests are separate from mocked adapter tests.
+13. Verify mobile/desktop visibility defaults, persisted overrides, all `/tpm` command forms, and the View-menu toggle. Disable TPM view during active work, verify background event/heartbeat execution continues, then re-enable and reopen the same work with its draft intact. Track visibility remains independent.
 
 ## Delivery sequence
 

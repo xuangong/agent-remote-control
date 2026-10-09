@@ -26,6 +26,7 @@ import { RenameSessionDialog } from './components/favorites/RenameSessionDialog.
 import { SessionTitle } from './components/SessionTitle.js';
 import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import { TrackViewScope, useSessionAttention } from './hooks/useSessionAttention.js';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
 import { FavoritesHeading, FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
@@ -1067,7 +1068,22 @@ function AppContent({
     ]);
   });
   const visibleWindows = openWindows.filter(session => activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(sessionKey(session)));
-  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady, visibleWindows);
+  const attention = useSessionAttention(baseUrl, userScoped && accessReady, item => {
+    setActiveView('workbench'); setContextOpen(false); setInspectorOpen(false);
+    const target = openWindows.find(session => sessionKey(session) === sessionKey(item));
+    if (target) { revealSession(target); return; }
+    const source = openWindows.find(session => {
+      const entry = ask.entryFor(session);
+      return entry.record?.target && sessionKey(entry.record.target) === sessionKey(item);
+    });
+    if (source) { revealSession(source); openAsk(source, replicas.get(source.agentId)?.getState()); }
+    else void openSession(item);
+  });
+  const notificationTargets = JSON.stringify([...openWindows, ...askActivitySessions.map(entry => entry.session)].map(sessionKey).sort());
+  useEffect(() => {
+    attention.notifier.setDisplayed(attention.enabled ? [...openWindows, ...askActivitySessions.map(entry => entry.session)] : []);
+  }, [attention.notifier, notificationTargets, attention.enabled]);
+  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady, visibleWindows, attention.observe);
   useEffect(() => trackedViews.retain(tracking.sessions), [trackedViews, tracking.sessions]);
   const applySessionTitle = useCallback((session: StarInput) => {
     setConfirmedTitleState(current => {
@@ -1502,10 +1518,10 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       observations={tracking.observations} navigation={viewNavigation} />;
   }
-  return <ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
-    {userScoped ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
+    {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       <div ref={setMobileViewTarget} className="lab-global-view-slot" />
@@ -1516,7 +1532,7 @@ function AppContent({
         {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : null}
     </nav> : null}
-    <ViewOptions target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sessionViewTarget}
+    <ViewOptions attentionControls={userScoped ? attention.controls : undefined} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -1763,7 +1779,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

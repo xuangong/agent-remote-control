@@ -14,7 +14,8 @@ const baseUrl = 'http://localhost/u/alice/';
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
-async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[], navigation?: { compact: boolean }, initiallyAuthorized = true) {
+async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[], navigation?: { compact: boolean }, initiallyAuthorized = true, showTrack = true) {
+  if (showTrack) localStorage.setItem('agent-remote:track-view', 'true');
   if (navigation) vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: navigation.compact && query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {} })));
   if (navigation) vi.spyOn(SessionDirectoryClient.prototype, 'attachChild').mockImplementation(async (_provider, _parent, id) => ({ agentId: id + '-agent', nativeSessionId: id }));
   saveTrackedSessions(baseUrl, [target, ...(other ? [other] : [])]);
@@ -383,4 +384,26 @@ it('remembers an explicit return to the mobile parent instead of reviving the pr
   await f.open(other.title);
   await f.open();
   expect(new URLSearchParams(location.search).get('session')).toBe('tracked');
+});
+
+it('keeps desktop tracking alive while its panel is hidden and delivers pending and completion notifications', async () => {
+  const notices: { title: string }[] = [];
+  vi.stubGlobal('Notification', class {
+    static permission = 'granted';
+    constructor(readonly title: string) { notices.push(this); }
+    close() {}
+  });
+  const f = await fixture(star, true, undefined, undefined, undefined, true, false);
+  expect(f.container.querySelector('[aria-label="Tracked sessions"]')).toBeNull();
+  const emit = (status: 'running' | 'waiting' | 'idle', seq: number) => act(async () => {
+    f.activity.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
+      agentId: 'live-agent', status, cursor: { epoch: 'tracked-epoch', seq },
+    } });
+  });
+  await emit('running', 2); await emit('waiting', 3); await emit('waiting', 4);
+  await emit('running', 5); await emit('idle', 6);
+  await vi.waitFor(() => expect(notices.map(notice => notice.title)).toEqual(['Session needs your input', 'Session completed']));
+  expect(f.activityClosed).not.toHaveBeenCalled();
+  expect(f.contentConnections).toHaveLength(0);
+  expect(readTrackedSessions(baseUrl)).toEqual([star]);
 });

@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ViewOptionsProps {
   target?: HTMLElement | null;
+  attentionControls?: ReactNode;
   triggerRef: RefObject<HTMLButtonElement>;
   headerVisible: boolean;
   sidebarVisible: boolean;
@@ -15,7 +16,7 @@ interface ViewOptionsProps {
   onToggleInspector(): void;
 }
 
-export function ViewOptions({ target, triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
+export function ViewOptions({ attentionControls, target, triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusedControl = useRef<string>();
@@ -68,6 +69,7 @@ export function ViewOptions({ target, triggerRef, headerVisible, sidebarVisible,
       <label><span>Header</span><input data-view-control="header" type="checkbox" checked={headerVisible} onChange={onToggleHeader} /></label>
       <label><span>Sidebar</span><input data-view-control="sidebar" type="checkbox" aria-controls="lab-context" checked={sidebarVisible} onChange={() => togglePanel(onToggleSidebar)} /></label>
       <label><span>Replica Inspector</span><input data-view-control="inspector" type="checkbox" aria-controls="lab-inspector" checked={inspectorVisible} onChange={() => togglePanel(onToggleInspector)} /></label>
+      {attentionControls}
     </section> : null}
   </div>;
   return target === null ? null : target ? createPortal(controls, target) : controls;

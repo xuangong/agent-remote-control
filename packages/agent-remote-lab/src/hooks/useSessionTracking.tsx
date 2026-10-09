@@ -13,7 +13,7 @@ const noOpenSessions: readonly OpenedSession[] = [];
 export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string; visible: boolean }
 const noAuxiliarySessions: readonly AuxiliarySession[] = [];
 
-export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true, visibleSessions?: readonly OpenedSession[]) {
+export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true, visibleSessions?: readonly OpenedSession[], onObservation?: (session: SessionStar | OpenedSession, value: SessionObservation) => void) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   // Authorization gates network access; only tracking changes release retained conversations.
@@ -146,8 +146,11 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       return { ...previous, sessions };
     });
   }, [baseUrl]);
+  const onObservationRef = useRef(onObservation); onObservationRef.current = onObservation;
   const update = useCallback((key: string, value: SessionObservation) => {
-    if (!observed.current.some(item => sessionKey(item.session) === key)) return;
+    const target = observed.current.find(item => sessionKey(item.session) === key);
+    if (!target) return;
+    onObservationRef.current?.(target.session, value);
     captureVisibleCursor(key);
     setObservations(previous => {
       const next = acknowledgeVisible(key, nextObservation(previous[key], value, readCursors.get(key))), old = previous[key];

@@ -75,6 +75,7 @@ flowchart LR
 | --- | --- |
 | [relay.md](relay.md) | Relay session ownership and serialized transport. |
 | [protocol.md](protocol.md) | Versioned public wire and separate Snapshot/Timeline recovery contract. |
+| [Protocol upgrade runbook](../../protocol-upgrade-runbook.md) | Staged protocol releases, remote upgrade reachability, verification and compatibility cleanup. |
 | [providers.md](providers.md) | Replaceable SDK, DSH, Codex and Claude Provider boundaries. |
 | [provider-support.md](provider-support.md) | Audited capability matrix, endpoint support and workaround boundaries. |
 | [provider-onboarding.md](provider-onboarding.md) | Comparison record and acceptance checklist for a new Provider. |

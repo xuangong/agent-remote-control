@@ -8,6 +8,12 @@ and the existing Agent Host protocol.
 Read [Personal access security](security.md) before upgrading an existing service;
 its rollout order and re-login boundary preserve existing device and sharing state.
 
+For a session protocol change, also follow the
+[protocol upgrade runbook](../../protocol-upgrade-runbook.md). Establish a verified
+upgrade path before replacing the service, publish required Controller packages
+before deploying their website path, and preserve management access for old and
+offline Hosts. Removing compatibility is a separate rollout after fleet confirmation.
+
 ## Production ownership
 
 | Service | Public origin | Owns |

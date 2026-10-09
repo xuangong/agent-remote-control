@@ -22,6 +22,10 @@ The stable launcher itself remains at its bootstrap version and supervises versi
 
 ## Session protocol transitions
 
+Follow the [protocol upgrade runbook](protocol-upgrade-runbook.md) for the staged
+release order, owner confirmation checkpoints, validation matrix and later cleanup.
+It includes the verified 1.7.0 / Controller 0.2.40 rollout as a worked example.
+
 Installation compatibility checks the target's Node minimum and OS/architecture, not
 whether the old Controller speaks the target session protocol. The website and Relay
 separately require the final release to match the Relay's session protocol. The stable

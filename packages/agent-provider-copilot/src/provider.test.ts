@@ -10,7 +10,8 @@ function event(type: string, data: unknown, extra = {}) { return {id: `e${++sequ
 beforeEach(() => {
   mock.history = []; mock.handler = undefined;
   mock.native = {on: vi.fn((handler: unknown) => {mock.handler = handler; return vi.fn();}), getEvents: vi.fn(async () => mock.history), send: vi.fn(async () => 'm'), abort: vi.fn(async () => {}), disconnect: vi.fn(async () => {}), rpc: {
-    metadata: {isProcessing: vi.fn(async () => ({processing: false}))},
+    metadata: {isProcessing: vi.fn(async () => ({processing: false})), contextInfo: vi.fn(async () => ({contextInfo: null}))},
+    usage: {getMetrics: vi.fn(async () => usageMetrics({}))},
     permissions: {handlePendingPermissionRequest: vi.fn(async () => ({success: true}))},
     interruptMainTurn: vi.fn(async () => ({interrupted: true})),
     commands: {invoke: vi.fn(async () => ({kind: 'agent-prompt', prompt: 'Resolved skill instructions', displayPrompt: '/native-cmd args'}))},
@@ -23,6 +24,93 @@ beforeEach(() => {
 });
 async function open() { const provider = new CopilotAgentProvider({executable: '/test/copilot'}); return {provider, session: await provider.createSession({sessionId: 'public', cwd: process.cwd()})}; }
 async function collect(session: {observe(): AsyncIterable<ProviderStreamItem>}) { const values: ProviderStreamItem[] = []; const done = (async () => {for await (const value of session.observe()) values.push(value);})(); return {values, done}; }
+function usageMetrics(models: Record<string, {inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number}>) {
+  return {totalPremiumRequestCost: 0, totalUserRequests: Object.keys(models).length, totalApiDurationMs: 0, sessionStartTime: new Date(0).toISOString(), codeChanges: {linesAdded: 0, linesRemoved: 0, filesModifiedCount: 0, filesModified: []}, modelMetrics: Object.fromEntries(Object.entries(models).map(([model, usage]) => [model, {requests: {count: 1, cost: 0}, usage}]))};
+}
+function sessionUsage(values: ProviderStreamItem[]) { return values.flatMap(value => value.type === 'observation' && value.event.type === 'usage_updated' && value.event.usage.tokenScope === 'session' ? [value.event.usage] : []); }
+describe('Copilot session usage snapshots', () => {
+  it('publishes native accumulated totals after open and resume without requiring a new turn', async () => {
+    mock.native.rpc.usage.getMetrics.mockResolvedValue(usageMetrics({a: {inputTokens: 20, outputTokens: 5, cacheReadTokens: 8, cacheWriteTokens: 2}, b: {inputTokens: 10, outputTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1}}));
+    const {provider, session} = await open(); const seen = await collect(session);
+    try {
+      await vi.waitFor(() => expect(sessionUsage(seen.values).at(-1)).toEqual({tokenScope: 'session', inputTokens: 17, outputTokens: 8, cachedInputTokens: 10, cacheCreationInputTokens: 3, totalTokens: 38}));
+      const persistence = (await session.runtimeInfo()).persistence!;
+      await session.dispose(); await seen.done;
+      const resumed = await provider.resumeSession(persistence); const history = await collect(resumed);
+      await vi.waitFor(() => expect(sessionUsage(history.values).at(-1)?.totalTokens).toBe(38));
+      expect(mock.native.send).not.toHaveBeenCalled();
+      await resumed.dispose(); await history.done;
+    } finally {await provider.dispose();}
+  }, 10000);
+
+  it('keeps session opening and input available when metrics are unsupported without publishing false zero totals', async () => {
+    mock.native.rpc.usage.getMetrics.mockRejectedValue(new Error('Method not found'));
+    const {provider, session} = await open(); const seen = await collect(session);
+    try {
+      await session.sendMessage('Still usable');
+      mock.handler(event('assistant.usage', {inputTokens: 99, outputTokens: 9, cacheReadTokens: 0, cacheWriteTokens: 0}));
+      await vi.waitFor(() => expect(mock.native.rpc.usage.getMetrics).toHaveBeenCalled());
+      await new Promise(resolve => setTimeout(resolve, 180));
+      expect(seen.values.flatMap(value => value.type === 'observation' && value.event.type === 'usage_updated' ? [value.event.usage] : [])).toEqual([]);
+      expect((await session.runtimeInfo()).status).toBe('idle');
+    } finally {await provider.dispose(); await seen.done;}
+  }, 10000);
+
+  it('coalesces refreshes and discards an in-flight snapshot invalidated by newer usage', async () => {
+    const {provider, session} = await open(); const seen = await collect(session);
+    try {
+      await vi.waitFor(() => expect(sessionUsage(seen.values).at(-1)?.totalTokens).toBe(0));
+      let finish!: (value: unknown) => void;
+      mock.native.rpc.usage.getMetrics.mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}));
+      for (let i = 0; i < 20; i++) mock.handler(event('assistant.usage', {inputTokens: 999, outputTokens: 999}));
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+      for (let i = 0; i < 20; i++) mock.handler(event('assistant.usage', {}, {agentId: 'child'}));
+      mock.handler(event('session.usage_info', {currentTokens: 42, tokenLimit: 1000}));
+      mock.native.rpc.usage.getMetrics.mockResolvedValue(usageMetrics({a: {inputTokens: 50, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 0}}));
+      finish(usageMetrics({a: {inputTokens: 20, outputTokens: 5, cacheReadTokens: 8, cacheWriteTokens: 0}}));
+      await vi.waitFor(() => expect(sessionUsage(seen.values).at(-1)?.totalTokens).toBe(60));
+      expect(sessionUsage(seen.values).map(usage => usage.totalTokens)).toEqual([0, 60]);
+      expect(mock.native.rpc.usage.getMetrics).toHaveBeenCalledTimes(3);
+      const usage = seen.values.flatMap(value => value.type === 'observation' && value.event.type === 'usage_updated' ? [value.event.usage] : []);
+      expect(usage.some(value => value.contextWindowUsedTokens === 42)).toBe(true);
+      expect(usage.some(value => value.tokenScope === 'call')).toBe(false);
+    } finally {await provider.dispose(); await seen.done;}
+  }, 10000);
+
+  it('retains the last accumulated snapshot after refresh failure and ignores replies after disposal', async () => {
+    mock.native.rpc.usage.getMetrics.mockResolvedValue(usageMetrics({a: {inputTokens: 20, outputTokens: 5, cacheReadTokens: 8, cacheWriteTokens: 0}}));
+    const {provider, session} = await open(); const seen = await collect(session);
+    try {
+      await vi.waitFor(() => expect(sessionUsage(seen.values).at(-1)?.totalTokens).toBe(25));
+      mock.native.rpc.usage.getMetrics.mockRejectedValueOnce(new Error('Disconnected'));
+      mock.handler(event('assistant.idle', {}));
+      await vi.waitFor(() => expect(mock.native.rpc.usage.getMetrics).toHaveBeenCalledTimes(2));
+      expect(sessionUsage(seen.values).map(usage => usage.totalTokens)).toEqual([25]);
+      let finish!: (value: unknown) => void;
+      mock.native.rpc.usage.getMetrics.mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}));
+      mock.handler(event('assistant.usage', {inputTokens: 40, outputTokens: 8}));
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+      await session.dispose(); await seen.done;
+      finish(usageMetrics({a: {inputTokens: 40, outputTokens: 8, cacheReadTokens: 10, cacheWriteTokens: 0}}));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(sessionUsage(seen.values).map(usage => usage.totalTokens)).toEqual([25]);
+    } finally {await provider.dispose();}
+  }, 10000);
+
+  it('does not let a late initial context snapshot overwrite a live context update', async () => {
+    let finish!: (value: unknown) => void;
+    mock.native.rpc.metadata.contextInfo.mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}));
+    const {provider, session} = await open(); const seen = await collect(session);
+    try {
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+      mock.handler(event('session.usage_info', {currentTokens: 200, tokenLimit: 1000}));
+      finish({contextInfo: {totalTokens: 100, promptTokenLimit: 1000}});
+      await new Promise(resolve => setImmediate(resolve));
+      const contexts = seen.values.flatMap(value => value.type === 'observation' && value.event.type === 'usage_updated' && value.event.usage.contextScope === 'current' ? [value.event.usage] : []);
+      expect(contexts).toEqual([{contextScope: 'current', contextWindowUsedTokens: 200, contextWindowMaxTokens: 1000}]);
+    } finally {await provider.dispose(); await seen.done;}
+  }, 10000);
+});
 describe('Copilot native adapter', () => {
   it('joins durable history with buffered live events once and retains background input after idle', async () => {
     const historical = event('user.message', {content: 'Earlier'});

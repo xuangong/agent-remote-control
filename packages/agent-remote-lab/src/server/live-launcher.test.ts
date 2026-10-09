@@ -246,6 +246,7 @@ describe('live DSH launcher', () => {
             { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Permission callbacks are process-local.' },
             { capability: 'sessions.empty-persistence', status: 'degraded', reason: 'An empty session may not be persisted.' },
             { capability: 'interactions.form.schema', status: 'degraded', reason: 'Native schema loss prevents form support.' },
+            { capability: 'events.usage', status: 'degraded', reason: 'Cumulative tokens cover the current native Query with runtime scope, not a persisted session total.' },
           ],
         },
       ],

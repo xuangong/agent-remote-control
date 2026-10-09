@@ -382,8 +382,20 @@ distribution. Token scope is explicit:
 | --- | --- | --- |
 | Codex | Native `tokenUsage.total`, scope `session` | `tokenUsage.last.totalTokens` and native model capacity |
 | OpenCode | Native session aggregate when available, scope `session`; otherwise the latest populated assistant snapshot, scope `call` | Latest assistant token footprint and native model catalog capacity |
-| Claude Code | Native result main-loop usage, scope `turn` | Matching root-model `context_usage`, when supplied |
-| Copilot | Native `assistant.usage`, scope `call` | Independent `session.usage_info` current tokens and limit |
+| Claude Code | Latest native result `modelUsage`, summed across models within that snapshot, scope `runtime` | Matching root-model `context_usage`, when supplied |
+| Copilot | Native `session.rpc.usage.getMetrics()` session aggregate, scope `session` | Initial `metadata.contextInfo` and independent `session.usage_info` current tokens and limit |
+
+Session and runtime snapshots are cumulative. Claude's runtime scope covers the
+current streaming-input `query()` pipeline, including main-loop, subagent and
+compaction calls. It starts fresh on native resume and resets on native `/clear`;
+it does not establish a persisted session lifetime total. Read the latest
+`modelUsage`, never sum successive results or substitute per-turn `result.usage`.
+The native `/clear` reset is an accounting boundary, not a supported ARC control:
+it changes native session identity and is rejected by the existing identity guard.
+Copilot's public experimental metrics RPC supplies a session aggregate on open
+and after live usage changes; per-call `assistant.usage` triggers a refresh but
+does not replace the aggregate. An unavailable RPC leaves the latest known
+snapshot intact; it does not block interaction or fabricate zero usage.
 
 Within a scoped snapshot, `inputTokens` excludes cache reads and writes;
 `cachedInputTokens`, `cacheCreationInputTokens`, and `outputTokens` are disjoint
@@ -407,13 +419,14 @@ prevent duplicate or superseded usage records from regressing recovered state.
 Browser reconnect restores the retained current snapshot, including in ARDB
 record/replay. Cold Host attach only displays measurements actually supplied by
 the native runtime; it does not reconstruct usage history. Existing snapshots
-do not promise persistence across Host restarts. Experimental metrics APIs,
-account quota, cost presentation, and historical aggregation are outside this
-feature.
+do not promise persistence across Host restarts. Copilot's experimental metrics
+API is used with the pinned SDK/CLI pair; native restart durability is not an ARC
+guarantee. Account quota, cost presentation, and historical aggregation are
+outside this feature.
 
 The optional usage fields extend the strict 1.6 schema: old unscoped records
 remain readable by updated clients, but old strict clients reject new fields.
 Deploy Relay and browser assets first and refresh open clients before updating
-Controllers to emit scoped usage. Older Controllers can remain connected; their
+Controllers to emit scoped usage, including the `runtime` scope. Older Controllers can remain connected; their
 unscoped token and context measurements appear as unavailable. The independent
 Host uplink version is unchanged.

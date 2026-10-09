@@ -28,7 +28,7 @@ export function observe(session: AgentSession) {
  } })();
  return {items, done, timeline: () => projectTimelineRows(store.rows()), events: () => items.flatMap(i => i.type === 'observation' ? [i.event] : [])};
 }
-export async function fixture(handler: (body: ModelRequest, res: ServerResponse, index: number) => void, configure?: (cwd: string) => Promise<CopilotAgentProviderOptions['nativeSessionConfig']>) {
+export async function fixture(handler: (body: ModelRequest, res: ServerResponse, index: number) => void, configure?: (cwd: string) => Promise<CopilotAgentProviderOptions['nativeSessionConfig']>, providerType: 'openai' | 'anthropic' = 'openai') {
  const home = await mkdtemp(join(tmpdir(), 'copilot-native-test-'));
  const cwd = join(home, 'workspace'); await mkdir(cwd);
  const requests: ModelRequest[] = []; const errors: unknown[] = []; const diagnostics: string[] = [];
@@ -38,7 +38,7 @@ export async function fixture(handler: (body: ModelRequest, res: ServerResponse,
  });
  server.listen(0, '127.0.0.1'); await once(server, 'listening');
  const address = server.address(); if (!address || typeof address === 'string') throw new Error('No fixture port');
- const provider = new CopilotAgentProvider({onDiagnostic: message => diagnostics.push(message), useLoggedInUser: false, requestTimeoutMs: 5000, env: {COPILOT_HOME: join(home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {...await configure?.(cwd), provider: {type: 'openai', baseUrl: `http://127.0.0.1:${address.port}`, wireApi: 'completions'}}});
+ const provider = new CopilotAgentProvider({onDiagnostic: message => diagnostics.push(message), useLoggedInUser: false, requestTimeoutMs: 5000, env: {COPILOT_HOME: join(home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {...await configure?.(cwd), provider: {type: providerType, baseUrl: `http://127.0.0.1:${address.port}`, ...(providerType === 'openai' ? {wireApi: 'completions' as const} : {})}}});
  return {home, cwd, provider, baseUrl: `http://127.0.0.1:${address.port}`, requests, errors, diagnostics, async close() {
   try { await provider.dispose(); } finally { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await rm(home, {recursive: true, force: true}); }
  }};

@@ -76,7 +76,7 @@ it('does not emit empty reasoning and maps context usage without inventing monet
  const p = new Projector();
  expect(p.project(event('assistant.reasoning', {reasoningId: 'r', content: ''}))).toBeUndefined();
  expect(p.project(event('session.usage_info', {currentTokens: 120, tokenLimit: 1000, messagesLength: 3}))?.event).toMatchObject({type: 'usage_updated', usage: {contextScope: 'current', contextWindowUsedTokens: 120, contextWindowMaxTokens: 1000}});
- expect(p.project(event('assistant.usage', {model: 'm', cost: 2, inputTokens: 5, outputTokens: 1}))?.event).not.toHaveProperty('usage.totalCostUsd');
+ expect(p.project(event('assistant.usage', {model: 'm', cost: 2, inputTokens: 5, outputTokens: 1}))).toBeUndefined();
 }, 10000);
 it('reconstructs completed historical interactions without reopening pending prompts', () => {
  const p = new Projector();
@@ -113,32 +113,17 @@ it('retains successful compaction metadata and native token counts', () => {
  const p = new Projector();
  expect(p.project(event('session.compaction_start', {}))?.event).toMatchObject({item: {type: 'compaction', status: 'loading'}});
  expect(p.project(event('session.compaction_complete', {success: true, trigger: 'manual', preCompactionTokens: 900}))?.event).toMatchObject({item: {type: 'compaction', status: 'completed', trigger: 'manual', preTokens: 900}});
- expect(p.project(event('assistant.usage', {inputTokens: 12, outputTokens: 5, cacheReadTokens: 8, cacheWriteTokens: 2, cost: 1}))?.event).toEqual({type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {tokenScope: 'call', inputTokens: 2, outputTokens: 5, cachedInputTokens: 8, cacheCreationInputTokens: 2, totalTokens: 17}});
 }, 10000);
 
-it('reports call totals independently of an incomplete cache breakdown without accumulating calls', () => {
+it('does not publish ephemeral per-call counts as session usage from either root or child projectors', () => {
  const p = new Projector();
- expect(p.project(event('assistant.usage', {inputTokens: 12, outputTokens: 5, cacheReadTokens: 8}))?.event).toEqual({
-  type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {tokenScope: 'call', outputTokens: 5, cachedInputTokens: 8, totalTokens: 17},
- });
- expect(p.project(event('assistant.usage', {inputTokens: 4, outputTokens: 2}))?.event).toEqual({
-  type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {tokenScope: 'call', outputTokens: 2, totalTokens: 6},
- });
- expect(p.project(event('assistant.usage', {inputTokens: 4}))?.event).toEqual({
-  type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {tokenScope: 'call'},
- });
- expect(p.project(event('assistant.usage', {inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0}))?.event).toEqual({
-  type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {tokenScope: 'call', inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, totalTokens: 0},
- });
+ expect(p.project(event('assistant.usage', {inputTokens: 12, outputTokens: 5, cacheReadTokens: 8, cacheWriteTokens: 2}))).toBeUndefined();
+ expect(p.project(event('assistant.usage', {inputTokens: 4, outputTokens: 2}))).toBeUndefined();
+ expect(p.project(event('assistant.usage', {inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0}))).toBeUndefined();
 }, 10000);
 
 it('rejects invalid token components and leaves unavailable context fields unknown', () => {
  const p = new Projector();
- expect(p.project(event('assistant.usage', {inputTokens: 2, outputTokens: Infinity, cacheReadTokens: 3, cacheWriteTokens: -1}))?.event).toEqual({
-  type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {tokenScope: 'call', cachedInputTokens: 3},
- });
- expect(p.project(event('assistant.usage', {inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 2}))?.event).not.toHaveProperty('usage.totalTokens');
- expect(p.project(event('assistant.usage', {inputTokens: -1, outputTokens: Infinity}))).toBeUndefined();
  expect(p.project(event('session.usage_info', {currentTokens: 0}))?.event).toEqual({
   type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {contextScope: 'current', contextWindowUsedTokens: 0},
  });

@@ -580,8 +580,9 @@
 .agent-session-usage h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 6px; font-size: 12px; font-weight: 600; }
 .agent-session-usage .agent-session-facts { margin: 0; }
 .agent-session-usage dd { font-variant-numeric: tabular-nums; }
-.agent-session-usage-stale, .agent-session-usage-empty { color: var(--agent-muted); font-size: 11px; font-weight: 400; }
+.agent-session-usage-stale, .agent-session-usage-empty, .agent-session-usage-description { color: var(--agent-muted); font-size: 11px; font-weight: 400; }
 .agent-session-usage-empty { margin: 0; }
+.agent-session-usage-description { margin: 0 0 6px; }
 .agent-composer-input { position: relative; min-width: 0; }
 .agent-command-menu { position: absolute; z-index: 10; bottom: calc(100% + 8px); inset-inline: 0; border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); padding: 4px; max-height: min(260px, 35vh); overflow-y: auto; background: var(--agent-panel-raised); box-shadow: 0 8px 24px oklch(0.2 0.01 248 / .1); }
 .agent-composer .agent-command-menu button { display: flex; width: 100%; min-width: 0; min-height: 36px; text-align: left; gap: 12px; align-items: center; border: 0; background: transparent; color: var(--agent-ink); border-radius: 4px; }

@@ -304,8 +304,8 @@ it('preserves native execution authority across turn results and socket reattach
   } finally { socket.close(); await manager.close(); }
 }, 5000);
 
-it('restores current token and context snapshots across real socket reconnection without accumulating usage', async () => {
-  const tokens: AgentUsage = { tokenScope: 'session', inputTokens: 100, cachedInputTokens: 60,
+it.each(['session', 'runtime'] as const)('restores %s totals and native resets across real socket reconnection without accumulating usage', async tokenScope => {
+  const tokens: AgentUsage = { tokenScope, inputTokens: 100, cachedInputTokens: 60,
     cacheCreationInputTokens: 0, outputTokens: 40, totalTokens: 200 };
   const context = { contextScope: 'current' as const, contextWindowUsedTokens: 90, contextWindowMaxTokens: 500 };
   const values: ProviderStreamItem[] = [tokens, context].map((usage, index) => ({
@@ -341,10 +341,10 @@ it('restores current token and context snapshots across real socket reconnection
     expect(decodeServerMessage(JSON.stringify(first))).toMatchObject({ status: 'ok' });
     expect(first.payload).toMatchObject({ lastUsage: { ...tokens, ...context } });
     for (let index = 0; index < 2; index++) {
-      push({ tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3 });
+      push({ tokenScope, inputTokens: 2, outputTokens: 1, totalTokens: 3 });
       const update = await inbox.next('agent_update');
       expect(decodeServerMessage(JSON.stringify(update))).toMatchObject({ status: 'ok' });
-      expect((update.payload as { lastUsage: AgentUsage }).lastUsage).toEqual({ tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3, ...context });
+      expect((update.payload as { lastUsage: AgentUsage }).lastUsage).toEqual({ tokenScope, inputTokens: 2, outputTokens: 1, totalTokens: 3, ...context });
       const live = await inbox.next('agent_stream');
       expect(decodeServerMessage(JSON.stringify(live))).toMatchObject({ status: 'ok' });
     }
@@ -356,11 +356,11 @@ it('restores current token and context snapshots across real socket reconnection
     try {
       reconnected.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
       expect((await restored.next('agent_snapshot')).payload).toMatchObject({ lastUsage: {
-        tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3, ...context,
+        tokenScope, inputTokens: 2, outputTokens: 1, totalTokens: 3, ...context,
       } });
       push({ contextWindowUsedTokens: 0 });
       expect(((await restored.next('agent_update')).payload as { lastUsage: AgentUsage }).lastUsage).toEqual({
-        tokenScope: 'call', inputTokens: 2, outputTokens: 1, totalTokens: 3, contextWindowUsedTokens: 0,
+        tokenScope, inputTokens: 2, outputTokens: 1, totalTokens: 3, contextWindowUsedTokens: 0,
       });
     } finally { reconnected.close(); }
   } finally { socket.close(); await manager.close(); }

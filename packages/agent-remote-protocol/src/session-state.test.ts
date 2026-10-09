@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { reduceSessionState, sessionOperationAvailability, type SessionOperationKind } from './session-state.js';
 import type { AgentSnapshotPayload } from './snapshot.js';
+import { decodeAgentSnapshot, decodeAgentStreamMessage } from './codec.js';
+import { BORGEE_AGENT_REMOTE_PROTOCOL_VERSION as protocolVersion } from './version.js';
 
 const snapshot = (): AgentSnapshotPayload => ({
   id: 'view', providerId: 'native', status: 'idle', createdAt: '2026-01-01', updatedAt: '2026-01-01', activeTurn: null, pendingInteractions: [],
-  runtimeInfo: { providerId: 'native', status: 'idle', connection: { state: 'connected' } },
+  runtimeInfo: { providerId: 'native', sessionId: 'native-session', status: 'idle', connection: { state: 'connected' } },
   capabilities: { history: true, sendMessage: true, queueMessage: true, steer: true, cancel: true, planning: true, sessionSettings: true, commands: true,
     readResource: true, interactions: { question: true, toolApproval: true, planApproval: true } },
 });
@@ -12,6 +14,28 @@ const question = { kind: 'question' as const, requestId: 'q', questions: [{ ques
 const operations: SessionOperationKind[] = ['send_message', 'queue_message', 'steer', 'cancel', 'set_planning', 'set_session_setting', 'execute_command', 'interaction_response'];
 
 describe('current usage snapshots', () => {
+  it('restores and replays cumulative runtime snapshots without summing them again', () => {
+    const restored = decodeAgentSnapshot(JSON.stringify({ protocolVersion, type: 'agent_snapshot', payload: {
+      ...snapshot(), lastUsage: { tokenScope: 'runtime', totalTokens: 500, contextScope: 'current', contextWindowUsedTokens: 100, contextWindowMaxTokens: 200 },
+    } }));
+    expect(restored.status).toBe('ok');
+    if (restored.status !== 'ok') throw new Error('Expected restored runtime usage');
+    let state = restored.value.payload;
+    for (const type of ['usage_updated', 'turn_completed', 'usage_updated'] as const) {
+      const decoded = decodeAgentStreamMessage(JSON.stringify({ protocolVersion, type: 'agent_stream', payload: {
+        agentId: 'view', timestamp: '2026-10-09T00:00:00.000Z', event: { type, providerId: 'native', usage: { tokenScope: 'runtime', totalTokens: 700 } },
+      } }));
+      expect(decoded.status).toBe('ok');
+      if (decoded.status !== 'ok') throw new Error('Expected recorded runtime usage');
+      state = reduceSessionState(state, decoded.value.payload.event, decoded.value.payload.timestamp);
+    }
+    expect(state.lastUsage).toEqual({ tokenScope: 'runtime', totalTokens: 700,
+      contextScope: 'current', contextWindowUsedTokens: 100, contextWindowMaxTokens: 200 });
+    state = reduceSessionState(state, { type: 'usage_updated', usage: { tokenScope: 'runtime', totalTokens: 0 } }, 'reset');
+    expect(state.lastUsage).toEqual({ tokenScope: 'runtime', totalTokens: 0,
+      contextScope: 'current', contextWindowUsedTokens: 100, contextWindowMaxTokens: 200 });
+  });
+
   it('retains explicit current context without requiring a token measurement', () => {
     const usage = { contextScope: 'current' as const, contextWindowUsedTokens: 0, contextWindowMaxTokens: 200 };
     const state = reduceSessionState(snapshot(), { type: 'usage_updated', usage }, 'context');

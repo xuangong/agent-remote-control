@@ -11,8 +11,11 @@ const percentage = new Intl.NumberFormat('en-US', { style: 'percent', maximumFra
 
 export function AgentSessionUsage({ usage, lastKnown }: Props) {
   const tokenLabel = usage?.tokenScope === 'session' ? 'Session tokens'
-    : usage?.tokenScope === 'turn' ? 'Latest turn tokens'
-      : usage?.tokenScope === 'call' ? 'Latest call tokens' : 'Token usage';
+    : usage?.tokenScope === 'runtime' ? 'Tokens since start / resume'
+      : usage?.tokenScope === 'turn' ? 'Latest turn tokens'
+        : usage?.tokenScope === 'call' ? 'Latest call tokens' : 'Token usage';
+  const tokenDescription = usage?.tokenScope === 'session' ? 'Cumulative usage for this native session.'
+    : usage?.tokenScope === 'runtime' ? 'Accumulated during this run; resets when resumed or cleared.' : undefined;
   const used = usage?.contextScope === 'current' ? usage.contextWindowUsedTokens : undefined;
   const capacity = usage?.contextScope === 'current' ? usage.contextWindowMaxTokens : undefined;
   const proportion = used !== undefined && capacity !== undefined && capacity > 0 ? used / capacity : undefined;
@@ -21,6 +24,7 @@ export function AgentSessionUsage({ usage, lastKnown }: Props) {
   return <div className="agent-session-usage">
     <section aria-label={tokenLabel}>
       <h3>{tokenLabel}{stale}</h3>
+      {tokenDescription ? <p className="agent-session-usage-description">{tokenDescription}</p> : null}
       {usage?.tokenScope ? <dl className="agent-session-facts">
         <dt>Input</dt><dd><TokenCount value={usage.inputTokens} /></dd>
         <dt>Output</dt><dd><TokenCount value={usage.outputTokens} /></dd>

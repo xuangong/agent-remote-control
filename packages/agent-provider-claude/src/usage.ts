@@ -1,9 +1,10 @@
 import type { AgentUsage } from '@orchardworks/agent-provider-sdk';
 import { record } from './projector.js';
 
-/** Query cost is cumulative; result token counts cover this turn's main loop only. */
+/** Native model accounting and cost are latest cumulative snapshots for one query. */
 export class ClaudeUsage {
-  private previousCost: number | undefined = 0;
+  private previousCost: number | undefined;
+  private previousTokens: AgentUsage | undefined;
   private context: { model: string; usage: AgentUsage } | undefined;
   private readonly seenContext = new Set<string>();
 
@@ -25,27 +26,59 @@ export class ClaudeUsage {
   result(message: unknown, model: string | undefined): AgentUsage {
     if (!record(message)) return {};
     const usage: AgentUsage = {};
-    if (record(message.usage)) {
-      if (tokens(message.usage.input_tokens)) usage.inputTokens = message.usage.input_tokens;
-      if (tokens(message.usage.output_tokens)) usage.outputTokens = message.usage.output_tokens;
-      if (tokens(message.usage.cache_read_input_tokens)) usage.cachedInputTokens = message.usage.cache_read_input_tokens;
-      if (tokens(message.usage.cache_creation_input_tokens)) usage.cacheCreationInputTokens = message.usage.cache_creation_input_tokens;
-      if (Object.keys(usage).length) usage.tokenScope = 'turn';
-      const counts = [usage.inputTokens, usage.outputTokens, usage.cachedInputTokens, usage.cacheCreationInputTokens];
-      if (counts.every(tokens)) {
-        const total = counts.reduce((sum, value) => sum + value, 0);
-        if (tokens(total)) usage.totalTokens = total;
-      }
+    const failed = message.is_error === true || typeof message.subtype === 'string' && message.subtype.startsWith('error_');
+    const accounting = modelAccounting(message.modelUsage, message.subtype === 'success' && !failed);
+    // Fatal native results may contain a zeroed placeholder instead of an accounting snapshot.
+    if (accounting && !(failed && (zeroed(accounting) || regressed(accounting, this.previousTokens)))) {
+      Object.assign(usage, accounting);
+      this.previousTokens = accounting;
     }
     const cost = message.total_cost_usd;
-    if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) this.previousCost = undefined;
-    else if (!(message.is_error && this.previousCost !== undefined && cost < this.previousCost)) {
-      if (this.previousCost !== undefined) usage.totalCostUsd = cost >= this.previousCost ? cost - this.previousCost : cost;
+    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0
+      && !(failed && (cost === 0 || this.previousCost !== undefined && cost < this.previousCost))) {
+      usage.totalCostUsd = cost;
       this.previousCost = cost;
     }
     if (this.context && this.context.model === model) Object.assign(usage, this.context.usage);
     return usage;
   }
+}
+
+const buckets = {
+  inputTokens: 'inputTokens', outputTokens: 'outputTokens',
+  cachedInputTokens: 'cacheReadInputTokens', cacheCreationInputTokens: 'cacheCreationInputTokens',
+} as const;
+
+function modelAccounting(value: unknown, successful: boolean): AgentUsage | undefined {
+  if (!record(value)) return;
+  const models = Object.values(value);
+  if (!models.length && !successful) return;
+  const usage: AgentUsage = {};
+  for (const key of Object.keys(buckets) as (keyof typeof buckets)[]) {
+    const counts = models.map((model) => record(model) ? model[buckets[key]] : undefined);
+    if (!counts.every(tokens)) continue;
+    const count = counts.reduce((sum, amount) => sum + amount, 0);
+    if (tokens(count)) usage[key] = count;
+  }
+  if (!Object.keys(usage).length) return;
+  usage.tokenScope = 'runtime';
+  const counts = Object.keys(buckets).map((key) => usage[key as keyof typeof buckets]);
+  if (counts.every(tokens)) {
+    const total = counts.reduce((sum, count) => sum + count, 0);
+    if (tokens(total)) usage.totalTokens = total;
+  }
+  return usage;
+}
+
+function zeroed(usage: AgentUsage): boolean {
+  return !Object.keys(buckets).some((key) => (usage[key as keyof typeof buckets] ?? 0) > 0);
+}
+
+function regressed(usage: AgentUsage, previous: AgentUsage | undefined): boolean {
+  return previous !== undefined && Object.keys(buckets).some((key) => {
+    const current = usage[key as keyof typeof buckets], before = previous[key as keyof typeof buckets];
+    return current !== undefined && before !== undefined && current < before;
+  });
 }
 
 function tokens(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0; }

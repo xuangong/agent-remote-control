@@ -11,6 +11,7 @@ import { CopilotChildSession } from './child-session.js';
 import {isNativeInteraction} from './interaction-mapping.js';
 import {CopilotImages} from './images.js';
 import { NativeInteractions } from './interactions.js';
+import {copilotContextUsage, copilotSessionUsage} from './usage.js';
 export class CopilotAgentSession implements AgentSession {
   readonly capabilities: AgentCapabilities = { imageInput: structuredClone(IMAGE_INPUT_CAPABILITIES), history: true, sendMessage: true, queueMessage: true, steer: true, cancel: true, readResource: true, commands: false, sessionSettings: false, interactions: {question: true, toolApproval: true, planApproval: false, form: true, externalAction: true} };
   readonly stream = new Channel<ProviderStreamItem>();
@@ -27,6 +28,11 @@ export class CopilotAgentSession implements AgentSession {
   private observed = false;
   private revision = 0;
   private foregroundRevision = 0;
+  private usageRevision = 0;
+  private contextRevision = 0;
+  private usageRefreshTimer?: ReturnType<typeof setTimeout>;
+  private usageRefreshRunning = false;
+  private usageSignature?: string;
   private todosRefresh: Promise<void> = Promise.resolve();
   private updatingPermissions = false;
   private todosSignature = '[]';
@@ -86,7 +92,9 @@ export class CopilotAgentSession implements AgentSession {
       self.emit({type: 'thread_started', provider, sessionId: config.sessionId});
       await self.refreshControls(); await self.initializePermissions(resume); await self.refreshMode();
       if (config.planning !== undefined) await self.setPlanning(config.planning);
-      await self.refreshTodos(); await self.refreshChildren(); self.emitRuntime(); return self;
+      await self.refreshTodos(); await self.refreshChildren(); self.emitRuntime();
+      self.scheduleUsageRefresh(true); void self.refreshInitialContext();
+      return self;
     } catch (error) { await self.dispose(); throw error; }
   }
   call<T>(operation: Promise<T>, label: string): Promise<T> { return deadline(operation, this.options.requestTimeoutMs ?? 15000, label); }
@@ -101,6 +109,10 @@ export class CopilotAgentSession implements AgentSession {
     
     if (event.type === 'session.binary_asset') this.images.register(event.data);
     const d = record(event.data); const owner = event.agentId ?? (typeof d.parentToolCallId === 'string' ? d.parentToolCallId : undefined);
+    if (delivery === 'live') {
+      if (event.type === 'assistant.usage' || ['assistant.idle', 'session.idle', 'abort', 'session.error'].includes(event.type)) this.scheduleUsageRefresh();
+      if (!owner && event.type === 'session.usage_info') this.contextRevision++;
+    }
     if (owner && !(delivery === 'history' && isNativeInteraction(event))) { for (const child of this.children.values()) child.accept(event, delivery); }
     else {
       for (const projected of this.projector.projectAll(event, delivery)) {
@@ -126,6 +138,50 @@ export class CopilotAgentSession implements AgentSession {
     if (delivery === 'live' && event.type === 'session.todos_changed') void this.refreshTodos();
     if (delivery === 'live' && event.type === 'session.model_change') void this.refreshControls().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
     if (delivery === 'live' && (event.type.startsWith('subagent.') || event.type === 'assistant.idle' || event.type === 'session.task_complete')) void this.refreshChildren().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
+  }
+  private scheduleUsageRefresh(immediate = false): void {
+    if (this.closed) return;
+    this.usageRevision++;
+    this.queueUsageRefresh(immediate ? 0 : 100);
+  }
+  private queueUsageRefresh(delay: number): void {
+    if (this.closed || this.usageRefreshRunning || this.usageRefreshTimer) return;
+    this.usageRefreshTimer = setTimeout(() => {
+      this.usageRefreshTimer = undefined;
+      void this.refreshUsage();
+    }, delay);
+    this.usageRefreshTimer.unref?.();
+  }
+  private async refreshUsage(): Promise<void> {
+    if (this.closed) return;
+    this.usageRefreshRunning = true;
+    const revision = this.usageRevision;
+    try {
+      const snapshot = await this.call(this.rpc.usage.getMetrics(), 'Copilot session usage');
+      if (this.closed || revision !== this.usageRevision) return;
+      const usage = copilotSessionUsage(record(snapshot));
+      if (!usage) return;
+      const signature = JSON.stringify(usage);
+      if (signature === this.usageSignature) return;
+      this.usageSignature = signature;
+      this.emit({type: 'usage_updated', provider, usage});
+    } catch (error) {
+      if (!this.closed) this.options.onDiagnostic?.(`Copilot session usage unavailable: ${String(error)}`);
+    } finally {
+      this.usageRefreshRunning = false;
+      if (revision !== this.usageRevision) this.queueUsageRefresh(100);
+    }
+  }
+  private async refreshInitialContext(): Promise<void> {
+    const revision = this.contextRevision;
+    try {
+      const {contextInfo} = await this.call(this.rpc.metadata.contextInfo({promptTokenLimit: 0, outputTokenLimit: 0}), 'Copilot current context');
+      if (this.closed || revision !== this.contextRevision || !contextInfo) return;
+      const usage = copilotContextUsage({currentTokens: contextInfo.totalTokens, tokenLimit: contextInfo.promptTokenLimit});
+      if (usage) this.emit({type: 'usage_updated', provider, usage});
+    } catch (error) {
+      if (!this.closed) this.options.onDiagnostic?.(`Copilot current context unavailable: ${String(error)}`);
+    }
   }
   async respondToInteraction(id: string, response: AgentInteractionResponse): Promise<void> {
     await this.interactions.respond(id, response); this.emitRuntime();
@@ -311,6 +367,7 @@ export class CopilotAgentSession implements AgentSession {
   async runtimeInfo(): Promise<AgentRuntimeInfo> { return structuredClone({...this.info, status: this.info.status}); }
   async dispose(): Promise<void> {
     if (this.closed) return; this.interactions.dispose(); this.images.stop(); this.closed = true; this.unsubscribe?.(); await Promise.allSettled([...this.children.values()].map(child => child.dispose()));
+    clearTimeout(this.usageRefreshTimer); this.usageRefreshTimer = undefined;
     this.info.status = 'closed'; this.stream.close(); this.onDispose();
     if (this.native) await this.call(this.native.disconnect(), 'Disconnect Copilot session');
   }

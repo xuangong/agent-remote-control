@@ -130,7 +130,7 @@ describe('Agent Remote compatibility manifest', () => {
 
   it.each([
     'events.subagent.navigation', 'events.tool-result.resources', 'controls.queue-steer-commands-settings',
-    'interactions.restart-recovery', 'sessions.empty-persistence', 'interactions.form.schema',
+    'interactions.restart-recovery', 'sessions.empty-persistence', 'interactions.form.schema', 'events.usage',
   ])('requires the evidenced Claude %s degradation', (capability) => {
     process.env[manifestEnvironment] = writeManifest(validManifest({ omitClaudeDegradation: capability }));
     expect(() => loadCompatibilityManifest()).toThrow('Claude degradation');
@@ -259,6 +259,7 @@ function validManifest(overrides: {
     { capability: 'interactions.restart-recovery', status: 'degraded', reason: 'Permission callbacks are process-local.' },
     { capability: 'sessions.empty-persistence', status: 'degraded', reason: 'An empty session may not be persisted.' },
     { capability: 'interactions.form.schema', status: 'degraded', reason: 'Native schema loss prevents form support.' },
+    { capability: 'events.usage', status: 'degraded', reason: 'Usage covers the current native Query runtime, not the persisted session lifetime.' },
   ].filter(({ capability }) => capability !== overrides.omitClaudeDegradation);
   if (overrides.invalidClaudeDegradation === 'duplicate') claudeDegradations.push({ ...claudeDegradations[0]! });
   if (overrides.invalidClaudeDegradation === 'extra') claudeDegradations.push({ capability: 'events.unknown', status: 'degraded', reason: 'Undeclared.' });

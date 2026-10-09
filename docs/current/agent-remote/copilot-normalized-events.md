@@ -21,7 +21,7 @@ Evidence labels below:
 | `turn_failed` | `session.error` and failed child tasks. Message is retained; optional public `code` and `diagnostic` are not populated. | Projector code; failure projection unit case |
 | `turn_canceled` | Native `abort` and confirmed child cancellation. Main cancellation leaves child-owned prompts intact. Reason is generic, not the native abort detail. | Native root/child cancellation; unit tests |
 | `timeline` | All eight item variants below have mappings. Tool metadata and history fidelity have the limits listed separately. | Native and unit tests |
-| `usage_updated` | `assistant.usage` supplies a `call` token snapshot: uncached input, output, cache read/write, and known total. `session.usage_info` independently supplies current context used/limit. No inferred session total or USD cost. | Unit projector tests |
+| `usage_updated` | `session.rpc.usage.getMetrics()` supplies the native cumulative `session` token snapshot on open/resume and after live usage changes. `assistant.usage` triggers a refresh; its call counts never replace totals. `session.usage_info` independently supplies current context used/limit. No inferred lifetime durability or USD cost. | Provider and native loopback tests |
 | `runtime_updated` | Root open, model/effort, planning, permission confirmation and child-directory refresh publish snapshots. Read API supplies current foreground/waiting status. Native connection/retry telemetry and `activeTurnId` are not populated; child views expose runtime through `runtimeInfo()` rather than emitting root-style updates. | Native settings/plan; unit settings/children; connection limits by inspection |
 | `interaction_requested` | Permission events plus identity-bound question, plan and elicitation callbacks. Five of six interaction kinds have mappings; see below. | Native approval/question/plan/form; URL unit test |
 | `interaction_resolved` | Confirmed native completion or validated submitted callback response. Sensitive receipts are redacted. Submitted session grant survives completion racing the RPC response. | Native permissions/questions/forms; unit race tests |
@@ -84,8 +84,8 @@ Results preserve the native summary and structured JSON. Unknown/malformed diff 
 | `observation` | Root/child events carry source keys, delivery and time; native projections also have increasing revisions. Local RPC-derived events use local source keys. |
 | `history_boundary` | One boundary after root history; children read paginated native event logs before their boundary. |
 | `timeline_replacement` | Not emitted. Native truncation/snapshot rewind/context clear are not normalized into timeline corrections; no public rewind control is advertised. These are gaps if exposed externally. |
-| `inputTokens`, `outputTokens`, `cachedInputTokens` | Mapped from native usage; unit verified. |
-| `contextWindowUsedTokens`, `contextWindowMaxTokens` | Mapped from native context usage; unit verified. |
+| `inputTokens`, `outputTokens`, `cachedInputTokens`, `cacheCreationInputTokens`, `totalTokens` | Native session cumulative snapshot, with disjoint cache buckets; isolated SDK/CLI tests cover multiple turns, normal runtime restart/resume and both model wire formats. |
+| `contextWindowUsedTokens`, `contextWindowMaxTokens` | Initial native `metadata.contextInfo` and live `session.usage_info`; stale initial responses cannot replace newer live measurements. |
 | `totalCostUsd` | Intentionally absent: native cost/credits do not establish a USD amount. |
 | Runtime cwd, model, effort, planning, tool policy, children, persistence | Implemented where native calls confirm them; settings become unavailable/unknown when not confirmed. Resumed tool policy has no supported getter. |
 | Runtime native connection state/attempt/retry time | Not emitted by this stdio adapter. Relay/browser connection state is a separate boundary and must not be confused with it. |

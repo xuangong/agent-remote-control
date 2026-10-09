@@ -120,7 +120,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:267322a4ede682ef472c441ae85d17060934027fa0afb2a173ad6847731957d2"
+      "digest": "sha256:ab1620551462a838bc26a7509b8e366622ad0cf6333274a625bb62b139238d2c"
     }
   },
   "providers": [
@@ -235,6 +235,11 @@
           "capability": "interactions.form.schema",
           "status": "degraded",
           "reason": "The pinned native CLI drops pattern/multipleOf and sensitive markers before onElicitation while retaining defaults. Form and unverified URL completion mappings remain disabled; no partial-schema workaround is advertised."
+        },
+        {
+          "capability": "events.usage",
+          "status": "degraded",
+          "reason": "Cumulative modelUsage covers the current native Query, including subagents and compaction, with runtime token scope. Native resume and clear reset its accounting; this is not a persisted session lifetime total. Per-turn usage is never substituted for the aggregate."
         }
       ]
     },
@@ -253,7 +258,7 @@
         {
           "capability": "native.experimental-rpc",
           "status": "degraded",
-          "reason": "Public SDK model, skills, commands, tasks, metadata, permissions, interruptMainTurn and eventLog APIs are experimental; only CLI 1.0.83 is native-loopback verified. No ACP or private RPC transport."
+          "reason": "Public SDK model, skills, commands, tasks, metadata, usage.getMetrics, permissions, interruptMainTurn and eventLog APIs are experimental; only CLI 1.0.83 is native-loopback verified. No ACP or private RPC transport."
         },
         {
           "capability": "controls.settings",
@@ -273,7 +278,7 @@
         {
           "capability": "events.resources-usage",
           "status": "degraded",
-          "reason": "Tool output is bounded native text; skill Markdown uses refreshed native locators and bounded regular-file reads. Tokens describe the latest native call; session.usage_info supplies independent current context. No inferred session total. Output images, todos, cost and terminal control are not mapped."
+          "reason": "Tool output is bounded native text; skill Markdown uses refreshed native locators and bounded regular-file reads. Native usage.getMetrics supplies cumulative session token snapshots; session.usage_info supplies independent current context. Metrics failures retain the latest known snapshot without blocking interaction. Native durability across restarts is not guaranteed by ARC; child views do not inherit root totals. Output images and terminal control are not mapped; native billing credits are not USD."
         },
         {
           "capability": "controls.immediate-input",

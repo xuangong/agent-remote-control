@@ -111,7 +111,7 @@ describe('Claude persistent session', () => {
   });
 });
 
-it('does not finish a later turn on duplicate results and reports per-turn Query cost deltas', async () => {
+it('does not finish a later turn on duplicate results and reports the latest query accounting', async () => {
   const native = runtime();
   const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'root' }, { query: native.factory });
   const output = session.observe()[Symbol.asyncIterator]();
@@ -119,10 +119,11 @@ it('does not finish a later turn on duplicate results and reports per-turn Query
     await session.sendMessage('First');
     const first = (await native.nextInput()).value;
     const completed = { type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: 'result-one', user_message_uuid: first.uuid,
-      usage: { input_tokens: 10, output_tokens: 2 }, total_cost_usd: 2, modelUsage: { root: { contextWindow: 200000 } } };
+      usage: { input_tokens: 10, output_tokens: 2 }, total_cost_usd: 2,
+      modelUsage: { root: { inputTokens: 10, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, contextWindow: 200000 } } };
     native.push(completed);
     const firstResult = await nextEvent(output, 'turn_completed');
-    expect(firstResult).toMatchObject({ turnId: first.uuid, usage: { tokenScope: 'turn', inputTokens: 10, totalCostUsd: 2 } });
+    expect(firstResult).toMatchObject({ turnId: first.uuid, usage: { tokenScope: 'runtime', inputTokens: 10, totalCostUsd: 2 } });
     expect(firstResult).not.toHaveProperty('usage.contextWindowMaxTokens');
     await session.sendMessage('Second');
     const second = (await native.nextInput()).value;
@@ -130,8 +131,10 @@ it('does not finish a later turn on duplicate results and reports per-turn Query
     native.push({ ...completed, uuid: 'replayed-other-envelope' });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect((await session.runtimeInfo()).status).toBe('running');
-    native.push({ ...completed, uuid: 'result-two', user_message_uuid: second.uuid, total_cost_usd: 3 });
-    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: second.uuid, usage: { inputTokens: 10, totalCostUsd: 1 } });
+    native.push({ ...completed, uuid: 'result-two', user_message_uuid: second.uuid, total_cost_usd: 3,
+      modelUsage: { root: { inputTokens: 20, outputTokens: 5, cacheReadInputTokens: 4, cacheCreationInputTokens: 3 } } });
+    expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: second.uuid,
+      usage: { tokenScope: 'runtime', inputTokens: 20, outputTokens: 5, cachedInputTokens: 4, cacheCreationInputTokens: 3, totalTokens: 32, totalCostUsd: 3 } });
   } finally { await session.dispose(); }
 });
 

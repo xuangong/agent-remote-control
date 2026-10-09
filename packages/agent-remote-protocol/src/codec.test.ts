@@ -43,10 +43,23 @@ describe('usage snapshot wire contract', () => {
   const message = (usage: unknown) => ({ protocolVersion: version, type: 'agent_stream', payload: {
     agentId: 'agent-7', timestamp: '2026-10-09T00:00:00.000Z', event: { type: 'usage_updated', providerId: 'codex', usage },
   } });
-  it.each(['session', 'turn', 'call'])('round trips %s token scope with independent context values', tokenScope => {
+  it.each(['session', 'runtime', 'turn', 'call'])('round trips %s token scope with independent context values', tokenScope => {
     const update = message({ tokenScope, inputTokens: 10, cachedInputTokens: 20, cacheCreationInputTokens: 0,
       outputTokens: 5, totalTokens: 35, contextScope: 'current', contextWindowUsedTokens: 15, contextWindowMaxTokens: 200 });
     expect(decodeAgentStreamMessage(JSON.stringify(update))).toEqual({ status: 'ok', value: update });
+  });
+  it('preserves cumulative runtime usage in restored snapshots and turn completions', () => {
+    const usage = { tokenScope: 'runtime' as const, inputTokens: 20, outputTokens: 5, totalTokens: 25,
+      contextScope: 'current' as const, contextWindowUsedTokens: 15, contextWindowMaxTokens: 200 };
+    const restored = { ...snapshot, payload: { ...snapshot.payload, lastUsage: usage } };
+    const encoded = encodeAgentSnapshot(restored);
+    expect(encoded.status).toBe('ok');
+    if (encoded.status !== 'ok') throw new Error('Expected runtime usage to encode');
+    expect(decodeAgentSnapshot(encoded.json)).toEqual({ status: 'ok', value: restored });
+    const completed = { protocolVersion: version, type: 'agent_stream', payload: {
+      agentId: 'agent-7', timestamp: '2026-10-09T00:00:00.000Z', event: { type: 'turn_completed', providerId: 'claude', usage },
+    } };
+    expect(decodeAgentStreamMessage(JSON.stringify(completed))).toEqual({ status: 'ok', value: completed });
   });
   it.each([{}, { inputTokens: 10 }, { contextWindowUsedTokens: 0 }, { tokenScope: 'call' },
     { contextScope: 'current', contextWindowUsedTokens: 0 }])('accepts partial and legacy snapshots: %j', usage => {

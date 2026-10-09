@@ -33,6 +33,7 @@ const requiredDegradations: Record<
     { capability: 'interactions.restart-recovery', status: 'degraded' },
     { capability: 'sessions.empty-persistence', status: 'degraded' },
     { capability: 'interactions.form.schema', status: 'degraded' },
+    { capability: 'events.usage', status: 'degraded' },
   ],
   dsh: [
     { capability: 'events.session/title', status: 'degraded' },

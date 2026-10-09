@@ -5,7 +5,7 @@ import {provider, record, detail} from './native.js';
 export {provider, record, detail} from './native.js';
 import {interactionRequest, interactionResponse} from './interaction-mapping.js';
 import {copilotToolResult, patchFiles} from './tool-result.js';
-import {copilotCallUsage, copilotContextUsage} from './usage.js';
+import {copilotContextUsage} from './usage.js';
 /** Assistant text observations are append-only; durable messages contribute only an unsent suffix. */
 export class Projector {
   private readonly tools = new Map<string, { name: string; detail: AgentToolDetail }>();
@@ -160,10 +160,6 @@ export class Projector {
       }
       case 'session.usage_info': {
         const usage = copilotContextUsage(d);
-        return usage && wrap({type: 'usage_updated', provider, turnId, usage});
-      }
-      case 'assistant.usage': {
-        const usage = copilotCallUsage(d);
         return usage && wrap({type: 'usage_updated', provider, turnId, usage});
       }
       case 'session.compaction_start': return timeline({type: 'compaction', status: 'loading'});

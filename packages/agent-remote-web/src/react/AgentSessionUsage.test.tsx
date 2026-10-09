@@ -10,11 +10,12 @@ function fact(section: Element, label: string): HTMLElement {
 }
 
 it.each([
-  ['session', 'Session tokens'], ['turn', 'Latest turn tokens'], ['call', 'Latest call tokens'],
+  ['session', 'Session tokens'], ['runtime', 'Tokens since start / resume'], ['turn', 'Latest turn tokens'], ['call', 'Latest call tokens'],
 ] as const)('labels %s token measurements by their supplied scope', async (tokenScope, label) => {
   const container = await render(<AgentSessionUsage lastKnown={false} usage={{ tokenScope, inputTokens: 3_456, outputTokens: 100,
     cachedInputTokens: 200, cacheCreationInputTokens: 0, totalTokens: 3_756, totalCostUsd: 12.34 }} />);
   const tokens = container.querySelector(`section[aria-label="${label}"]`)!;
+  expect(tokens).not.toBeNull();
   expect(fact(tokens, 'Input').querySelector('data')?.getAttribute('value')).toBe('3456');
   expect(fact(tokens, 'Input').querySelector('data')?.title).toBe('3,456 tokens');
   expect(fact(tokens, 'Input').querySelector('[aria-hidden="true"]')?.textContent).toBe('3.5K');
@@ -23,6 +24,18 @@ it.each([
   expect(fact(tokens, 'Cache write').querySelector('data')?.getAttribute('value')).toBe('0');
   expect(fact(tokens, 'Total').querySelector('data')?.getAttribute('value')).toBe('3756');
   expect(container.textContent).not.toMatch(/12\.34|cost|USD|Last known/i);
+});
+
+it('distinguishes native session totals from cumulative usage limited to the current runtime', async () => {
+  const container = await render(<AgentSessionUsage lastKnown={false} usage={{ tokenScope: 'session', totalTokens: 1_000 }} />);
+  const session = container.querySelector('section[aria-label="Session tokens"]')!;
+  expect(session.textContent).toContain('Cumulative usage for this native session.');
+  expect(session.textContent).not.toContain('resets when resumed');
+  await rerender(container, <AgentSessionUsage lastKnown={false} usage={{ tokenScope: 'runtime', totalTokens: 50 }} />);
+  const runtime = container.querySelector('section[aria-label="Tokens since start / resume"]')!;
+  expect(runtime.textContent).toContain('Accumulated during this run; resets when resumed or cleared.');
+  expect(fact(runtime, 'Total').querySelector('data')?.getAttribute('value')).toBe('50');
+  expect(container.querySelector('section[aria-label="Session tokens"]')).toBeNull();
 });
 
 it('preserves zero and leaves missing counters unknown without deriving a total', async () => {

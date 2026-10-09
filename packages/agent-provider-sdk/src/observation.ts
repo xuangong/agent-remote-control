@@ -36,14 +36,19 @@ export type AgentTimelineItem =
   | { type: 'compaction'; status: 'loading' | 'completed'; trigger?: 'auto' | 'manual'; preTokens?: number };
 
 export interface AgentUsage {
-  /** Latest native token snapshot scope; omitted for legacy counters with unknown semantics. */
-  tokenScope?: 'session' | 'turn' | 'call';
+  /**
+   * Latest normalized token snapshot. Session totals cover the entire native session; runtime totals
+   * accumulate across turns since this native runtime/query started or resumed, or its last
+   * native clear/reset. Turn and call scopes remain supported for legacy measurements.
+   * Omitted for counters with unknown semantics. Consumers replace snapshots, never sum them.
+   */
+  tokenScope?: 'session' | 'runtime' | 'turn' | 'call';
   /** When tokenScope is present, input excludes cache read and cache creation. */
   inputTokens?: number;
   cachedInputTokens?: number;
   cacheCreationInputTokens?: number;
   outputTokens?: number;
-  /** Total from the same native snapshot, never a sum of usage notifications. */
+  /** Total from the same normalized snapshot; consumers never sum usage notifications. */
   totalTokens?: number;
   totalCostUsd?: number;
   /** Confirms that context fields measure current occupancy, independently of token consumption. */

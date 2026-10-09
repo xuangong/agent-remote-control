@@ -6,6 +6,8 @@ import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 import '../../src/session-view-styles';
 import '../../src/ask.css';
 
+const tokenScope = new URLSearchParams(window.location.search).get('usageScope') === 'runtime' ? 'runtime' : 'session';
+
 const state: AgentReplicaState = {
   ...replicaState,
   timeline: { ...replicaState.timeline, hasOlder: false },
@@ -21,7 +23,7 @@ const state: AgentReplicaState = {
       { id: 'approval', category: 'permissions', label: 'Approval policy', value: 'never', options: [{ value: 'never', label: 'Never ask' }], mutable: true, scope: 'session' },
       { id: 'sandbox', category: 'permissions', label: 'Sandbox', value: 'dangerFullAccess', options: [{ value: 'dangerFullAccess', label: 'Full access' }], mutable: true, scope: 'session' },
     ] },
-    lastUsage: { tokenScope: 'session', inputTokens: 6_100, outputTokens: 622_500, cachedInputTokens: 305_300_000,
+    lastUsage: { tokenScope, inputTokens: 6_100, outputTokens: 622_500, cachedInputTokens: 305_300_000,
       cacheCreationInputTokens: 0, totalTokens: 305_928_600, contextScope: 'current', contextWindowUsedTokens: 82_400, contextWindowMaxTokens: 128_000 },
   },
 };

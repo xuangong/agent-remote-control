@@ -10,7 +10,7 @@ import { AgentComposer } from './AgentComposer.js';
 import { render, unmount } from '../test/setup.js';
 
 const { WebSocket, WebSocketServer } = createRequire(import.meta.url)('ws') as typeof import('ws');
-const version = '1.6.0';
+const version = '1.7.0';
 
 it('holds a message through a real channel reconnect and never replays an unconfirmed send', async () => {
   const history: HistoryPage = { protocolVersion: version, type: 'timeline_page', payload: {

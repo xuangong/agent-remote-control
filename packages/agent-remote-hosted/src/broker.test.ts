@@ -303,8 +303,8 @@ it('does not open or retain a virtual stream when its credential expires after p
     return prepared;
   });
   close.push(dispose);
-  browser.native.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'subscribe', subscriptionId: 1, agentId: 'agent',
-    message: { protocolVersion: '1.6.0', type: 'negotiate' } }));
+  browser.native.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'subscribe', subscriptionId: 1, agentId: 'agent',
+    message: { protocolVersion: '1.7.0', type: 'negotiate' } }));
   await expect.poll(() => received.find(message => message.type === 'closed')?.code, { timeout: 1500 }).toBe(1008);
   expect(opened).toEqual([]);
   expect(broker.activeStreamCount('alice')).toBe(0);
@@ -666,14 +666,14 @@ it('allows bounded image chunks without consuming the session control message bu
   const browser = transportPair(); prepared.accept(browser.server); await ready;
   const contentBase64 = Buffer.alloc(32768).toString('base64');
   for (let index = 0; index < 320; index += 1) {
-    browser.native.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'image_upload_chunk', payload: { requestId: String(index), agentId: 'agent', uploadId: 'u', offset: index * 32768, contentBase64 } }));
+    browser.native.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'image_upload_chunk', payload: { requestId: String(index), agentId: 'agent', uploadId: 'u', offset: index * 32768, contentBase64 } }));
     await Promise.resolve();
   }
-  browser.native.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'cancel', payload: { requestId: 'cancel', agentId: 'agent', operationId: operationOne } }));
+  browser.native.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'cancel', payload: { requestId: 'cancel', agentId: 'agent', operationId: operationOne } }));
   await Promise.resolve(); await Promise.resolve();
   expect(browser.native.readyState).toBe(1);
   expect(received).toBe(321);
-  browser.native.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'image_upload_chunk', payload: { contentBase64: 'a'.repeat(48 * 1024) } }));
+  browser.native.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'image_upload_chunk', payload: { contentBase64: 'a'.repeat(48 * 1024) } }));
   await Promise.resolve();
   expect(browser.native.closeCode).toBe(1008);
 }, 10_000);

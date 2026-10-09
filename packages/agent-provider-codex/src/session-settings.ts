@@ -86,7 +86,7 @@ export class CodexSessionSettings {
       id: 'model', category: 'model', label: 'Model', value: model ?? null,
       options: this.models.map(({ value, label, description }) => ({ value, label, ...(description ? { description } : {}) })),
       mutable: this.models.length > 0, scope: 'session',
-      description: this.discoveryFailure ?? 'Applies to subsequent turns.',
+      description: this.discoveryFailure ?? 'Applies to subsequent steps when native live switching is available, and to future turns.',
     }];
     if (selected?.efforts.length) settings.push({
       id: 'effort', category: 'model', label: 'Reasoning effort', value: effort ?? selected.defaultEffort ?? null,

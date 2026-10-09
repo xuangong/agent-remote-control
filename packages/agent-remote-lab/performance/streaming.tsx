@@ -16,8 +16,8 @@ const entries = Array.from({ length: count }, (_, i) => ({
 }));
 const replica = new AgentReplica();
 const agent = replicaState.agent!;
-replica.applySnapshot({ protocolVersion: '1.6.0', type: 'agent_snapshot', payload: agent });
-replica.applyHistory({ protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+replica.applySnapshot({ protocolVersion: '1.7.0', type: 'agent_snapshot', payload: agent });
+replica.applyHistory({ protocolVersion: '1.7.0', type: 'timeline_page', payload: {
   requestId: 'benchmark', agentId: agent.id, direction: 'tail', epoch: 'stream-benchmark', entries,
   reset: false, staleCursor: false, gap: false, hasOlder: false, hasNewer: false, error: null,
   window: { minSeq: 1, maxSeq: count, nextSeq: count + 1 },
@@ -31,7 +31,7 @@ Object.assign(window, { startStream: async () => {
   if (running) throw new Error('Stream already started');
   running = true;
   for (let i = 0; i < 40; i++) {
-    replica.applyStream({ protocolVersion: '1.6.0', type: 'agent_stream', payload: {
+    replica.applyStream({ protocolVersion: '1.7.0', type: 'agent_stream', payload: {
       agentId: agent.id, epoch: 'stream-benchmark', seq: count + i + 1, timestamp: '2026-09-24T00:00:01Z',
       event: { type: 'timeline', providerId: 'recorded', resources: [],
         item: { type: 'assistant_message', messageId: `a${count - 1}`, text: ` Update ${i}.` } },

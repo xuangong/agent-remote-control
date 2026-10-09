@@ -22,6 +22,8 @@ export class OpenCodeSettings {
   private agents: Agent[] = [];
   private permission: PermissionRuleset = [];
   private native?: Session;
+  private nativeRevision = 0;
+  get revision(): number { return this.nativeRevision; }
   constructor(
     private readonly transport: OpenCodeTransport,
     private readonly nativeId: string,
@@ -30,6 +32,7 @@ export class OpenCodeSettings {
   ) {}
 
   async refresh(): Promise<Session> {
+    const revision = this.nativeRevision;
     const parameters = { directory: this.cwd };
     const [providers, agents, session] = await Promise.all([
       this.transport.request(() => this.transport.client.provider.list(parameters)),
@@ -38,11 +41,13 @@ export class OpenCodeSettings {
     ]);
     this.providers = providers;
     this.agents = agents;
-    this.updateNative(session);
-    return session;
+    this.updateNative(session, revision);
+    return this.native!;
   }
 
-  updateNative(session: Session): void {
+  updateNative(session: Session, expectedRevision = this.nativeRevision): boolean {
+    if (expectedRevision !== this.nativeRevision) return false;
+    this.nativeRevision++;
     this.native = session;
     this.permission = session.permission ?? [];
     // Older sessions may not contain durable selections; retain their message/persistence fallback.
@@ -52,6 +57,7 @@ export class OpenCodeSettings {
       if (!session.model.variant) delete this.selected.variant;
       else this.selected.variant = session.model.variant;
     }
+    return true;
   }
 
   private variants(): string[] {
@@ -91,8 +97,8 @@ export class OpenCodeSettings {
       { id: 'agent', category: 'model', label: 'Agent', value: this.selected.agent ?? null, mutable, scope: 'session', description, options: this.agents.filter(agent => !agent.hidden && agent.mode !== 'subagent').map(agent => ({ value: agent.name, label: agent.name, description: agent.description })) },
     ];
     if (variants.length || this.selected.variant !== undefined) settings.push({
-      id: 'variant', category: 'model', label: 'Model variant', value: this.selected.variant || null, mutable, scope: 'session',
-      description: `Native model-specific variant; its meaning depends on the model and is not a universal reasoning-effort level. ${description}`,
+      id: 'variant', category: 'model', label: 'Model variant', value: this.selected.variant || this.defaultVariantValue(), mutable, scope: 'session',
+      description: `Native model-specific variant; its meaning depends on the model and is not a universal reasoning-effort level. Native default inherits the agent/model variant. ${description}`,
       options: [{ value: this.defaultVariantValue(), label: 'Agent/model default' }, ...variants.map(value => ({ value, label: value }))],
     });
     const rules = [...(agent?.permission ?? []), ...this.permission];
@@ -113,9 +119,10 @@ export class OpenCodeSettings {
   async set(id: string, value: string): Promise<void> {
     validateSessionSetting(this.list(), id, value);
     if (id.startsWith('permission:')) {
+      const revision = this.nativeRevision;
       const rule = { permission: id.slice('permission:'.length), pattern: '*', action: value as 'ask' | 'allow' | 'deny' };
       const session = await this.transport.request(() => this.transport.client.session.update({ sessionID: this.nativeId, directory: this.cwd, permission: [rule] }));
-      this.updateNative(session);
+      this.updateNative(session, revision);
       return;
     }
     const next = { ...this.selected };
@@ -129,8 +136,13 @@ export class OpenCodeSettings {
       if (!model) throw new AgentOperationRejectedError('operation_rejected', 'Select an OpenCode model before choosing its variant.');
       await this.transport.request(() => this.transport.client.v2.session.switchModel({ sessionID: this.nativeId, model: { providerID: model.providerID, id: model.modelID, ...(next.variant ? { variant: next.variant } : {}) } }));
     }
-    Object.assign(this.selected, next);
-    if (next.variant === undefined) delete this.selected.variant;
+    const revision = ++this.nativeRevision;
+    const response = await this.transport.request(() => this.transport.client.session.get({ sessionID: this.nativeId, directory: this.cwd }));
+    this.updateNative(response, revision);
+    const session = this.native;
+    const confirmed = id === 'agent' ? session?.agent === next.agent
+      : session?.model !== undefined && `${session.model.providerID}/${session.model.id}` === next.model && (session.model.variant || undefined) === next.variant;
+    if (!confirmed) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode did not confirm the requested session selection.');
   }
 
   /** Older native compaction routes require an explicit provider/model pair. */

@@ -30,6 +30,7 @@ export class CopilotAgentSession implements AgentSession {
   private foregroundRevision = 0;
   private usageRevision = 0;
   private contextRevision = 0;
+  private controlsRevision = 0;
   private usageRefreshTimer?: ReturnType<typeof setTimeout>;
   private usageRefreshRunning = false;
   private usageSignature?: string;
@@ -136,7 +137,15 @@ export class CopilotAgentSession implements AgentSession {
       this.info.mode = event.data.newMode; this.info.planning = {active: event.data.newMode === 'plan'}; this.emitRuntime();
     }
     if (delivery === 'live' && event.type === 'session.todos_changed') void this.refreshTodos();
-    if (delivery === 'live' && event.type === 'session.model_change') void this.refreshControls().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
+    if (delivery === 'live' && !owner && event.type === 'session.model_change') {
+      // Preserve every native transition even if the model queue drains before readback.
+      this.controlsRevision++;
+      this.info.model = event.data.newModel;
+      const setting = this.info.settings?.find(setting => setting.id === 'model');
+      if (setting) setting.value = event.data.newModel;
+      this.emitRuntime();
+    }
+    if (delivery === 'live' && !owner && ['session.model_change', 'assistant.idle', 'session.idle'].includes(event.type)) void this.refreshControls().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
     if (delivery === 'live' && (event.type.startsWith('subagent.') || event.type === 'assistant.idle' || event.type === 'session.task_complete')) void this.refreshChildren().then(() => this.emitRuntime()).catch(error => this.options.onDiagnostic?.(String(error)));
   }
   private scheduleUsageRefresh(immediate = false): void {
@@ -201,8 +210,10 @@ export class CopilotAgentSession implements AgentSession {
     this.interactions.cancelOwner(); this.emitRuntime();
   }
   private async refreshControls(): Promise<void> {
+    const revision = ++this.controlsRevision;
     try {
       const [current, listing] = await Promise.all([this.call(this.rpc.model.getCurrent(), 'Copilot model'), this.call(this.rpc.model.list(), 'Copilot models')]);
+      if (this.closed || revision !== this.controlsRevision) return;
       this.info.model = current.modelId;
       const permissions = this.info.settings?.filter(s => s.category === 'permissions') ?? [];
       this.info.settings = [...permissions, {id: 'model', category: 'model', label: 'Model', value: current.modelId ?? null, options: listing.list.map(record).filter(model => typeof model.id === 'string').map(model => ({value: model.id as string, label: typeof model.name === 'string' ? model.name : model.id as string})), mutable: true, scope: 'session'}];
@@ -222,8 +233,20 @@ export class CopilotAgentSession implements AgentSession {
       if (efforts.length || current.reasoningEffort) this.info.settings.push({id: 'reasoning_effort', category: 'model', label: 'Reasoning effort', value: current.reasoningEffort ?? null, options: efforts.map(value => ({value, label: value})), mutable: efforts.length > 0, scope: 'session'});
       this.capabilities.sessionSettings = this.info.settings.some(setting => setting.options.length > 0);
       const modelSetting = this.info.settings.find(s => s.id === 'model')!; modelSetting.mutable = modelSetting.options.length > 0;
-    } catch (error) { this.capabilities.sessionSettings = this.info.settings?.some(s => s.category === 'permissions' && s.mutable) ?? false; this.options.onDiagnostic?.(`Copilot model controls unavailable: ${String(error)}`); }
-    try { await this.listCommands(); this.capabilities.commands = true; } catch (error) { this.capabilities.commands = false; this.options.onDiagnostic?.(`Copilot skills unavailable: ${String(error)}`); }
+    } catch (error) {
+      if (this.closed || revision !== this.controlsRevision) return;
+      this.capabilities.sessionSettings = this.info.settings?.some(s => s.category === 'permissions' && s.mutable) ?? false;
+      this.options.onDiagnostic?.(`Copilot model controls unavailable: ${String(error)}`);
+    }
+    try {
+      await this.listCommands();
+      if (this.closed || revision !== this.controlsRevision) return;
+      this.capabilities.commands = true;
+    } catch (error) {
+      if (this.closed || revision !== this.controlsRevision) return;
+      this.capabilities.commands = false;
+      this.options.onDiagnostic?.(`Copilot skills unavailable: ${String(error)}`);
+    }
   }
   private applyPermissions(value: 'ask' | 'allow' | null): void {
     this.info.settings = [...(this.info.settings ?? []).filter(s => s.id !== 'tool_approval_mode'), {
@@ -243,7 +266,7 @@ export class CopilotAgentSession implements AgentSession {
       if (result.success) this.applyPermissions(resume ? null : 'ask');
     } catch (error) {this.options.onDiagnostic?.(`Copilot permission controls unavailable: ${String(error)}`);}
   }
-  async setSessionSetting(id: string, value: string): Promise<void> {
+  async setSessionSetting(id: string, value: string): Promise<void | {status: 'pending'}> {
     this.assertOpen(); validateSessionSetting(this.info.settings, id, value);
     if (id === 'tool_approval_mode') {
       this.updatingPermissions = true;
@@ -257,12 +280,15 @@ export class CopilotAgentSession implements AgentSession {
       } finally {this.updatingPermissions = false;}
       return;
     }
-    if ((await prepareAgentOperation(() => this.call(this.rpc.metadata.isProcessing(), 'Copilot foreground activity'))).processing) throw new AgentOperationRejectedError('operation_rejected', 'Copilot model changes require an idle session.');
-    this.assertOpen();
-    if (id === 'reasoning_effort') await this.call(this.rpc.model.setReasoningEffort({reasoningEffort: value}), 'Copilot reasoning effort');
+    if (id === 'reasoning_effort') {
+      await this.call(this.rpc.model.setReasoningEffort({reasoningEffort: value}), 'Copilot reasoning effort');
+      this.controlsRevision++;
+    }
     else {
-      const result = await this.call(this.rpc.model.switchTo({modelId: value}), 'Copilot model switch');
-      if (result.deferred) throw new Error('Copilot deferred the model change; confirmation is pending native application.');
+      const result = await this.call(this.rpc.model.switchTo({modelId: value, deferIfModelChangeQueued: true}), 'Copilot model switch');
+      this.controlsRevision++;
+      // Native queue acceptance is not confirmation that the live model changed.
+      if (result.deferred) return {status: 'pending'};
     }
     await this.refreshControls(); this.emitRuntime();
   }
@@ -364,7 +390,10 @@ export class CopilotAgentSession implements AgentSession {
     const child = new CopilotChildSession(this, info, () => this.children.delete(id)); this.children.set(id, child);
     try { await child.initialize(); return child; } catch (error) { await child.dispose(); throw error; }
   }
-  async runtimeInfo(): Promise<AgentRuntimeInfo> { return structuredClone({...this.info, status: this.info.status}); }
+  async runtimeInfo(options?: {refreshSettings?: boolean}): Promise<AgentRuntimeInfo> {
+    if (options?.refreshSettings && !this.closed) await this.refreshControls();
+    return structuredClone({...this.info, status: this.info.status});
+  }
   async dispose(): Promise<void> {
     if (this.closed) return; this.interactions.dispose(); this.images.stop(); this.closed = true; this.unsubscribe?.(); await Promise.allSettled([...this.children.values()].map(child => child.dispose()));
     clearTimeout(this.usageRefreshTimer); this.usageRefreshTimer = undefined;

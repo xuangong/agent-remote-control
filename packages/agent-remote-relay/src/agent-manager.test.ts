@@ -11,7 +11,7 @@ import type {
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { AgentManager, InteractionResponseError } from './agent-manager.js';
@@ -113,7 +113,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     const wire = createSessionWire(manager, (json) => output.push(JSON.parse(json)));
     try {
       await manager.ready;
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
       mutableCapabilities.sendMessage = false;
       const child = { nativeSessionId: 'child', title: 'Review', createdAt: '2026-09-10T00:00:00.000Z', status: 'waiting' as const, observation: 'live' as const };
       stream.push({ type: 'observation', sourceKey: 'children:1', occurredAt: Date.now(), delivery: 'live', event: {
@@ -143,8 +143,8 @@ describe('AgentManager Timeline and Snapshot', () => {
       expect(command.documentation).toMatchObject({ locator: 'skill:inspect', status: 'pending' });
       const output: unknown[] = [];
       const wire = createSessionWire(manager, (json) => output.push(JSON.parse(json)));
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'resource_request', payload: { requestId: 'r', agentId: 'docs', resourceId: command.documentation!.resourceId } }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'resource_request', payload: { requestId: 'r', agentId: 'docs', resourceId: command.documentation!.resourceId } }));
       expect(output).toContainEqual(expect.objectContaining({ type: 'resource_response', payload: expect.objectContaining({ resourceId: command.documentation!.resourceId,
         state: expect.objectContaining({ status: 'available', contentBase64: Buffer.from('# Inspect').toString('base64') }) }) }));
       expect(reads).toEqual(['skill:inspect']);
@@ -258,32 +258,28 @@ describe('AgentManager Timeline and Snapshot', () => {
     } finally { await manager.close(); }
   });
 
-  it('validates native choices, serializes selection before send and publishes confirmed settings', async () => {
-    const stream = new ManualProviderStream();
-    stream.push({ type: 'history_boundary' });
-    const gate = deferred();
-    const calls: string[] = [];
-    let value = 'first';
+  it('accepts settings while running without blocking input and publishes native confirmation', async () => {
+    const stream = new ManualProviderStream(); stream.push({ type: 'history_boundary' });
+    const gate = deferred(); let value = 'first'; const calls: string[] = [];
     const session = sessionFor(stream, {
       capabilities: { ...capabilities, sessionSettings: true },
       async setSessionSetting(_id, next) { calls.push('select'); await gate.promise; value = next; },
-      async sendMessage() { calls.push(value); },
-      async runtimeInfo() { return { providerId: 'codex', sessionId: 'session-1', status: 'idle', settings: [{ id: 'model', category: 'model', label: 'Model', value, options: [{ value: 'first', label: 'First' }, { value: 'second', label: 'Second' }], mutable: true, scope: 'session' }] }; },
+      async sendMessage() { calls.push('send'); },
+      async runtimeInfo() { return { providerId: 'codex', sessionId: 'session-1', status: 'running', settings: [{ id: 'model', category: 'model', label: 'Model', value, options: [{ value: 'first', label: 'First' }, { value: 'second', label: 'Second' }], mutable: true, scope: 'session' }] }; },
     });
     const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'epoch-1' });
-    await manager.ready;
-    await expect(manager.setSessionSetting('model', 'invented')).rejects.toThrow();
-    const selected = manager.setSessionSetting('model', 'second');
-    const sent = manager.sendMessage('Hello');
-    await nextEventLoopTurn();
-    expect(calls).toEqual(['select']);
-    expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('first');
-    gate.resolve();
-    await selected;
-    expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('second');
-    await sent;
-    expect(calls).toEqual(['select', 'second']);
-    await manager.close();
+    try {
+      await manager.ready;
+      await expect(manager.setSessionSetting('model', 'invented')).rejects.toThrow();
+      await manager.setSessionSetting('model', 'second');
+      expect(manager.snapshot().payload.settingChanges).toMatchObject([{ settingId: 'model', targetValue: 'second', confirmedValue: 'first', status: 'pending' }]);
+      expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('first');
+      await manager.sendMessage('Hello');
+      expect(calls).toEqual(['select', 'send']);
+      gate.resolve();
+      await expect.poll(() => manager.snapshot().payload.settingChanges).toEqual([]);
+      expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('second');
+    } finally { gate.resolve(); await manager.close(); }
   });
 
   it('serializes planning selection with message submission and publishes authoritative state before acknowledgement', async () => {
@@ -432,7 +428,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     ]);
     const snapshot = manager.snapshot();
     expect(snapshot).toMatchObject({
-      protocolVersion: '1.6.0', type: 'agent_snapshot',
+      protocolVersion: '1.7.0', type: 'agent_snapshot',
       payload: { id: 'agent-1', providerId: 'codex', pendingInteractions: [] },
     });
     expect(snapshot.payload).not.toHaveProperty('timeline');
@@ -591,10 +587,10 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const output: Array<Record<string, unknown>> = [];
     const freshClient = createSessionWire(manager, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await freshClient.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await freshClient.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
     await freshClient.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'resource_request',
+      protocolVersion: '1.7.0', type: 'resource_request',
       payload: { requestId: 'resource-read', agentId: 'agent-1', resourceId },
     }));
 
@@ -681,9 +677,9 @@ describe('AgentManager Timeline and Snapshot', () => {
     });
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'timeline_subscription',
+      protocolVersion: '1.7.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resource', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -719,7 +715,7 @@ describe('AgentManager Timeline and Snapshot', () => {
       state: { status: 'unavailable', reason: 'The generated file expired.' },
     })]);
     expect(wireOutput.slice(1)).toEqual([expect.objectContaining({
-      protocolVersion: '1.6.0',
+      protocolVersion: '1.7.0',
       type: 'resource_update',
       payload: expect.objectContaining({
         agentId: 'agent-1', resourceId: pendingBinding!.resourceId,
@@ -757,9 +753,9 @@ describe('AgentManager Timeline and Snapshot', () => {
 
     const wireOutput: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(manager, (json) => wireOutput.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'timeline_subscription',
+      protocolVersion: '1.7.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resources', agentIds: ['agent-1'] },
     }));
     wireOutput.length = 0;
@@ -796,7 +792,7 @@ describe('AgentManager Timeline and Snapshot', () => {
     secondRead.resolve({ status: 'available', mediaType: 'image/png', bytes: pngBytes });
     await nextEventLoopTurn();
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'timeline_request',
+      protocolVersion: '1.7.0', type: 'timeline_request',
       payload: { requestId: 'tail-after-settlement', agentId: 'agent-1', direction: 'tail', limit: 10 },
     }));
 
@@ -1390,7 +1386,7 @@ it('anchors an activity transition to canonical content already committed by the
   const wire = createSessionWire(manager, json => output.push(JSON.parse(json)));
   try {
     await manager.ready;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
     expect(output.at(-1).payload.cursor).toEqual({ epoch: 'content-epoch', seq: 0 });
     stream.push({ type: 'observation', sourceKey: 'answer', occurredAt: Date.now(), delivery: 'live', event: {
       type: 'timeline', provider: 'codex', item: { type: 'assistant_message', text: 'Please review the answer.' },
@@ -1579,4 +1575,142 @@ it.each(['identity', 'revision'] as const)('does not restore stale usage across 
     stream.push(observation(40, 'live'));
     await expect.poll(() => manager.snapshot().payload.lastUsage?.totalTokens).toBe(40);
   } finally { await manager.close(); }
+});
+
+
+describe('setting intent settlement', () => {
+  async function setup(set: AgentSession['setSessionSetting']) {
+    const stream = new ManualProviderStream(); stream.push({ type: 'history_boundary' });
+    let value: string | null = 'first'; let readFails = false; let readHangs = false;
+    const info = () => ({ providerId: 'codex', sessionId: 'session-1', status: 'idle' as const, settings: [{ id: 'model', category: 'model' as const, label: 'Model', value, options: ['first', 'second', 'third'].map(value => ({ value, label: value })), mutable: true, scope: 'session' as const }] });
+    const manager = await AgentManager.attach({ agentId: 'settings', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'epoch', session: sessionFor(stream, {
+      capabilities: { ...capabilities, sessionSettings: true }, setSessionSetting: set,
+      async runtimeInfo() { if (readHangs) return new Promise<AgentRuntimeInfo>(() => {}); if (readFails) throw new Error('offline'); return info(); },
+    }) });
+    await manager.ready;
+    let revision = 0;
+    return { manager, failRead() { readFails = true; }, hangRead() { readHangs = true; }, update(next: string | null) { value = next; stream.push({ type: 'observation', sourceKey: `runtime-${++revision}`, occurredAt: Date.now(), delivery: 'live', event: { type: 'runtime_updated', provider: 'codex', runtimeInfo: info() } }); } };
+  }
+
+  it('ends an unconfirmed native queue at its deadline, without resubmitting, and accepts late native truth', async () => {
+    vi.useFakeTimers(); let attempts = 0;
+    const { manager, update, failRead } = await setup(async () => { attempts++; return { status: 'pending' }; });
+    try {
+      await manager.setSessionSetting('model', 'second');
+      failRead();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(manager.snapshot().payload.settingChanges).toMatchObject([{ status: 'timed_out', confirmedValue: 'first' }]);
+      expect(attempts).toBe(1);
+      update('second'); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('second');
+      expect(manager.snapshot().payload.settingChanges?.[0]?.status).toBe('timed_out');
+    } finally { await manager.close(); vi.useRealTimers(); }
+  });
+
+  it('retries only unsubmitted deferred work on a native readiness event, not unchanged polling', async () => {
+    vi.useFakeTimers(); let attempts = 0;
+    const { manager, update } = await setup(async () => { attempts++; if (attempts === 1) return { status: 'deferred' }; update('second'); });
+    try {
+      await manager.setSessionSetting('model', 'second');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(attempts).toBe(1);
+      update('first'); await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(2);
+      expect(manager.snapshot().payload.settingChanges).toEqual([]);
+    } finally { await manager.close(); vi.useRealTimers(); }
+  });
+
+  it('does not confirm a return to the original value while native changes are still queued', async () => {
+    vi.useFakeTimers(); let attempts = 0;
+    const { manager, update } = await setup(async () => { attempts++; return { status: 'pending' }; });
+    try {
+      await manager.setSessionSetting('model', 'second');
+      await manager.setSessionSetting('model', 'first');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(attempts).toBe(2);
+      expect(manager.snapshot().payload.settingChanges).toMatchObject([{ status: 'pending', targetValue: 'first' }]);
+      update('second'); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.settingChanges?.[0]?.status).toBe('pending');
+      update('first'); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.settingChanges).toEqual([]);
+    } finally { await manager.close(); vi.useRealTimers(); }
+  });
+
+  it('keeps the newest target when an older mutation completes', async () => {
+    vi.useFakeTimers(); const first = deferred(); const second = deferred(); const calls: string[] = [];
+    const { manager, update } = await setup(async (_id, value) => { calls.push(value); await (value === 'second' ? first.promise : second.promise); update(value); });
+    try {
+      await manager.setSessionSetting('model', 'second');
+      await manager.setSessionSetting('model', 'third');
+      first.resolve(); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.settingChanges).toMatchObject([{ targetValue: 'third', status: 'pending' }]);
+      expect(calls).toEqual(['second', 'third']);
+      second.resolve(); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.settingChanges).toEqual([]);
+      expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('third');
+    } finally { first.resolve(); second.resolve(); await manager.close(); vi.useRealTimers(); }
+  });
+
+  it('settles a hung call and readback by the deadline and never dispatches after close', async () => {
+    vi.useFakeTimers(); const gate = deferred();
+    const { manager, hangRead } = await setup(async () => gate.promise);
+    hangRead();
+    try {
+      await manager.setSessionSetting('model', 'second');
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(manager.snapshot().payload.settingChanges?.[0]?.status).toBe('timed_out');
+      await manager.close(); gate.resolve(); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.settingChanges?.[0]?.status).toBe('timed_out');
+    } finally { gate.resolve(); await manager.close(); vi.useRealTimers(); }
+  });
+
+  it('keeps accepted settings alive when the last page disconnects or a controller restart is considered', async () => {
+    vi.useFakeTimers();
+    const { manager, update } = await setup(async () => ({ status: 'pending' }));
+    try {
+      expect(manager.canReleaseIdle()).toBe(true);
+      await manager.setSessionSetting('model', 'second');
+      expect(manager.canReleaseIdle()).toBe(false);
+      expect(manager.canRestartController(true)).toBe(false);
+      update('second'); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.canReleaseIdle()).toBe(true);
+      expect(manager.canRestartController(true)).toBe(true);
+    } finally { await manager.close(); vi.useRealTimers(); }
+  });
+
+  it('recovers polling after a hung readback and ignores its late result once a newer read starts', async () => {
+    vi.useFakeTimers();
+    const stream = new ManualProviderStream(); stream.push({ type: 'history_boundary' });
+    const reads: Array<(runtime: AgentRuntimeInfo) => void> = [];
+    const info = (value: string): AgentRuntimeInfo => ({ providerId: 'codex', sessionId: 'session-1', status: 'idle', settings: [
+      { id: 'model', category: 'model', label: 'Model', value, options: ['first', 'second', 'third'].map(value => ({ value, label: value })), mutable: true, scope: 'session' },
+    ] });
+    let writes = 0;
+    const manager = await AgentManager.attach({ agentId: 'settings', provider: { providerId: 'codex', displayName: 'Codex' }, epoch: 'epoch', session: sessionFor(stream, {
+      capabilities: { ...capabilities, sessionSettings: true },
+      async setSessionSetting() { writes++; return { status: 'pending' }; },
+      async runtimeInfo(options) { return options?.refreshSettings ? new Promise(resolve => reads.push(resolve)) : info('first'); },
+    }) });
+    try {
+      await manager.ready;
+      await manager.setSessionSetting('model', 'second');
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(reads).toHaveLength(2);
+      reads[0]!(info('third')); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('first');
+      reads[1]!(info('second')); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.runtimeInfo.settings?.[0]?.value).toBe('second');
+      expect(manager.snapshot().payload.settingChanges).toEqual([]);
+      expect(writes).toBe(1);
+    } finally { await manager.close(); vi.useRealTimers(); }
+  });
+
+  it('reports native rejection with its code and returns to the confirmed value', async () => {
+    vi.useFakeTimers();
+    const { manager } = await setup(async () => { throw Object.assign(new Error('Sign in again.'), { code: 'reauthentication_required' }); });
+    try {
+      await manager.setSessionSetting('model', 'second'); await vi.advanceTimersByTimeAsync(0);
+      expect(manager.snapshot().payload.settingChanges).toMatchObject([{ status: 'failed', code: 'reauthentication_required', message: 'Sign in again.', confirmedValue: 'first' }]);
+    } finally { await manager.close(); vi.useRealTimers(); }
+  });
 });

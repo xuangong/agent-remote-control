@@ -22,7 +22,7 @@ test('persists explicit creation model and planning selections on the native ses
     if (path === '/session' || path === '/session/created') return json(native);
     if (path === '/provider') return json({ connected: ['test'], default: {}, all: [{ id: 'test', name: 'Test', models: { model: { id: 'model', name: 'Model', limit: { context: 10000, output: 1000 } } } }] });
     if (path === '/agent') return json(['plan', 'build'].map(name => ({ name, mode: 'primary', permission: [] })));
-    if (/^\/api\/session\/created\/(model|agent)$/.test(path)) { response.writeHead(204).end(); return; }
+    if (/^\/api\/session\/created\/(model|agent)$/.test(path)) { Object.assign(native, JSON.parse(raw)); response.writeHead(204).end(); return; }
     if (path === '/session/status') return json({});
     if (['/permission', '/question', '/session/created/message', '/session/created/todo', '/session/created/children'].includes(path)) return json([]);
     return json({}, 404);

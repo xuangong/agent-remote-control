@@ -33,3 +33,11 @@ Execution remains authoritative through `runtimeInfo` and `runtime_updated`. A h
 Token counters (including scope and total), current context (`contextScope`, `contextWindowUsedTokens`, and `contextWindowMaxTokens`), and the legacy `totalCostUsd` field form independent replacement groups. `contextScope: 'current'` confirms current context occupancy independently of `tokenScope`; context-only measurements are valid. Reporting any defined value in a group replaces that group, including removal of omitted fields; other groups remain last known. An empty update or an undefined property has no effect. Context occupancy is not cumulative consumption and may decrease after compaction. Unscoped legacy counters remain accepted but do not establish normalized token or current-context semantics.
 
 Adapters interpret native scope and cache semantics. The public state reducer preserves only the latest measurements; it does not construct history or a billing ledger. Cold attach can restore usage only when the native runtime exposes it. Retained Remote snapshots do not promise usage persistence across Host restarts.
+
+## Session setting application
+
+`setSessionSetting` may be called while a turn is active. Keep native scheduling and policy checks inside the adapter. Return `void` after native application, `{ status: 'pending' }` after native queue acceptance, or `{ status: 'deferred' }` only when no mutation was submitted and a later native readiness event permits retry. Publish actual selections through runtime settings; a request acknowledgement alone must not optimistically change them. Emit a runtime observation when a private readiness lock is released, even when the visible settings are unchanged.
+
+`runtimeInfo({ refreshSettings: true })` requests a fresh native settings read when the adapter has a read-only native getter. Unsupported fields retain their last native confirmation; do not resume or mutate a session just to read them. Guard asynchronous readbacks against newer native observations.
+
+The public relay owns accepted intent identities, supersession, deadlines and failure notices. It does not cancel active turns or resolve approval requests to apply a setting, and never retries a native mutation whose result is uncertain.

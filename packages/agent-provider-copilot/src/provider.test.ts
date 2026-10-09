@@ -145,7 +145,7 @@ describe('Copilot native adapter', () => {
     const {provider, session} = await open(); expect(session.capabilities.commands).toBe(true);
     expect(mock.config.skillDirectories).toEqual(['/native/project/skills']);
     await session.executeCommand('native', 'args'); expect(mock.native.rpc.commands.invoke).toHaveBeenCalledWith({name: 'native-cmd', input: 'args'}); expect(mock.native.send).toHaveBeenCalledWith({prompt: 'Resolved skill instructions', displayPrompt: '/native-cmd args', mode: 'immediate'});
-    await session.setSessionSetting('model', 'model-b'); expect(mock.native.rpc.model.switchTo).toHaveBeenCalledWith({modelId: 'model-b'});
+    await session.setSessionSetting('model', 'model-b'); expect(mock.native.rpc.model.switchTo).toHaveBeenCalledWith({modelId: 'model-b', deferIfModelChangeQueued: true});
     await expect(session.setSessionSetting('permissions', 'allow')).rejects.toThrow();
     expect((await session.readResource('/etc/passwd')).status).toBe('unavailable'); await provider.dispose();
   }, 10000);
@@ -377,20 +377,144 @@ it('reads only current regular bounded skill documents without following final s
  } finally { await provider.dispose(); await rm(home, {recursive: true, force: true}); }
 }, 10000);
 
-it('rejects busy model changes and does not claim deferred writes are confirmed', async () => {
+it.each(['session.model_change', 'assistant.idle'])('keeps a running model switch pending until native %s confirms application', async (notification) => {
+ const {provider, session} = await open(); const seen = await collect(session);
+ try {
+  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: true});
+  mock.handler(event('assistant.turn_start', {}));
+  mock.native.rpc.model.switchTo.mockResolvedValue({modelId: 'model-a', deferred: true});
+  await expect(session.setSessionSetting('model', 'model-b')).resolves.toEqual({status: 'pending'});
+  expect((await session.runtimeInfo()).model).toBe('model-a');
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'model', value: 'model-a'}));
+  mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-b'});
+  mock.handler(event(notification, {newModel: 'model-b'}));
+  await vi.waitFor(() => expect(seen.values).toContainEqual(expect.objectContaining({event: expect.objectContaining({type: 'runtime_updated', runtimeInfo: expect.objectContaining({model: 'model-b'})})})), {timeout: 1000});
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'model', value: 'model-b'}));
+  expect(mock.native.rpc.model.switchTo).toHaveBeenCalledExactlyOnceWith({modelId: 'model-b', deferIfModelChangeQueued: true});
+  expect(mock.native.rpc.interruptMainTurn).not.toHaveBeenCalled();
+ } finally { await provider.dispose(); await seen.done; }
+}, 10000);
+
+it('publishes each native model change before a fast FIFO queue drains back to the original model', async () => {
+ const {provider, session} = await open(); const seen = await collect(session);
+ try {
+  await new Promise(resolve => setImmediate(resolve));
+  seen.values.length = 0;
+  mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-a'});
+  mock.handler(event('session.model_change', {previousModel: 'model-a', newModel: 'model-b'}));
+  mock.handler(event('session.model_change', {previousModel: 'model-b', newModel: 'model-a'}));
+  await new Promise(resolve => setImmediate(resolve));
+  const updates = seen.values.flatMap(value => value.type === 'observation' && value.event.type === 'runtime_updated' ? [value.event.runtimeInfo] : []);
+  expect(updates.slice(0, 2).map(info => [info.model, info.settings?.find(setting => setting.id === 'model')?.value])).toEqual([['model-b', 'model-b'], ['model-a', 'model-a']]);
+  expect((await session.runtimeInfo()).model).toBe('model-a');
+ } finally {await provider.dispose(); await seen.done;}
+}, 10000);
+
+it('does not overwrite a newer native model event with an older control readback', async () => {
+ const {provider, session} = await open();
+ let finish!: (value: {modelId: string}) => void;
+ try {
+  mock.native.rpc.model.getCurrent.mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}));
+  mock.handler(event('session.model_change', {previousModel: 'model-a', newModel: 'model-b'}));
+  mock.handler(event('session.model_change', {previousModel: 'model-b', newModel: 'model-a'}));
+  await new Promise(resolve => setImmediate(resolve));
+  finish({modelId: 'model-b'});
+  await new Promise(resolve => setImmediate(resolve));
+  expect((await session.runtimeInfo()).model).toBe('model-a');
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'model', value: 'model-a'}));
+ } finally {await provider.dispose();}
+}, 10000);
+
+it('does not overwrite a confirmed effort mutation with an older control readback', async () => {
+ mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-a', reasoningEffort: 'high'});
+ mock.native.rpc.model.list.mockResolvedValue({list: [{id: 'model-a', supportedReasoningEfforts: ['low', 'high']}]});
+ mock.native.rpc.model.setReasoningEffort = vi.fn(async () => {
+  mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-a', reasoningEffort: 'low'});
+  return {reasoningEffort: 'low'};
+ });
+ const {provider, session} = await open();
+ try {
+  let finish!: (value: unknown) => void;
+  mock.native.rpc.model.getCurrent.mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}));
+  const older = session.runtimeInfo({refreshSettings: true});
+  await session.setSessionSetting('reasoning_effort', 'low');
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'reasoning_effort', value: 'low'}));
+  finish({modelId: 'model-a', reasoningEffort: 'high'});
+  await older;
+  expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'reasoning_effort', value: 'low'}));
+ } finally {await provider.dispose();}
+}, 10000);
+
+it.each(['success', 'failure'])('ignores an older control readback %s after a newer explicit refresh', async outcome => {
+ const {provider, session} = await open();
+ try {
+  let finish!: (value: unknown) => void;
+  let fail!: (error: Error) => void;
+  mock.native.rpc.model.getCurrent.mockImplementationOnce(() => new Promise((resolve, reject) => {finish = resolve; fail = reject;}));
+  const older = session.runtimeInfo({refreshSettings: true});
+  mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-b'});
+  await session.runtimeInfo({refreshSettings: true});
+  if (outcome === 'success') finish({modelId: 'model-a'});
+  else fail(new Error('Old model read failed'));
+  await older;
+  expect((await session.runtimeInfo()).model).toBe('model-b');
+  expect(session.capabilities.sessionSettings).toBe(true);
+ } finally {await provider.dispose();}
+}, 10000);
+
+it('invalidates older control reads when native accepts a queued model mutation', async () => {
+ const {provider, session} = await open();
+ try {
+  let fail!: (error: Error) => void;
+  mock.native.rpc.model.getCurrent.mockImplementationOnce(() => new Promise((_resolve, reject) => {fail = reject;}));
+  const older = session.runtimeInfo({refreshSettings: true});
+  mock.native.rpc.model.switchTo.mockResolvedValue({modelId: 'model-a', deferred: true});
+  await expect(session.setSessionSetting('model', 'model-b')).resolves.toEqual({status: 'pending'});
+  fail(new Error('Read started before mutation failed'));
+  await older;
+  expect((await session.runtimeInfo()).model).toBe('model-a');
+  expect(session.capabilities.sessionSettings).toBe(true);
+ } finally {await provider.dispose();}
+}, 10000);
+
+it('ignores an older skills failure after a newer control refresh confirms commands', async () => {
+ const {provider, session} = await open();
+ try {
+  let fail!: (error: Error) => void;
+  mock.native.rpc.skills.list.mockImplementationOnce(() => new Promise((_resolve, reject) => {fail = reject;}));
+  const older = session.runtimeInfo({refreshSettings: true});
+  await vi.waitFor(() => expect(fail).toBeTypeOf('function'), {timeout: 1000});
+  await session.runtimeInfo({refreshSettings: true});
+  fail(new Error('Old skills read failed'));
+  await older;
+  expect(session.capabilities.commands).toBe(true);
+ } finally {await provider.dispose();}
+}, 10000);
+
+it('applies immediate model switches using native readback while processing', async () => {
  const {provider, session} = await open();
  try {
   mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: true});
-  await expect(session.setSessionSetting('model', 'model-b')).rejects.toThrow('idle');
-  expect(mock.native.rpc.model.switchTo).not.toHaveBeenCalled();
-  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: false});
-  mock.native.rpc.model.switchTo.mockResolvedValue({deferred: true});
-  await expect(session.setSessionSetting('model', 'model-b')).rejects.toThrow('pending');
-  expect((await session.runtimeInfo()).model).toBe('model-a');
+  mock.native.rpc.model.switchTo.mockImplementation(async () => {
+   mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-b'});
+   return {modelId: 'model-b', deferred: false};
+  });
+  await expect(session.setSessionSetting('model', 'model-b')).resolves.toBeUndefined();
+  expect((await session.runtimeInfo()).model).toBe('model-b');
+ } finally {await provider.dispose();}
+}, 10000);
+
+it('does not replay an uncertain model mutation when native activity changes', async () => {
+ const {provider, session} = await open();
+ try {
+  mock.native.rpc.model.switchTo.mockRejectedValueOnce(new Error('Model switch timed out'));
+  await expect(session.setSessionSetting('model', 'model-b')).rejects.toThrow('timed out');
   mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-b'});
-  mock.handler(event('session.model_change', {newModel: 'model-b'}));
+  mock.handler(event('assistant.idle', {}));
   await vi.waitFor(async () => expect((await session.runtimeInfo()).model).toBe('model-b'), {timeout: 1000});
- } finally { await provider.dispose(); }
+  expect(mock.native.rpc.model.switchTo).toHaveBeenCalledTimes(1);
+  expect(mock.native.rpc.interruptMainTurn).not.toHaveBeenCalled();
+ } finally {await provider.dispose();}
 }, 10000);
 
 
@@ -412,6 +536,7 @@ it('publishes native reasoning effort and applies only supported selections', as
  try {
   expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'reasoning_effort', value: 'medium', options: [{value: 'low', label: 'low'}, {value: 'medium', label: 'medium'}, {value: 'high', label: 'high'}]}));
   expect(session.capabilities.imageInput).toMatchObject({mediaTypes: ['image/png'], maxImages: 1, maxImageBytes: 3145728});
+  mock.native.rpc.metadata.isProcessing.mockResolvedValue({processing: true});
   await session.setSessionSetting('reasoning_effort', 'high');
   expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'reasoning_effort', value: 'high'}));
   await expect(session.setSessionSetting('reasoning_effort', 'extreme')).rejects.toThrow();
@@ -712,3 +837,22 @@ it('keeps pending callback presentation out of native execution snapshots', asyn
   expect(events.some(e => e.type === 'interaction_resolved')).toBe(true);
   expect(events.filter(e => e.type === 'runtime_updated').some(e => e.runtimeInfo.status === 'waiting')).toBe(false);
 }, 5000);
+
+it('refreshes native model settings only when runtime readback explicitly requests them', async () => {
+ mock.native.rpc.model.list.mockResolvedValue({list: [{id: 'model-a', name: 'Model A'}, {id: 'model-b', name: 'Model B', supportedReasoningEfforts: ['low', 'high']}]});
+ mock.native.rpc.permissions.setApproveAll = vi.fn(async () => ({success: true}));
+ const {provider, session} = await open();
+ try {
+  mock.native.rpc.model.getCurrent.mockClear();
+  mock.native.rpc.model.getCurrent.mockResolvedValue({modelId: 'model-b', reasoningEffort: 'high'});
+  expect((await session.runtimeInfo()).model).toBe('model-a');
+  expect(mock.native.rpc.model.getCurrent).not.toHaveBeenCalled();
+  const refreshed = await session.runtimeInfo({refreshSettings: true});
+  expect(refreshed.model).toBe('model-b');
+  expect(refreshed.settings).toContainEqual(expect.objectContaining({id: 'reasoning_effort', value: 'high'}));
+  expect(refreshed.settings).toContainEqual(expect.objectContaining({id: 'tool_approval_mode', value: 'ask'}));
+  expect(mock.native.rpc.model.getCurrent).toHaveBeenCalledTimes(1);
+  await session.runtimeInfo();
+  expect(mock.native.rpc.model.getCurrent).toHaveBeenCalledTimes(1);
+ } finally {await provider.dispose();}
+}, 10000);

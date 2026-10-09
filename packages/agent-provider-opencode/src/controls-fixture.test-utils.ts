@@ -7,6 +7,8 @@ export async function controlsFixture(restricted = false) {
   const state = {
     rejectUpdate: false,
     rejectSwitch: false,
+    ignoreSwitch: false,
+    selection: {} as { agent?: string; model?: { providerID: string; id: string; variant?: string } },
     permission: [{ permission: 'bash', pattern: 'git *', action: 'ask' }] as any[],
     providers: { all: [{ id: 'test', name: 'Test', models: { main: { id: 'main', name: 'Main', limit: { context: 128000, output: 8192 }, variants: { fast: {}, deep: {} } }, other: { id: 'other', name: 'Other' } } }, { id: 'offline', name: 'Offline', models: { missing: { id: 'missing', name: 'Unavailable' } } }], connected: ['test'], default: { test: 'main' } },
     agents: [{ name: 'build', mode: 'primary', permission: [{ permission: '*', pattern: '*', action: 'allow' }, { permission: 'bash', pattern: '*', action: 'ask' }] }, { name: 'plan', mode: 'primary', permission: [{ permission: 'edit', pattern: '*', action: 'deny' }] }, { name: 'hidden', hidden: true, mode: 'primary', permission: [] }, { name: 'worker', mode: 'subagent', permission: [] }] as any[],
@@ -26,12 +28,13 @@ export async function controlsFixture(restricted = false) {
         if (state.rejectUpdate) { response.writeHead(500); response.end(); return; }
         state.permission.push(...body.permission);
       }
-      return json({ id: 'ses_controls', permission: state.permission });
+      return json({ id: 'ses_controls', permission: state.permission, ...state.selection });
     }
     if (url.pathname === '/session/ses_controls/summarize') return json(true);
     if (url.pathname === '/session/ses_controls/command') return json({ info: {}, parts: [] });
     if (url.pathname.startsWith('/api/session/')) {
       if (state.rejectSwitch) { response.writeHead(409); response.end(); return; }
+      if (!state.ignoreSwitch) Object.assign(state.selection, body);
       response.writeHead(204); response.end(); return;
     }
     response.writeHead(404); response.end();

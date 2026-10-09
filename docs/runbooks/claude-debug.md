@@ -89,7 +89,7 @@ The root tests enforce per-test and process deadlines. Build first, then select 
 
 ```bash
 pnpm build
-BORGEE_CODEX_TEST_EXECUTABLE=/absolute/path/to/codex-0.148.0 \
+BORGEE_CODEX_TEST_EXECUTABLE=/absolute/path/to/codex-0.162.0 \
 AGENT_CLAUDE_TEST_EXECUTABLE=/absolute/path/to/claude-2.1.247 \
 pnpm test
 pnpm test:conformance

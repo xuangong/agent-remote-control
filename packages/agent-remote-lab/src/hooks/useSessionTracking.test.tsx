@@ -182,8 +182,8 @@ it('acknowledges only the selected session and clears reminders when that sessio
       listeners.set(id, listener); queueMicrotask(() => listener.onOpen());
       return { close: () => { listeners.delete(id); }, send: message => {
         if (message.type !== 'negotiate') return;
-        listener.onMessage({ protocolVersion: '1.6.0', type: 'negotiated' });
-        listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
+        listener.onMessage({ protocolVersion: '1.7.0', type: 'negotiated' });
+        listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
       } };
     },
   };
@@ -198,7 +198,7 @@ it('acknowledges only the selected session and clears reminders when that sessio
   const second = { ...star, nativeSessionId: 'second' };
   await act(async () => { tracking.toggle(star); tracking.toggle(second); });
   const emit = (id: string, status: 'waiting' | 'idle') => act(async () => {
-    listeners.get(id)!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: id, status } });
+    listeners.get(id)!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: id, status } });
   });
   await emit('native', 'waiting'); await emit('second', 'idle');
   expect(tracking.observations[sessionKey(star)]?.attention).toBe('pending');
@@ -222,8 +222,8 @@ it('observes open windows without attachment or history and preserves subscripti
     return { close: () => { listeners.delete(id); }, send: message => {
       if (message.type !== 'negotiate') return;
       expect(message.observation).toBe('activity');
-      listener.onMessage({ protocolVersion: '1.6.0', type: 'negotiated' });
-      listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
+      listener.onMessage({ protocolVersion: '1.7.0', type: 'negotiated' });
+      listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
     } };
   });
   const fetchSnapshot = vi.fn(), fetchTimeline = vi.fn();
@@ -246,7 +246,7 @@ it('observes open windows without attachment or history and preserves subscripti
   await act(async () => tracking.toggle(side));
   await act(async () => focus(sessionKey(side)));
   expect(tracking.backgroundSessions).toEqual([]);
-  await act(async () => listeners.get('side')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'side', status: 'waiting' } }));
+  await act(async () => listeners.get('side')!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'side', status: 'waiting' } }));
   expect(tracking.observations[sessionKey(side)]).toMatchObject({ activity: 'waiting', changed: false, attention: undefined });
   await act(async () => tracking.toggle(side));
   expect(listeners.size).toBe(2);
@@ -271,8 +271,8 @@ it('observes a minimized auxiliary Ask independently and replaces only its subsc
       return { close: () => { listeners.delete(id); }, send: message => {
         if (message.type !== 'negotiate') return;
         expect(message.observation).toBe('activity');
-        listener.onMessage({ protocolVersion: '1.6.0', type: 'negotiated' });
-        listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
+        listener.onMessage({ protocolVersion: '1.7.0', type: 'negotiated' });
+        listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: id, status: 'running' } });
       } };
     },
   };
@@ -291,7 +291,7 @@ it('observes a minimized auxiliary Ask independently and replaces only its subsc
   expect([...listeners.keys()]).toEqual(['primary', 'ask']);
   expect(tracking.sessions).toEqual([]);
   expect(tracking.backgroundSessions).toEqual([]);
-  await act(async () => listeners.get('ask')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'ask', status: 'waiting' } }));
+  await act(async () => listeners.get('ask')!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'ask', status: 'waiting' } }));
   expect(tracking.observations[sessionKey(ask)]).toMatchObject({ attention: 'pending', changed: false });
   await act(async () => show(true));
   expect(tracking.observations[sessionKey(ask)]).toMatchObject({ attention: undefined, changed: false });
@@ -300,7 +300,7 @@ it('observes a minimized auxiliary Ask independently and replaces only its subsc
   await act(async () => select('clean-ask'));
   expect([...listeners.keys()]).toEqual(['primary', 'clean-ask']);
   expect(listeners.get('primary')).toBe(primaryListener);
-  await act(async () => oldAsk.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'ask', status: 'idle' } }));
+  await act(async () => oldAsk.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'ask', status: 'idle' } }));
   expect(tracking.observations[sessionKey({ ...ask, nativeSessionId: 'clean-ask' })]).toMatchObject({ activity: 'running', attention: undefined });
   expect(readTrackedSessions('alice')).toEqual([]);
   expect(fetchSnapshot).not.toHaveBeenCalled(); expect(fetchTimeline).not.toHaveBeenCalled();
@@ -458,12 +458,12 @@ it.each(['before', 'after'] as const)('acknowledges updates only after their vis
       return { close: () => {}, send: message => {
         if (message.type !== 'negotiate' || message.observation !== 'activity') return;
         activity.set(id, listener);
-        listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 } } });
+        listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 } } });
       } };
     },
   };
   const page = (seq: number): import('@orchardworks/agent-remote-protocol').HistoryPage => ({
-    protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+    protocolVersion: '1.7.0', type: 'timeline_page', payload: {
       requestId: 'history', agentId: 'native', direction: 'tail', epoch: 'content', reset: false, staleCursor: false, gap: false, error: null,
       window: { minSeq: 1, maxSeq: seq, nextSeq: seq + 1 }, startCursor: { epoch: 'content', seq: 1 }, endCursor: { epoch: 'content', seq },
       hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', seqStart: 1, seqEnd: seq, sourceSeqRanges: [{ startSeq: 1, endSeq: seq }], collapsed: [], resources: [],
@@ -480,7 +480,7 @@ it.each(['before', 'after'] as const)('acknowledges updates only after their vis
     tracking = useSessionTracking('alice', transport, sessionKey(child), [primary, child], undefined, connections, true, visible);
     return <>{tracking.observers}</>;
   }
-  const emit = (seq: number) => act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity',
+  const emit = (seq: number) => act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity',
     payload: { agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq } } }));
   try {
     await render(<Fixture />);
@@ -520,14 +520,14 @@ it.each([
       return { close: () => {}, send: message => {
         if (message.type !== 'negotiate' || message.observation !== 'activity') return;
         activity.set(id, listener);
-        listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+        listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
           agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 },
         } });
       } };
     },
   };
   const page = (seq: number, epoch = 'content'): import('@orchardworks/agent-remote-protocol').HistoryPage => ({
-    protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+    protocolVersion: '1.7.0', type: 'timeline_page', payload: {
       requestId: `history-${seq}`, agentId: 'native', direction: 'tail', epoch, reset: false, staleCursor: false, gap: false, error: null,
       window: { minSeq: 1, maxSeq: seq, nextSeq: seq + 1 }, startCursor: { epoch, seq: 1 }, endCursor: { epoch, seq },
       hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', seqStart: 1, seqEnd: seq,
@@ -563,14 +563,14 @@ it.each([
     });
     if (unseen) await act(async () => { replica.applyHistory(page(3, epoch)); });
     if (replaced) {
-      await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+      await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
         agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq: 1 },
       } }));
-      await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+      await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
         agentId: 'native', status: 'idle', cursor: { epoch, seq: 1 },
       } }));
     }
-    await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+    await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
       agentId: 'native', status: 'idle', cursor: { epoch, seq: unseen ? 3 : 2 },
     } }));
     expect(tracking.observations[sessionKey(star)]).toMatchObject({ activity: 'idle', changed: unseen });
@@ -592,7 +592,7 @@ it.each(['scope', 'transport'] as const)('does not reuse read content after the 
         return { close: () => {}, send: message => {
           if (message.type !== 'negotiate' || message.observation !== 'activity') return;
           activity.set(transport, listener);
-          listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+          listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
             agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 },
           } });
         } };
@@ -602,7 +602,7 @@ it.each(['scope', 'transport'] as const)('does not reuse read content after the 
   };
   const initialTransport = makeTransport(), replacementTransport = makeTransport();
   const replica = new AgentReplica();
-  replica.applyHistory({ protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+  replica.applyHistory({ protocolVersion: '1.7.0', type: 'timeline_page', payload: {
     requestId: 'history', agentId: 'native', direction: 'tail', epoch: 'content', reset: false, staleCursor: false, gap: false, error: null,
     window: { minSeq: 1, maxSeq: 8, nextSeq: 9 }, startCursor: { epoch: 'content', seq: 1 }, endCursor: { epoch: 'content', seq: 8 },
     hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', seqStart: 1, seqEnd: 8,
@@ -622,7 +622,7 @@ it.each(['scope', 'transport'] as const)('does not reuse read content after the 
     return <>{tracking.observers}</>;
   }
   const emit = (transport: RemoteAgentTransport, seq: number) => act(async () => activity.get(transport)!.onMessage({
-    protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq } },
+    protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq } },
   }));
   try {
     await render(<Fixture />);

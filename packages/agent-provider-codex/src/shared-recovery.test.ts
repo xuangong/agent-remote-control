@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { CodexAppServerProvider } from './provider.js';
+import { CodexAppServerSession } from './session.js';
 import { normalizeRecoverySettings } from './shared-recovery.js';
 import { AgentManager } from '../../agent-remote-relay/dist/agent-manager.js';
 import { createSessionWire } from '../../agent-remote-relay/dist/session-wire.js';
@@ -267,6 +268,39 @@ afterEach(async () => {
   await Promise.allSettled(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
+it.each(['turn/start', 'turn/steer', 'thread/settings/update'])('retries deferred settings when the local %s submission lock is released', async blockedMethod => {
+  const { server, session } = await harness({}, false);
+  const manager = await AgentManager.attach({ agentId: 'readiness', provider: { providerId: 'codex', displayName: 'Codex' }, session, epoch: 'initial' });
+  managerCleanups.push(() => manager.close());
+  await manager.ready;
+  if (blockedMethod === 'turn/steer') await manager.sendMessage('Start');
+  const blocked = deferred<RpcOverride | undefined>();
+  let entered = false;
+  server.requestHook = async ({ method, params }) => {
+    if (method === blockedMethod && !entered) {
+      entered = true;
+      const result = await blocked.promise;
+      if (method === 'thread/settings/update') server.notify('thread/settings/updated', { threadId: 'root', threadSettings: params });
+      return result;
+    }
+    if (method === 'thread/settings/update') server.notify('thread/settings/updated', { threadId: 'root', threadSettings: params });
+    return undefined;
+  };
+  const submitting = blockedMethod === 'thread/settings/update'
+    ? session.setSessionSetting!('approval', 'never') : manager.sendMessage('Continue');
+  try {
+    await expect.poll(() => entered).toBe(true);
+    await manager.setSessionSetting('approval', 'untrusted');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(server.requests.filter(request => request.method === 'thread/settings/update')).toHaveLength(blockedMethod === 'thread/settings/update' ? 1 : 0);
+    blocked.resolve(undefined);
+    await submitting;
+    await expect.poll(() => manager.snapshot().payload.runtimeInfo.settings?.find(setting => setting.id === 'approval')?.value, { timeout: 1000 }).toBe('untrusted');
+    expect(server.requests.filter(request => request.method === 'thread/settings/update')).toHaveLength(blockedMethod === 'thread/settings/update' ? 2 : 1);
+    expect(server.requests.some(request => request.method === 'turn/interrupt')).toBe(false);
+  } finally { blocked.resolve(undefined); await submitting; }
+});
+
 async function harness(settings: NonNullable<ConstructorParameters<typeof CodexAppServerProvider>[0]>['sharedRecovery'] = {}, observe = true) {
   const root = await mkdtemp(join(tmpdir(), 'arc-shared-recovery-'));
   roots.push(root);
@@ -338,12 +372,12 @@ describe('shared Codex recovery', () => {
     const activityWire = createSessionWire(manager, json => activity.push(json));
     managerCleanups.push(async () => { contentWire.close(); activityWire.close(); await manager.close(); });
     await manager.ready;
-    await contentWire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
-    await activityWire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    await contentWire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+    await activityWire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
     expect(content.map(json => JSON.parse(json))).toContainEqual(expect.objectContaining({ type: 'agent_snapshot', payload: expect.objectContaining({ status: 'running' }) }));
     expect(activity.map(json => JSON.parse(json))).toEqual([
-      { protocolVersion: '1.6.0', type: 'negotiated' },
-      { protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running', cursor: { epoch: 'initial', seq: 0 } } },
+      { protocolVersion: '1.7.0', type: 'negotiated' },
+      { protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'remote', status: 'running', cursor: { epoch: 'initial', seq: 0 } } },
     ]);
     server.notify('turn/completed', { threadId: 'root', turn: { id: 'existing-turn', status: 'completed' } });
     await expect.poll(() => manager.snapshot().payload.status).toBe('idle');
@@ -441,7 +475,7 @@ describe('shared Codex recovery', () => {
     const wire = createSessionWire(manager, json => wireOutput.push(json));
     managerCleanups.push(async () => { wire.close(); await manager.close(); });
     await manager.ready;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     const events: string[] = [];
     const connections: string[] = [];
     manager.subscribe(message => {
@@ -456,7 +490,7 @@ describe('shared Codex recovery', () => {
     server.thread.turns = activeTurnId ? [{ id: activeTurnId, status: 'inProgress', items: [] }] : [];
     server.disconnectClients();
     await expect.poll(() => connections).toContain('reconnecting');
-    await expect.poll(() => connections).toContain('connected');
+    await expect.poll(() => connections.at(-1)).toBe('connected');
     expect(manager.snapshot().payload.activeTurn?.turnId ?? null).toBe(activeTurnId);
     if (activeTurnId === 'old-turn') expect(manager.snapshot().payload.activeTurn).toEqual(previousTurn);
     const decoded = wireOutput.map(json => decodeServerMessage(json));
@@ -476,12 +510,33 @@ describe('shared Codex recovery', () => {
         return undefined;
       };
       await expect(manager.setSessionSetting('approval', 'untrusted')).resolves.toBeUndefined();
-      expect((await session.runtimeInfo()).settings?.find(setting => setting.id === 'approval')?.value).toBe('untrusted');
+      await expect.poll(async () => (await session.runtimeInfo()).settings?.find(setting => setting.id === 'approval')?.value).toBe('untrusted');
     } else {
       await expect(manager.setPlanning(true)).rejects.toThrow(/idle/i);
       await manager.cancel();
       expect(server.requests.at(-1)).toEqual({ method: 'turn/interrupt', params: { threadId: 'root', turnId: activeTurnId } });
     }
+  });
+
+  it('drops disconnected confirmation locks after restoring native settings without replay', async () => {
+    const { server, session } = await harness({}, false);
+    server.notify('thread/settings/updated', { threadId: 'root', threadSettings: { effort: 'high' } });
+    await new Promise<void>(resolve => setTimeout(resolve, 20));
+    await expect(session.setSessionSetting!('approval', 'untrusted')).resolves.toEqual({ status: 'pending' });
+    expect((session as CodexAppServerSession).hasIdleState()).toBe(false);
+    server.model = 'restored-model';
+    Object.assign(server.thread, { reasoningEffort: 'low' });
+    const baseline = server.requests.length;
+    server.disconnectClients();
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('reconnecting');
+    await expect(session.sendMessage('Must stay gated')).rejects.toThrow(/reconnecting|restoring/i);
+    await expect.poll(async () => (await session.runtimeInfo()).connection?.state).toBe('connected');
+    expect((session as CodexAppServerSession).hasIdleState()).toBe(true);
+    expect((await session.runtimeInfo()).model).toBe('restored-model');
+    expect((await session.runtimeInfo()).settings?.find(setting => setting.id === 'approval')?.value).toBe('on-request');
+    await session.sendMessage('Continue after native readback');
+    expect(server.requests.at(-1)).toMatchObject({ method: 'turn/start', params: { model: 'restored-model', effort: 'low' } });
+    expect(server.requests.slice(baseline).some(request => request.method === 'thread/settings/update')).toBe(false);
   });
 
   it('keeps transient recovery unbounded unless a caller sets an attempt limit', () => {
@@ -870,15 +925,15 @@ it('restores ten latest turns over Unix WebSocket and serves older history throu
   const output: ReturnType<typeof decodeServerMessage>[] = [];
   const wire = createSessionWire(manager, json => output.push(decodeServerMessage(json)));
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'timeline_request', payload: {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'timeline_request', payload: {
       agentId: 'paged', requestId: 'older', direction: 'before', cursor: tail.payload.startCursor, limit: 100,
     } }));
     const response = output.at(-1);
     expect(response).toMatchObject({ status: 'ok', value: { type: 'timeline_page', payload: {
       requestId: 'older', hasOlder: true, startCursor: { epoch: cursor.epoch, seq: -9 }, endCursor: { epoch: cursor.epoch, seq: 0 },
     } } });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'timeline_request', payload: {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'timeline_request', payload: {
       agentId: 'paged', requestId: 'oldest', direction: 'before', cursor: { epoch: cursor.epoch, seq: -9 }, limit: 100,
     } }));
     expect(output.at(-1)).toMatchObject({ status: 'ok', value: { type: 'timeline_page', payload: { requestId: 'oldest', hasOlder: false, entries: [{ turnId: 'page-turn-1' }, { turnId: 'page-turn-2' }, { turnId: 'page-turn-3' }] } } });
@@ -1122,9 +1177,9 @@ it('keeps child tasks and follow-up messages through Unix transport recovery wit
   const wire = createSessionWire(manager, json => output.push(json));
   managerCleanups.push(async () => { wire.close(); await manager.close(); });
   await manager.ready;
-  await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+  await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
   const read = async () => {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'timeline_request', payload: {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'timeline_request', payload: {
       agentId: 'observed-child', requestId: 'history', direction: 'tail', limit: 100,
     } }));
     const decoded = decodeServerMessage(output.at(-1)!);

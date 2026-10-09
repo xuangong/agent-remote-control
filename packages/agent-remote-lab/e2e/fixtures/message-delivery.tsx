@@ -7,8 +7,8 @@ import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 
 const replica = new AgentReplica();
-const snapshot = { protocolVersion: '1.6.0', type: 'agent_snapshot', payload: replicaState.agent! } as const;
-const history: HistoryPage = { protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+const snapshot = { protocolVersion: '1.7.0', type: 'agent_snapshot', payload: replicaState.agent! } as const;
+const history: HistoryPage = { protocolVersion: '1.7.0', type: 'timeline_page', payload: {
   requestId: 'history', agentId: snapshot.payload.id, epoch: 'delivery', direction: 'tail', reset: false, staleCursor: false, gap: false,
   window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'delivery', seq: 1 }, endCursor: { epoch: 'delivery', seq: 1 },
   hasOlder: false, hasNewer: false, error: null, entries: [{ providerId: snapshot.payload.providerId,
@@ -24,10 +24,10 @@ const transport: RemoteAgentTransport = {
     queueMicrotask(() => callbacks.onOpen());
     return { send: message => {
       if (message.type === 'negotiate') {
-        callbacks.onMessage({ protocolVersion: '1.6.0', type: 'negotiated' });
+        callbacks.onMessage({ protocolVersion: '1.7.0', type: 'negotiated' });
         callbacks.onMessage(snapshot);
       } else if (message.type === 'timeline_subscription') {
-        callbacks.onMessage({ protocolVersion: '1.6.0', type: 'timeline_subscribed', payload: {
+        callbacks.onMessage({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: {
           requestId: message.payload.requestId, agentIds: [snapshot.payload.id],
         } });
       } else if (message.type === 'send_message') submitted = message;
@@ -39,7 +39,7 @@ const transport: RemoteAgentTransport = {
 const client = new RemoteSessionClient(snapshot.payload.id, transport, replica, { scheduleReconnect: () => () => {} });
 client.start();
 function acknowledge() {
-  if (submitted) listener.onMessage({ protocolVersion: '1.6.0', type: 'command_acknowledged', payload: {
+  if (submitted) listener.onMessage({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
     requestId: submitted.payload.requestId, agentId: snapshot.payload.id, command: 'send_message',
   } });
 }
@@ -47,7 +47,7 @@ function disconnect() {
   listener.onDisconnect();
 }
 function echo() {
-  if (submitted) listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_stream', payload: {
+  if (submitted) listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_stream', payload: {
     agentId: snapshot.payload.id, epoch: 'delivery', seq: replica.getState().timeline.nextSeq, timestamp: new Date().toISOString(),
     event: { type: 'timeline', providerId: snapshot.payload.providerId, item: { type: 'user_message', text: 'text' in submitted.payload ? submitted.payload.text : '' }, resources: [] },
   } });

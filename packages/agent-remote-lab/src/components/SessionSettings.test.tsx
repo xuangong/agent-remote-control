@@ -80,14 +80,20 @@ describe('chat session settings', () => {
     expect((container.querySelector('textarea') as HTMLTextAreaElement).disabled).toBe(false);
   });
 
-  it('shows current permissions while disabling changes for disconnected or busy sessions', async () => {
-    for (const props of [{ state, disabled: true }, { state: { ...state, agent: { ...state.agent, status: 'running' as const } } }]) {
-      const container = await render(<LiveControlPanel {...props} onSetSessionSetting={async () => {}} />);
-      await act(async () => (container.querySelector('[data-testid="session-permissions-button"]') as HTMLButtonElement).click());
-      const select = container.querySelector('[data-testid="session-setting-permissions"]') as HTMLSelectElement;
-      expect(select.value).toBe('ask');
-      expect(select.disabled).toBe(true);
-    }
+  it.each([
+    { name: 'disconnected', disabled: true, activity: 'idle', mutable: false },
+    { name: 'running', disabled: false, activity: 'running', mutable: true },
+    { name: 'waiting', disabled: false, activity: 'waiting', mutable: true },
+  ] as const)('keeps current permissions visible and respects connection availability while $name', async ({disabled, activity, mutable}) => {
+    const onSelect = vi.fn(async () => {});
+    const container = await render(<LiveControlPanel state={{ ...state, agent: { ...state.agent, status: activity } }} disabled={disabled} onSetSessionSetting={onSelect} />);
+    await act(async () => (container.querySelector('[data-testid="session-permissions-button"]') as HTMLButtonElement).click());
+    const select = container.querySelector('[data-testid="session-setting-permissions"]') as HTMLSelectElement;
+    expect(select.value).toBe('ask');
+    expect(select.disabled).toBe(!mutable);
+    await act(async () => { select.value = 'auto'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    if (mutable) expect(onSelect).toHaveBeenCalledExactlyOnceWith('permissions', 'auto');
+    else expect(onSelect).not.toHaveBeenCalled();
   });
 
   it.each([

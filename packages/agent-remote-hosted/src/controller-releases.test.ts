@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createControllerReleases } from './controller-releases.js';
-const manifest = { protocolVersion: '1.6.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['linux-x64'] };
+const manifest = { protocolVersion: '1.7.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['linux-x64'] };
 const entry = { tag_name: 'controller-v0.2.0', draft: false, prerelease: false, published_at: '2026-09-22', assets: [{ name: 'controller-release.json' }, { name: manifest.asset }] };
 it('selects published stable versions, uses trusted URLs and caches concurrent discovery', async () => {
   const urls: string[] = [];

@@ -15,7 +15,10 @@ import { discoverClaudeCommands } from './commands.js';
 import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 
-export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'>;
+export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
+  /** The pinned SDK implements this control without declaring it on public Query. */
+  getSettings?: () => Promise<unknown>;
+};
 export interface ClaudeSessionOptions {
   executable?: string;
   restrictedNative?: boolean;
@@ -58,6 +61,8 @@ export class ClaudeAgentSession implements AgentSession {
   private permissionMode: PermissionMode = 'default';
   private resumePermissionMode: PermissionMode = 'default';
   private models: ModelInfo[] = [];
+  private appliedEffort: string | null | undefined;
+  private settingsRevision = 0;
   private changingSetting = false;
   private preparingMessage = false;
   private observing = false;
@@ -92,7 +97,7 @@ export class ClaudeAgentSession implements AgentSession {
       try {
         await this.updatePermissionMode(this.resumePermissionMode);
         this.runtimeUpdated();
-      } finally { this.changingSetting = false; }
+      } finally { this.changingSetting = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
     });
   }
 
@@ -114,6 +119,10 @@ export class ClaudeAgentSession implements AgentSession {
       session.pump = session.consume();
       const initialized = await deadline(session.native.initializationResult(), session.timeout, 'Claude initialization');
       session.models = initialized.models ?? [];
+      if (session.native.applyFlagSettings && session.native.getSettings) {
+        try { await session.readNativeSettings(); }
+        catch { session.appliedEffort = undefined; }
+      }
       if (session.failure) throw session.failure;
       session.status = 'idle';
       session.runtimeUpdated();
@@ -147,7 +156,7 @@ export class ClaudeAgentSession implements AgentSession {
       const content = await prepareAgentOperation(() => claudeMessageContent(snapshot));
       this.requireOpen();
       this.dispatchMessage(content);
-    } finally { this.preparingMessage = false; }
+    } finally { this.preparingMessage = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
   private assertMessageReady(options: AgentMessageOptions): void {
@@ -191,7 +200,7 @@ export class ClaudeAgentSession implements AgentSession {
       this.changingSetting = false;
       await this.sendMessage(`/${command.name}${args ? ` ${args}` : ''}`);
       return {};
-    } finally { this.changingSetting = false; }
+    } finally { this.changingSetting = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
   async cancel(): Promise<void> {
@@ -203,21 +212,36 @@ export class ClaudeAgentSession implements AgentSession {
     catch (error) { this.fail(error); this.native.close(); throw error; }
   }
 
-  async setSessionSetting(id: string, value: string): Promise<void> {
+  async setSessionSetting(id: string, value: string): Promise<void | { status: 'deferred' }> {
     this.requireOpen();
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude settings can only change while idle.');
+    if (this.changingSetting || this.preparingMessage) return { status: 'deferred' };
     this.changingSetting = true;
     try {
-      if (id === 'model') this.models = await prepareAgentOperation(() => deadline(this.native.supportedModels(), this.timeout, 'Claude model discovery'));
+      if (id === 'model' || id === 'reasoning_effort') this.models = await prepareAgentOperation(() => deadline(this.native.supportedModels(), this.timeout, 'Claude model discovery'));
       this.requireOpen();
       validateSessionSetting(this.settings(), id, value);
       if (id === 'model') {
         await this.updateNative(this.native.setModel(value), 'Claude model update');
         if (this.disposed) throw new Error('Claude closed before model confirmation.');
+        this.settingsRevision++;
         this.config.model = value;
+        if (this.appliedEffort !== undefined) {
+          try { await this.readNativeSettings(); }
+          catch { this.appliedEffort = undefined; }
+        }
+      } else if (id === 'reasoning_effort') {
+        await this.updateNative(this.native.applyFlagSettings!({ effortLevel: value === 'default' ? null : value as Options['effort'] }), 'Claude effort update');
+        if (this.disposed) throw new Error('Claude closed before effort confirmation.');
+        this.settingsRevision++;
+        await this.readNativeSettings();
+        if (value === 'default') delete this.config.reasoningEffort;
+        else if (this.appliedEffort !== null) this.config.reasoningEffort = this.appliedEffort;
+        else this.config.reasoningEffort = value;
+        this.runtimeUpdated();
+        if (value !== 'default' && value !== this.appliedEffort) throw new AgentOperationRejectedError('operation_rejected', `Claude applied ${this.appliedEffort ?? 'no effort parameter'} instead of requested effort ${value}.`);
       } else await this.updatePermissionMode(value as PermissionMode);
       this.runtimeUpdated();
-    } finally { this.changingSetting = false; }
+    } finally { this.changingSetting = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
   async setPlanning(active: boolean): Promise<void> {
@@ -227,7 +251,7 @@ export class ClaudeAgentSession implements AgentSession {
     try {
       await this.updatePermissionMode(active ? 'plan' : this.resumePermissionMode);
       this.runtimeUpdated();
-    } finally { this.changingSetting = false; }
+    } finally { this.changingSetting = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
   private async updatePermissionMode(mode: PermissionMode): Promise<void> {
@@ -240,22 +264,57 @@ export class ClaudeAgentSession implements AgentSession {
     catch (error) { if (error instanceof DeadlineError) this.fail(error); throw error; }
   }
   private confirmPermissionMode(mode: PermissionMode): void {
+    this.settingsRevision++;
     this.permissionMode = mode;
     this.planning = mode === 'plan';
     if (!this.planning) this.resumePermissionMode = mode;
   }
+  private async readNativeSettings(refreshModel = false): Promise<void> {
+    const revision = this.settingsRevision;
+    try {
+      const response = await deadline(this.native.getSettings!(), this.timeout, 'Claude applied effort readback');
+      if (this.disposed || revision !== this.settingsRevision) return;
+      const applied = (response as { applied?: { model?: unknown; effort?: unknown } } | null)?.applied;
+      const effort = applied?.effort;
+      if (effort !== null && (typeof effort !== 'string' || !['low', 'medium', 'high', 'xhigh', 'max'].includes(effort))) throw new Error('Claude did not report applied effort.');
+      this.settingsRevision++;
+      this.appliedEffort = effort;
+      const model = applied?.model;
+      const selected = this.config.model;
+      if (refreshModel && typeof model === 'string' && model.length > 0 && selected !== undefined && selected !== 'default') {
+        const metadata = this.models.find(entry => entry.value === selected);
+        if (model !== selected && model !== metadata?.resolvedModel) this.config.model = model;
+      }
+    } catch (error) {
+      if (this.disposed || revision !== this.settingsRevision) return;
+      this.settingsRevision++;
+      this.appliedEffort = undefined;
+      throw error;
+    }
+  }
   private settings(): AgentSessionSetting[] {
     const model = this.config.model ?? (this.models.some(model => model.value === 'default') ? 'default' : null);
-    return [{ id: 'model', category: 'model', label: 'Model', value: model,
+    const settings: AgentSessionSetting[] = [{ id: 'model', category: 'model', label: 'Model', value: model,
       options: this.models.map((model) => ({ value: model.value, label: model.displayName, description: model.description })),
       mutable: true, scope: 'session' },
     { id: 'permissions', category: 'permissions', label: 'Permissions', value: this.permissionMode,
       options: [{ value: 'default', label: 'Ask for permissions' }, { value: 'acceptEdits', label: 'Accept edits' },
         { value: 'dontAsk', label: 'Deny unapproved tools' }, { value: 'plan', label: 'Plan' }],
       mutable: true, scope: 'session' }];
+    const metadata = this.models.find(entry => entry.value === model || entry.resolvedModel === model);
+    if (metadata?.supportsEffort && metadata.supportedEffortLevels?.length && this.appliedEffort !== undefined && this.native.applyFlagSettings && this.native.getSettings) {
+      settings.push({ id: 'reasoning_effort', category: 'model', label: 'Reasoning effort',
+        value: this.config.reasoningEffort === undefined ? 'default' : this.appliedEffort,
+        options: [{ value: 'default', label: 'Native default' }, ...metadata.supportedEffortLevels.map(value => ({ value, label: value }))],
+        mutable: true, scope: 'session', description: `Native default clears the session flag override. Applied effort: ${this.appliedEffort ?? 'no effort parameter'}. Changes apply to subsequent native requests.` });
+    }
+    return settings;
   }
 
-  async runtimeInfo(): Promise<AgentRuntimeInfo> { return this.info(); }
+  async runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo> {
+    if (options?.refreshSettings && !this.disposed && !this.failure && this.native.getSettings) await this.readNativeSettings(true);
+    return this.info();
+  }
   async readResource(locator: string) { return this.images.readResource(locator); }
   async openChildSession(nativeSessionId: string): Promise<AgentSession> { return this.children.open(nativeSessionId); }
   async release(): Promise<void> {

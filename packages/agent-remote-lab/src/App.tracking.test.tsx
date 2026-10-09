@@ -30,7 +30,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
   const contentClosed = vi.fn();
   const contentListeners = new Map<string, RemoteTransportListener>();
   const activityListeners = new Map<string, RemoteTransportListener>();
-  const snapshot = { protocolVersion: '1.6.0' as const, type: 'agent_snapshot' as const,
+  const snapshot = { protocolVersion: '1.7.0' as const, type: 'agent_snapshot' as const,
     payload: { ...replicaState.agent!, id: 'live-agent', providerId: target.providerId,
       runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: target.providerId, sessionId: target.nativeSessionId, ...(navigation ? { childSessions: [{ nativeSessionId: 'child', title: 'Tracked child', status: 'idle' as const, observation: 'live' as const, createdAt: '2026-09-20T00:00:00Z' }] } : {}) } } };
   const snapshotFor = (agentId: string) => {
@@ -39,7 +39,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
     return { ...snapshot, payload: { ...snapshot.payload, id: agentId, runtimeInfo: { ...snapshot.payload.runtimeInfo, sessionId, childSessions } } };
   };
   const fetchTimeline = vi.fn<LabTransport['fetchTimeline']>(async agentId => ({
-    protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+    protocolVersion: '1.7.0', type: 'timeline_page', payload: {
       requestId: 'history', agentId, direction: 'tail', epoch: 'tracked-epoch', reset: false, staleCursor: false, gap: false,
       window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'tracked-epoch', seq: 1 }, endCursor: { epoch: 'tracked-epoch', seq: 1 },
       hasOlder: false, hasNewer: false, error: null,
@@ -56,16 +56,16 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
       queueMicrotask(() => listener.onOpen());
       return { close: () => { if (observing) activityClosed(agentId); else contentClosed(agentId); }, send: message => {
         if (message.type === 'negotiate') {
-          listener.onMessage({ protocolVersion: '1.6.0', type: 'negotiated', sessionControl: true });
-          if (message.observation !== 'activity') listener.onMessage({ protocolVersion: '1.6.0', type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
+          listener.onMessage({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
+          if (message.observation !== 'activity') listener.onMessage({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
           if (message.observation === 'activity') {
             observing = true; activity = listener; activityListeners.set(agentId, listener);
-            if (activityReady) listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId, status: 'idle', cursor: { epoch: 'tracked-epoch', seq: 1 } } });
+            if (activityReady) listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId, status: 'idle', cursor: { epoch: 'tracked-epoch', seq: 1 } } });
           } else { contentConnections.push(agentId); contentListeners.set(agentId, listener); listener.onMessage(snapshotFor(agentId)); }
         } else if (message.type === 'session_control_request') {
-          listener.onMessage({ protocolVersion: '1.6.0', type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
+          listener.onMessage({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
         } else if (message.type === 'timeline_subscription') {
-          listener.onMessage({ protocolVersion: '1.6.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
+          listener.onMessage({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
         }
       } };
     },
@@ -87,7 +87,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(title))!.click());
   };
   const emitActivity = (agentId: string, seq: number) => act(async () => {
-    activityListeners.get(agentId)!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+    activityListeners.get(agentId)!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
       agentId, status: 'idle', cursor: { epoch: 'tracked-epoch', seq },
     } });
   });
@@ -156,7 +156,7 @@ it.each(['connecting', 'disconnected'] as const)('revalidates a %s tracked sessi
 
 it('closes the tracking edge only when content reaches the fixed activity cursor', async () => {
   const f = await fixture(star);
-  await act(async () => f.activity.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+  await act(async () => f.activity.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
     agentId: 'live-agent', status: 'waiting', cursor: { epoch: 'tracked-epoch', seq: 1 },
   } } as Parameters<RemoteTransportListener['onMessage']>[0]));
   const page = await f.fetchTimeline('live-agent', 'tail', undefined, 100);
@@ -168,7 +168,7 @@ it('closes the tracking edge only when content reaches the fixed activity cursor
   expect(ring()?.getAttribute('data-state')).toBe('catching_up');
   expect(ring()?.getAttribute('aria-valuenow')).not.toBe('100');
   // A newer activity report must not move the target selected on entry.
-  await act(async () => f.activity.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+  await act(async () => f.activity.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: {
     agentId: 'live-agent', status: 'running', cursor: { epoch: 'tracked-epoch', seq: 50 },
   } } as Parameters<RemoteTransportListener['onMessage']>[0]));
   await act(async () => release(page));
@@ -186,7 +186,7 @@ it('retains opened tracked content across switches without preconnecting unopene
   expect(f.contentConnections).toEqual(['live-agent']);
   await f.open(other.title);
   expect(f.contentClosed).not.toHaveBeenCalledWith('live-agent');
-  await act(async () => f.contentListeners.get('live-agent')!.onMessage({ protocolVersion: '1.6.0', type: 'agent_update',
+  await act(async () => f.contentListeners.get('live-agent')!.onMessage({ protocolVersion: '1.7.0', type: 'agent_update',
     payload: { ...replicaState.agent!, id: 'live-agent', status: 'running', runtimeInfo: { ...replicaState.agent!.runtimeInfo, status: 'running', sessionId: star.nativeSessionId } } }));
   await f.open();
   expect(f.contentConnections).toEqual(['live-agent', 'other-agent']);
@@ -348,7 +348,7 @@ it.each([false, true])('does not restore a side link removed by another tab whil
   const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
   expect(side.hidden).toBe(false);
   await f.open(other.title);
-  await act(async () => f.contentListeners.get('live-agent')!.onMessage({ protocolVersion: '1.6.0', type: 'session_control', payload: {
+  await act(async () => f.contentListeners.get('live-agent')!.onMessage({ protocolVersion: '1.7.0', type: 'session_control', payload: {
     agentId: 'live-agent', revision: 'native-owner', access: 'read_only', available: false,
     nativeOwner: { kind: 'native_cli', generation: 'native-owner' },
   } }));

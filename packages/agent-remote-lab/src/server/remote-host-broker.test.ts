@@ -141,7 +141,7 @@ describe('Remote Host broker', () => {
     const repeated = await (await f.post(base + '/attach', { nativeSessionId: 'cold' })).json();
     expect(repeated).toEqual(attached); expect(attached.agentId).toBeTruthy();
     expect(calls.find((call) => call.path === '/remote/attach')).toMatchObject({ sessionId: attached.agentId });
-    expect((await fetch(f.url + `/v1/sessions/${attached.agentId}/snapshot?protocolVersion=1.6.0`)).status).toBe(200);
+    expect((await fetch(f.url + `/v1/sessions/${attached.agentId}/snapshot?protocolVersion=1.7.0`)).status).toBe(200);
   });
   it('bounds RPC waits and never repeats an uncertain creation', async () => {
     const f = await setup({ rpcTimeoutMs: 40 }); const pair = await (await f.post('/v1/remote/pairings')).json(); const native = await host(f.url, pair.key);
@@ -217,8 +217,8 @@ describe('Remote Host broker', () => {
       reconnected.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId, status: 200,
         body: request.path.startsWith('/remote/') ? JSON.stringify({ agentId, nativeSessionId: body.nativeSessionId }) : '{}' }));
     });
-    expect((await fetch(f.url + `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.6.0`)).status).toBe(200);
-    expect(recovery).toEqual(['/remote/attach', '/remote/child/attach', `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.6.0`]);
+    expect((await fetch(f.url + `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.7.0`)).status).toBe(200);
+    expect(recovery).toEqual(['/remote/attach', '/remote/child/attach', `/v1/sessions/${child.agentId}/snapshot?protocolVersion=1.7.0`]);
   });
 });
 
@@ -263,7 +263,7 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
       if (request.path === '/remote/create') sessions.add(body.nativeSessionId);
       if (!sessions.has(body.nativeSessionId)) return { status: 404, body: '{}' };
       let existing = false; try { relay.requireAgent(request.sessionId!); existing = true; } catch {}
-      if (!existing) await relay.createAgent({ protocolVersion: '1.6.0', type: 'create_agent', payload: {
+      if (!existing) await relay.createAgent({ protocolVersion: '1.7.0', type: 'create_agent', payload: {
         requestId: request.sessionId!, operationId: request.path === '/remote/create' ? '00000000-0000-4000-8000-000000000007' : '00000000-0000-4000-8000-000000000006',
         agentId: request.sessionId!, providerId: 'recorded', config: { sessionId: body.nativeSessionId },
       } });

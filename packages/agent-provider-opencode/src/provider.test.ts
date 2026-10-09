@@ -17,6 +17,7 @@ async function fixture() {
   const requests: Array<{ method: string; path: string; body: any }> = [];
   let messages: any[] = [];
   let historyBarrier: { arrive(): void; wait: Promise<void> } | undefined;
+  let sessionBarrier: { arrive(): void; wait: Promise<void> } | undefined;
   let failHistoryReads = 0;
   let status: any = { type: 'idle' };
   let permissions: any[] = [];
@@ -60,7 +61,13 @@ async function fixture() {
     if (url.pathname === '/api/session/ses_test/model' || url.pathname === '/api/session/ses_test/agent') {
       Object.assign(nativeSelection, body); emit('session.updated', { info: native() }); res.writeHead(204); res.end(); return;
     }
-    if (url.pathname === '/session/ses_test') { if (req.method === 'PATCH') title = body.title; return json(native()); }
+    if (url.pathname === '/session/ses_test') {
+      if (req.method === 'PATCH') title = body.title;
+      const snapshot = structuredClone(native());
+      const barrier = sessionBarrier; sessionBarrier = undefined;
+      if (barrier) { barrier.arrive(); await barrier.wait; }
+      return json(snapshot);
+    }
     if (url.pathname === '/session/ses_test/message') {
       if (failHistoryReads-- > 0) { res.writeHead(500); res.end(); return; }
       const before = url.searchParams.get('before');
@@ -97,6 +104,9 @@ async function fixture() {
   return { set health(value: unknown) { health = value; }, url: `http://127.0.0.1:${(server.address() as any).port}`, requests, emit, native, set nativeSelection(value: any) { nativeSelection = value; }, set children(value: any[]) { children = value; }, set globalSessions(value: any[]) { globalSessions = value; }, set globalListingStatus(value: number) { globalListingStatus = value; }, set connectedProviders(value: string[]) { connectedProviders = value; }, get connections() { return connections; }, get activeConnections() { return streams.size; }, set failHistoryReads(value: number) { failHistoryReads = value; }, blockNextHistory() {
     let arrive!: () => void; let release!: () => void; const arrived = new Promise<void>(resolve => { arrive = resolve; });
     historyBarrier = { arrive, wait: new Promise<void>(resolve => { release = resolve; }) }; return { arrived, release };
+  }, blockNextSessionRead() {
+    let arrive!: () => void; let release!: () => void; const arrived = new Promise<void>(resolve => { arrive = resolve; });
+    sessionBarrier = { arrive, wait: new Promise<void>(resolve => { release = resolve; }) }; return { arrived, release };
   }, blockNextAbort() {
     let arrive!: () => void; let release!: () => void; const arrived = new Promise<void>(resolve => { arrive = resolve; });
     abortBarrier = { arrive, wait: new Promise<void>(resolve => { release = resolve; }) }; return { arrived, release };
@@ -719,4 +729,57 @@ test('keeps native retry active after a failed turn until native settlement', as
   await expect.poll(async () => (await session.runtimeInfo()).status, {timeout: 4000}).toBe('idle');
   expect(items.filter(item => item.type === 'observation' && item.event.type === 'turn_failed')).toHaveLength(1);
   expect(items.some(item => item.type === 'observation' && item.event.type === 'turn_completed')).toBe(false);
+}, 10000);
+
+test('changes a running session model and agent with native readback without aborting its turn', async () => {
+  const f = await fixture(); f.status = { type: 'busy' }; f.messages = [assistant('Still working')];
+  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
+  const session = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) });
+  const items = observe(session);
+  await waitFor(() => timeline(items).some(item => item.text === 'Still working'));
+  await session.setSessionSetting!('model', 'test/model');
+  await session.setSessionSetting!('agent', 'plan');
+  expect((await session.runtimeInfo()).status).toBe('running');
+  expect((await session.runtimeInfo()).settings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'model', value: 'test/model' }),
+    expect.objectContaining({ id: 'agent', value: 'plan' }),
+  ]));
+  expect(f.native()).toMatchObject({ model: { providerID: 'test', id: 'model' }, agent: 'plan' });
+  expect(f.requests.some(request => request.path.endsWith('/abort'))).toBe(false);
+  expect(items.some(item => item.type === 'observation' && ['turn_completed', 'turn_canceled', 'turn_failed'].includes(item.event.type))).toBe(false);
+}, 10000);
+
+test('refreshes native session selections on request without polling for ordinary runtime reads', async () => {
+  const f = await fixture();
+  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
+  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
+  const reads = () => f.requests.filter(request => request.method === 'GET' && request.path === '/session/ses_test').length;
+  const before = reads();
+  await session.runtimeInfo();
+  expect(reads()).toBe(before);
+  f.nativeSelection = { model: { providerID: 'test', id: 'model', variant: 'deep' }, agent: 'plan', permission: [{ permission: '*', pattern: '*', action: 'deny' }] };
+  const current = await session.runtimeInfo({ refreshSettings: true });
+  expect(reads()).toBe(before + 1);
+  expect(current).toMatchObject({ model: 'test/model', mode: 'plan', planning: { active: true } });
+  expect(current.settings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'variant', value: 'deep' }),
+    expect.objectContaining({ id: 'permission:*', value: 'deny' }),
+  ]));
+}, 10000);
+
+
+test('does not restore a stale session read after a newer native selection is confirmed', async () => {
+  const f = await fixture(); f.nativeSelection = { agent: 'build', model: { providerID: 'test', id: 'model' } };
+  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
+  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
+  const blocked = f.blockNextSessionRead();
+  const reading = session.runtimeInfo({ refreshSettings: true });
+  await blocked.arrived;
+  try {
+    await session.setSessionSetting!('agent', 'plan');
+    expect((await session.runtimeInfo()).mode).toBe('plan');
+    blocked.release(); await reading;
+    expect((await session.runtimeInfo()).mode).toBe('plan');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'agent', value: 'plan' }));
+  } finally { blocked.release(); await reading; }
 }, 10000);

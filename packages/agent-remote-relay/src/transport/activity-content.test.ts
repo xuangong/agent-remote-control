@@ -59,8 +59,8 @@ async function fixture() {
     socket.on('message', raw => { messages.push(JSON.parse(raw.toString())); });
     await once(socket, 'open');
     await expect.poll(() => messages.some(item => item.type === 'ready'), { timeout: 1500 }).toBe(true);
-    socket.send(JSON.stringify({ protocolVersion: '1.6.0', type: 'subscribe', subscriptionId: 1, agentId: 'tracked',
-      message: { protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' } }));
+    socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'subscribe', subscriptionId: 1, agentId: 'tracked',
+      message: { protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' } }));
     const activity = () => messages.filter(item => item.message?.type === 'agent_activity').map(item => item.message.payload);
     await expect.poll(() => activity().length, { timeout: 1500 }).toBe(1);
     return { socket, messages, activity };

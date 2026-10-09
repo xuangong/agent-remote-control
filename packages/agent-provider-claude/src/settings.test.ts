@@ -1,11 +1,12 @@
 import { expect, it } from 'vitest';
+import type { ModelInfo } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeAgentSession } from './session.js';
 import { Channel } from './channel.js';
 
 function fixture() {
   const events = new Channel<any>();
   const changes: string[] = [];
-  let models = [{ value: 'sonnet', displayName: 'Sonnet', description: 'Native Sonnet' }];
+  let models: ModelInfo[] = [{ value: 'sonnet', displayName: 'Sonnet', description: 'Native Sonnet' }];
   let update: () => Promise<void> = async () => {};
   const query = { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](),
     initializationResult: async () => ({ models }), supportedModels: async () => models,
@@ -16,7 +17,7 @@ function fixture() {
     setUpdate(value: typeof update) { update = value; }, factory: () => query as any };
 }
 
-it('publishes confirmed model choices and rejects stale choices and active-turn changes', async () => {
+it('publishes confirmed model choices, rejects stale choices, and changes permissions during a turn', async () => {
   const native = fixture();
   const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'old' }, { query: native.factory });
   try {
@@ -27,13 +28,18 @@ it('publishes confirmed model choices and rejects stale choices and active-turn 
     const changing = session.setSessionSetting!('model', 'sonnet');
     await expect.poll(() => typeof confirm).toBe('function');
     expect((await session.runtimeInfo()).model).toBe('old');
+    await expect(session.setSessionSetting('permissions', 'dontAsk')).resolves.toEqual({ status: 'deferred' });
+    expect(native.changes).toEqual([]);
     await expect(session.sendMessage('racing')).rejects.toThrow(/setting/);
     confirm(); await changing;
     expect((await session.runtimeInfo()).model).toBe('sonnet');
     native.setModels([]);
     await expect(session.setSessionSetting!('model', 'sonnet')).rejects.toThrow(/Unavailable/);
     await session.sendMessage('active');
-    await expect(session.setSessionSetting!('permissions', 'acceptEdits')).rejects.toThrow(/idle/);
+    native.setUpdate(async () => {});
+    await session.setSessionSetting!('permissions', 'acceptEdits');
+    expect((await session.runtimeInfo()).status).toBe('running');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'acceptEdits' }));
   } finally { await session.dispose(); }
 });
 
@@ -125,4 +131,149 @@ it('does not invent a default option when the native model catalog omits it', as
     expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'model', value: null }));
     await expect(session.setSessionSetting!('model', 'default')).rejects.toThrow(/Unavailable/);
   } finally { await session.dispose(); }
+});
+
+it('changes a model during a running turn only after native confirmation without interrupting it', async () => {
+  const native = fixture(); let interrupts = 0;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'old' }, {
+    query: () => ({ ...native.factory(), interrupt: async () => { interrupts++; } }),
+  });
+  try {
+    await session.sendMessage('Continue working');
+    let confirm!: () => void;
+    native.setUpdate(() => new Promise<void>(resolve => { confirm = resolve; }));
+    const changing = session.setSessionSetting('model', 'sonnet');
+    void changing.catch(() => {});
+    await expect.poll(() => typeof confirm).toBe('function');
+    expect((await session.runtimeInfo()).model).toBe('old');
+    expect((await session.runtimeInfo()).status).toBe('running');
+    confirm(); await changing;
+    expect((await session.runtimeInfo()).model).toBe('sonnet');
+    expect((await session.runtimeInfo()).status).toBe('running');
+    expect(interrupts).toBe(0);
+  } finally { await session.dispose(); }
+});
+
+function effortFixture() {
+  const native = fixture();
+  native.setModels([{ value: 'sonnet', resolvedModel: 'claude-sonnet-native', displayName: 'Sonnet', description: 'Native Sonnet', supportsEffort: true, supportedEffortLevels: ['low', 'high', 'max'] }]);
+  let applied: string | null = 'high';
+  let apply: (value: string | null) => Promise<void> = async value => { applied = value ?? 'high'; };
+  const flags: Array<string | null> = [];
+  return { ...native, flags, setApply(value: typeof apply) { apply = value; }, setApplied(value: string | null) { applied = value; },
+    factory: () => ({ ...native.factory(),
+      applyFlagSettings: async ({ effortLevel }: { effortLevel: string | null }) => { flags.push(effortLevel); await apply(effortLevel); },
+      getSettings: async () => ({ applied: { model: 'claude-sonnet-native', effort: applied } }),
+    }),
+  };
+}
+
+it('changes native effort during a turn and confirms actual application before publishing it', async () => {
+  const native = effortFixture();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'claude-sonnet-native' }, { query: native.factory });
+  try {
+    const effort = (await session.runtimeInfo()).settings!.find(setting => setting.id === 'reasoning_effort');
+    expect(effort).toMatchObject({ value: 'default', options: [{ value: 'default', label: 'Native default' }, { value: 'low', label: 'low' }, { value: 'high', label: 'high' }, { value: 'max', label: 'max' }] });
+    expect(effort!.description).toContain('Applied effort: high');
+    await session.sendMessage('Keep working');
+    let confirm!: () => void;
+    native.setApply(value => new Promise<void>(resolve => { confirm = () => { native.setApplied(value); resolve(); }; }));
+    const changing = session.setSessionSetting('reasoning_effort', 'max');
+    void changing.catch(() => {});
+    await expect.poll(() => typeof confirm).toBe('function');
+    expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'reasoning_effort')!.value).toBe('default');
+    confirm(); await changing;
+    expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'reasoning_effort')!.value).toBe('max');
+    expect((await session.runtimeInfo()).status).toBe('running');
+    expect(JSON.parse((await session.runtimeInfo()).persistence!.opaque).reasoningEffort).toBe('max');
+    native.setApply(async value => { native.setApplied(value ?? 'high'); });
+    await session.setSessionSetting('reasoning_effort', 'default');
+    expect(native.flags).toEqual(['max', null]);
+    expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'reasoning_effort')!.value).toBe('default');
+    expect(JSON.parse((await session.runtimeInfo()).persistence!.opaque).reasoningEffort).toBeUndefined();
+  } finally { await session.dispose(); }
+});
+
+it('keeps native effort overrides truthful and does not invent unsupported effort choices', async () => {
+  const native = effortFixture();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'sonnet' }, { query: native.factory });
+  try {
+    native.setApply(async () => { native.setApplied('low'); });
+    await expect(session.setSessionSetting('reasoning_effort', 'max')).rejects.toThrow(/applied low/);
+    expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'reasoning_effort')!.value).toBe('low');
+    await expect(session.setSessionSetting('reasoning_effort', 'medium')).rejects.toThrow(/Unavailable/);
+    native.setModels([{ value: 'sonnet', displayName: 'Sonnet', description: 'No effort', supportsEffort: false }]);
+    await expect(session.setSessionSetting('reasoning_effort', 'high')).rejects.toThrow(/Unknown/);
+    expect((await session.runtimeInfo()).settings!.some(setting => setting.id === 'reasoning_effort')).toBe(false);
+  } finally { await session.dispose(); }
+});
+
+it('does not advertise effort without native applied-state readback', async () => {
+  const native = effortFixture();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'sonnet' }, {
+    query: () => ({ ...native.factory(), getSettings: undefined }),
+  });
+  try { expect((await session.runtimeInfo()).settings!.some(setting => setting.id === 'reasoning_effort')).toBe(false); }
+  finally { await session.dispose(); }
+});
+
+it('withdraws effort state when native application succeeds but applied readback becomes unavailable', async () => {
+  const native = effortFixture(); let unavailable = false;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'sonnet' }, {
+    query: () => { const query = native.factory(); return { ...query, getSettings: async () => {
+      if (unavailable) throw new Error('Native settings readback unavailable');
+      return query.getSettings();
+    } }; },
+  });
+  try {
+    unavailable = true;
+    await expect(session.setSessionSetting('reasoning_effort', 'max')).rejects.toThrow(/readback unavailable/);
+    expect(native.flags).toEqual(['max']);
+    expect((await session.runtimeInfo()).settings!.some(setting => setting.id === 'reasoning_effort')).toBe(false);
+  } finally { await session.dispose(); }
+});
+
+it('refreshes native settings only on request and retains confirmed model aliases and default selections', async () => {
+  const native = effortFixture(); let reads = 0; let model = 'claude-sonnet-native'; let effort = 'high';
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'sonnet', reasoningEffort: 'high' }, {
+    query: () => ({ ...native.factory(), getSettings: async () => { reads++; return { applied: { model, effort } }; } }),
+  });
+  try {
+    const initialReads = reads;
+    effort = 'low';
+    await session.runtimeInfo();
+    expect(reads).toBe(initialReads);
+    const refreshed = await session.runtimeInfo({ refreshSettings: true });
+    expect(reads).toBe(initialReads + 1);
+    expect(refreshed.model).toBe('sonnet');
+    expect(refreshed.settings).toContainEqual(expect.objectContaining({ id: 'reasoning_effort', value: 'low' }));
+    model = 'externally-selected-model';
+    expect((await session.runtimeInfo({ refreshSettings: true })).model).toBe(model);
+    native.setModels([{ value: 'default', displayName: 'Default', description: 'Native default' }]);
+    await session.setSessionSetting('model', 'default');
+    model = 'native-default-resolved';
+    expect((await session.runtimeInfo({ refreshSettings: true })).settings).toContainEqual(expect.objectContaining({ id: 'model', value: 'default' }));
+  } finally { await session.dispose(); }
+});
+
+it.each(['stale result', 'stale failure'])('does not let a late settings read overwrite a newer native confirmation: %s', async outcome => {
+  const native = effortFixture(); let block = false; let release!: () => void;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', model: 'sonnet' }, {
+    query: () => { const query = native.factory(); return { ...query, getSettings: async () => {
+      if (!block) return query.getSettings();
+      block = false;
+      return new Promise((resolve, reject) => { release = () => outcome === 'stale failure' ? reject(new Error('Old read failed')) : resolve({ applied: { model: 'old-model', effort: 'low' } }); });
+    } }; },
+  });
+  try {
+    block = true;
+    const reading = session.runtimeInfo({ refreshSettings: true });
+    void reading.catch(() => {});
+    await expect.poll(() => typeof release).toBe('function');
+    await session.setSessionSetting('reasoning_effort', 'max');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'reasoning_effort', value: 'max' }));
+    release(); await reading.catch(() => {});
+    expect((await session.runtimeInfo()).model).toBe('sonnet');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'reasoning_effort', value: 'max' }));
+  } finally { release?.(); await session.dispose(); }
 });

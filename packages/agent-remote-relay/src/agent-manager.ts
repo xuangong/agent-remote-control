@@ -36,6 +36,7 @@ import { ResourceIngestor } from './resources/resource-ingestor.js';
 import { InMemoryResourceStore, type ResourceStore } from './resources/resource-store.js';
 import { projectTimelinePage, type TimelinePageRequest } from './timeline-projector.js';
 import { TimelineStore } from './timeline-store.js';
+import { SessionSettingChanges } from './session-setting-changes.js';
 
 export interface AgentManagerAttachOptions {
   agentId: string;
@@ -96,6 +97,8 @@ export class AgentManager {
   readonly ready: Promise<void>;
   readonly settled: Promise<void>;
 
+  private applyingState = false;
+  private readonly settingChanges: SessionSettingChanges;
   private readonly listeners = new Set<AgentManagerListener>();
   private timeline: TimelineStore;
   private readonly state: AgentSnapshot;
@@ -110,6 +113,7 @@ export class AgentManager {
   private boundarySeen = false;
   private closed = false;
   private nativeStateRevision = 0;
+  private runtimeReadRevision = 0;
   private readonly historicalInteractions = new Map<string, AgentInteractionRequest>();
   private readonly nativeStateVersions = new Map<string, number>();
   private commandTail: Promise<void> = Promise.resolve();
@@ -154,6 +158,20 @@ export class AgentManager {
     this.ready = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
       this.rejectReady = reject;
+    });
+    this.settingChanges = new SessionSettingChanges({
+      runtime: runtimeInfo, clock,
+      apply: async (id, value) => {
+        this.validateOperation('set_session_setting');
+        validateSessionSetting(this.state.payload.runtimeInfo.settings, id, value);
+        return this.session.setSessionSetting!(id, value);
+      },
+      refresh: () => this.refreshRuntimeInfo(true),
+      publish: changes => {
+        this.state.payload.settingChanges = changes;
+        this.state.payload.updatedAt = this.clock().toISOString();
+        if (!this.applyingState) this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot(), cursor: this.timeline.cursor });
+      },
     });
     this.settled = this.consume();
     void this.settled.catch(() => undefined);
@@ -219,7 +237,7 @@ export class AgentManager {
   /** Small safety predicate without cloning the potentially large snapshot. */
   canReleaseIdle(): boolean {
     const state = this.state.payload;
-    return !this.closed && this.listeners.size === 0 && !this.historyLoading
+    return !this.closed && !this.settingChanges.hasUnsettledWork() && this.listeners.size === 0 && !this.historyLoading
       && this.pendingCommandExecutions === 0 && (state.status === 'idle' || state.status === 'closed') && state.activeTurn === null
       && state.pendingInteractions.length === 0
       && (!state.runtimeInfo.connection || state.runtimeInfo.connection.state === 'connected');
@@ -227,7 +245,7 @@ export class AgentManager {
 
   canRestartController(preservesNativeWork: boolean): boolean {
     const state = this.state.payload;
-    return !this.closed && !this.historyLoading && this.pendingCommandExecutions === 0
+    return !this.closed && !this.settingChanges.hasUnsettledWork() && !this.historyLoading && this.pendingCommandExecutions === 0
       && state.pendingInteractions.length === 0
       && (!state.runtimeInfo.connection || state.runtimeInfo.connection.state === 'connected')
       && (preservesNativeWork || ((state.status === 'idle' || state.status === 'closed') && state.activeTurn === null));
@@ -404,17 +422,13 @@ export class AgentManager {
 
   async setSessionSetting(id: string, value: string): Promise<void> {
     return this.prepareOperation(async dispatch => {
-      return this.serializeCommand(async () => {
-        if (this.session.capabilities.sessionSettings !== true || !this.session.setSessionSetting) {
-          throw new UnsupportedAgentCapabilityError('set_session_setting');
-        }
-        const state = this.state.payload;
-        if (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0) throw new AgentBusyError();
-        validateSessionSetting((await this.session.runtimeInfo()).settings, id, value);
-        this.validateOperation('set_session_setting');
-        await dispatch(() => this.session.setSessionSetting!(id, value));
-        await this.refreshRuntimeInfo();
-      });
+      if (this.session.capabilities.sessionSettings !== true || !this.session.setSessionSetting) {
+        throw new UnsupportedAgentCapabilityError('set_session_setting');
+      }
+      this.validateOperation('set_session_setting');
+      const setting = validateSessionSetting(this.state.payload.runtimeInfo.settings, id, value);
+      // The receipt acknowledges the accepted intent; the snapshot carries its eventual outcome.
+      await dispatch(async () => this.settingChanges.accept(setting, value));
     });
   }
 
@@ -561,6 +575,7 @@ export class AgentManager {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.settingChanges.close();
     this.resolveReadiness();
     this.listeners.clear();
     try {
@@ -783,18 +798,24 @@ export class AgentManager {
     }
   }
 
-  private async refreshRuntimeInfo(): Promise<void> {
+  private async refreshRuntimeInfo(refreshSettings = false): Promise<void> {
     const revision = this.nativeStateRevision;
-    const runtimeInfo = await this.session.runtimeInfo();
-    if (this.closed || revision !== this.nativeStateRevision) return;
-    this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString());
+    const readRevision = ++this.runtimeReadRevision;
+    const runtimeInfo = await this.session.runtimeInfo(refreshSettings ? { refreshSettings: true } : undefined);
+    if (this.closed || revision !== this.nativeStateRevision || readRevision !== this.runtimeReadRevision) return;
+    this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString(), false);
   }
 
-  private applyStateEvent(event: Exclude<AgentStreamEvent, { type: 'timeline' }>, timestamp: string): void {
+  private applyStateEvent(event: Exclude<AgentStreamEvent, { type: 'timeline' }>, timestamp: string, nativeObservation = true): void {
     this.nativeStateRevision += 1;
     if (event.type === 'interaction_resolved' || event.type === 'interaction_invalidated') this.claimedInteractionIds.delete(event.requestId);
+    this.applyingState = true;
     this.state.payload = reduceSessionState(this.state.payload, event, timestamp);
-    if (event.type === 'runtime_updated') this.state.payload.capabilities = this.effectiveCapabilities();
+    if (event.type === 'runtime_updated') {
+      this.state.payload.capabilities = this.effectiveCapabilities();
+      this.settingChanges.observe(event.runtimeInfo, nativeObservation);
+    }
+    this.applyingState = false;
     this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot(), cursor: this.timeline.cursor });
   }
 

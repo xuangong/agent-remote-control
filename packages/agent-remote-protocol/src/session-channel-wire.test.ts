@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as protocol from './index.js';
 import type { SessionChannelSocket } from './session-channel-wire.js';
 
-const protocolVersion = '1.6.0' as const;
+const protocolVersion = '1.7.0' as const;
 const negotiate = { protocolVersion, type: 'negotiate' as const };
 const negotiated = { protocolVersion, type: 'negotiated' as const };
 const tick = async () => { for (let index = 0; index < 10; index++) await Promise.resolve(); };

@@ -173,7 +173,7 @@ it('holds the permission mutation gate until a canceled plan approval settles na
     await nextEvent(output, 'turn_canceled');
     expect((await session.runtimeInfo()).status).toBe('idle');
     await expect(session.sendMessage('Racing work')).rejects.toThrow(/setting change/);
-    await expect(session.setSessionSetting('permissions', 'dontAsk')).rejects.toThrow(/idle/);
+    await expect(session.setSessionSetting('permissions', 'dontAsk')).resolves.toEqual({ status: 'deferred' });
     await expect(session.setPlanning(false)).rejects.toThrow(/idle/);
     await expect(decision).resolves.toMatchObject({ behavior: 'deny', interrupt: true });
     confirm(); expect(await settled).toMatchObject({ message: expect.stringMatching(/no longer active/) });

@@ -133,6 +133,17 @@ describe('Claude Code native process', () => {
       const before = api.calls();
       await session.sendMessage('WAIT_FOR_INTERRUPT');
       await expect.poll(() => api.calls()).toBeGreaterThan(before);
+      await session.setSessionSetting!('permissions', 'acceptEdits');
+      expect((await session.runtimeInfo()).status).toBe('running');
+      await session.setSessionSetting!('model', 'sonnet');
+      expect((await session.runtimeInfo()).status).toBe('running');
+      const effort = (await session.runtimeInfo()).settings!.find(setting => setting.id === 'reasoning_effort');
+      expect(effort?.options).toContainEqual({ value: 'low', label: 'low' });
+      await session.setSessionSetting!('reasoning_effort', 'low');
+      expect((await session.runtimeInfo({ refreshSettings: true })).settings).toContainEqual(expect.objectContaining({ id: 'reasoning_effort', value: 'low' }));
+      await session.setSessionSetting!('reasoning_effort', 'default');
+      expect((await session.runtimeInfo({ refreshSettings: true })).settings).toContainEqual(expect.objectContaining({ id: 'reasoning_effort', value: 'default' }));
+      expect((await session.runtimeInfo()).status).toBe('running');
       await session.cancel();
       expect((await turn(session, resumed)).at(-1)).toMatchObject({ type: 'turn_canceled' });
       expect((await session.runtimeInfo()).status).toBe('idle');

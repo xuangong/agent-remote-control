@@ -101,7 +101,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   await assert.rejects(run(['opencode', 'callbacks', 'setup', join(directory, 'private callbacks')]));
   await assert.rejects(run(['start']), /AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required/);
   await assert.rejects(run(['start'], { AGENT_HOST_REMOTE_KEY: 'key-without-relay' }), /Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together/);
-  for (const [provider, version] of [['codex', 'codex-cli 0.148.0'], ['claude', '2.1.247 (Claude Code)']]) {
+  for (const [provider, version] of [['codex', 'codex-cli 0.162.0'], ['claude', '2.1.247 (Claude Code)']]) {
     const executable = join(directory, `${provider}.cjs`);
     await writeFile(executable, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(version)});\n`, { mode: 0o755 });
     env[`AGENT_HOST_${provider.toUpperCase()}`] = executable;

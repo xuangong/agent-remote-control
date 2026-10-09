@@ -23,9 +23,9 @@ describe('session wire negotiation', () => {
       executeOperation: (target, operation, work) => cache.execute({ ...operation, scope: 'owner', target: target.agentId }, work),
     });
     try {
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
       const send = async (operationId: string) => {
-        await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'send_message', payload: {
+        await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'send_message', payload: {
           requestId: 'image-send', operationId, agentId: agent.agentId,
           content: [{ type: 'image', attachmentId: 'expired', label: 'image #1' }],
         } }));
@@ -43,7 +43,7 @@ describe('session wire negotiation', () => {
   it('requires explicit resolve authorization before creating a local resource binding', async () => {
     const { agent } = fakeAgent();
     const resolveResource = vi.fn(async (requestId: string, locator: string, sourceLocator?: string) => ({
-      protocolVersion: '1.6.0' as const,
+      protocolVersion: '1.7.0' as const,
       type: 'resource_resolve_response' as const,
       payload: {
         requestId, agentId: 'agent-1',
@@ -57,10 +57,10 @@ describe('session wire negotiation', () => {
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)), {
       authorize: (action) => { actions.push(action); return permitted; },
     });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
     const request = {
-      protocolVersion: '1.6.0', type: 'resource_resolve_request',
+      protocolVersion: '1.7.0', type: 'resource_resolve_request',
       payload: { requestId: 'resolve-one', agentId: 'agent-1', locator: './result.png', sourceLocator: '/workspace/report.md' },
     };
 
@@ -82,14 +82,14 @@ describe('session wire negotiation', () => {
     agent.executeCommand = vi.fn(async () => ({ text: 'Native result' }));
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'list_commands', payload: { agentId: 'agent-1', requestId: 'list' } }));
-    expect(output).toEqual([{ protocolVersion: '1.6.0', type: 'command_list', payload: { agentId: 'agent-1', requestId: 'list', commands } }]);
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'list_commands', payload: { agentId: 'agent-1', requestId: 'list' } }));
+    expect(output).toEqual([{ protocolVersion: '1.7.0', type: 'command_list', payload: { agentId: 'agent-1', requestId: 'list', commands } }]);
     output.length = 0;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'execute_command', payload: { agentId: 'agent-1', requestId: 'run', operationId: OPERATION_ID, commandId: 'native:custom', args: ' a  b\n' } }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'execute_command', payload: { agentId: 'agent-1', requestId: 'run', operationId: OPERATION_ID, commandId: 'native:custom', args: ' a  b\n' } }));
     expect(agent.executeCommand).toHaveBeenCalledWith('native:custom', ' a  b\n');
-    expect(output).toEqual([{ protocolVersion: '1.6.0', type: 'command_result', payload: { agentId: 'agent-1', requestId: 'run', result: { text: 'Native result' } } }]);
+    expect(output).toEqual([{ protocolVersion: '1.7.0', type: 'command_result', payload: { agentId: 'agent-1', requestId: 'run', result: { text: 'Native result' } } }]);
     wire.close();
   });
   it('acknowledges the exact planning command after provider completion', async () => {
@@ -99,15 +99,15 @@ describe('session wire negotiation', () => {
     agent.setPlanning = async (active) => { selected.push(active); await new Promise<void>((resolve) => { finish = resolve; }); };
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
-    const submitted = wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'set_planning', payload: { requestId: 'planning-1', operationId: OPERATION_ID, agentId: 'agent-1', active: true } }));
+    const submitted = wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'set_planning', payload: { requestId: 'planning-1', operationId: OPERATION_ID, agentId: 'agent-1', active: true } }));
     await Promise.resolve();
     expect(selected).toEqual([true]);
     expect(output).toEqual([]);
     finish();
     await submitted;
-    expect(output).toEqual([{ protocolVersion: '1.6.0', type: 'command_acknowledged', payload: { requestId: 'planning-1', agentId: 'agent-1', command: 'set_planning' } }]);
+    expect(output).toEqual([{ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: { requestId: 'planning-1', agentId: 'agent-1', command: 'set_planning' } }]);
     wire.close();
   });
 
@@ -124,11 +124,11 @@ describe('session wire negotiation', () => {
         return result;
       },
     });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     for (const requestId of ['first-request', 'retry-request']) {
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'execute_command', payload: {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'execute_command', payload: {
         requestId, operationId: OPERATION_ID, agentId: 'agent-1', commandId: 'review', args: '--short',
       } }));
     }
@@ -147,16 +147,16 @@ describe('session wire negotiation', () => {
     agent.respondToInteraction = vi.fn(async () => undefined);
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'interaction_response', payload: {
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'interaction_response', payload: {
       agentId: 'agent-1', requestId: 'native-approval', submissionId: 'submission-one', operationId: OPERATION_ID,
       response: { kind: 'plan_approval', action: 'approve' },
     } }));
 
     expect(validateInteractionResponse).toHaveBeenCalledOnce();
-    expect(output).toEqual([{ protocolVersion: '1.6.0', type: 'command_acknowledged', payload: {
+    expect(output).toEqual([{ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
       requestId: 'submission-one', agentId: 'agent-1', command: 'interaction_response',
     } }]);
   });
@@ -178,7 +178,7 @@ describe('session wire negotiation', () => {
     expect(output.map(({ type }) => type)).toEqual(['protocol_error']);
 
     output.length = 0;
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
 
     expect(resolveAgent).toHaveBeenCalledOnce();
     expect(subscribe).toHaveBeenCalledOnce();
@@ -213,7 +213,7 @@ describe('session wire negotiation', () => {
       onFailure: (error) => failures.push(error),
     });
 
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
 
     expect(failures).toEqual([{
       kind: 'manager_event_buffer_overflow',
@@ -235,11 +235,11 @@ describe('session wire negotiation', () => {
       maxBufferedManagerEvents: 2,
       onFailure: (error) => failures.push(error),
     });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'timeline_subscription',
+      protocolVersion: '1.7.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-overflow', agentIds: ['agent-1'] },
     }));
 
@@ -259,7 +259,7 @@ describe('session wire negotiation', () => {
 
     expect(output).toEqual([
       expect.objectContaining({
-        protocolVersion: '1.6.0', type: 'protocol_error',
+        protocolVersion: '1.7.0', type: 'protocol_error',
         payload: expect.objectContaining({ code: 'incompatible_protocol_version', recoverable: false }),
       }),
     ]);
@@ -270,7 +270,7 @@ describe('session wire negotiation', () => {
     const output: unknown[] = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json)));
 
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
 
     expect(output.map((message) => (message as { type: string }).type)).toEqual(['negotiated', 'agent_snapshot']);
     expect(output[1]).toMatchObject({ payload: { id: 'agent-1', pendingInteractions: [] } });
@@ -285,7 +285,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>), {
       onFailure: (error) => failures.push(error),
     });
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     emit({
@@ -294,7 +294,7 @@ describe('session wire Timeline and manager-event projection', () => {
     } as AgentManagerEvent);
     emit({ type: 'agent_state', agentId: 'agent-1', snapshot: agent.snapshot() });
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'send_message',
+      protocolVersion: '1.7.0', type: 'send_message',
       payload: { requestId: 'message-after-failure', operationId: OPERATION_ID, agentId: 'agent-1', text: 'Continue.' },
     }));
 
@@ -309,7 +309,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     emit({
@@ -320,7 +320,7 @@ describe('session wire Timeline and manager-event projection', () => {
     });
 
     expect(output).toEqual([{
-      protocolVersion: '1.6.0',
+      protocolVersion: '1.7.0',
       type: 'resource_update',
       payload: {
         agentId: 'agent-1',
@@ -335,7 +335,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
     const replacement: AgentManagerEvent = {
       type: 'timeline_resource_binding_replaced',
@@ -350,14 +350,14 @@ describe('session wire Timeline and manager-event projection', () => {
     expect(output).toEqual([]);
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'timeline_subscription',
+      protocolVersion: '1.7.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-resource-replacement', agentIds: ['agent-1'] },
     }));
     output.length = 0;
     emit(replacement);
 
     expect(output).toEqual([{
-      protocolVersion: '1.6.0',
+      protocolVersion: '1.7.0',
       type: 'timeline_resource_binding_replaced',
       payload: {
         agentId: 'agent-1',
@@ -374,25 +374,25 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     emit(timelineManagerEvent(1, 'before subscription'));
     expect(output).toEqual([]);
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'timeline_subscription',
+      protocolVersion: '1.7.0', type: 'timeline_subscription',
       payload: { requestId: 'subscribe-1', agentIds: ['agent-1'] },
     }));
     emit(timelineManagerEvent(2, 'live after acknowledgement'));
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'timeline_request',
+      protocolVersion: '1.7.0', type: 'timeline_request',
       payload: { requestId: 'tail-1', agentId: 'agent-1', direction: 'tail', limit: 10 },
     }));
 
     expect(output.map(({ type }) => type)).toEqual(['timeline_subscribed', 'agent_stream', 'timeline_page']);
     expect(output[1]).toEqual({
-      protocolVersion: '1.6.0', type: 'agent_stream',
+      protocolVersion: '1.7.0', type: 'agent_stream',
       payload: {
         agentId: 'agent-1', epoch: 'epoch-1', seq: 2, timestamp: '2026-09-02T00:00:02.000Z',
         event: {
@@ -409,16 +409,16 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'send_message',
+      protocolVersion: '1.7.0', type: 'send_message',
       payload: { requestId: 'message-1', operationId: OPERATION_ID, agentId: 'agent-1', text: 'Continue.' },
     }));
 
     expect(output).toEqual([{
-      protocolVersion: '1.6.0', type: 'command_acknowledged',
+      protocolVersion: '1.7.0', type: 'command_acknowledged',
       payload: { requestId: 'message-1', agentId: 'agent-1', command: 'send_message' },
     }]);
   });
@@ -430,14 +430,14 @@ describe('session wire Timeline and manager-event projection', () => {
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
     try {
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
       output.length = 0;
       const text = '  Keep this\nexact text  ';
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'send_message', payload: {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'send_message', payload: {
         requestId: 'message-delivery', operationId: OPERATION_ID, agentId: 'agent-1', text, ...(delivery === undefined ? {} : { delivery }),
       } }));
       expect(calls).toEqual([delivery === undefined ? [text] : [text, { delivery }]]);
-      expect(output).toEqual([{ protocolVersion: '1.6.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-1', command: 'send_message' } }]);
+      expect(output).toEqual([{ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-1', command: 'send_message' } }]);
     } finally { wire.close(); }
   });
 
@@ -450,9 +450,9 @@ describe('session wire Timeline and manager-event projection', () => {
     const output: any[] = [];
     const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
     try {
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
       const type = kind === 'steer' ? 'steer' : 'send_message';
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type, payload: {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type, payload: {
         requestId: 'accepted-input', operationId: OPERATION_ID, agentId: 'agent-1',
         ...(kind === 'content' ? { content: [{ type: 'text', text: 'later' }] } : { text: 'later' }),
       } }));
@@ -466,8 +466,8 @@ describe('session wire Timeline and manager-event projection', () => {
     const output: any[] = [];
     const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
     try {
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
-      await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'send_message', payload: {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'send_message', payload: {
         requestId: 'invalid-evidence', operationId: OPERATION_ID, agentId: 'agent-1', text: 'input',
       } }));
       expect(output.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'operation_outcome_unknown' } });
@@ -481,16 +481,16 @@ describe('session wire Timeline and manager-event projection', () => {
     };
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     await wire.receive(JSON.stringify({
-      protocolVersion: '1.6.0', type: 'send_message',
+      protocolVersion: '1.7.0', type: 'send_message',
       payload: { requestId: 'message-unsupported', operationId: OPERATION_ID, agentId: 'agent-1', text: 'Continue.' },
     }));
 
     expect(output).toEqual([{
-      protocolVersion: '1.6.0', type: 'protocol_error',
+      protocolVersion: '1.7.0', type: 'protocol_error',
       payload: {
         requestId: 'message-unsupported', code: 'unsupported_command',
         message: 'send_message is not supported by this Agent.', recoverable: true,
@@ -502,7 +502,7 @@ describe('session wire Timeline and manager-event projection', () => {
     const { agent, emit } = fakeAgent();
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     output.length = 0;
 
     const request = {
@@ -533,7 +533,7 @@ describe('session wire Timeline and manager-event projection', () => {
     ]);
     expect(output[0]).toMatchObject({ payload: { runtimeInfo: { connection: { state: 'reconnecting', attempt: 2 } } } });
     expect(output.at(-1)).toEqual({
-      protocolVersion: '1.6.0', type: 'interaction_invalidated',
+      protocolVersion: '1.7.0', type: 'interaction_invalidated',
       payload: { agentId: 'agent-1', requestId: 'plan-2', reason: 'connection_replaced', turnId: 'turn-1' },
     });
     expect(output.every((message) => !('snapshot' in message) && !('event' in message))).toBe(true);
@@ -543,7 +543,7 @@ describe('session wire Timeline and manager-event projection', () => {
 function fakeAgent(): { agent: SessionWireAgent; emit: (event: AgentManagerEvent) => void } {
   let listener: ((event: AgentManagerEvent) => void) | undefined;
   const snapshot = {
-    protocolVersion: '1.6.0' as const,
+    protocolVersion: '1.7.0' as const,
     type: 'agent_snapshot' as const,
     payload: {
       id: 'agent-1', providerId: 'codex', createdAt: '2026-09-02T00:00:00.000Z',
@@ -563,7 +563,7 @@ function fakeAgent(): { agent: SessionWireAgent; emit: (event: AgentManagerEvent
       subscribe(next) { listener = next; return () => { listener = undefined; }; },
       fetchTimeline(request) {
         return {
-          protocolVersion: '1.6.0', type: 'timeline_page',
+          protocolVersion: '1.7.0', type: 'timeline_page',
           payload: {
             requestId: request.requestId, agentId: 'agent-1', direction: request.direction,
             epoch: 'epoch-1', reset: false, staleCursor: false, gap: false,
@@ -604,7 +604,7 @@ it('captures activity immediately and coalesces content progress while activity 
   const output: any[] = [];
   const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
     expect(output.at(-1)).toMatchObject({ type: 'agent_activity', payload: { status: 'idle', cursor: { epoch: 'epoch-1', seq: 3 } } });
     const snapshot = agent.snapshot(); snapshot.payload.status = 'waiting';
     emit({ type: 'agent_state', agentId: agent.agentId, snapshot, cursor: { epoch: 'epoch-1', seq: 7 } });
@@ -624,7 +624,7 @@ it('coalesces streaming content and stops pending activity delivery when closed'
   const output: any[] = [];
   const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
     emit(timelineManagerEvent(1, 'First'));
     await vi.advanceTimersByTimeAsync(250);
     emit(timelineManagerEvent(2, ' next'));
@@ -647,7 +647,7 @@ it('publishes a replacement content baseline only after the complete rebuild', a
   const output: any[] = [];
   const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
     emit({ type: 'timeline_replacement', agentId: agent.agentId, epoch: 'epoch-1' });
     emit(timelineManagerEvent(1, 'Restored'));
     await vi.advanceTimersByTimeAsync(1_000);
@@ -666,7 +666,7 @@ it.each([0, 250])('separates a rebuilt baseline from live content arriving %i ms
   const output: any[] = [];
   const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
   try {
-    await wire.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }));
+    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
     emit({ type: 'timeline_replacement', agentId: agent.agentId, epoch: 'epoch-1' });
     emit(timelineManagerEvent(1, 'Restored'));
     emit(timelineManagerEvent(2, ' history'));
@@ -695,14 +695,14 @@ it.each(['page-access', 'native-owner'] as const)('checks %s changes after async
   const a = createSessionWire(agent, json => aMessages.push(JSON.parse(json)), { sessionControls: registry });
   const b = createSessionWire(agent, json => bMessages.push(JSON.parse(json)), { sessionControls: registry });
   const latest = (messages: any[]) => messages.filter(message => message.type === 'session_control').at(-1).payload;
-  const request = (revision: string) => JSON.stringify({ protocolVersion: '1.6.0', type: 'session_control_request', payload: {
+  const request = (revision: string) => JSON.stringify({ protocolVersion: '1.7.0', type: 'session_control_request', payload: {
     agentId: 'agent-1', requestId: 'claim', action: 'take_over', revision,
   } });
   try {
-    await a.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
-    await b.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate' }));
+    await a.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+    await b.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
     await a.receive(request(latest(aMessages).revision));
-    const pending = a.receive(JSON.stringify({ protocolVersion: '1.6.0', type: 'send_message', controlToken: latest(aMessages).token,
+    const pending = a.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'send_message', controlToken: latest(aMessages).token,
       payload: { agentId: 'agent-1', requestId: 'send', operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', content: [{ type: 'text', text: 'late' }] },
     }));
     await b.receive(request(latest(bMessages).revision));
@@ -728,14 +728,14 @@ it('requires authorization before granting shared control and rejects mutations 
   const messages: any[] = [];
   const wire = createSessionWire(agent, json => messages.push(JSON.parse(json)), {sessionControls: registry, authorize: () => false});
   try {
-    await wire.receive(JSON.stringify({protocolVersion: '1.6.0', type: 'negotiate'}));
+    await wire.receive(JSON.stringify({protocolVersion: '1.7.0', type: 'negotiate'}));
     const control = messages.find(message => message.type === 'session_control').payload;
     expect(control.access).toBe('read_only'); expect(control.token).toBeUndefined();
-    await wire.receive(JSON.stringify({protocolVersion: '1.6.0', type: 'session_control_request', payload: {
+    await wire.receive(JSON.stringify({protocolVersion: '1.7.0', type: 'session_control_request', payload: {
       agentId: agent.agentId, requestId: 'claim', action: 'acquire', revision: control.revision,
     }}));
     expect(messages.at(-1)).toMatchObject({type: 'protocol_error', payload: {code: 'forbidden'}});
-    await wire.receive(JSON.stringify({protocolVersion: '1.6.0', type: 'cancel', payload: {
+    await wire.receive(JSON.stringify({protocolVersion: '1.7.0', type: 'cancel', payload: {
       agentId: agent.agentId, requestId: 'cancel', operationId: OPERATION_ID,
     }}));
     expect(messages.at(-1)).toMatchObject({type: 'protocol_error', payload: {code: 'session_read_only'}});

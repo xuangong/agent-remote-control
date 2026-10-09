@@ -8,6 +8,8 @@
   --agent-signal: #3390ec;
   --agent-action-text: #1d5f9f;
   --agent-running: #9a5b16;
+  --agent-setting-pending: oklch(46% 0.1 85);
+  --agent-setting-pending-surface: oklch(96% 0.07 95);
   --agent-success: #2e8f63;
   --agent-success-text: #237049;
   --agent-danger: #c53f48;
@@ -569,6 +571,9 @@
 .agent-session-panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .agent-session-setting { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; margin-bottom: 12px; font-size: 12px; }
 .agent-session-setting select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--agent-rule); border-radius: 6px; color: var(--agent-ink); background: var(--agent-panel); padding: 6px 8px; font: inherit; }
+.agent-session-controls .agent-setting-pending { color: var(--agent-setting-pending); background: var(--agent-setting-pending-surface); border-radius: 3px; }
+.agent-session-setting[data-setting-state="pending"] select { color: var(--agent-setting-pending); background: var(--agent-setting-pending-surface); }
+.agent-session-controls button[aria-label$=", unread setting error"]::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 50%; background: var(--agent-danger); vertical-align: middle; }
 .agent-session-setting .agent-composer-note, .agent-session-facts dd { overflow-wrap: anywhere; }
 .agent-setting-scope { color: var(--agent-muted); font-size: 12px; }
 .agent-session-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 16px; font-size: 12px; }

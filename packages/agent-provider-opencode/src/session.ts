@@ -195,6 +195,7 @@ export class OpenCodeSession implements AgentSession {
     }
   }
   private async refresh(): Promise<void> {
+    const revision = this.controls.revision;
     const parameters = { sessionID: this.nativeId, directory: this.config.cwd };
     const [history, statuses, permissions, questions, todos, native, children] = await Promise.all([
       this.transport.requestWithResponse(() => this.transport.client.session.messages({ ...parameters, limit: 200 })),
@@ -206,7 +207,7 @@ export class OpenCodeSession implements AgentSession {
       this.transport.request(() => this.transport.client.session.children(parameters)),
     ]);
     if (this.closed) return;
-    this.nativeSession = native; this.controls.updateNative(native);
+    if (this.controls.updateNative(native, revision)) this.nativeSession = native;
     this.capabilities.planning = this.controls.planningAvailable;
     this.children = children.map(child => {
       const source = history.data.flatMap(message => message.info.role === 'assistant' ? message.parts.flatMap(part => part.type === 'tool' && part.tool === 'task' && part.state.status !== 'pending' && part.state.metadata?.sessionId === child.id && part.state.metadata?.parentSessionId === this.nativeId ? [{ parentTurnId: message.info.role === 'assistant' ? message.info.parentID : undefined, part }] : []) : []).at(0);
@@ -308,7 +309,14 @@ export class OpenCodeSession implements AgentSession {
     return { providerId: 'opencode', sessionId: this.nativeId, status: this.status, cwd: this.config.cwd, model: this.config.model ?? null, mode: this.config.agent ?? null, planning: { active: this.config.agent === 'plan' }, settings: this.controls.list(), childSessions: this.children.map(child => ({ ...child })), connection: { ...this.connection }, persistence: { providerId: 'opencode', sessionId: this.nativeId, opaque: JSON.stringify(this.config) } };
   }
   private emitRuntime(): void { this.emit({ type: 'runtime_updated', provider: 'opencode', runtimeInfo: this.info(), activeTurnId: this.activeTurnId && !this.terminalTurns.has(this.activeTurnId) ? this.activeTurnId : null }); }
-  async runtimeInfo(): Promise<AgentRuntimeInfo> { return this.info(); }
+  async runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo> {
+    if (options?.refreshSettings && !this.closed) {
+      const revision = this.controls.revision;
+      const native = await this.transport.request(() => this.transport.client.session.get({ sessionID: this.nativeId, directory: this.config.cwd }));
+      if (!this.closed && this.controls.updateNative(native, revision)) this.nativeSession = native;
+    }
+    return this.info();
+  }
   private writable(): void {
     if (this.closed) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode session is closed.');
     if (this.transport.restricted) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode native execution is locked by Host policy.');

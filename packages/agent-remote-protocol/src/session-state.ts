@@ -101,7 +101,7 @@ export function sessionOperationAvailability(
     : operation === 'set_planning' ? capabilities.planning
     : operation === 'set_session_setting' ? capabilities.sessionSettings : capabilities.commands;
   if (!supported) return reject('unsupported_command', `Provider does not support ${operation}.`);
-  if ((operation === 'set_planning' || operation === 'set_session_setting')
+  if (operation === 'set_planning'
     && (state.status !== 'idle' || state.activeTurn !== null || state.pendingInteractions.length > 0)) {
     return reject('agent_busy', 'Session settings can change only while idle with no pending interactions.');
   }

@@ -21,7 +21,13 @@ This package adapts the native `codex app-server` JSON-RPC protocol to `@orchard
 | Native image viewing and generation | Assistant Markdown backed by opaque session resource references |
 | Resource reads | Only local files or embedded raster bytes explicitly referenced by native image items |
 
-The compatibility target verified by local process tests is `codex-cli 0.148.0`. Native `item/started` and `item/completed` notifications are authoritative; deprecated `codex/event/item_started` and `codex/event/item_completed` mirrors are intentionally ignored to avoid duplicate Timeline meaning.
+The current compatibility target is `codex-cli 0.162.0`; isolated native settings tests verify this version against a local inference fixture. Native `item/started` and `item/completed` notifications are authoritative; deprecated `codex/event/item_started` and `codex/event/item_completed` mirrors are intentionally ignored to avoid duplicate Timeline meaning.
+
+Running model and reasoning-effort changes first use native `turn/settings/update` for the captured active turn, then `thread/settings/update` for future-turn defaults. Native `applied` publishes settings for subsequent inference steps within the same task; an already captured inference request keeps its original settings. Repeated changes within that turn use the last live-accepted model and effort when validating dependent selections and preserving collaboration settings. Displayed values remain native thread-confirmed values, while effort choices follow the live-accepted model. Future defaults remain `pending` until observed natively. A new turn before confirmation omits model, effort, and collaboration overrides, inheriting native queued defaults.
+
+Live model switching requires native `step_model_switching`. The adapter does not enable it. Unsupported methods, the disabled feature, and an unavailable captured turn return `deferred` without changing future defaults; native policy rejections fail explicitly. If live publication succeeds but future-default submission fails, the operation reports `native_settings_partial_failure` and is not replayed automatically. Permission changes use only `thread/settings/update`, preserve collaboration settings, and remain subject to native requirements and Host restrictions.
+
+Explicit refresh reads loaded thread metadata through `thread/read` with `includeTurns: false`. Concrete model and effort values refresh observed state; unloaded metadata and responses superseded by native notifications are ignored. Only observations matching the latest requested value clear its local pending guard. Native snapshots carry no mutation identity: live updates return `pending` even if a snapshot arrives during submission, allowing the public coordinator to distinguish acceptance from convergence. Fresh idle readback can reconcile missing model/effort notifications, and recovery drops obsolete confirmation locks without replaying writes. Input stays gated until native state restoration completes. The read API exposes no session approval/sandbox getter; these retain their last native-confirmed values. Local process tests with `codex-cli 0.162.0`, an isolated configuration and local HTTP responses verified successive requests within one turn as `A/high → B/high → B/low → A/low`, followed by a future turn using `A/low`, plus disabled-feature deferral and running permission changes.
 
 Set `BORGEE_CODEX_TEST_EXECUTABLE` to select the exact Codex executable used by both the local process version check and the provider process. Without the override, the test and provider both resolve `codex` from `PATH`.
 
@@ -71,8 +77,8 @@ collaboration mode remain independent.
 Native Default questions have `isBlocking: false`; they still need an explicit
 answer or cancellation. Request identity, response validation, cancellation and
 late-answer rejection use the existing Question lifecycle. A feature being
-available does not force the model to ask. The verified native target is Codex
-0.148.0; a native configuration error is surfaced rather than retried without the
+available does not force the model to ask. This question lifecycle was originally
+verified with Codex 0.148.0; a native configuration error is surfaced rather than retried without the
 feature. This adapter does not add a feature-negotiation API for arbitrary Codex
 versions or recover pending callbacks across process restarts.
 

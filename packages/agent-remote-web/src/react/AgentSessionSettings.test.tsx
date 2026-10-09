@@ -1,5 +1,6 @@
 import { act, useState } from 'react';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import type { AgentSessionSettingChange } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState } from '../replica/reducer.js';
 import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
@@ -107,4 +108,188 @@ it('preserves native session settings alongside usage updates and reconnecting s
     expect(status.querySelector('[aria-label="Session tokens"] data')?.getAttribute('value')).toBe('150');
     expect(status.querySelector('.agent-session-usage-stale') !== null).toBe(connection === 'connecting');
   }
+});
+
+const modelChange: AgentSessionSettingChange = {
+  settingId: 'model', category: 'model', label: 'Model', requestId: 'change-model', targetValue: 'model-b', confirmedValue: 'model-a', status: 'pending',
+  requestedAt: '2026-10-09T00:00:00Z', deadlineAt: '2026-10-09T00:00:30Z',
+};
+function settingsState(changes: AgentSessionSettingChange[] = []): AgentReplicaState {
+  return { ...state, timeline: { ...state.timeline, initialized: true }, agent: { ...state.agent!, settingChanges: changes,
+    capabilities: { ...state.agent!.capabilities, sessionSettings: true },
+    runtimeInfo: { ...state.agent!.runtimeInfo, model: 'model-a', settings: [
+      { id: 'model', category: 'model', label: 'Model', value: 'model-a', options: [{ value: 'model-a', label: 'Model A' }, { value: 'model-b', label: 'Model B' }], mutable: true, scope: 'session' },
+      { id: 'approval', category: 'permissions', label: 'Approval policy', value: 'ask', options: [{ value: 'ask', label: 'Ask' }, { value: 'allow', label: 'Allow' }], mutable: true, scope: 'session' },
+    ] },
+  } };
+}
+function Settings({ replica, onSelect = async () => {}, onPendingChange = () => {} }: {
+  replica: AgentReplicaState; onSelect?(id: string, value: string): Promise<void>; onPendingChange?(pending: boolean): void;
+}) {
+  const [view, setView] = useState<SessionControlView>();
+  return <AgentSessionSettings state={replica} disabled={false} busy={false} view={view} onView={setView} onSelect={onSelect} onPendingChange={onPendingChange} />;
+}
+
+it('shows shared pending targets in every settings surface and allows selecting the confirmed value again', async () => {
+  const replica = settingsState([modelChange]);
+  const onSelect = vi.fn(async () => {}); const onPendingChange = vi.fn();
+  const container = await render(<><Settings replica={replica} onSelect={onSelect} onPendingChange={onPendingChange} /><Settings replica={replica} /></>);
+  const buttons = container.querySelectorAll<HTMLButtonElement>('[data-testid="session-model-button"]');
+  for (const button of buttons) {
+    expect(button.textContent).toContain('Model B');
+    expect(button.getAttribute('aria-label')).toContain('pending');
+    await act(async () => button.click());
+  }
+  const selects = container.querySelectorAll<HTMLSelectElement>('select[aria-label="Model"]');
+  expect([...selects].map(select => [select.value, select.disabled])).toEqual([['model-b', false], ['model-b', false]]);
+  expect(onPendingChange).not.toHaveBeenCalled();
+  await act(async () => { selects[0]!.value = 'model-a'; selects[0]!.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith('model', 'model-a');
+  expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+  expect(replica.agent!.runtimeInfo.settings![0]!.value).toBe('model-a');
+});
+
+it.each(['failed', 'timed_out'] as const)('restores confirmed values after %s and clears only the opened category notification', async status => {
+  const changes: AgentSessionSettingChange[] = [
+    { ...modelChange, status, message: 'Model change could not be confirmed.' },
+    { ...modelChange, settingId: 'approval', category: 'permissions', label: 'Approval policy', requestId: 'change-permissions', targetValue: 'allow', confirmedValue: 'ask', status, message: 'Permission change could not be confirmed.' },
+  ];
+  const replica = settingsState(changes);
+  replica.agent!.runtimeInfo.settings![0]!.value = null;
+  const container = await render(<Settings replica={replica} />);
+  const model = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  const permissions = container.querySelector<HTMLButtonElement>('[data-testid="session-permissions-button"]')!;
+  expect(model.textContent).toContain('Model A');
+  expect(model.getAttribute('aria-label')).toContain('unread');
+  expect(permissions.getAttribute('aria-label')).toContain('unread');
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => model.click());
+  expect(model.getAttribute('aria-label')).not.toContain('unread');
+  expect(permissions.getAttribute('aria-label')).toContain('unread');
+  expect(container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!.value).toBe('model-a');
+  expect(container.querySelector('[aria-label="Model settings"]')!.textContent).toContain('Model change could not be confirmed.');
+  await act(async () => model.click());
+  expect(model.getAttribute('aria-label')).not.toContain('unread');
+  await act(async () => permissions.click());
+  expect(permissions.getAttribute('aria-label')).not.toContain('unread');
+});
+
+it('updates normal values on late native confirmation and shows a new unread outcome for a newer request', async () => {
+  const failed = { ...modelChange, status: 'timed_out' as const };
+  let replica = settingsState([failed]);
+  const container = await render(<Settings replica={replica} />);
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  await act(async () => { button.click(); });
+  await act(async () => { button.click(); });
+  replica = settingsState([failed]);
+  replica.agent!.runtimeInfo.settings![0]!.value = 'model-b';
+  await rerender(container, <Settings replica={replica} />);
+  expect(button.textContent).toContain('Model B');
+  expect(button.getAttribute('aria-label')).not.toContain('pending');
+  expect(button.getAttribute('aria-label')).not.toContain('unread');
+  await rerender(container, <Settings replica={settingsState([{ ...failed, requestId: 'new-change' }])} />);
+  expect(button.getAttribute('aria-label')).toContain('unread');
+});
+
+it('keeps sign-in recovery for public permission failures inside the matching panel', async () => {
+  const replica = settingsState([{ ...modelChange, settingId: 'approval', category: 'permissions', label: 'Approval policy', requestId: 'permissions', status: 'failed', code: 'reauthentication_required', message: 'Sign in again.' }]);
+  const renderError = vi.fn((error: unknown) => (error as {code?: string}).code === 'reauthentication_required' ? <button>Sign in again</button> : null);
+  const props = { state: replica, disabled: false, busy: false, onView() {}, onPendingChange() {}, renderError };
+  const container = await render(<AgentSessionSettings {...props} view="model" />);
+  expect(container.textContent).not.toContain('Sign in again');
+  await rerender(container, <AgentSessionSettings {...props} view="permissions" />);
+  expect(renderError).toHaveBeenCalledWith(expect.objectContaining({ code: 'reauthentication_required' }));
+  expect(container.querySelector('[aria-label="Permission settings"]')!.textContent).toContain('Sign in again');
+});
+
+it('clears pending presentation after confirmation without holding local submission busy', async () => {
+  let accept!: () => void;
+  const onSelect = vi.fn(() => new Promise<void>(resolve => { accept = resolve; }));
+  const onPendingChange = vi.fn();
+  const container = await render(<Settings replica={settingsState()} onSelect={onSelect} onPendingChange={onPendingChange} />);
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  await act(async () => button.click());
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
+  await act(async () => { select.value = 'model-b'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(onPendingChange.mock.calls).toEqual([[true]]);
+  await rerender(container, <Settings replica={settingsState([modelChange])} onSelect={onSelect} onPendingChange={onPendingChange} />);
+  expect(select.value).toBe('model-b');
+  await act(async () => accept());
+  expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+  expect(select.disabled).toBe(false);
+  expect(select.closest('[data-setting-state="pending"]')).not.toBeNull();
+  const confirmed = settingsState();
+  confirmed.agent!.runtimeInfo.settings![0]!.value = 'model-b';
+  await rerender(container, <Settings replica={confirmed} onSelect={onSelect} onPendingChange={onPendingChange} />);
+  expect(select.value).toBe('model-b');
+  expect(select.closest('[data-setting-state="pending"]')).toBeNull();
+  expect(button.getAttribute('aria-label')).toBe('Model');
+  expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+});
+
+it('retains local admission error recovery without fabricating a public pending change', async () => {
+  const error = Object.assign(new Error('Recent sign-in required.'), { code: 'reauthentication_required' });
+  const renderError = vi.fn(() => <button>Sign in</button>);
+  const onPendingChange = vi.fn();
+  const container = await render(<AgentSessionSettings state={settingsState()} disabled={false} busy={false} view="permissions" onView={() => {}}
+    onPendingChange={onPendingChange} onSelect={async () => { throw error; }} renderError={renderError} />);
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="Approval policy"]')!;
+  await act(async () => { select.value = 'allow'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(renderError).toHaveBeenCalledWith(error);
+  expect(container.querySelector('[aria-label="Permission settings"]')!.textContent).toContain('Sign in');
+  expect(select.value).toBe('ask');
+  expect(select.closest('[data-setting-state="pending"]')).toBeNull();
+  expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+});
+
+it('reads outcomes arriving in the open category and isolates read state across sessions', async () => {
+  const container = await render(<Settings replica={settingsState([modelChange])} />);
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  await act(async () => button.click());
+  const failed = settingsState([{ ...modelChange, status: 'failed', message: 'Native model change failed.' }]);
+  await rerender(container, <Settings replica={failed} />);
+  expect(button.getAttribute('aria-label')).not.toContain('unread');
+  expect(container.querySelector('[aria-label="Model settings"]')!.textContent).toContain('Native model change failed.');
+  await act(async () => button.click());
+  expect(button.getAttribute('aria-label')).not.toContain('unread');
+  const otherSession = { ...failed, agent: { ...failed.agent!, id: 'other-session' } };
+  await rerender(container, <Settings replica={otherSession} />);
+  expect(button.getAttribute('aria-label')).toContain('unread');
+  await act(async () => button.click());
+  await act(async () => button.click());
+  await rerender(container, <Settings replica={failed} />);
+  expect(button.getAttribute('aria-label')).not.toContain('unread');
+});
+
+it.each(['pending', 'failed', 'timed_out'] as const)('retains %s requests after the native setting descriptor disappears', async status => {
+  const change: AgentSessionSettingChange = { ...modelChange, settingId: 'reasoning_effort', category: 'model', label: 'Reasoning effort', targetValue: 'high', confirmedValue: 'medium', status,
+    ...(status === 'pending' ? {} : {message: 'The selected model no longer supports this setting.'}),
+  };
+  const replica = settingsState([change]);
+  const container = await render(<Settings replica={replica} />);
+  const model = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  expect(model.getAttribute('aria-label')).toContain(status === 'pending' ? 'pending' : 'unread');
+  await act(async () => model.click());
+  const panel = container.querySelector('[aria-label="Model settings"]')!;
+  expect(panel.textContent).toContain('Reasoning effort');
+  expect(panel.querySelector('select[aria-label="Reasoning effort"]')).toBeNull();
+  if (status === 'pending') {
+    expect(panel.textContent).toContain('high');
+    expect(panel.textContent).toContain('Current: medium');
+  } else {
+    expect(panel.textContent).toContain('The selected model no longer supports this setting.');
+    expect(model.getAttribute('aria-label')).not.toContain('unread');
+    await act(async () => model.click());
+    expect(model.getAttribute('aria-label')).not.toContain('unread');
+  }
+});
+
+it('keeps sign-in recovery visible when a failed permission descriptor disappears', async () => {
+  const replica = settingsState([{ ...modelChange, settingId: 'removed_approval', category: 'permissions', label: 'Native tool approvals', status: 'failed', code: 'reauthentication_required', message: 'Sign in again.' }]);
+  const renderError = vi.fn(() => <button>Restore sign-in</button>);
+  const container = await render(<AgentSessionSettings state={replica} disabled={false} busy={false} view="permissions" onView={() => {}} onPendingChange={() => {}} renderError={renderError} />);
+  const panel = container.querySelector('[aria-label="Permission settings"]')!;
+  expect(panel.textContent).toContain('Native tool approvals');
+  expect(panel.textContent).toContain('Restore sign-in');
+  expect(panel.querySelector('select[aria-label="Native tool approvals"]')).toBeNull();
 });

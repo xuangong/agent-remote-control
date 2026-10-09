@@ -131,12 +131,12 @@ describe('operation eligibility', () => {
         .toMatchObject({ code: `native_runtime_${connection}` });
     }
   });
-  it('allows input and cancellation during work but reserves configuration for idle sessions', () => {
+  it('allows input and cancellation during work but accepts setting intents while keeping planning idle-only', () => {
     const state = reduceSessionState(snapshot(), { type: 'turn_started', turnId: 'turn' }, 'start');
-    for (const operation of ['send_message', 'queue_message', 'steer', 'cancel', 'execute_command'] as const) {
+    for (const operation of ['send_message', 'queue_message', 'steer', 'cancel', 'execute_command', 'set_session_setting'] as const) {
       expect(sessionOperationAvailability(state, operation)).toEqual({ allowed: true });
     }
-    for (const operation of ['set_planning', 'set_session_setting'] as const) expect(sessionOperationAvailability(state, operation)).toMatchObject({ code: 'agent_busy' });
+    for (const operation of ['set_planning'] as const) expect(sessionOperationAvailability(state, operation)).toMatchObject({ code: 'agent_busy' });
     expect(sessionOperationAvailability({ ...state, capabilities: { ...state.capabilities, queueMessage: false } }, 'queue_message')).toMatchObject({ code: 'unsupported_command' });
   });
 });

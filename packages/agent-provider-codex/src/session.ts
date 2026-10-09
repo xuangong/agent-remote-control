@@ -95,6 +95,11 @@ export class CodexAppServerSession implements AgentSession {
 
   private readonly settings = new CodexSessionSettings();
   private changingSetting = false;
+  private settingRetryNeeded = false;
+  private liveSettingsUnsupported = false;
+  private liveTurnSettings: { turnId: string; model: string | undefined; effort: string | undefined } | undefined;
+  private unavailableSettingsTurnId: string | undefined;
+  private readonly pendingSettings = new Map<string, string>();
   private executingCommand = false;
   private commandEventSequence = 0;
   private readonly commandEventPrefix = randomUUID();
@@ -121,6 +126,7 @@ export class CodexAppServerSession implements AgentSession {
   private runtimeStatus: AgentRuntimeInfo['status'] = 'starting';
   private latestFailure: AgentRuntimeInfo['failure'];
   private runtimeRevision = 0;
+  private settingsRevision = 0;
   private statusRevision = 0;
   private nativeTurnRevision = 0;
   private readonly observedTurnIds = new Set<string>();
@@ -174,7 +180,7 @@ export class CodexAppServerSession implements AgentSession {
     return this.ready && !this.transportFailure && !this.disposed
       && (this.runtimeStatus === 'idle' || !this.ownsRuntime && this.runtimeStatus === 'closed')
       && !this.activeTurnId && !this.startingTurn && !this.sendingMessage && !this.changingSetting
-      && !this.executingCommand && !this.settingConfirmation && !this.preparingObservation
+      && !this.executingCommand && !this.settingConfirmation && !this.preparingObservation && this.pendingSettings.size === 0
       && this.pendingInteractions.size === 0;
   }
 
@@ -203,6 +209,9 @@ export class CodexAppServerSession implements AgentSession {
     const confirmation = this.settingConfirmation;
     this.settingConfirmation = undefined;
     confirmation?.reject(new Error('Codex setting confirmation was invalidated by connection recovery'));
+    // Lost notifications cannot be correlated after recovery. Restore native state before
+    // reopening input; never replay these accepted operations or invent their outcome.
+    this.pendingSettings.clear();
     this.invalidatePendingInteractions(reason);
   }
 
@@ -566,7 +575,7 @@ export class CodexAppServerSession implements AgentSession {
           this.emitRuntimeUpdate();
         }
       }
-    } finally { this.sendingMessage = false; }
+    } finally { this.sendingMessage = false; this.notifySettingReadiness(); }
   }
 
   private assertMessageReady(): void {
@@ -603,15 +612,15 @@ export class CodexAppServerSession implements AgentSession {
     const input: CodexInput[] = typeof message === 'string' ? (message ? [{ type: 'text', text: message, text_elements: [] }] : []) : message;
     if (!input.length && !skill) throw new AgentOperationRejectedError('operation_rejected', 'Codex message must not be empty');
     if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new AgentOperationRejectedError('operation_rejected', 'A Codex turn is already active');
-    const collaborationMode = this.buildCollaborationMode();
+    const collaborationMode = this.hasPendingModelSetting ? undefined : this.buildCollaborationMode();
     const statusRevision = this.statusRevision;
     this.startingTurn = true;
     try {
       const result = await this.transport.request('turn/start', {
         threadId: this.threadId,
         input: [...(skill ? [{ type: 'skill', ...skill }] : []), ...input],
-        ...(this.config.model ? { model: this.config.model } : {}),
-        ...(this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
+        ...(!this.hasPendingModelSetting && this.config.model ? { model: this.config.model } : {}),
+        ...(!this.hasPendingModelSetting && this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
         ...(collaborationMode ? { collaborationMode } : {}),
       });
       if (statusRevision === this.statusRevision && isRecord(result) && isRecord(result.turn) && readString(result.turn.id)) {
@@ -622,31 +631,83 @@ export class CodexAppServerSession implements AgentSession {
       }
     } finally {
       this.startingTurn = false;
+      this.notifySettingReadiness();
     }
   }
 
-  async setSessionSetting(id: string, value: string): Promise<void> {
-    if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending command interactions or message submission');
-    await this.applySessionSetting(id, value);
+  private notifySettingReadiness(): void {
+    if (!this.settingRetryNeeded || this.changingSetting || this.startingTurn || this.sendingMessage || this.disposed) return;
+    this.settingRetryNeeded = false;
+    this.emitRuntimeUpdate();
   }
 
-  private async applySessionSetting(id: string, value: string): Promise<void> {
+  private get hasPendingModelSetting(): boolean {
+    return this.pendingSettings.has('model') || this.pendingSettings.has('effort');
+  }
+
+  async setSessionSetting(id: string, value: string): Promise<void | { status: 'pending' | 'deferred' }> {
+    if (this.executingCommand || this.commandInteractions.pending) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending command interactions or message submission');
+    return this.applySessionSetting(id, value, false);
+  }
+
+  private async applySessionSetting(id: string, value: string, waitForConfirmation = true): Promise<void | { status: 'pending' | 'deferred' }> {
     this.assertDirectInput();
     if (this.restrictedNative && this.settings.describe(this.config.model, this.config.reasoningEffort).some(setting => setting.id === id && setting.category === 'permissions')) {
       throw new AgentOperationRejectedError('operation_rejected', 'Native permission settings are locked by local Host policy.');
     }
-    if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle' || this.activeTurnId) throw new AgentOperationRejectedError('operation_rejected', 'Codex settings can only change while idle.');
-    if (this.pendingInteractions.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'Codex settings cannot change with pending interactions.');
-    const patch = this.settings.patch(id, value, this.config.model, this.config.reasoningEffort);
-    const collaborationMode = this.buildCollaborationMode();
+    const modelSetting = id === 'model' || id === 'effort';
+    const liveTurnId = !waitForConfirmation && modelSetting ? this.activeTurnId : undefined;
+    const liveSettings = liveTurnId && this.liveTurnSettings?.turnId === liveTurnId ? this.liveTurnSettings : undefined;
+    const effectiveModel = liveSettings?.model ?? this.config.model;
+    const effectiveEffort = liveSettings?.effort ?? this.config.reasoningEffort;
+    const patch = this.settings.patch(id, value, effectiveModel, effectiveEffort);
+    if (waitForConfirmation) {
+      if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle' || this.activeTurnId) throw new AgentOperationRejectedError('operation_rejected', 'Codex settings can only change while idle.');
+      if (this.pendingInteractions.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'Codex settings cannot change with pending interactions.');
+    } else {
+      if (this.changingSetting || this.startingTurn || this.sendingMessage || (!liveTurnId && (this.pendingSettings.has(id) || (modelSetting && this.hasPendingModelSetting)))) {
+        this.settingRetryNeeded = true;
+        return { status: 'deferred' };
+      }
+      if (this.runtimeStatus === 'closed' || this.runtimeStatus === 'failed') throw new AgentOperationRejectedError('operation_rejected', 'Codex settings require an available session.');
+    }
+    if (!waitForConfirmation && modelSetting && (this.runtimeStatus === 'running' || this.runtimeStatus === 'waiting' || liveTurnId)
+      && (!liveTurnId || this.liveSettingsUnsupported || this.unavailableSettingsTurnId === liveTurnId)) return { status: 'deferred' };
+    const collaborationMode = modelSetting ? this.buildCollaborationMode() : undefined;
     if (collaborationMode) {
       patch.collaborationMode = { ...collaborationMode, settings: { ...collaborationMode.settings,
+        ...(effectiveModel ? { model: effectiveModel } : {}),
+        ...(effectiveEffort ? { reasoning_effort: effectiveEffort } : {}),
         ...(typeof patch.model === 'string' ? { model: patch.model } : {}),
         ...(typeof patch.effort === 'string' ? { reasoning_effort: patch.effort } : {}),
       } };
     }
-    if (this.settings.describe(this.config.model, this.config.reasoningEffort).find((setting) => setting.id === id)?.value === value) return;
+    if (!liveTurnId && this.settings.describe(this.config.model, this.config.reasoningEffort).find((setting) => setting.id === id)?.value === value) return;
     this.changingSetting = true;
+    if (!waitForConfirmation) {
+      let liveApplied = false;
+      try {
+        if (liveTurnId) {
+          if (!await this.updateRunningTurnSettings(liveTurnId, patch)) return { status: 'deferred' };
+          liveApplied = true;
+          this.liveTurnSettings = { turnId: liveTurnId, model: typeof patch.model === 'string' ? patch.model : effectiveModel,
+            effort: typeof patch.effort === 'string' ? patch.effort : effectiveEffort };
+        }
+        // Record the latest target before submission: returning to the old baseline can still be queued.
+        const previousPending = this.pendingSettings.get(id);
+        this.pendingSettings.set(id, value);
+        // Future-turn settings have a separate native confirmation from live step publication.
+        try { await this.transport.request('thread/settings/update', { threadId: this.threadId, ...patch }); }
+        catch (error) {
+          if (previousPending) this.pendingSettings.set(id, previousPending);
+          else this.pendingSettings.delete(id);
+          if (!liveApplied) throw error;
+          throw Object.assign(new Error(`Codex accepted the setting for the current turn, but future-turn settings were not confirmed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }), { code: 'native_settings_partial_failure' });
+        }
+        if (liveApplied || this.pendingSettings.has(id)) return { status: 'pending' };
+        return;
+      } finally { this.changingSetting = false; this.notifySettingReadiness(); }
+    }
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let confirmation: NonNullable<typeof this.settingConfirmation>;
     const confirmed = new Promise<void>((resolve, reject) => {
@@ -660,11 +721,37 @@ export class CodexAppServerSession implements AgentSession {
       clearTimeout(deadline);
       if (this.settingConfirmation === confirmation!) this.settingConfirmation = undefined;
       this.changingSetting = false;
+      this.notifySettingReadiness();
     }
+  }
+
+  private async updateRunningTurnSettings(turnId: string, patch: Record<string, unknown>): Promise<boolean> {
+    let result: unknown;
+    try {
+      result = await this.transport.request('turn/settings/update', {
+        threadId: this.threadId, turnId,
+        ...(typeof patch.model === 'string' ? { model: patch.model } : {}),
+        ...(typeof patch.effort === 'string' ? { effort: patch.effort } : {}),
+      });
+    } catch (error) {
+      if (error instanceof CodexAppServerRpcError && (error.code === -32601
+        || (error.code === -32600 && error.message.includes('require the step_model_switching feature')))) {
+        this.liveSettingsUnsupported = true;
+        return false;
+      }
+      throw error;
+    }
+    if (isRecord(result) && result.status === 'applied') return true;
+    if (isRecord(result) && result.status === 'targetUnavailable') {
+      this.unavailableSettingsTurnId = turnId;
+      return false;
+    }
+    throw Object.assign(new Error('Codex did not confirm the current-turn update. Future-turn settings were not submitted.'), { code: 'native_live_settings_unconfirmed' });
   }
 
   async setPlanning(active: boolean): Promise<void> {
     this.assertDirectInput();
+    if (this.hasPendingModelSetting) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending model settings.');
     if (!this.capabilities.planning) throw new AgentOperationRejectedError('operation_rejected', 'Codex planning control is unsupported.');
     if (this.executingCommand || this.commandInteractions.pending || this.sendingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending command interactions or message submission');
     if (this.changingSetting || this.startingTurn || this.runtimeStatus !== 'idle') throw new AgentOperationRejectedError('operation_rejected', 'Codex planning can only change while idle.');
@@ -746,6 +833,7 @@ export class CodexAppServerSession implements AgentSession {
 
   private assertCommandIdle(): void {
     this.assertDirectInput();
+    if (this.hasPendingModelSetting) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending model settings.');
     if (this.changingSetting || this.startingTurn || this.sendingMessage || this.activeTurnId || this.runtimeStatus !== 'idle') throw new AgentOperationRejectedError('operation_rejected', 'Codex commands require an idle session.');
     if (this.pendingInteractions.size > 0) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending native interactions.');
   }
@@ -790,8 +878,44 @@ export class CodexAppServerSession implements AgentSession {
     });
   }
 
-  async runtimeInfo(): Promise<AgentRuntimeInfo> {
+  async runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo> {
+    if (options?.refreshSettings && this.threadId) {
+      this.assertOpen();
+      this.runtime.assertConnected();
+      const transport = this.transport;
+      const revision = this.settingsRevision;
+      const result = await transport.request('thread/read', { threadId: this.threadId, includeTurns: false });
+      if (!this.disposed && transport === this.transport && revision === this.settingsRevision
+        && isRecord(result) && isRecord(result.thread) && result.thread.id === this.threadId) {
+        const status = readThreadRuntimeStatus(result.thread.status);
+        if (status === 'idle' || status === 'running' || status === 'waiting') {
+          // Native metadata exposes concrete model/effort values, but no session permission settings.
+          const model = readString(result.thread.model);
+          const effort = readString(result.thread.reasoningEffort);
+          if (model || effort) this.applyThreadSettings({ ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+          if (status === 'idle' && !this.activeTurnId && !this.changingSetting) {
+            for (const [id, value] of [['model', model], ['effort', effort]] as const) {
+              if (value && this.pendingSettings.get(id) === value) {
+                this.pendingSettings.delete(id);
+              }
+            }
+          }
+        }
+      }
+    }
     return this.currentRuntimeInfo();
+  }
+
+  private describeSessionSettings() {
+    const settings = this.settings.describe(this.config.model, this.config.reasoningEffort);
+    if (this.activeTurnId && this.liveTurnSettings?.turnId === this.activeTurnId) {
+      const activeEffort = this.settings.describe(this.liveTurnSettings.model, this.liveTurnSettings.effort).find(setting => setting.id === 'effort');
+      const confirmedEffort = settings.find(setting => setting.id === 'effort');
+      if (activeEffort && confirmedEffort) confirmedEffort.options = activeEffort.options;
+      else if (activeEffort) settings.splice(1, 0, { ...activeEffort, value: this.config.reasoningEffort ?? null });
+      else if (confirmedEffort) settings.splice(settings.indexOf(confirmedEffort), 1);
+    }
+    return settings;
   }
 
   private currentRuntimeInfo(): AgentRuntimeInfo {
@@ -804,7 +928,7 @@ export class CodexAppServerSession implements AgentSession {
       childSessions: this.threadId ? this.runtime.childSessions(this.threadId) : [],
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
       model: this.config.model ?? null,
-      settings: this.settings.describe(this.config.model, this.config.reasoningEffort).map((setting) => this.acceptsDirectInput && !(this.restrictedNative && setting.category === 'permissions') ? setting : { ...setting, mutable: false }),
+      settings: this.describeSessionSettings().map((setting) => this.acceptsDirectInput && !(this.restrictedNative && setting.category === 'permissions') ? setting : { ...setting, mutable: false }),
       mode: this.config.collaborationMode ?? null,
       ...(this.planningModes ? { planning: { active: this.config.collaborationMode === 'plan' } } : {}),
       persistence: this.threadId ? {
@@ -872,7 +996,10 @@ export class CodexAppServerSession implements AgentSession {
     this.communicationHistory.rememberThread(response.thread);
     this.threadId = threadId;
     if (this.ownsRuntime) this.runtime.registerRoot(threadId);
-    this.applyThreadSettings({ ...response.thread, ...response, sandboxPolicy: response.sandbox ?? response.thread.sandboxPolicy });
+    this.applyThreadSettings({ ...response.thread, ...response, sandboxPolicy: response.sandbox ?? response.thread.sandboxPolicy,
+      ...('reasoningEffort' in response ? { effort: response.reasoningEffort }
+        : 'reasoningEffort' in response.thread ? { effort: response.thread.reasoningEffort } : {}),
+    });
     if (!this.config.model) this.config.model = readString(response.model) ?? readString(response.thread.model);
     if (!this.config.cwd) this.config.cwd = readString(response.cwd) ?? readString(response.thread.cwd);
     if (!this.config.reasoningEffort) this.config.reasoningEffort = readString(response.reasoningEffort) ?? readString(response.thread.reasoningEffort);
@@ -1094,7 +1221,7 @@ export class CodexAppServerSession implements AgentSession {
 
     if (method === 'thread/settings/updated') {
       if (!isRecord(params.threadSettings)) return true;
-      this.applyThreadSettings(params.threadSettings);
+      this.applyThreadSettings(params.threadSettings, true);
     } else {
       const status = readThreadRuntimeStatus(params.status);
       if (!status) return true;
@@ -1117,7 +1244,8 @@ export class CodexAppServerSession implements AgentSession {
     return true;
   }
 
-  private applyThreadSettings(settings: Record<string, unknown>): void {
+  private applyThreadSettings(settings: Record<string, unknown>, notification = false): void {
+    this.settingsRevision += 1;
     this.settings.apply(settings);
     const cwd = readString(settings.cwd);
     const model = readString(settings.model);
@@ -1133,6 +1261,12 @@ export class CodexAppServerSession implements AgentSession {
       else delete this.config.collaborationMode;
     }
     if (!this.ownsRuntime) this.refreshInputCapabilities();
+    // Notifications describe current native state, not individual mutation receipts.
+    if (notification) {
+      for (const [id, value] of this.pendingSettings) {
+        if (this.settings.describe(this.config.model, this.config.reasoningEffort).find(setting => setting.id === id)?.value === value) this.pendingSettings.delete(id);
+      }
+    }
     const confirmation = this.settingConfirmation;
     if (confirmation && this.settings.describe(this.config.model, this.config.reasoningEffort).find(({ id }) => id === confirmation.id)?.value === confirmation.value) {
       confirmation.resolve();

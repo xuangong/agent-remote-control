@@ -108,7 +108,15 @@ Sensitive question answers and form fields travel to the Provider only in the re
 
 ## Session settings
 
-The unshipped protocol `1.5.0` includes optional `sessionSettings` capability, typed selection descriptors in `runtimeInfo.settings`, and `set_session_setting { requestId, operationId, agentId, settingId, value }`. Choice IDs are opaque Provider values, not native RPC method names. The existing `command_acknowledged`, runtime stream and Agent Snapshot carry completion and confirmed state. The independent uplink envelope versions stay unchanged. All public protocol participants must upgrade together because negotiation and object schemas are strict (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-protocol/src/messages.ts`).
+Protocol `1.7.0` adds optional `settingChanges` to Agent Snapshot and Agent Update. The existing `sessionSettings` capability, opaque choices in `runtimeInfo.settings`, and `set_session_setting { requestId, operationId, agentId, settingId, value }` remain. `command_acknowledged` now confirms that a setting intent was accepted, not that native application finished. A duplicate operation returns the same acceptance without submitting another native mutation.
+
+Each change retains its accepted `category` and `label` even if a new model removes that setting from the native catalog. It carries `settingId`, `requestId`, `targetValue`, `confirmedValue`, `requestedAt`, `deadlineAt`, and `status` (`pending`, `failed`, or `timed_out`), with optional `message` and `code`. Native runtime settings remain authoritative. A matching native selection removes the pending change. Accepted changes are independent of conversation activity: the public layer permits them during work, while adapters decide when native application is possible without interrupting a turn or resolving an approval.
+
+The relay gives each intent 30 seconds. Native rejection ends Pending immediately; expiry ends it even if a native call or readback is hung. Fresh readback is attempted, with the last confirmed value available as fallback. Each readback has a five-second deadline so a hung getter cannot block later reads; results from superseded reads are ignored. Neither an unknown mutation nor a native queued mutation is resubmitted automatically. The SDK result `deferred` means nothing was submitted and permits another attempt when native readiness changes; `pending` means native acceptance without confirmation. New intents supersede earlier intents for the same setting. Old completion cannot settle the newer intent; late native state still updates confirmed values.
+
+Snapshots and updates share these outcomes across pages and reconnects. The renderer displays pending targets in amber, then restores normal text for the actual or last confirmed value. Terminal outcomes remain in the relevant panel; an unread dot clears when that panel is opened. Read markers are local presentation state. No timeout toast or automatic retry is generated. Settings default choices describe native selection semantics, not an inferred effective model or effort.
+
+All strict-schema public participants must upgrade together to `1.7.0`. Independent uplink envelope versions stay unchanged (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-relay/src/session-setting-changes.ts`).
 
 ## Provider commands
 
@@ -367,7 +375,7 @@ The shared Session View renders attribution and Markdown in Content and All
 activity modes. Search keeps User / Assistant messages as its default; All
 activity also searches communication text and attribution. Recording, replay,
 source-key deduplication, and reconnect use the ordinary timeline contract.
-All strict-schema Remote participants must upgrade together to protocol 1.6.0;
+All strict-schema Remote participants must upgrade together to protocol 1.7.0;
 this does not change the independent Host uplink envelope version.
 
 ## Current session usage

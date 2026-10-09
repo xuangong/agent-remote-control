@@ -146,12 +146,16 @@ export interface AgentSession {
   steer?(text: string): Promise<AgentInputAcceptance | void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
-  setSessionSetting?(id: string, value: string): Promise<void>;
+  /** Deferred has not been submitted and may be retried after native state changes.
+   * Pending has been accepted by native code and must not be submitted again.
+   * Runtime settings report confirmed native selections in every case. */
+  setSessionSetting?(id: string, value: string): Promise<void | { status: 'pending' | 'deferred' }>;
   listCommands?(): Promise<import('./commands.js').AgentCommand[]>;
   executeCommand?(id: string, args: string): Promise<import('./commands.js').AgentCommandResult>;
   readResource?(locator: string): Promise<AgentResourceReadResult>;
-  /** Current native execution facts, consistent with live runtime_updated observations. */
-  runtimeInfo(): Promise<AgentRuntimeInfo>;
+  /** Current native execution facts, consistent with live runtime_updated observations.
+   * Request a fresh native settings read when supported; unsupported fields retain their last confirmation. */
+  runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo>;
   dispose(): Promise<void>;
 }
 

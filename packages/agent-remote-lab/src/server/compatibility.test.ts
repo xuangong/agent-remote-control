@@ -276,7 +276,7 @@ function validManifest(overrides: {
     },
     ...(overrides.omitCodex ? [] : [{
       providerId: 'codex',
-      native: { name: 'codex-cli', version: '0.148.0', revision: null },
+      native: { name: 'codex-cli', version: '0.162.0', revision: null },
       degradations: codexDegradations,
     }]),
     {
@@ -290,7 +290,7 @@ function validManifest(overrides: {
   ];
   return {
     schemaVersion: 1,
-    protocolVersion: '1.6.0',
+    protocolVersion: '1.7.0',
     borgee: {
       release: 'unreleased',
       sourceState: 'working_tree',

@@ -225,7 +225,7 @@ function closeHttpServer(server: Server): Promise<void> {
 const entry = process.argv[1] === undefined ? undefined : new URL(`file://${process.argv[1]}`).href;
 if (entry === import.meta.url) {
   const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE;
-  if (!executable) throw new Error('BORGEE_CODEX_TEST_EXECUTABLE must name the explicit Codex 0.148.0 executable.');
+  if (!executable) throw new Error('BORGEE_CODEX_TEST_EXECUTABLE must name the explicit Codex 0.162.0 executable.');
   const server = await createCodexValidationServer({ executable });
   const address = await server.http.listen(Number(process.env.AGENT_REMOTE_PORT ?? 5910), '127.0.0.1');
   process.stdout.write(`Codex Agent Remote relay listening on ${address.url}\n`);

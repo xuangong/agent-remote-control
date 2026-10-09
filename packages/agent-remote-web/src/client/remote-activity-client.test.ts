@@ -11,8 +11,8 @@ it('negotiates activity only, reconnects without replaying content, and releases
   const values: RemoteActivityState[] = [];
   const client = new RemoteActivityClient('agent', transport, state => values.push(state));
   client.start(); listener.onOpen();
-  expect(send.mock.calls).toEqual([[{ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' }]]);
-  listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'running' } });
+  expect(send.mock.calls).toEqual([[{ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }]]);
+  listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'running' } });
   expect(values.at(-1)).toEqual({ connection: 'ready', activity: 'running' });
   listener.onDisconnect();
   expect(values.at(-1)).toEqual({ connection: 'disconnected' });
@@ -32,7 +32,7 @@ it('shows an unsupported Host without falling back to content or retrying foreve
   const values: RemoteActivityState[] = [];
   const client = new RemoteActivityClient('agent', { connect } as unknown as RemoteAgentTransport, state => values.push(state));
   client.start(); listener.onOpen();
-  listener.onMessage({ protocolVersion: '1.6.0', type: 'protocol_error', payload: { code: 'invalid_shape', message: 'Unknown field', recoverable: false } });
+  listener.onMessage({ protocolVersion: '1.7.0', type: 'protocol_error', payload: { code: 'invalid_shape', message: 'Unknown field', recoverable: false } });
   expect(values.at(-1)?.error).toContain('Update the Controller');
   await vi.advanceTimersByTimeAsync(60000);
   expect(connect).toHaveBeenCalledOnce();
@@ -45,9 +45,9 @@ it('passes the observed content cursor without inferring one when absent', () =>
   const values: RemoteActivityState[] = [];
   const client = new RemoteActivityClient('agent', transport, value => values.push(value));
   client.start(); listener.onOpen();
-  listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting', cursor: { epoch: 'e', seq: 8 } } });
+  listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting', cursor: { epoch: 'e', seq: 8 } } });
   expect(values.at(-1)?.cursor).toEqual({ epoch: 'e', seq: 8 });
-  listener.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'idle' } });
+  listener.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'idle' } });
   expect(values.at(-1)?.cursor).toBeUndefined();
   client.stop();
 });
@@ -73,13 +73,13 @@ describe('activity confirmation across page suspension', () => {
     client.start();
     const hide = () => { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); };
     const show = () => { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); };
-    const confirm = () => connections.at(-1)!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'running' } });
+    const confirm = () => connections.at(-1)!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'running' } });
     return { client, connections, values, hide, show, confirm };
   }
 
   it('pauses confirmation while hidden and gives recovery a fresh bounded confirmation window', async () => {
     const h = setup();
-    h.connections[0]!.onMessage({ protocolVersion: '1.6.0', type: 'negotiated' });
+    h.connections[0]!.onMessage({ protocolVersion: '1.7.0', type: 'negotiated' });
     await vi.advanceTimersByTimeAsync(19_000);
     h.hide();
     await vi.advanceTimersByTimeAsync(60_000);
@@ -154,7 +154,7 @@ describe('activity confirmation across page suspension', () => {
     await Promise.resolve();
     expect(h.connections).toHaveLength(2);
     h.confirm(); h.connections[0]!.onDisconnect();
-    h.connections[0]!.onMessage({ protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'idle' } });
+    h.connections[0]!.onMessage({ protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'idle' } });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.connections).toHaveLength(2);
     expect(h.values.at(-1)).toEqual({ connection: 'ready', activity: 'running' });

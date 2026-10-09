@@ -17,18 +17,18 @@ describe('Codex Lab composition', () => {
 
   it('rejects an executable that is not the pinned real app-server version', async () => {
     const executable = fakeExecutable('codex-cli 0.149.0');
-    await expect(createCodexValidationServer({ executable })).rejects.toThrow('codex-cli 0.148.0');
+    await expect(createCodexValidationServer({ executable })).rejects.toThrow('codex-cli 0.162.0');
   });
 
   it('compares the normalized Codex version exactly', async () => {
-    const executable = fakeExecutable('codex-cli 0.148.0 nightly');
+    const executable = fakeExecutable('codex-cli 0.162.0 nightly');
     const attempt = await createCodexValidationServer({ executable }).then(
       (server) => ({ server }),
       (error: unknown) => ({ error }),
     );
     if ('server' in attempt) await attempt.server.close();
     expect(attempt).toMatchObject({ error: expect.objectContaining({
-      message: expect.stringContaining('got codex-cli 0.148.0 nightly'),
+      message: expect.stringContaining('got codex-cli 0.162.0 nightly'),
     }) });
   });
 
@@ -36,7 +36,7 @@ describe('Codex Lab composition', () => {
     process.env.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST = compatibilityManifest({
       codexVersion: '0.149.0',
     });
-    const attempt = await createCodexValidationServer({ executable: fakeExecutable('codex-cli 0.148.0') }).then(
+    const attempt = await createCodexValidationServer({ executable: fakeExecutable('codex-cli 0.162.0') }).then(
       (server) => ({ server }),
       (error: unknown) => ({ error }),
     );
@@ -50,18 +50,18 @@ describe('Codex Lab composition', () => {
     process.env.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST = compatibilityManifest({
       protocolVersion: '2.0.0',
     });
-    const attempt = await createCodexValidationServer({ executable: fakeExecutable('codex-cli 0.148.0') }).then(
+    const attempt = await createCodexValidationServer({ executable: fakeExecutable('codex-cli 0.162.0') }).then(
       (server) => ({ server }),
       (error: unknown) => ({ error }),
     );
     if ('server' in attempt) await attempt.server.close();
     expect(attempt).toMatchObject({ error: expect.objectContaining({
-      message: expect.stringContaining('protocolVersion 1.6.0'),
+      message: expect.stringContaining('protocolVersion 1.7.0'),
     }) });
   });
 
   it('registers Codex through the same Provider registry for an explicit absolute executable', async () => {
-    const executable = fakeExecutable('codex-cli 0.148.0');
+    const executable = fakeExecutable('codex-cli 0.162.0');
     const composition = await createCodexValidationServer({ executable });
     try {
       expect(composition.relay.listProviders()).toEqual([{ providerId: 'codex', displayName: 'Codex (fixture)' }]);
@@ -86,7 +86,7 @@ describe('Codex Lab composition', () => {
     const manifest = join(root, 'compatibility.json');
     writeFileSync(manifest, JSON.stringify({
       schemaVersion: 1,
-      protocolVersion: overrides.protocolVersion ?? '1.6.0',
+      protocolVersion: overrides.protocolVersion ?? '1.7.0',
       borgee: {
         release: 'unreleased', sourceState: 'working_tree',
         baseRevision: '9e21c2ad9a0ba55413960a1681d34675c5d6e026',
@@ -118,7 +118,7 @@ describe('Codex Lab composition', () => {
         },
         {
           providerId: 'codex',
-          native: { name: 'codex-cli', version: overrides.codexVersion ?? '0.148.0', revision: null },
+          native: { name: 'codex-cli', version: overrides.codexVersion ?? '0.162.0', revision: null },
           degradations: [
             { capability: 'sessions.source-reference', status: 'degraded', reason: 'Source references require Codex 0.155.0 or newer.' },
             { capability: 'interactions.form.schema', status: 'degraded', reason: 'Bounded flat schemas only.' },

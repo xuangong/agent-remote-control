@@ -4,7 +4,7 @@ import { findTimelineMatches, scanTimelineHistory } from './timeline-search.js';
 
 const entry = (seq: number, text: string): ProjectedTimelineEntry => ({ providerId: 'recorded', seqStart: seq, seqEnd: seq,
   timestamp: '2026-09-29T00:00:00Z', item: { type: 'assistant_message', text }, resources: [], collapsed: [], sourceSeqRanges: [] });
-const page = (entries: ProjectedTimelineEntry[], hasOlder = false): HistoryPage => ({ protocolVersion: '1.6.0', type: 'timeline_page', payload: {
+const page = (entries: ProjectedTimelineEntry[], hasOlder = false): HistoryPage => ({ protocolVersion: '1.7.0', type: 'timeline_page', payload: {
   requestId: 'page', agentId: 'one', direction: 'before', epoch: 'epoch', reset: false, staleCursor: false, gap: false, error: null,
   entries, hasOlder, hasNewer: true, startCursor: entries[0] ? { epoch: 'epoch', seq: entries[0].seqStart } : null, endCursor: null,
   window: { minSeq: 1, maxSeq: 30, nextSeq: 31 },

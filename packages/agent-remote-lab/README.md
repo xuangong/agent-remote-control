@@ -215,7 +215,7 @@ test -n "$BORGEE_CODEX_TEST_EXECUTABLE" && test "${BORGEE_CODEX_TEST_EXECUTABLE#
 env -u DSH_REPO /usr/bin/perl -e 'alarm 240; exec @ARGV' "$LAB_PNPM" --filter @orchardworks/agent-remote-lab exec playwright test e2e/codex.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=180000
 ```
 
-The executable check must print `codex-cli 0.148.0`; a suffix such as `nightly` is intentionally rejected by the Lab before the Provider is built (`src/server/codex.ts:30-49`). The visible flow selects `Codex (fixture)`, answers the rendered question, observes its continuation, reloads, and asserts one copy of the transcript (`e2e/codex.spec.ts:9-35`).
+The executable check must print `codex-cli 0.162.0`; a suffix such as `nightly` is intentionally rejected by the Lab before the Provider is built (`src/server/codex.ts:30-49`). The visible flow selects `Codex (fixture)`, answers the rendered question, observes its continuation, reloads, and asserts one copy of the transcript (`e2e/codex.spec.ts:9-35`).
 
 ### Standalone DSH source-fixture verification
 

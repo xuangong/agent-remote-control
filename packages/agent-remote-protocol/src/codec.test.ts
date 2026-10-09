@@ -37,7 +37,7 @@ import {
   encodeResumeAgentRequest,
 } from './index.js';
 
-const version = '1.6.0';
+const version = '1.7.0';
 
 describe('usage snapshot wire contract', () => {
   const message = (usage: unknown) => ({ protocolVersion: version, type: 'agent_stream', payload: {
@@ -676,16 +676,16 @@ describe('resource and session messages', () => {
 });
 
 it('round-trips strict activity observation without accepting content fields', () => {
-  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
-  const activity = { protocolVersion: '1.6.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting' } };
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const activity = { protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting' } };
   expect(decodeServerMessage(JSON.stringify(activity))).toMatchObject({ status: 'ok', value: activity });
   expect(decodeServerMessage(JSON.stringify({ ...activity, payload: { ...activity.payload, text: 'private' } })).status).toBe('rejected');
 });
 
 
 it('round-trips an activity content cursor and rejects invalid cursor values', () => {
-  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.6.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
-  const message = { protocolVersion: '1.6.0', type: 'agent_activity', payload: {
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const message = { protocolVersion: '1.7.0', type: 'agent_activity', payload: {
     agentId: 'agent', status: 'waiting', cursor: { epoch: 'epoch', seq: 42 },
   } };
   expect(decodeServerMessage(JSON.stringify(message))).toMatchObject({ status: 'ok', value: message });
@@ -702,4 +702,15 @@ it('round-trips native failure evidence independently of historical lastError', 
   expect(encoded.status).toBe('ok');
   if (encoded.status !== 'ok') throw new Error('Expected a valid failure snapshot');
   expect(decodeAgentSnapshot(encoded.json)).toEqual({ status: 'ok', value: failed });
+});
+
+
+it.each(['pending', 'failed', 'timed_out'] as const)('round trips shared %s setting outcomes independently of the current catalog', status => {
+  const change = { settingId: 'reasoning_effort', category: 'model', label: 'Reasoning effort', requestId: 'native-intent',
+    targetValue: 'high', confirmedValue: 'low', status, requestedAt: '2026-10-09T00:00:00Z', deadlineAt: '2026-10-09T00:00:30Z',
+    ...(status === 'pending' ? {} : { message: 'The change was not confirmed.' }) };
+  const message = { ...snapshot, payload: { ...snapshot.payload, settingChanges: [change] } };
+  expect(decodeAgentSnapshot(JSON.stringify(message))).toEqual({ status: 'ok', value: message });
+  expect(decodeAgentSnapshot(JSON.stringify({ ...message, protocolVersion: '1.6.0' })).status).toBe('rejected');
+  expect(decodeAgentSnapshot(JSON.stringify({ ...message, payload: { ...message.payload, settingChanges: [{ ...change, category: 'invented' }] } })).status).toBe('rejected');
 });

@@ -66,7 +66,7 @@ describe('live DSH launcher', () => {
     const manifest = join(testRoot, 'invalid-compatibility.json');
     writeFileSync(manifest, JSON.stringify({
       schemaVersion: 2,
-      protocolVersion: '1.6.0',
+      protocolVersion: '1.7.0',
       borgee: { release: 'unreleased', revision: 'test' },
       providers: [{
         providerId: 'dsh',
@@ -142,7 +142,7 @@ describe('live DSH launcher', () => {
     const manifest = join(testRoot, 'compatibility.json');
     writeFileSync(manifest, JSON.stringify({
       schemaVersion: 1,
-      protocolVersion: '1.6.0',
+      protocolVersion: '1.7.0',
       borgee: {
         release: 'unreleased', sourceState: 'working_tree',
         baseRevision: '9e21c2ad9a0ba55413960a1681d34675c5d6e026',
@@ -175,7 +175,7 @@ describe('live DSH launcher', () => {
         },
         {
           providerId: 'codex',
-          native: { name: 'codex-cli', version: '0.148.0', revision: null },
+          native: { name: 'codex-cli', version: '0.162.0', revision: null },
           degradations: [
             { capability: 'sessions.source-reference', status: 'degraded', reason: 'Source references require Codex 0.155.0 or newer.' },
             { capability: 'interactions.form.schema', status: 'degraded', reason: 'Bounded flat schemas only.' },

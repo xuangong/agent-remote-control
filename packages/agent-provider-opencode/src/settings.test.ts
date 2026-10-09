@@ -106,7 +106,7 @@ test('exposes protocol-valid default variants and never sends their UI sentinel 
   const { settings, requests, selected } = await fixture();
   for (const setting of settings.list()) expect(Value.Check(PublicSessionSetting, setting)).toBe(true);
   const variant = settings.list().find(setting => setting.id === 'variant')!;
-  expect(variant.value).toBeNull();
+  expect(variant.value).toBe('opencode:default');
   const defaultValue = variant.options.find(option => option.label === 'Agent/model default')!.value;
   expect(defaultValue.length).toBeGreaterThan(0);
   await settings.set('variant', 'deep');
@@ -141,4 +141,16 @@ test('keeps native variants distinct from the default option sentinel', async ()
   await settings.set('variant', defaults.value);
   expect(selected.variant).toBeUndefined();
   for (const setting of settings.list()) expect(Value.Check(PublicSessionSetting, setting)).toBe(true);
+}, 5000);
+
+
+test('requires native session readback before publishing a model or agent selection', async () => {
+  const { settings, state, selected } = await fixture();
+  state.ignoreSwitch = true;
+  await expect(settings.set('model', 'test/other')).rejects.toThrow(/confirm/);
+  await expect(settings.set('agent', 'plan')).rejects.toThrow(/confirm/);
+  expect(selected).toEqual({ model: 'test/main', agent: 'build' });
+  state.ignoreSwitch = false;
+  await settings.set('model', 'test/other');
+  expect(selected.model).toBe('test/other');
 }, 5000);

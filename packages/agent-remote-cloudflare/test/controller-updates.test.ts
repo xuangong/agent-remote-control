@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { fixture, send } from './fixture.js';
 it.each(['linux', 'win32'])('persists %s Host versions and restricts upgrade RPC to the owner over real Worker HTTP and WebSocket', async platform => {
-  const release = { protocolVersion: '1.6.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: [`${platform}-x64`] };
+  const release = { protocolVersion: '1.7.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: [`${platform}-x64`] };
   const f = await fixture({ controllerRelease: release });
   const alice = await f.login('alice'), bob = await f.login('bob');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
@@ -32,7 +32,7 @@ it.each(['linux', 'win32'])('persists %s Host versions and restricts upgrade RPC
 }, 30000);
 
 it('routes only the verified bridge to a legacy Host and continues after its identity changes', async () => {
-  const release = { protocolVersion: '1.6.0', version: '0.2.33', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.33.tgz', nodeMajor: 22, platforms: ['win32-x64'] };
+  const release = { protocolVersion: '1.7.0', version: '0.2.33', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.33.tgz', nodeMajor: 22, platforms: ['win32-x64'] };
   const bridge = { ...release, protocolVersion: '1.5.0', version: '0.2.32', asset: 'orchardworks-agent-remote-controller-0.2.32.tgz' };
   const f = await fixture({ controllerRelease: release, controllerBridge: bridge });
   const alice = await f.login('alice');
@@ -61,7 +61,7 @@ it('routes only the verified bridge to a legacy Host and continues after its ide
 }, 30000);
 
 it('reports an unavailable bridge without hiding the final release or forwarding an unsafe update', async () => {
-  const release = { protocolVersion: '1.6.0', version: '0.2.33', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.33.tgz', nodeMajor: 22, platforms: ['linux-x64'] };
+  const release = { protocolVersion: '1.7.0', version: '0.2.33', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.33.tgz', nodeMajor: 22, platforms: ['linux-x64'] };
   const f = await fixture({ controllerRelease: release });
   const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };

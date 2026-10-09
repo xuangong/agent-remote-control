@@ -2,7 +2,7 @@ import { ImageInputCapabilities } from './image-input.js';
 import { type Static, Type } from '@sinclair/typebox';
 
 import { AgentInteractionRequest } from './interactions.js';
-import { AgentSessionSetting } from './session-settings.js';
+import { AgentSessionSetting, AgentSessionSettingChange } from './session-settings.js';
 import { AgentUsage } from './timeline.js';
 import { ProtocolVersionSchema } from './version.js';
 
@@ -96,6 +96,7 @@ export const AgentRuntimeInfo = Strict({
 export type AgentRuntimeInfo = Static<typeof AgentRuntimeInfo>;
 
 export const AgentSnapshotPayload = Strict({
+  settingChanges: Type.Optional(Type.Array(AgentSessionSettingChange)),
   id: NonEmptyString,
   providerId: NonEmptyString,
   cwd: Type.Optional(NonEmptyString),

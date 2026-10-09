@@ -13,7 +13,7 @@ const entries = Array.from({ length: 120 }, (_, index) => ({
 }));
 function history(agentId: string, before = 121, limit = 20) {
   const selected = entries.filter(entry => entry.seqStart < before).slice(-limit);
-  return { protocolVersion: '1.6.0', type: 'timeline_page', payload: { requestId: 'history', agentId, direction: before === 121 ? 'tail' : 'before',
+  return { protocolVersion: '1.7.0', type: 'timeline_page', payload: { requestId: 'history', agentId, direction: before === 121 ? 'tail' : 'before',
     epoch: 'epoch', entries: selected, window: { minSeq: 1, maxSeq: 120, nextSeq: 121 },
     startCursor: selected.length ? { epoch: 'epoch', seq: selected[0]!.seqStart } : null,
     endCursor: selected.length ? { epoch: 'epoch', seq: selected.at(-1)!.seqEnd } : null,
@@ -46,7 +46,7 @@ beforeAll(async () => {
     function View({ id }) {
       const [replica] = useState(() => {
         const replica = new AgentReplica();
-        replica.applySnapshot({ protocolVersion: '1.6.0', type: 'agent_snapshot', payload: {
+        replica.applySnapshot({ protocolVersion: '1.7.0', type: 'agent_snapshot', payload: {
           id, providerId: 'recorded', status: 'idle', activeTurn: null, createdAt: '', updatedAt: '', pendingInteractions: [],
           capabilities: { sendMessage: false, history: true, steer: false, cancel: false, readResource: false },
           runtimeInfo: { providerId: 'recorded', status: 'idle' },

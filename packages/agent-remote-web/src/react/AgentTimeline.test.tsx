@@ -456,7 +456,7 @@ describe('AgentTimeline', () => {
     const updated = applyResourceUpdate(
       state([entry(1, { type: 'assistant_message', text: 'Generated output' }, [binding])]),
       {
-        protocolVersion: '1.6.0',
+        protocolVersion: '1.7.0',
         type: 'resource_update',
         payload: {
           agentId: 'agent-one', resourceId: binding.resourceId,

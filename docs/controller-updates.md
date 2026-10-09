@@ -33,15 +33,18 @@ They cannot download protocol 1.6 releases directly. Website discovery supplies 
 verified **0.2.32 upgrade component**, built from `controller-v0.2.30` with only the
 updater fix, regression tests, version and generated compatibility metadata changed.
 It truthfully retains session protocol 1.5. After it registers, the owner confirms a
-second update to **0.2.33 or newer**. Controller 0.2.31 goes directly to the final
-release. Each step has its own operation ID, checksum verification, activation and
+second update to the final release. Controller **0.2.31** requires protocol 1.6
+in its updater, so it first installs the verified **0.2.33** release before
+continuing to protocol 1.7 or newer. Controllers **0.2.32 and 0.2.33 or newer**
+can install across a session protocol change. Each step has its own operation ID, checksum verification, activation and
 rollback. A missing or incompatible bridge blocks only legacy Hosts. No browser can
 skip the bridge by claiming a different installed version.
 
 Release both artifacts before deploying the website path. Reserve `controller-v0.2.32`
 for the protocol 1.5 bridge; do not build that tag from main or merge its older runtime
 into main. Publish the bridge as a stable, non-latest release, then publish the protocol
-1.6 final release as latest. Do not rewrite old release manifests or relabel the new
+final release as latest. Keep the existing 0.2.33 protocol 1.6 release available
+for 0.2.31 Hosts, including offline machines that reconnect after deployment. Do not rewrite old release manifests or relabel the new
 runtime as protocol 1.5. The normal release manifest format stays unchanged so strict
 old decoders can read it. If GitHub rate limits an old Controller, its existing
 latest-only fallback cannot verify the non-latest bridge; retry after that limit clears.
@@ -51,6 +54,15 @@ The website does not silently start the second update or update offline Hosts. R
 Controller updates after reconnecting and choose **Update Host** to continue. Reloading
 the page does not lose the upgrade path: the running Host identity determines its step.
 Native Codex and other agent executables are not upgraded by this process.
+
+Upgrade management uses Host uplink version 2 independently of session protocol
+negotiation. A session protocol mismatch must not prevent listing the Host,
+reading update status, or confirming its next compatible package. Mixed fleets
+receive each required intermediate release independently; one unavailable package
+does not hide another valid upgrade path. Keep these paths until old installations
+have been retired or upgraded; removing them is a separate rollout. Candidate
+startup rollback verifies registration, not every session feature, so validate both
+management reconnection and session behavior before releasing a new runtime.
 
 ## Windows
 

@@ -4,7 +4,7 @@ import { watchPagePolling } from '@orchardworks/agent-remote-web';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 import { hostDisplayLabel } from './host-environment.js';
 
-export function controllerUpdateCoverage(release: ControllerRelease | null, hosts: readonly RemoteHost[], bridge?: ControllerRelease) {
+export function controllerUpdateCoverage(release: ControllerRelease | null, hosts: readonly RemoteHost[], bridge?: ControllerRelease | readonly ControllerRelease[]) {
   const owned = hosts.filter(host => host.access !== 'shared');
   const covered = !!release && owned.length > 0 && owned.every(host => {
     const platform = host.controller ?? (host.environment ? { platform: host.environment.os.platform, arch: host.environment.os.arch, nodeMajor: release.nodeMajor } : undefined);
@@ -17,7 +17,7 @@ export function controllerUpdateCoverage(release: ControllerRelease | null, host
 const labels: Record<ControllerUpdateStatus['phase'], string> = { idle: 'Ready', downloading: 'Downloading and installing…', waiting: 'Waiting for a safe restart…', restarting: 'Restarting…', succeeded: 'Updated', failed: 'Update failed' };
 export function ControllerUpdates({ service, hosts }: { service: HostPairingService; hosts: readonly RemoteHost[] }) {
   const [release, setRelease] = useState<ControllerRelease | null>(null);
-  const [bridge, setBridge] = useState<ControllerRelease>();
+  const [bridge, setBridge] = useState<ControllerRelease | readonly ControllerRelease[]>();
   const [bridgeError, setBridgeError] = useState<string>();
   const [error, setError] = useState<string>();
   const [expanded, setExpanded] = useState(false);
@@ -32,13 +32,18 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
   const { owned, covered, outdated, eligible } = controllerUpdateCoverage(release, hosts, bridge);
   const actionable = eligible.filter(host => !['downloading', 'waiting', 'restarting'].includes(statuses[host.id]?.phase ?? 'idle'));
   const available = eligible.length > 0;
+  const confirmedBridges = [...new Set(eligible.flatMap(host => {
+    if (!confirm?.includes(host.id) || !host.controller || !controllerUpgradeBridgeVersion(release!, host.controller)) return [];
+    const target = controllerUpdateTarget(release!, host.controller, bridge);
+    return target ? [target.version] : [];
+  }))];
   useEffect(() => {
     let retired = false, loading = false;
     setRelease(null); setBridge(undefined); setBridgeError(undefined); setStatuses({}); setError(undefined); requests.current.clear(); setBusy(false); setConfirm(null);
     const discover = async (refresh = false) => {
       if (retired || loading || !service.controllerRelease) return;
       loading = true; setChecking(true);
-      try { const result = await service.controllerRelease({ refresh }); if (!retired && current.current.service === service) { setRelease(result.release); setBridge(result.bridgeRelease); setBridgeError(result.bridgeError); setError(undefined); } }
+      try { const result = await service.controllerRelease({ refresh }); if (!retired && current.current.service === service) { setRelease(result.release); setBridge(result.bridgeReleases ?? result.bridgeRelease); setBridgeError(result.bridgeError); setError(undefined); } }
       catch (cause) { if (!retired) setError(cause instanceof Error ? cause.message : 'Could not check Controller updates.'); }
       finally { loading = false; if (!retired) setChecking(false); }
     };
@@ -110,7 +115,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
       {release ? <a href={`https://github.com/xuangong/agent-remote-control/releases/tag/controller-v${release.version}`} target="_blank" rel="noreferrer">Release notes and manual installation</a> : null}
       {actionable.length > 1 ? <button type="button" disabled={busy} onClick={() => setConfirm(actionable.map(host => host.id))}>Update {actionable.length} Hosts</button> : null}
       {confirm?.length ? <div role="group" aria-label="Confirm Controller update"><p>Update {confirm.length} online {confirm.length === 1 ? 'Host' : 'Hosts'} to {release?.version}? The Controller restarts as soon as the download is verified. Remote connections briefly reconnect. Shared Codex daemon tasks keep running; private agent tasks and Controller-hosted tool calls may be interrupted. Offline Hosts are skipped.</p>
-        {eligible.some(host => confirm.includes(host.id) && host.controller && controllerUpgradeBridgeVersion(release!, host.controller)) ? <p>Older Controllers first install upgrade component {bridge?.version}. After they reconnect, confirm again to continue to {release?.version}.</p> : null}
+        {confirmedBridges.length ? <p>Older Controllers first install upgrade component {confirmedBridges.join(', ')}. After they reconnect, confirm again to continue to {release?.version}.</p> : null}
         <button type="button" disabled={busy} onClick={() => void update(eligible.filter(host => confirm.includes(host.id)))}>Confirm update</button><button type="button" onClick={() => setConfirm(null)}>Cancel</button>
       </div> : null}
     </div> : null}

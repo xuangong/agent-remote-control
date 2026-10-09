@@ -117,9 +117,9 @@ it('offers a bridge first and a separately confirmed final update after reconnec
   expect(requests[1]!.operationId).not.toBe(requests[0]!.operationId);
 });
 it('keeps newer Hosts actionable when the legacy bridge is unavailable', () => {
-  const latest = { ...release, version: '0.2.33' };
+  const latest = { ...release, version: '0.2.40' };
   const legacy = { ...host, id: 'old', controller: { ...host.controller!, version: '0.2.30' } };
-  const modern = { ...host, controller: { ...host.controller!, version: '0.2.31' } };
+  const modern = { ...host, controller: { ...host.controller!, version: '0.2.39' } };
   expect(controllerUpdateCoverage(latest, [legacy, modern]).eligible).toEqual([modern]);
 });
 
@@ -145,4 +145,24 @@ it('updates to a standalone bridge and stops after the Host reconnects', async (
   expect(container.textContent).not.toContain('Update Host');
   expect(container.textContent).not.toContain('0.2.33');
   expect(container.textContent).not.toContain('not compatible');
+});
+
+it('confirms the correct upgrade component for each legacy version in a mixed fleet', async () => {
+  const latest = { ...release, version: '0.2.40', asset: 'orchardworks-agent-remote-controller-0.2.40.tgz' };
+  const bridges = [
+    { ...release, version: '0.2.32', protocolVersion: '1.5.0', asset: 'orchardworks-agent-remote-controller-0.2.32.tgz' },
+    { ...release, version: '0.2.33', protocolVersion: '1.6.0', asset: 'orchardworks-agent-remote-controller-0.2.33.tgz' },
+  ];
+  const managed = ['0.2.30', '0.2.31', '0.2.39'].map(version => ({ ...host, id: version, name: version, controller: { ...host.controller!, version } }));
+  const requests: Array<[string, string]> = [];
+  const service: HostPairingService = { hosts: async () => ({ hosts: managed }), pair: async () => { throw new Error('unused'); },
+    controllerRelease: async () => ({ release: latest, bridgeRelease: bridges[0], bridgeReleases: bridges }),
+    controllerUpdate: async (id, input) => { if (!input) return { phase: 'idle', updatedAt: 0 }; requests.push([id, input.version]); return { ...input, phase: 'downloading', updatedAt: 1 }; } };
+  const container = await render(<ControllerUpdates service={service} hosts={managed} />);
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.textContent).toContain('Upgrade component: 0.2.32');
+  expect(container.textContent).toContain('Upgrade component: 0.2.33');
+  await act(async () => button(container, 'Update 3 Hosts').click());
+  await act(async () => button(container, 'Confirm update').click());
+  expect(requests).toEqual([['0.2.30', '0.2.32'], ['0.2.31', '0.2.33'], ['0.2.39', '0.2.40']]);
 });

@@ -42,9 +42,12 @@ function hasLegacyUpdater(host: Pick<ControllerIdentity, 'version'>): boolean {
     && compareControllerVersions(host.version, LEGACY_UPDATER_LAST_VERSION) <= 0;
 }
 export function controllerUpgradeBridgeVersion(release: ControllerRelease, host: Pick<ControllerIdentity, 'version'>): string | undefined {
-  return hasLegacyUpdater(host) && release.protocolVersion !== '1.5.0' ? LEGACY_UPDATER_BRIDGE_VERSION : undefined;
+  if (hasLegacyUpdater(host) && release.protocolVersion !== '1.5.0') return LEGACY_UPDATER_BRIDGE_VERSION;
+  // 0.2.31 shipped the same updater restriction with session protocol 1.6.
+  if (host.version === '0.2.31' && release.protocolVersion !== '1.6.0') return '0.2.33';
+  return undefined;
 }
-export function controllerUpdateTarget(release: ControllerRelease, host: UpdateHost, bridge?: ControllerRelease | null): ControllerRelease | null {
+export function controllerUpdateTarget(release: ControllerRelease, host: UpdateHost, bridge?: ControllerRelease | readonly ControllerRelease[] | null): ControllerRelease | null {
   if (!releaseCoversHost(release, host)) return null;
   // A staged rollout may publish only the bridge. Its old runtime is intentional;
   // Controller 0.2.31 cannot install it because its updater requires protocol 1.6.
@@ -56,12 +59,15 @@ export function controllerUpdateTarget(release: ControllerRelease, host: UpdateH
   if (release.protocolVersion !== PROTOCOL_VERSION) return null;
   const bridgeVersion = controllerUpgradeBridgeVersion(release, host);
   if (!bridgeVersion) return release;
-  return bridge?.version === bridgeVersion && bridge.protocolVersion === '1.5.0'
-    && compareControllerVersions(bridge.version, release.version) < 0 && releaseCoversHost(bridge, host) ? bridge : null;
+  const candidate = (Array.isArray(bridge) ? bridge : bridge ? [bridge] : []).find(item => item.version === bridgeVersion);
+  const bridgeProtocol = bridgeVersion === LEGACY_UPDATER_BRIDGE_VERSION ? '1.5.0' : '1.6.0';
+  return candidate?.protocolVersion === bridgeProtocol
+    && compareControllerVersions(candidate.version, release.version) < 0 && releaseCoversHost(candidate, host) ? candidate : null;
 }
 export interface ControllerReleaseDiscovery {
   release: ControllerRelease | null;
   bridgeRelease?: ControllerRelease;
+  bridgeReleases?: ControllerRelease[];
   bridgeError?: string;
 }
 export type ControllerUpdatePhase = 'idle' | 'downloading' | 'waiting' | 'restarting' | 'succeeded' | 'failed';

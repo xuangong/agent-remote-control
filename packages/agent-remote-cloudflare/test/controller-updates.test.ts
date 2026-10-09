@@ -91,3 +91,54 @@ it.each(['0.2.29', '0.2.30'])('allows %s to install a staged bridge while the fi
   expect(rpc).toHaveLength(1);
   expect(JSON.parse(rpc[0].body).version).toBe('0.2.32');
 }, 30000);
+
+it('keeps distinct legacy upgrade paths available after the Worker restarts and offline Hosts reconnect', async () => {
+  const release = { protocolVersion: '1.7.0', version: '0.2.40', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.40.tgz', nodeMajor: 22, platforms: ['linux-x64'] };
+  const bridges = [
+    { ...release, protocolVersion: '1.5.0', version: '0.2.32', asset: 'orchardworks-agent-remote-controller-0.2.32.tgz' },
+    { ...release, protocolVersion: '1.6.0', version: '0.2.33', asset: 'orchardworks-agent-remote-controller-0.2.33.tgz' },
+  ];
+  const f = await fixture({ controllerRelease: release, controllerBridges: bridges });
+  const alice = await f.login('alice');
+  const oldHosts = [];
+  for (const version of ['0.2.30', '0.2.31', '0.2.39']) {
+    const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
+    const identity = { version, revision: 'c'.repeat(40), platform: 'linux', arch: 'x64', nodeMajor: 22, remoteUpdate: true };
+    oldHosts.push({ ...(await f.host(pairing.key, false, identity, false, false, 'codex', version)), identity });
+  }
+  await f.restart();
+  expect(await (await f.json(alice.basePath + 'v1/remote/hosts', alice.cookie)).json()).toMatchObject({ hosts: expect.arrayContaining(oldHosts.map(host => expect.objectContaining({ id: host.hostId, online: false, controller: host.identity }))) });
+  expect(await (await f.json(alice.basePath + 'v1/remote/controller-release', alice.cookie)).json()).toMatchObject({ release, bridgeReleases: bridges });
+  for (const [index, old] of oldHosts.entries()) {
+    const reconnected = await f.host(old.key, false, old.identity, false, false, 'codex', old.identity.version);
+    expect(reconnected.hostId).toBe(old.hostId);
+    const requests: any[] = [];
+    reconnected.socket.addEventListener('message', event => {
+      const request = JSON.parse(String(event.data)); if (request.type !== 'rpc_request') return;
+      requests.push(request); send(reconnected.socket, { type: 'rpc_response', requestId: request.requestId, status: 202, body: JSON.stringify({ phase: 'downloading', ...JSON.parse(request.body), updatedAt: Date.now() }) });
+    });
+    const path = alice.basePath + `v1/remote/hosts/${old.hostId}/controller-update`;
+    const expected = bridges[index] ?? release;
+    if (index < 2) expect((await f.json(path, alice.cookie, { version: release.version, operationId: 'skip-intermediate' })).status).toBe(409);
+    expect((await f.json(path, alice.cookie, { version: expected.version, operationId: 'confirm-intermediate' })).status).toBe(202);
+    expect(JSON.parse(requests[0].body).version).toBe(expected.version);
+  }
+}, 30000);
+
+it('retains a valid upgrade path when a different legacy bridge is unavailable', async () => {
+  const release = { protocolVersion: '1.7.0', version: '0.2.40', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.40.tgz', nodeMajor: 22, platforms: ['linux-x64'] };
+  const bridge = { ...release, protocolVersion: '1.6.0', version: '0.2.33', asset: 'orchardworks-agent-remote-controller-0.2.33.tgz' };
+  const f = await fixture({ controllerRelease: release, controllerBridge: bridge });
+  const alice = await f.login('alice');
+  for (const version of ['0.2.30', '0.2.31']) {
+    const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
+    const host = await f.host(pairing.key, false, { version, revision: 'c'.repeat(40), platform: 'linux', arch: 'x64', nodeMajor: 22, remoteUpdate: true }, false, false, 'codex', version);
+    host.socket.addEventListener('message', event => { const request = JSON.parse(String(event.data)); if (request.type !== 'rpc_request') return;
+      send(host.socket, { type: 'rpc_response', requestId: request.requestId, status: 202, body: JSON.stringify({ phase: 'downloading', ...JSON.parse(request.body), updatedAt: Date.now() }) });
+    });
+    if (version === '0.2.31') {
+      expect(await (await f.json(alice.basePath + 'v1/remote/controller-release', alice.cookie)).json()).toMatchObject({ release, bridgeRelease: bridge, bridgeError: expect.stringContaining('upgrade component') });
+      expect((await f.json(alice.basePath + `v1/remote/hosts/${host.hostId}/controller-update`, alice.cookie, { version: bridge.version, operationId: 'valid-other-bridge' })).status).toBe(202);
+    }
+  }
+}, 30000);

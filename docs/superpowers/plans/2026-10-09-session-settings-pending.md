@@ -51,3 +51,21 @@ The deadline is 30 seconds from acceptance. At expiry, end Pending immediately a
 Final integration build and workspace typecheck passed. The complete Lab run passed after all source and digest updates were frozen; earlier attempts during dist replacement and with a stale digest are retained as failed runs, not counted as acceptance evidence.
 
 Final verification logs: `/tmp/arc-settings-final-0162-build.log`, `/tmp/arc-lab-codex-0162-regression-final.log`, `/tmp/arc-settings-final-0162-setup.log`, and `/tmp/arc-settings-final-0162-package.log`.
+
+## Upgrade compatibility rollout
+
+Controller 0.2.40 retains the independent version-2 management uplink while session
+protocol moves to 1.7.0. Keep both published intermediate paths: 0.2.0 through
+0.2.30 use 0.2.32 (protocol 1.5), and 0.2.31 uses 0.2.33 (protocol 1.6).
+Controllers whose updaters already allow protocol changes can update directly.
+Discovery, per-version caching and UI selection support mixed fleets without
+letting a missing intermediate package disable another Host. Owner confirmation
+is required for each step; offline Hosts retain their route after reconnect.
+Compatibility removal is a later rollout, not part of this deployment.
+
+A new regression first reproduced the incorrect direct 0.2.31 -> 1.7 offer.
+The repaired paths passed Protocol (212), Hosted (202), Lab (952 passed, 6 skipped),
+and the update suites (136 Host tests with one platform skip, 11 UI tests,
+8 real Worker HTTP/WebSocket tests). Full build and typecheck passed.
+Evidence: `/tmp/arc-upgrade-compat-build.log` and
+`/tmp/arc-upgrade-compat-regression.log`.

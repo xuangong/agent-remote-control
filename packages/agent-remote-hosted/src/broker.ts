@@ -689,15 +689,20 @@ export function createHostBroker(options: HostBrokerOptions) {
     return { status: 200, body: JSON.stringify({ items, hasMore: next < owned.length, ...(next < owned.length ? { nextCursor: String(next) } : {}), revision }) };
   }
 
-  let bridgeLookup: Promise<ControllerRelease> | undefined;
+  const bridgeLookups = new Map<string, Promise<ControllerRelease>>();
   function readUpgradeBridge(version: string, refresh = false): Promise<ControllerRelease> {
-    if (refresh) bridgeLookup = undefined;
-    if (!bridgeLookup) {
+    if (refresh) bridgeLookups.delete(version);
+    let lookup = bridgeLookups.get(version);
+    if (!lookup) {
       const releases = options.controllerReleases ?? controllerReleases;
       if (!releases.version) return Promise.reject(new Error('Upgrade component release discovery is unavailable.'));
-      bridgeLookup = releases.version(version).catch(error => { bridgeLookup = undefined; throw error; });
+      lookup = releases.version(version).catch(error => {
+        if (bridgeLookups.get(version) === lookup) bridgeLookups.delete(version);
+        throw error;
+      });
+      bridgeLookups.set(version, lookup);
     }
-    return bridgeLookup;
+    return lookup;
   }
 
   async function handle(request: Request, context: BrokerRequestContext, url: URL) {
@@ -712,15 +717,18 @@ export function createHostBroker(options: HostBrokerOptions) {
       requireOwner(subject);
       const refresh = url.searchParams.get('refresh') === '1';
       const release = await (options.controllerReleases ?? controllerReleases).latest({ refresh });
-      const legacy = release && [...hosts.values()].find(host => host.controller?.remoteUpdate && controllerUpgradeBridgeVersion(release, host.controller));
-      if (!release || !legacy?.controller) return json(200, { release });
-      try {
-        const bridgeRelease = await readUpgradeBridge(controllerUpgradeBridgeVersion(release, legacy.controller)!, refresh);
-        return json(200, { release, bridgeRelease });
-      } catch {
-        return json(200, { release, bridgeError: 'The upgrade component for older Controllers is unavailable. Refresh and retry after it is published.' });
-      }
+      if (!release) return json(200, { release });
+      const versions = [...new Set([...hosts.values()].flatMap(host => {
+        const version = host.controller?.remoteUpdate && controllerUpgradeBridgeVersion(release, host.controller);
+        return version ? [version] : [];
+      }))];
+      const results = await Promise.allSettled(versions.map(version => readUpgradeBridge(version, refresh)));
+      const bridges = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+      return json(200, { release, ...(bridges[0] ? { bridgeRelease: bridges[0] } : {}),
+        ...(bridges.length > 1 ? { bridgeReleases: bridges } : {}),
+        ...(results.some(result => result.status === 'rejected') ? { bridgeError: 'An upgrade component for older Controllers is unavailable. Refresh and retry after it is published.' } : {}) });
     }
+
     const controllerUpdate = /^\/v1\/remote\/hosts\/([^/]+)\/controller-update$/.exec(url.pathname);
     if (controllerUpdate) {
       requireOwner(subject); requireAccess(controllerUpdate[1]!, subject);

@@ -86,6 +86,17 @@ Validate production `/health`, login redirect/cookies, Host registration, sharin
 Controller streams and reconnect over the public TLS domain. A successful local
 workerd test or deployment dry-run does not establish public DNS/TLS readiness.
 
+Before activating Controllers that advertise new uplink fields, verify the running
+Durable Object as well as the Worker deployment and static assets. Cloudflare
+propagates Worker and Durable Object code independently. A successful deployment
+and matching website asset hashes can coexist with an old Relay instance that
+rejects the new registration envelope. Run `agent-remote-controller diagnostics
+--source server --limit 20` on an already registered Host and require fresh entries
+whose `workerVersionId` matches the deployed version. Do not use old cached entries
+as readiness evidence. Keep the existing Controller running until this check passes;
+if an attempted upgrade rolls back, verify Relay readiness before retrying.
+See [Cloudflare code updates](https://developers.cloudflare.com/durable-objects/platform/known-issues/#code-updates).
+
 ## Local Docker
 
 First build the selected Gateway worktree's image without replacing an existing

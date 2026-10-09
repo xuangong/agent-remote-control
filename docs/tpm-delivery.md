@@ -48,6 +48,8 @@ ARDB exposes list, show, create and diagnostic lifecycle actions over the same a
 
 Deploy the compatible Relay before enabling updated Controllers. Controllers advertise TPM management; the Relay never probes new paths on old Controllers, so normal old sessions stay connected. Providers without both instruction and callable-tool capabilities are not offered for TPM creation.
 
+Check a registered Host's fresh server diagnostics for the deployed `workerVersionId` before activating a TPM Controller. A newly served website does not prove that the Durable Object has replaced its old Relay runtime. During the initial rollout, the old runtime rejected the new registration field and the launcher correctly restored the previous Controller. Retry only after the running Relay version matches; see the [deployment readiness check](current/agent-remote/deployment.md#cloudflare).
+
 ## Validation boundaries
 
 The regression suite covers persistent receipts, unknown outcomes, revision conflicts, bounded concurrency and fairness, busy-session queueing, pause/completion, tool argument validation, native ownership, and real HTTP/WebSocket authorization and reconnect boundaries. A real Host-uplink test disconnects its only Relay connection and verifies continued heartbeat delivery with one native observation.

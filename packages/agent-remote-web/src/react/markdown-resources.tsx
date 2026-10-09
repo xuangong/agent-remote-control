@@ -64,7 +64,8 @@ export function MarkdownResourceImage({
     ? candidate : undefined;
   const key = JSON.stringify([context?.scopeKey, locator, sourceLocator]);
   const { ref: frameRef, near } = useNearViewport(key);
-  const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string }>();
+  const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string;
+    detail?: Awaited<ReturnType<typeof loadLocalResource>>['detail']; resources?: MarkdownResourceContext['resources'] }>();
   const [openedKey, setOpenedKey] = useState<string>();
   useEffect(() => { setOpenedKey(undefined); }, [key]);
   const binding = (result?.key === key ? result.binding : undefined)
@@ -76,6 +77,8 @@ export function MarkdownResourceImage({
     if (!near || !locator || !context) return () => { current = false; };
     void loadLocalResource(context, locator, sourceLocator, (resolved) => {
       if (current) setResult({ key, binding: resolved });
+    }).then(({ binding, detail }) => {
+      if (current) setResult({ key, binding, detail, resources: context.resources });
     }).catch((error: unknown) => {
       if (current) setResult(previous => ({ key, binding: previous?.key === key ? previous.binding : undefined,
         failure: error instanceof Error && error.message ? error.message : 'Image resource is unavailable.' }));
@@ -84,7 +87,8 @@ export function MarkdownResourceImage({
   }, [context, key, locator, sourceLocator, near]);
 
   if (!locator || !context) return <span>{alt}</span>;
-  const detail = binding ? context.resources[binding.resourceId] : undefined;
+  const detail = result?.key === key && result.resources === context.resources && result.detail
+    ? result.detail : binding ? context.resources[binding.resourceId] : undefined;
   const src = detail?.status === 'available' && 'contentBase64' in detail && canPreviewImage(detail.mediaType)
     ? `data:${detail.mediaType};base64,${detail.contentBase64}` : undefined;
   const reason = failure ?? (detail?.status === 'unavailable' ? detail.reason

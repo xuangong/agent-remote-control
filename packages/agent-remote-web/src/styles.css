@@ -741,11 +741,14 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-file-heading strong { font-size: 13px; font-weight: 600; }
 .agent-file-heading small { color: var(--agent-muted); font-size: 11px; }
 .agent-file-body { flex: 1; min-height: 0; overflow: hidden; }
+.agent-file-body[data-rendered-markdown] { overflow: auto; overscroll-behavior: contain; }
+.agent-file-markdown { box-sizing: border-box; max-width: 76ch; margin-inline: auto; padding: 20px clamp(16px, 3vw, 32px) 32px; font-size: 15px; line-height: 1.65; }
 .agent-file-code { height: 100%; min-height: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .agent-file-message { padding: 20px; color: var(--agent-muted); overflow-wrap: anywhere; }
 .agent-file-message[role="alert"] { color: var(--agent-danger); }
 .agent-file-footer { display: flex; justify-content: space-between; gap: 16px; padding: 5px 12px max(5px, env(safe-area-inset-bottom)); border-top: 1px solid var(--agent-rule); color: var(--agent-muted); font-size: 11px; }
 .agent-file-preview .agent-preview-browser-toolbar button[aria-pressed="true"] { background: var(--agent-surface-selected); }
+.agent-file-preview .agent-preview-browser-toolbar .agent-file-mode { width: auto; padding-inline: 10px; font: inherit; font-size: 12px; }
 @media (max-width: 760px) {
   .agent-file-preview { width: 100%; max-height: 100dvh; }
 }

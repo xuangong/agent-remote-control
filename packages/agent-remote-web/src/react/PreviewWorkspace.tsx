@@ -21,7 +21,9 @@ export function PreviewWorkspace({ children, className, style, resourceScope, ..
   useEffect(() => { if (browserOpen) setFile(undefined); }, [browserOpen]);
   const openFile = useCallback((request: FilePreviewRequest) => {
     context?.hide?.();
-    setFile(current => ({ request: { ...request, returnFocus: request.returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : undefined) }, scope: resourceScope, version: (current?.version ?? 0) + 1 }));
+    const trigger = request.returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
+    setFile(current => ({ request: { ...request, returnFocus: current && current.scope === resourceScope && trigger?.closest('dialog.agent-file-preview')
+      ? current.request.returnFocus : trigger }, scope: resourceScope, version: (current?.version ?? 0) + 1 }));
   }, [context?.hide, resourceScope]);
   const setContainer = context?.setContainer;
   const attach = useCallback((element: HTMLDivElement | null) => { container.current = element; setContainer?.(element); }, [setContainer]);
@@ -42,8 +44,9 @@ export function PreviewWorkspace({ children, className, style, resourceScope, ..
   return <div {...props} ref={attach}
     className={`agent-preview-workspace${className ? ` ${className}` : ''}`} data-preview-open={open || undefined}
     style={{ ...style, '--agent-preview-width': `${displayedFraction * 100}%` } as CSSProperties}>
-    <FilePreviewContext.Provider value={{ open: openFile, scopeKey: resourceScope }}><div className="agent-preview-workspace-content">{children}</div></FilePreviewContext.Provider>
+    <FilePreviewContext.Provider value={{ open: openFile, scopeKey: resourceScope }}><div className="agent-preview-workspace-content">{children}</div>
     {selectedFile ? <FilePreview key={selectedFile.version} request={selectedFile.request} onClose={() => setFile(undefined)} /> : null}
+    </FilePreviewContext.Provider>
     {open ? <>
       {dragging ? <div className="agent-preview-resize-shield" /> : null}
       <div className="agent-preview-divider" role="separator" aria-label="Resize conversation and preview" aria-orientation="vertical"

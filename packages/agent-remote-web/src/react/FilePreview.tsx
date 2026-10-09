@@ -1,23 +1,29 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { FilePreviewRequest } from './FilePreviewContext.js';
+import { createFilePreviewResourceContext } from './file-preview-resources.js';
 import { loadLocalResource } from './local-resource.js';
+import { MarkdownContent } from './MarkdownContent.js';
 import { canPreviewImage } from './ResourceCard.js';
 import { ImagePreview } from './ImagePreview.js';
 import { usePreviewVisibility } from './usePreviewVisibility.js';
 
 const ReadOnlyCode = lazy(() => import('./ReadOnlyCode.js'));
 type Loaded = Awaited<ReturnType<typeof loadLocalResource>>;
-const textTypes = new Set(['text/plain', 'text/markdown', 'text/html', 'application/json', 'image/svg+xml']);
+const textTypes = new Set(['text/plain', 'text/markdown', 'text/x-markdown', 'text/html', 'application/json', 'image/svg+xml']);
 
 export function FilePreview({ request, onClose }: { readonly request: FilePreviewRequest; readonly onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [attempt, retry] = useState(0);
   const [wrap, setWrap] = useState(true);
+  const [mode, setMode] = useState<{ request: FilePreviewRequest; source: boolean }>();
   const [result, setResult] = useState<{ request: FilePreviewRequest; value: Loaded }>();
   const [failure, setFailure] = useState<string>();
   const [loading, setLoading] = useState(true);
   const target = fileTarget(request.locator);
   const filename = displayFilename(target.locator);
+  const previewId = useId();
+  const resourceContext = useMemo(() => createFilePreviewResourceContext(request.context, target.locator, request.sourceLocator,
+    `${request.context.scopeKey}:file-preview:${previewId}`), [request.context, target.locator, request.sourceLocator, previewId]);
 
   useEffect(() => {
     const trigger = request.returnFocus;
@@ -42,13 +48,17 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
   const available = detail?.status === 'available' && 'contentBase64' in detail && typeof detail.contentBase64 === 'string'
     ? { ...detail, contentBase64: detail.contentBase64 } : undefined;
   const isImage = available && canPreviewImage(available.mediaType);
+  const mediaType = available?.mediaType.split(';', 1)[0]?.trim().toLowerCase();
+  const isMarkdown = mediaType === 'text/markdown' || mediaType === 'text/x-markdown' || /\.(?:md|markdown)$/i.test(filename);
+  const source = mode?.request === request ? mode.source : target.line !== undefined;
+  const renderedMarkdown = isMarkdown && !source;
   usePreviewVisibility(dialog, !isImage, `file:${request.context.scopeKey}:${request.locator}`);
   let text: string | undefined;
   let error = failure ?? (detail?.status === 'unavailable' ? detail.reason : detail?.status === 'failed' ? detail.message
     : !loading && !available ? 'This file is unavailable. Check the path and Host connection, then retry.' : undefined);
   if (available && !isImage) {
     try {
-      if (!textTypes.has(available.mediaType)) throw new Error('This file type cannot be previewed.');
+      if (!textTypes.has(mediaType!)) throw new Error('This file type cannot be previewed.');
       text = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(available.contentBase64), character => character.charCodeAt(0)));
       if (text.includes('\0')) throw new Error('Binary files cannot be previewed as text.');
     } catch (cause) { error = cause instanceof Error ? cause.message : 'This file is not readable UTF-8 text.'; }
@@ -63,14 +73,18 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
     <div className="agent-preview-browser-layout">
       <header className="agent-preview-browser-toolbar">
         <div className="agent-file-heading"><strong>{filename}</strong><small title={request.locator}>{request.locator}</small></div>
-        {text !== undefined ? <button type="button" aria-label="Wrap lines" title="Wrap lines" aria-pressed={wrap} onClick={() => setWrap(value => !value)}>↵</button> : null}
+        {text !== undefined && isMarkdown ? <button type="button" className="agent-file-mode" aria-label={source ? 'Show rendered Markdown' : 'Show Markdown source'}
+          onClick={() => setMode({ request, source: !source })}>{source ? 'Preview' : 'Source'}</button> : null}
+        {text !== undefined && !renderedMarkdown ? <button type="button" aria-label="Wrap lines" title="Wrap lines" aria-pressed={wrap} onClick={() => setWrap(value => !value)}>↵</button> : null}
         <button type="button" aria-label="Refresh file" title="Read file again" disabled={loading} onClick={() => retry(value => value + 1)}>↻</button>
         <button type="button" aria-label="Close file preview" title="Close file preview" onClick={onClose}>×</button>
       </header>
-      <div className="agent-file-body" aria-busy={loading}>
+      <div className="agent-file-body" data-rendered-markdown={renderedMarkdown || undefined} aria-busy={loading}>
         {loading ? <p className="agent-file-message" role="status">Loading file…</p>
           : error ? <div className="agent-file-message" role="alert"><p>{error}</p><button type="button" onClick={() => retry(value => value + 1)}>Retry</button></div>
-          : text !== undefined ? <Suspense fallback={<p role="status" className="agent-file-message">Opening source…</p>}><ReadOnlyCode text={text} filename={filename} wrap={wrap} line={target.line} /></Suspense> : null}
+          : text !== undefined ? renderedMarkdown
+            ? <MarkdownContent markdown={text} className="agent-file-markdown" resourceContext={resourceContext} sourceLocator={target.locator} />
+            : <Suspense fallback={<p role="status" className="agent-file-message">Opening source…</p>}><ReadOnlyCode text={text} filename={filename} wrap={wrap} line={target.line} /></Suspense> : null}
       </div>
       <footer className="agent-file-footer"><span>Read only</span><span>{available ? `${available.byteLength.toLocaleString()} bytes` : 'Local resource'}</span></footer>
     </div>
@@ -87,6 +101,6 @@ function fileTarget(locator: string): { locator: string; line?: number } {
 }
 
 function displayFilename(locator: string): string {
-  const name = locator.split('/').at(-1) || locator;
+  const name = locator.split(/[\\/]/).at(-1) || locator;
   try { return decodeURIComponent(name); } catch { return name; }
 }

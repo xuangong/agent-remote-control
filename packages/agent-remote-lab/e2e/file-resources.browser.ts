@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +13,22 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     onPreviewCleanup(() => rm(workspace, { recursive: true, force: true }));
     const codePath = join(workspace, 'main.ts');
     await writeFile(codePath, 'export const greeting = "你好";\n// Read only');
-    await writeFile(join(workspace, 'report.md'), '# Report\n\n**Summary**\n\n' + 'This is a long paragraph for reading source on a mobile screen. '.repeat(20));
+    await mkdir(join(workspace, 'docs'));
+    await mkdir(join(workspace, 'appendix'));
+    await writeFile(join(workspace, 'docs/report.md'), [
+      '# Report', '**Summary**', '- First finding\n- Second finding',
+      '| One | Two | Three | Four | Five | Six |\n| --- | --- | --- | --- | --- | --- |\n| Ready | Ready | Ready | Ready | Ready | Ready |',
+      '```text\n' + 'Long code sample '.repeat(30) + '\n```',
+      '![Report diagram](./report.png)', '[Notes](../appendix/notes.md)',
+      'This is a long paragraph for reading on a mobile screen. '.repeat(20),
+      '<script>window.fileExecuted = true</script>',
+    ].join('\n\n'));
+    await writeFile(join(workspace, 'appendix/notes.md'), '# Notes\n\n![Nested diagram](./nested.png)\n\n[Report](../docs/report.md)');
     await writeFile(join(workspace, 'page.html'), '<!doctype html><script>window.fileExecuted = true</script>');
     const png = await readFile(new URL('./fixtures/markdown-wide.png', import.meta.url));
     await writeFile(join(workspace, 'wide.png'), png);
+    await writeFile(join(workspace, 'docs/report.png'), png);
+    await writeFile(join(workspace, 'appendix/nested.png'), png);
     const css = await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
     let browserScript = '';
     const fixture = await previewFixture({ workspace, servePage: async (request, response) => {
@@ -28,7 +40,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       }
       return false;
     } });
-    const markdown = `[Code](${codePath}#L2) [Markdown](./report.md) [HTML](file://${workspace}/page.html) [Missing](./missing.ts) [Denied](/etc/hosts)\n\n![Diagram](./wide.png)`;
+    const markdown = `[Code](${codePath}#L2) [Markdown](./docs/report.md) [Markdown line](./docs/report.md#L3) [HTML](file://${workspace}/page.html) [Missing](./missing.ts) [Denied](/etc/hosts)\n\n![Diagram](./wide.png)`;
     const source = `
       import React, { useSyncExternalStore, useState } from 'react';
       import { createRoot } from 'react-dom/client';
@@ -87,6 +99,18 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('refreshed');
     await panel.getByRole('button', { name: 'Close file preview' }).click();
     await page.getByRole('button', { name: 'Markdown', exact: true }).click();
+    await expect.poll(() => panel.locator('h1').textContent()).toBe('Report');
+    expect(await panel.locator('.agent-file-markdown strong').textContent()).toBe('Summary');
+    expect(await panel.locator('.agent-file-markdown table').count()).toBe(1);
+    expect(await panel.locator('.agent-file-markdown li').count()).toBe(2);
+    expect(await panel.locator('.cm-content').count()).toBe(0);
+    expect(await panel.getByRole('button', { name: 'Wrap lines' }).count()).toBe(0);
+    await expect.poll(() => panel.getByRole('img', { name: 'Report diagram', exact: true }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
+    await expect.poll(() => panel.getByRole('img', { name: 'Report diagram', exact: true }).evaluate(image => getComputedStyle(image).opacity)).toBe('1');
+    expect(await panel.locator('.agent-file-body').evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    expect(await page.evaluate(() => (window as any).fileExecuted)).toBeUndefined();
+    await page.screenshot({ path: join(tmpdir(), `arc-markdown-preview-${engine.name()}-${width}.png`) });
+    await panel.getByRole('button', { name: 'Show Markdown source' }).click();
     await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('**Summary**');
     const measureSource = () => panel.locator('.cm-content').evaluate(element => {
       const text = element.querySelector('.cm-line')!;
@@ -104,6 +128,20 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await panel.getByRole('button', { name: 'Wrap lines', exact: true }).click();
     await expect.poll(() => panel.locator('.cm-lineWrapping').count()).toBe(1);
     expect((await measureSource()).height).toBeCloseTo(wrapped.height, 1);
+    await panel.getByRole('button', { name: 'Show rendered Markdown' }).click();
+    await panel.getByRole('button', { name: 'Notes', exact: true }).click();
+    await expect.poll(() => panel.locator('h1').textContent()).toBe('Notes');
+    await expect.poll(() => panel.getByRole('img', { name: 'Nested diagram', exact: true }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
+    await expect.poll(() => panel.getByRole('img', { name: 'Nested diagram', exact: true }).evaluate(image => getComputedStyle(image).opacity)).toBe('1');
+    await panel.getByRole('button', { name: 'Report', exact: true }).click();
+    await expect.poll(() => panel.locator('h1').textContent()).toBe('Report');
+    await panel.getByRole('button', { name: 'Close file preview' }).click();
+    expect(await page.getByRole('button', { name: 'Markdown', exact: true }).evaluate(button => button === document.activeElement)).toBe(true);
+    await page.getByRole('button', { name: 'Markdown line', exact: true }).click();
+    await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('**Summary**');
+    expect(await panel.locator('.cm-activeLineGutter').textContent()).toBe('3');
+    await panel.getByRole('button', { name: 'Show rendered Markdown' }).click();
+    await expect.poll(() => panel.locator('h1').textContent()).toBe('Report');
     await panel.getByRole('button', { name: 'Close file preview' }).click();
     await page.getByRole('button', { name: 'HTML', exact: true }).click();
     await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('<script>');

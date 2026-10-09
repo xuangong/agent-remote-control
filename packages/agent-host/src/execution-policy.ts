@@ -94,6 +94,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   return {
     providerId: directory.providerId,
     supportsSourceReferences: directory.supportsSourceReferences,
+    requiresController: directory.requiresController?.bind(directory),
     supportsPromptEditing: directory.supportsPromptEditing,
     async validateSessionRename(id: string, title: string) { await checkSource(id); await directory.validateSessionRename?.(id, title); },
     ...(directory.sessionTitle ? { async sessionTitle(id: string) { await checkSource(id); return directory.sessionTitle!(id); } } : {}),

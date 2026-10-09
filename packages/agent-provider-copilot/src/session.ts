@@ -1,4 +1,4 @@
-import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -42,12 +42,15 @@ export class CopilotAgentSession implements AgentSession {
   private constructor(private readonly config: AgentSessionConfig, private readonly options: CopilotAgentProviderOptions, private readonly onDispose: () => void) {
     this.projector = new Projector(config.cwd);
     this.images = new CopilotImages(config.sessionId);
-    this.info = {providerId: provider, sessionId: config.sessionId, status: 'idle', cwd: config.cwd, model: config.model, childSessions: [], persistence: {providerId: provider, sessionId: config.sessionId, opaque: JSON.stringify({cwd: config.cwd})}};
+    this.info = {providerId: provider, sessionId: config.sessionId, status: 'idle', cwd: config.cwd, model: config.model, childSessions: [], persistence: {providerId: provider, sessionId: config.sessionId, opaque: JSON.stringify({cwd: config.cwd, systemPrompt: config.systemPrompt, instructions: config.instructions})}};
   }
   static async open(client: CopilotClient, config: AgentSessionConfig, resume: boolean, options: CopilotAgentProviderOptions, onDispose: () => void): Promise<CopilotAgentSession> {
     const self = new CopilotAgentSession(config, options, onDispose);
+    const tools = bindAgentSessionTools(config.tools, () => self.assertOpen());
+    const instructions = [config.systemPrompt, config.instructions].filter(Boolean).join('\n\n');
     const nativeConfig: SessionConfig = { ...options.nativeSessionConfig, sessionId: config.sessionId, workingDirectory: config.cwd, model: config.model, reasoningEffort: reasoningEffort(config.reasoningEffort), streaming: true, includeSubAgentStreamingEvents: true,
-      systemMessage: config.systemPrompt ? {mode: 'append', content: config.systemPrompt} : undefined,
+      systemMessage: instructions ? {mode: 'append', content: instructions} : undefined,
+      ...(tools.length ? { tools: tools.map(({ name, description, inputSchema, execute }) => ({ name, description, parameters: inputSchema, handler: execute })) } : {}),
       onPermissionRequest: async () => ({kind: 'no-result'}),
       onUserInputRequest: request => self.interactions.bindQuestion(request),
       onExitPlanModeRequest: request => self.interactions.bindPlan(request),

@@ -85,7 +85,7 @@ it.skipIf(process.platform === 'win32').each(['safe', 'interrupt'] as const)('ha
     } });
     terminal.stderr.on('data', chunk => {errors += chunk.toString();});
     const write = (text: string) => terminal!.stdin.write(JSON.stringify({write: text}) + '\n');
-    await waitFor(() => output.includes('commands') && output.includes('INITIAL_HISTORY'));
+    await waitFor(() => output.includes('open sidebar') && output.includes('INITIAL_HISTORY'));
     expect(output).not.toContain('Session in use');
     await new Promise(resolve => setTimeout(resolve, 500));
     write('CLI_RUNNING_TASK\r'); await waitFor(() => finish).catch(error => {throw new Error(String(error) + '\n' + output.slice(-7000) + errors);});

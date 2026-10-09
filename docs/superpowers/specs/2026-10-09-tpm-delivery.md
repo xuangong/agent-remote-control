@@ -1,6 +1,6 @@
 # TPM Delivery Sessions
 
-Status: design based on the agreed conversation; not implemented.
+Status: implemented with regression coverage. Native provider acceptance limits are documented in ../../tpm-delivery.md. Not deployed.
 Baseline: `main@3a853aa`.
 
 ## Purpose and scope
@@ -19,7 +19,7 @@ The first release supports a TPM and its main session on the same Controller. It
 - Disabling TPM view hides its entry, list, and workspace only. It preserves work records, drafts, background leases, event subscriptions, and heartbeat scheduling. Re-enabling restores access to existing work without creating or restarting TPM sessions. View visibility never changes work pause/resume state.
 - Each row represents a work item: title, delivery state, unread activity, and a needs-user indicator. Rows open the TPM workspace; they do not imply implementation-session focus.
 - The workspace resembles Ask: a resizable desktop dialog and a small-screen overlay, rendering the normal Session View and full chatbox.
-- The workspace exposes the related main session, current specification, and explicit pause/resume controls. Closing, minimizing, navigating, or disconnecting a browser never pauses the work item.
+- The workspace defaults to conversation and offers a secondary Plan & acceptance document view plus navigation to the related main session. Pause, resume, and check-now are internal diagnostic operations, not end-user controls. Background scheduling is the TPM responsibility. Closing, minimizing, navigating, or disconnecting a browser never pauses the work item.
 - Returning to a work item restores its draft and reading position using existing session-view behavior. Browser persistence owns presentation only.
 - A TPM can explain that it is waiting, ask for a decision, report a blocker, or present acceptance evidence. Heartbeats without a meaningful change do not create user notifications.
 - The list remains available when the user switches the main view. Association with the currently displayed session is a presentation hint, not the scope of the list.
@@ -185,3 +185,7 @@ Update public schemas, protocol fixtures, replay support, and compatibility meta
 7. Complete fault-injection, native-provider, and browser validation; then update compatibility metadata and package validation.
 
 Do not advertise the feature as complete until closed-browser execution, recovery, all advertised providers, and the workspace interaction are validated. Merge, deployment, and Controller publishing remain separate user-authorized delivery steps.
+
+## Composable execution companions
+
+TPM uses the standard session todo and heartbeat toolkits described in [Session companions](../../session-companions.md). The Host enforces ordered progress and explicit revision-bound user confirmation. The model may revise only unfinished steps at boundaries; approved-plan changes require renewed consent. Native status remains adapter-owned, and the ordinary Session View renders the optional checklist. There is no generic workflow graph or new chat type.

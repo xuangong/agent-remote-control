@@ -133,3 +133,11 @@ it('checks native workspace metadata before renaming even when the catalog omits
   expect(name).toBe('Allowed');
   await expect(directory.validateSessionRename!('session', 'Renamed')).rejects.toThrow(/workspace/i); expect(preparations).toBe(1);
 });
+
+
+it('preserves Controller-dependent extension lifetime metadata through workspace policy', async () => {
+  const f = await fixture();
+  const directory = protectHostDirectory({ ...f.source, requiresController: id => id === 'with-tools' }, f.policy!);
+  expect(directory.requiresController?.('with-tools')).toBe(true);
+  expect(directory.requiresController?.('plain')).toBe(false);
+});

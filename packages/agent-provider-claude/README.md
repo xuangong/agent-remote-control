@@ -54,3 +54,9 @@ Cold resume resolves cwd by native ID and refuses an unknown workspace. Successf
 ## Native session names
 
 Favorites rename uses the official SDK `renameSession` catalog function in the isolated helper, preserving the configured `CLAUDE_CONFIG_DIR`. It appends native custom-title metadata without opening a Query or sending a prompt. Names are trimmed and limited to 512 characters without control characters. The adapter skips an already matching name and confirms persistence through `getSessionInfo` before the Relay updates favorites and broadcasts `session_title_updated`. Operation-ID retries read the current native name without replaying the write.
+
+## Host extensions
+
+`instructions` appends to the `claude_code` preset when no custom `systemPrompt` is supplied. A custom string prompt retains its original base semantics; explicit instructions follow it. Host tools are served by an in-process SDK MCP server named `agent_host`, retaining the original object JSON schemas. Arguments are validated before any Host callback and errors become MCP tool errors. Native permission checks remain authoritative.
+
+Resume accepts extensions again, including after constructing a new provider. Instruction strings persist with the handle; Host callbacks must be rebound. Disposal closes the SDK MCP server and makes obsolete callbacks unavailable.

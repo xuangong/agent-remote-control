@@ -43,6 +43,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly name: string;
   readonly environment?: HostEnvironment;
   readonly controller?: ControllerIdentity;
+  readonly tpmManagement?: true;
   readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true }[];
   readonly providerChanges?: { current(): NonNullable<RemoteHostUplinkClientOptions['providers']>; subscribe(listener: () => void): () => void };
   readonly remoteKey: string;
@@ -198,6 +199,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         ...(options.onCredential ? { credentialRotation: true } : {}),
         ...(options.environment ? { environment: options.environment } : {}),
         ...(options.controller ? { controller: options.controller } : {}),
+        ...(options.tpmManagement ? { tpmManagement: true } : {}),
         ...(options.providerChanges ? { providerManagement: true } : {}),
         name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providerChanges?.current() ?? options.providers }),
       }));

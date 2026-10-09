@@ -1,3 +1,4 @@
+import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
 import { isHostProviderChange } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
@@ -20,6 +21,7 @@ type ProviderDescriptor = { providerId: string; displayName: string; promptEditi
 type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
   providerManagement?: true;
+  tpmManagement?: true;
   connectionId?: string; stopDiagnostics?(): void;
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
@@ -40,7 +42,7 @@ export interface RemoteHostBrokerState {
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement' | 'tpmManagement'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
@@ -101,7 +103,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   function snapshot(): RemoteHostBrokerState {
     return { pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement }) => ({ ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement }) => ({ ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -159,7 +161,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
   }
   function visibleHosts(subject?: string) {
-    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement }) => ({
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, tpmManagement }) => ({
+      ...(tpmManagement ? { tpmManagement } : {}),
       ...(providerManagement ? { providerManagement } : {}),
       ...(controller ? { controller } : {}),
       ...(environment ? { environment } : {}),
@@ -343,7 +346,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, pairingPurpose: purpose,
+          const next = { id: existing?.id ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, pairingPurpose: purpose,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
@@ -764,6 +767,44 @@ export function createHostBroker(options: HostBrokerOptions) {
       const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/provider-settings', undefined, body);
       requireOwner(principal(context)); requireAccess(providerSettings[1]!, principal(context));
       return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
+    const tpm = /^\/v1\/remote\/hosts\/([^/]+)\/tpm(?:\/(create|action|work))?$/.exec(url.pathname);
+    if (tpm) {
+      requireOwner(subject); requireAccess(tpm[1]!, subject);
+      const host = requireHost(tpm[1]!);
+      if (!host.tpmManagement) return request.method === 'GET' && !tpm[2]
+        ? json(200, { supported: false, supportedProviders: [], works: [] })
+        : json(409, { error: 'Update the Controller to use TPM.' });
+      const action = tpm[2];
+      const method = action === 'create' || action === 'action' ? 'POST' : 'GET';
+      if (request.method !== method) return json(405, { error: 'Method is not allowed.' });
+      let body: string | undefined;
+      let expectedId: string | undefined;
+      if (action === 'work') {
+        if (url.searchParams.size !== 1 || !url.searchParams.has('id')) throw new BrokerError(400, 'invalid_request', 'A TPM work ID is required.');
+        expectedId = required(url.searchParams.get('id'), 'id');
+        if (expectedId.length > 128) throw new BrokerError(400, 'invalid_request', 'The TPM work ID is invalid.');
+      } else if (!action && url.searchParams.size) {
+        const cursor = url.searchParams.get('cursor');
+        if (url.searchParams.size !== 1 || !cursor || cursor.length > 128) throw new BrokerError(400, 'invalid_request', 'The TPM catalog cursor is invalid.');
+      } else if (url.searchParams.size) throw new BrokerError(400, 'invalid_request', 'TPM query parameters are invalid.');
+      if (method === 'POST') {
+        const input = await readBody(request);
+        if (action === 'create' ? !isTpmCreate(input) : !isTpmAction(input)) throw new BrokerError(400, 'invalid_request', 'The TPM request is invalid.');
+        if (action === 'create' && !host.providers.some(provider => provider.providerId === input.providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
+        if (action === 'action') expectedId = input.id as string;
+        body = JSON.stringify(input);
+      }
+      const path = `/remote/tpm${action ? '/' + action : ''}${action === 'work' ? '?' + new URLSearchParams({ id: expectedId! }) : !action && url.searchParams.has('cursor') ? '?' + new URLSearchParams({ cursor: url.searchParams.get('cursor')! }) : ''}`;
+      const result = await rpc(host, method, path, undefined, body);
+      requireOwner(principal(context)); requireAccess(host.id, principal(context));
+      if (!action && result.status === 404) return json(200, { supported: false, works: [] });
+      if (result.status >= 200 && result.status < 300) {
+        let value: unknown;
+        try { value = JSON.parse(result.body); } catch { throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM response.'); }
+        if (action ? !isTpmWork(value) || (expectedId !== undefined && value.id !== expectedId) : !isTpmList(value)) throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM response.');
+      }
+      return rawJson(result);
     }
     const codexDaemon = /^\/v1\/remote\/hosts\/([^/]+)\/codex-daemon$/.exec(url.pathname);
     if (codexDaemon) {

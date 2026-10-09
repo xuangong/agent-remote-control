@@ -180,3 +180,5 @@ Optional authenticated hosting: see [Gateway Relay](docs/current/agent-remote/ga
 ### OpenCode
 
 OpenCode is available as a shared HTTP/SSE provider for Controller and ARDB. See [OpenCode setup and capabilities](docs/opencode.md).
+
+TPM delivery workspaces coordinate a single work item with an existing main session, using Controller-owned follow-up and the ordinary Session View. See [TPM delivery](docs/tpm-delivery.md) for usage, recovery, and verified provider boundaries.

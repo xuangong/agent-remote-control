@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
 import type { AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
+import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
@@ -12,7 +13,7 @@ export function createCodexSessionDirectory(
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string }>();
   const controllerTools = new Set<string>();
   let discovery: Promise<CodexSessionSummary[]> | undefined;
   let closed = false;
@@ -45,13 +46,13 @@ export function createCodexSessionDirectory(
     }
     return [...summaries.values()];
   }
-  async function remember(session: AgentSession): Promise<string> {
+  async function remember(session: AgentSession, extensionIdentity = sessionExtensionIdentity()): Promise<string> {
     try {
       if (closed) throw new Error('Codex directory is closed.');
       const info = await session.runtimeInfo();
       if (closed) throw new Error('Codex directory is closed.');
       if (!info.persistence || !info.sessionId) throw new Error('Codex did not return a native persistence handle.');
-      opened.set(info.sessionId, { session, handle: info.persistence, createdAt: new Date().toISOString() });
+      opened.set(info.sessionId, { session, handle: info.persistence, createdAt: new Date().toISOString(), extensionIdentity });
       return info.sessionId;
     } catch (error) { await session.dispose(); throw error; }
   }
@@ -89,9 +90,11 @@ export function createCodexSessionDirectory(
       if (sourceNativeSessionId && (!references || !provider.readSessionHistory)) throw new Error('Source references are unavailable on this Host.');
       const extensions = sourceNativeSessionId ? sourceSessionExtensions(sourceNativeSessionId, readSource) : {};
       const systemPrompt = [config.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n');
-      const session = await provider.createSession({ ...config, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
-        ...(systemPrompt ? { systemPrompt } : {}) });
-      const id = await remember(session);
+      const nativeConfig = { ...config, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
+        ...(systemPrompt ? { systemPrompt } : {}) };
+      const identity = sessionExtensionIdentity(nativeConfig);
+      const session = await provider.createSession(nativeConfig);
+      const id = await remember(session, identity);
       if (extensions.tools?.length || config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
         try { await references!.set({ sourceNativeSessionId, systemPrompt, handle: opened.get(id)!.handle }); }
@@ -102,13 +105,21 @@ export function createCodexSessionDirectory(
     async open(nativeSessionId, options) {
       if (closed) throw new Error('Codex directory is closed.');
       const existing = opened.get(nativeSessionId);
-      if (existing && (await existing.session.runtimeInfo()).status !== 'closed') return existing.session;
+      const reusable = existing && (await existing.session.runtimeInfo()).status !== 'closed';
+      if (reusable && options?.extensions === undefined) return existing.session;
       const grant = await references?.get(nativeSessionId);
       if (grant && !provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
       const extensions = grant ? sourceSessionExtensions(grant.sourceNativeSessionId, readSource) : undefined;
+      const resumedExtensions = extensions || options?.extensions ? { ...(extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : {}),
+        ...options?.extensions, tools: [...(extensions?.tools ?? []), ...(options?.extensions?.tools ?? [])] } : undefined;
+      if (reusable) {
+        requireSessionExtensionIdentity(existing.extensionIdentity, resumedExtensions);
+        return existing.session;
+      }
+      const identity = sessionExtensionIdentity(resumedExtensions);
       // Let native saved settings win after a Host restart; only restore Host instructions and tools.
       const resume = () => provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
-        extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : undefined);
+        resumedExtensions);
       let session: AgentSession;
       try { session = await resume(); }
       catch (error) {
@@ -126,8 +137,8 @@ export function createCodexSessionDirectory(
         try { session = await resume(); }
         catch { throw new NativeSessionOwnerError('native_handoff_unknown', 'The original Codex client was asked to stop, but shared recovery was not confirmed. Check the session before retrying.'); }
       }
-      await remember(session);
-      if (extensions?.tools?.length) controllerTools.add(nativeSessionId);
+      await remember(session, identity);
+      if (extensions?.tools?.length || options?.extensions?.tools?.length) controllerTools.add(nativeSessionId);
       return session;
     },
     async openChild(parentNativeSessionId, nativeSessionId) {

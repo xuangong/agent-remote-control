@@ -62,3 +62,5 @@ export type { SessionViewActions, SessionTakeControlOptions } from './react/sess
 export { TimelineSearch } from './react/TimelineSearch.js';
 
 export { CommunicationNavigationContext, type CommunicationNavigation } from './react/CommunicationNavigation.js';
+
+export { SessionTodoPanel, type SessionTodoPanelProps } from './react/SessionTodoPanel.js';

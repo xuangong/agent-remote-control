@@ -118,3 +118,23 @@ it('queries daemon outcomes and posts one explicit intent with no automatic repl
     ]);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+it('exposes validated TPM Host methods through the shared control client', async () => {
+  const requests: Array<{ method?: string; path?: string; body: string }> = [];
+  const work = { id: 'work', revision: 1, title: 'Delivery', providerId: 'codex', mainNativeSessionId: 'main', phase: 'clarifying', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: '2026-10-09', updatedAt: '2026-10-09', nextCheckAt: 0 };
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const chunk of request) body += String(chunk);
+    requests.push({ method: request.method, path: request.url, body });
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(request.url!.endsWith('/tpm') ? { supported: true, works: [work] } : work));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new RemoteHostClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/tenant/`);
+    expect((await client.tpmList('host')).works).toEqual([work]);
+    expect(await client.tpmWork('host', 'work')).toEqual(work);
+    expect(await client.tpmCreate('host', { providerId: 'codex', mainNativeSessionId: 'main', title: 'Delivery', requirement: 'Ship', operationId: 'create' })).toEqual(work);
+    expect(await client.tpmAction('host', 'work', { action: 'pause', revision: 1, operationId: 'pause' })).toEqual(work);
+    expect(requests.map(row => row.path)).toEqual(['/u/tenant/v1/remote/hosts/host/tpm', '/u/tenant/v1/remote/hosts/host/tpm/work?id=work', '/u/tenant/v1/remote/hosts/host/tpm/create', '/u/tenant/v1/remote/hosts/host/tpm/action']);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+}, 10000);

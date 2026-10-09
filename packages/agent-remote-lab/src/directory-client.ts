@@ -1,3 +1,5 @@
+import { RemoteHostControlClient, RemoteHostControlError, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
+import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from './workspace-access.js';
@@ -69,6 +71,17 @@ export class RemoteHostClient implements HostPairingService {
     const body = await response.json();
     if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
     return body as T;
+  }
+  tpmList(hostId: string): Promise<TpmList> { return this.tpm(client => client.tpmList(hostId, { signal: AbortSignal.timeout(15000) })); }
+  tpmWork(hostId: string, id: string): Promise<TpmWork> { return this.tpm(client => client.tpmWork(hostId, id, { signal: AbortSignal.timeout(15000) })); }
+  tpmCreate(hostId: string, input: TpmCreate): Promise<TpmWork> { return this.tpm(client => client.tpmCreate(hostId, input, { signal: AbortSignal.timeout(50000) })); }
+  tpmAction(hostId: string, id: string, input: TpmActionInput): Promise<TpmWork> { return this.tpm(client => client.tpmAction(hostId, id, input, { signal: AbortSignal.timeout(50000) })); }
+  private async tpm<T>(operation: (client: RemoteHostControlClient) => Promise<T>): Promise<T> {
+    try { return await operation(new RemoteHostControlClient(this.baseUrl, { fetch: workspaceFetch })); }
+    catch (error) {
+      if (error instanceof RemoteHostControlError) throw new DirectoryError(error.message, error.code, error.status, error.requestId);
+      throw error;
+    }
   }
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
     return this.request<{ hosts: RemoteHost[] }>('hosts');

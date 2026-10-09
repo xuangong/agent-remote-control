@@ -1,3 +1,4 @@
+import { RemoteHostControlClient, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 
@@ -41,6 +42,7 @@ export async function executeCommand(
   try {
     const path = invocation.path.join(' ');
     switch (path) {
+      case 'tpm list': case 'tpm create': case 'tpm show': case 'tpm pause': case 'tpm resume': case 'tpm check': case 'tpm reopen': case 'tpm resolve': return await context.tpm(invocation.path[1]!);
       case 'provider list': return await context.listProviders();
       case 'session create': return await context.createSession();
       case 'session resume': return await context.resumeSession();
@@ -96,6 +98,64 @@ class CommandContext {
   close(): void {
     if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
     this.parentSignal.removeEventListener('abort', this.forwardInterruption);
+  }
+
+  async tpm(action: string): Promise<void> {
+    const common = ['relay', 'origin', 'cookie-file', 'timeout', 'format', 'json'];
+    this.validateOptions(...common, ...(action === 'create' ? ['provider', 'main-session', 'title', 'file', 'operation-id'] : action === 'list' || action === 'show' ? [] : ['revision', 'operation-id', ...(action === 'resolve' ? ['intent-id', 'resolution', 'native-session'] : [])]));
+    this.requireFormat('text', 'json');
+    const hostId = this.invocation.positionals[0];
+    if (!hostId) throw new DebuggerError(2, 'host_id_required', 'A Host ID is required.', false);
+    if (action === 'create') {
+      if (this.invocation.positionals.length < 1 || this.invocation.positionals.length > 2) throw new DebuggerError(2, 'invalid_arguments', 'Provide one Host ID and an optional requirement.', false);
+    } else this.requirePositionals(action === 'list' ? 1 : 2);
+    const revision = action !== 'create' && action !== 'show' && action !== 'list'
+      ? optionNumber(this.invocation, 'revision') ?? (() => { throw new DebuggerError(2, 'revision_required', 'Option --revision is required. Read the work before changing it.', false); })()
+      : undefined;
+    const operationId = stringOption(this.invocation, 'operation-id') ?? crypto.randomUUID();
+    const relayUrl = resolveRelayUrl(stringOption(this.invocation, 'relay'), this.environmentVariables);
+    const headers = new Headers();
+    const origin = stringOption(this.invocation, 'origin') ?? this.environmentVariables.AGENT_REMOTE_ORIGIN ?? this.environmentVariables.BORGEE_REMOTE_ORIGIN;
+    if (origin) {
+      let parsed: URL;
+      try { parsed = new URL(origin); } catch { throw new DebuggerError(2, 'invalid_origin', 'Provide an HTTP origin for --origin.', false); }
+      if (!['http:', 'https:'].includes(parsed.protocol) || (origin !== parsed.origin && origin !== parsed.origin + '/')) throw new DebuggerError(2, 'invalid_origin', 'Provide an HTTP origin without a path for --origin.', false);
+      headers.set('origin', parsed.origin);
+    }
+    const cookieFile = stringOption(this.invocation, 'cookie-file');
+    if (cookieFile) {
+      let cookie: string;
+      try { cookie = (await this.withinDeadline(() => this.io.readFile(cookieFile, { signal: this.signal }))).trim(); }
+      catch (error) { if (this.signal.aborted) throw this.abortError(); throw new DebuggerError(2, 'cookie_file_unreadable', 'The existing session Cookie file could not be read.', false); }
+      if (!cookie || cookie.length > 16384 || /[\r\n\u0000]/.test(cookie) || !cookie.includes('=')) throw new DebuggerError(2, 'invalid_cookie_file', 'The Cookie file must contain one existing session Cookie header value.', false);
+      headers.set('cookie', cookie);
+    }
+    const client = new RemoteHostControlClient(relayUrl, { fetch: (input, init) => {
+      const requestHeaders = new Headers(init?.headers);
+      headers.forEach((value, key) => requestHeaders.set(key, value));
+      return fetch(input, { ...init, headers: requestHeaders, redirect: 'error' });
+    } });
+    const options = { signal: this.signal };
+    if (action === 'list') return this.result(await this.withinDeadline(() => client.tpmList(hostId, options)));
+    if (action === 'show') return this.result(await this.withinDeadline(() => client.tpmWork(hostId, this.invocation.positionals[1]!, options)));
+    if (action === 'create') {
+      const providerId = requiredOption(this.invocation, 'provider'), mainNativeSessionId = requiredOption(this.invocation, 'main-session'), title = requiredOption(this.invocation, 'title');
+      const requirement = await this.withinDeadline(() => readTextInput(this.invocation.positionals[1], stringOption(this.invocation, 'file'), this.io, this.signal));
+      return this.result(await this.withinDeadline(() => client.tpmCreate(hostId, { providerId, mainNativeSessionId, title, requirement, operationId }, options)));
+    }
+    let input: TpmActionInput;
+    if (action === 'resolve') {
+      const intentId = requiredOption(this.invocation, 'intent-id'), resolution = requiredOption(this.invocation, 'resolution');
+      if (resolution !== 'accepted' && resolution !== 'rejected') throw new DebuggerError(2, 'invalid_resolution', 'Resolution must be accepted or rejected.', false);
+      const nativeSessionId = stringOption(this.invocation, 'native-session');
+      if (intentId === 'creation' && resolution === 'accepted' && !nativeSessionId) throw new DebuggerError(2, 'native_session_required', 'Accepted creation resolution requires --native-session with the recovered native identity.', false);
+      if (nativeSessionId && (intentId !== 'creation' || resolution !== 'accepted')) throw new DebuggerError(2, 'invalid_native_session', 'Option --native-session applies only to accepted creation resolution.', false);
+      input = { action, revision: revision!, operationId, intentId, resolution, ...(nativeSessionId ? { nativeSessionId } : {}) };
+    } else {
+      if (action !== 'pause' && action !== 'resume' && action !== 'check' && action !== 'reopen') throw new DebuggerError(2, 'unknown_command', 'TPM action is unavailable.', false);
+      input = { action, revision: revision!, operationId };
+    }
+    this.result(await this.withinDeadline(() => client.tpmAction(hostId, this.invocation.positionals[1]!, input, options)));
   }
 
   async listProviders(): Promise<void> {

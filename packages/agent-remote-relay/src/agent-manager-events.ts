@@ -18,6 +18,7 @@ export type AgentManagerEvent =
       type: 'agent_stream';
       agentId: string;
       event: AgentStreamEvent;
+      delivery?: 'history' | 'live';
       timestamp: string;
       row?: CanonicalTimelineRow;
     }

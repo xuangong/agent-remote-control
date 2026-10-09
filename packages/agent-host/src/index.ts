@@ -14,3 +14,6 @@ export * from './session-reference.js';
 export * from './environment.js';
 export * from './opencode.js';
 export * from './opencode-directory.js';
+
+export * from './session-todo.js';
+export * from './session-heartbeat.js';

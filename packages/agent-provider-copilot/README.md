@@ -49,3 +49,9 @@ The Controller records requested handoff, forced exit, unexpected exit, and unco
 ## Native session names
 
 Favorites rename uses the pinned SDK's experimental `session.rpc.name.get/set` API. Names are trimmed and limited to 100 characters without control characters or double quotes. A confirmed identical name skips the write. A saved session is opened through the normal managed directory before mutation; an external CLI owner blocks the operation without automatic takeover. Existing running sessions are reused without interrupting the turn. The native name is read back before the Relay updates favorites and broadcasts `session_title_updated`; operation-ID retries reconcile current metadata without replaying the write.
+
+## Host extensions
+
+`instructions` and the existing `systemPrompt` additions use native `systemMessage.mode: 'append'`. Host tools map to SDK tools with their original JSON schemas and validated callbacks; they do not override built-in tools or skip native permissions. Unsupported schemas are rejected before native creation.
+
+Instruction strings persist in the adapter handle. `resumeSession(handle, extensions)` restores or replaces them and rebinds the Host's process-local callbacks, including with a new adapter instance. Disposed bindings reject subsequent tool calls.

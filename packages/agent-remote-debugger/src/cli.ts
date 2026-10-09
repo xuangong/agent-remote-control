@@ -12,6 +12,7 @@ export type { CliEnvironment } from './commands.js';
 
 const valueOptions = new Set([
   'relay', 'origin', 'format', 'provider', 'provider-session-id', 'cwd', 'model', 'reasoning-effort', 'system-prompt',
+  'cookie-file', 'main-session', 'title', 'revision', 'operation-id', 'intent-id', 'resolution', 'native-session',
   'persistence-file', 'tail', 'file', 'wait', 'for', 'response-file', 'output', 'until', 'timeout', 'planning', 'adapter', 'executable', 'port',
 ]);
 const flagOptions = new Set(['json', 'jsonl', 'all', 'follow', 'help', 'open']);
@@ -75,7 +76,7 @@ function parseInvocation(argv: readonly string[]): ParsedInvocation {
 function commandPath(argv: readonly string[]): readonly string[] {
   const first = argv[0];
   if (!first || first.startsWith('-')) throw new DebuggerError(2, 'command_required', 'A command is required.', false);
-  if (first === 'provider' || first === 'session' || first === 'interaction' || first === 'resource' || first === 'protocol' || first === 'settings') {
+  if (first === 'provider' || first === 'session' || first === 'interaction' || first === 'resource' || first === 'protocol' || first === 'settings' || first === 'tpm') {
     const second = argv[1];
     if (!second || second.startsWith('-')) throw new DebuggerError(2, 'subcommand_required', `A ${first} subcommand is required.`, false);
     return [first, second];
@@ -147,6 +148,11 @@ Commands:
   server --adapter <module-path> [--persistence-file <path>] [--port <0-65535>] [--open] [--jsonl]
   replay <session.jsonl> [--open] [--port <0-65535>]
   provider list
+  tpm list <host-id>
+  tpm create <host-id> [requirement] --provider <provider-id> --main-session <native-session-id> --title <title> [--file <path|->] [--operation-id <id>]
+  tpm show <host-id> <work-id>
+  tpm <pause|resume|check|reopen> <host-id> <work-id> --revision <revision> [--operation-id <id>]
+  tpm resolve <host-id> <work-id> --revision <revision> --intent-id <id> --resolution <accepted|rejected> [--native-session <id>] [--operation-id <id>]
   session create <agent-id> --provider <provider-id> [--provider-session-id <id>] [--cwd <path>] [--model <model>] [--reasoning-effort <effort>] [--system-prompt <text>] [--planning <on|off>]
   session resume <agent-id> --persistence-file <path|->
   observe <agent-id> [--until <idle|interaction|failed>]
@@ -166,6 +172,7 @@ Commands:
 
 Output: one-shot commands support text or json; streaming commands support text or jsonl. --json and --jsonl are format aliases.
 Connection: --relay <url> uses AGENT_REMOTE_URL, BORGEE_REMOTE_URL or http://127.0.0.1:5910. WebSocket commands also accept --origin <url>, then AGENT_REMOTE_ORIGIN, BORGEE_REMOTE_ORIGIN or http://127.0.0.1:6175.
+TPM commands use the existing authorized Host route. For an account-backed Relay, pass --cookie-file <path> with an existing browser session Cookie header and --origin <relay-origin>. Mutation receipts are never automatically retried.
 Common options: --relay <url> --origin <url> --timeout <milliseconds> --format <text|json|jsonl> --json --jsonl`;
 }
 

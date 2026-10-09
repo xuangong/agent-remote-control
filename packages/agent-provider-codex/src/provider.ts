@@ -41,6 +41,7 @@ export interface CodexAppServerProviderOptions {
 
 export class CodexAppServerProvider implements AgentProviderAdapter {
   readonly descriptor: AgentProviderDescriptor = {
+    sessionExtensions: { instructions: true, tools: true },
     providerId: 'codex',
     displayName: 'Codex',
   };

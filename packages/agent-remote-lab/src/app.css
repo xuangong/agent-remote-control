@@ -1,5 +1,6 @@
 @import "./trace.css";
 @import "./ask.css";
+@import "./tpm.css";
 
 @font-face {
   font-family: "Baloo 2 Digits";
@@ -1502,3 +1503,6 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-timeline-search-trigger[hidden] { display: none; }
 .lab-timeline-controls > .agent-session-search { position: absolute; z-index: 7; top: 6px; right: 6px; width: min(440px, calc(100% - 12px)); max-height: min(50%, 360px); overflow: auto; }
 @media (pointer: coarse) { .lab-timeline-search-trigger { width: 40px; min-height: 40px; } }
+
+.lab-workbench-layout.lab-workbench-with-todo { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.lab-workbench-layout.lab-workbench-with-todo.lab-workbench-toolbar-heading { grid-template-rows: auto minmax(0, 1fr) auto; }

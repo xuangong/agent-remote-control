@@ -1,3 +1,5 @@
+import { TpmCoordinator, type TpmOptions } from './tpm.js';
+import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
 import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
 import type { HostProviderDiscovery } from './provider-discovery.js';
 import {NativeSessionOwnerError, type NativeOwnerIdentity} from './native-session-owner.js';
@@ -13,7 +15,7 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { AgentSessionInUseError, AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
 import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
@@ -42,7 +44,7 @@ export interface AgentHostDirectory {
   models?(): Promise<unknown> | unknown;
   create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string; sourceNativeSessionId?: string; editNativeSessionId?: string; editTurnId?: string; editMessageId?: string }): Promise<string>;
   setSessionHandoffHandler?(handler: (nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>): void;
-  open(nativeSessionId: string, options?: { takeOver?: string }): Promise<AgentSession>;
+  open(nativeSessionId: string, options?: { takeOver?: string; extensions?: AgentSessionExtensions }): Promise<AgentSession>;
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close(): Promise<void> | void;
 }
@@ -64,6 +66,7 @@ export interface AgentHostRuntimeOptions {
   cancelTimeoutMs?: number;
   executionPolicy?: HostExecutionPolicy;
   operationCache?: OperationCacheOptions;
+  tpm?: TpmOptions;
   inputImages?: InputImageStoreOptions;
 }
 export interface AgentHostRequestDiagnostic {
@@ -131,6 +134,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
+      ...(options.tpm ? { tpmManagement: true } : {}),
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
@@ -263,6 +267,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
   }
   function bindHandoff(directory: AgentHostDirectory) { directory.setSessionHandoffHandler?.(async (nativeSessionId, next) => {
+    await tpm?.handoff(directory.providerId, nativeSessionId);
     const family = nativeFamily(directory.providerId, nativeSessionId);
     for (const binding of family) relay.sessionControls?.setNativeOwner(binding.agentId, next);
     for (const binding of family.reverse()) await relay.closeAgent(binding.agentId);
@@ -375,7 +380,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             if (!parent) throw new Error('Native parent session is unavailable.');
           }
         }
-        const session = parentNativeSessionId === undefined ? await source.open(nativeSessionId, takeOver ? { takeOver } : undefined)
+        const extensions = await tpm?.extensions(providerId, nativeSessionId);
+        const session = parentNativeSessionId === undefined ? await source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}) })
           : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
           : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
         if (closed) {
@@ -473,6 +479,16 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (draining && request.method === 'POST') throw new HostRequestError(503, 'controller_updating', 'Controller is updating. Reconnect before retrying.');
       const url = new URL(request.path, 'http://agent-host.local');
       const payload = request.method === 'POST' ? body(request.body) : undefined;
+      if (url.pathname.startsWith('/remote/tpm')) {
+        if (!tpm) return json(404, { code: 'tpm_unavailable', error: 'TPM is unavailable on this Controller.' });
+        try {
+          if (request.method === 'GET' && url.pathname === '/remote/tpm') return json(200, await tpm.list(url.searchParams.get('cursor') ?? undefined));
+          if (request.method === 'GET' && url.pathname === '/remote/tpm/work') return json(200, await tpm.get(string(url.searchParams.get('id'), 'id')));
+          if (request.method === 'POST' && url.pathname === '/remote/tpm/create' && isTpmCreate(payload)) return json(200, await tpm.create(payload, operationScope(request)));
+          if (request.method === 'POST' && url.pathname === '/remote/tpm/action' && isTpmAction(payload)) return json(200, await tpm.action(payload, operationScope(request)));
+          return json(400, { code: 'invalid_tpm_request', error: 'Invalid TPM request.' });
+        } catch (error) { return json(409, { code: 'tpm_request_failed', error: error instanceof Error ? error.message : 'TPM request failed.' }); }
+      }
       const selectedProvider = request.method === 'GET' ? url.searchParams.get('providerId') : payload?.providerId;
       const existing = request.sessionId ? bindings.getByAgent(request.sessionId) : undefined;
       // Uplink recovery may rebind a still-live session after its provider is disabled.
@@ -607,6 +623,31 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     catalogs.set(id, new RemoteHostCatalog({ roots: registration.directory.list }));
     bindHandoff(registration.directory);
   }
+  const tpm = options.tpm ? new TpmCoordinator(options.tpm, {
+    available: () => !closed && !draining,
+    supportedProviders: () => [...registrations.values()].filter(({ adapter }) => options.providerEnabled?.(adapter.descriptor.providerId) !== false
+      && adapter.descriptor.sessionExtensions?.instructions && adapter.descriptor.sessionExtensions?.tools).map(({ adapter }) => adapter.descriptor.providerId),
+    async acquire(providerId, nativeSessionId) {
+      if (closed || draining || options.providerEnabled?.(providerId) === false) throw new Error('TPM session provider is unavailable.');
+      const binding = await tracked(project(providerId, randomUUID(), nativeSessionId));
+      const lease = await acquireSession(binding.agentId);
+      if (!lease) throw new Error('TPM native session is unavailable.');
+      try { if (options.executionPolicy) await allowedWorkspace(options.executionPolicy, lease.agent.snapshot().payload.runtimeInfo.cwd); }
+      catch (error) { lease.release(); throw error; }
+      return lease;
+    },
+    async recover(providerId, nativeSessionId, extensions) {
+      if (closed || draining || options.providerEnabled?.(providerId) === false) throw new Error('TPM provider is unavailable.');
+      const existing = bindings.getByNative(providerId, nativeSessionId);
+      if (existing && (liveAgent(existing.agentId) || bindings.isPending(providerId, nativeSessionId))) throw new Error('Close the recovered session before binding it as a TPM.');
+      const session = await registration(providerId).directory.open(nativeSessionId, { extensions });
+      const info = await session.runtimeInfo();
+      if (info.sessionId !== nativeSessionId) throw new Error('Recovered native session identity does not match.');
+      if (options.executionPolicy) await allowedWorkspace(options.executionPolicy, info.cwd);
+    },
+    create: (providerId, cwd, extensions) => registration(providerId).directory.create({ ...(cwd ? { cwd } : {}), ...extensions }),
+    execute: executeOperation('host:tpm'),
+  }) : undefined;
   return { relay, addRegistration, control, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
@@ -618,7 +659,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     cancelControllerRestart() { if (!closed) draining = false; },
     resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },
     close(): Promise<void> { return closePromise ??= (async () => {
-      closed = true; bindings.close();
+      closed = true;
+      await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
+      bindings.close();
       const releasing = idle.close();
       for (const catalog of catalogs.values()) catalog.dispose();
       const cleanup = Promise.allSettled([releasing, relay.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);

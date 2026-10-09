@@ -87,3 +87,7 @@ versions or recover pending callbacks across process restarts.
 Session resume uses `excludeTurns: true`, followed by `thread/turns/list` with `limit: 10`, `sortDirection: "desc"`, and `itemsView: "full"`. The adapter reverses the returned page for chronological display. Readiness requires only the newest page; older pages are fetched through the optional Provider `readTimelineHistory` contract when the client requests earlier history. Pages never replay user inputs or apply historical runtime events to current status.
 
 Shared recovery and child snapshots use the same bounded reader. Recovery replaces the loaded history window and cursor; late pages from an old connection are rejected. Native pagination stays inside the adapter. Explicit `-32601` method-not-found responses from older servers retain the legacy full-history path; timeouts and malformed pages never trigger that fallback. Ten turns is a count bound, not a byte bound: this implementation does not paginate the items inside a single turn.
+
+## Host extensions
+
+`instructions` adds to the existing `systemPrompt` developer instructions on create and resume, including native collaboration-mode instructions. Host tools use native dynamic tools with object JSON schemas and validated local callbacks. Schemas are checked before thread creation and arguments before Host effects. Native dynamic tool definitions remain associated with the saved thread; the Host supplies the same named callback binding on resume. Instruction strings persist in the adapter handle; callbacks do not.

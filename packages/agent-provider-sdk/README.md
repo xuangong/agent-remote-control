@@ -41,3 +41,9 @@ Adapters interpret native scope and cache semantics. The public state reducer pr
 `runtimeInfo({ refreshSettings: true })` requests a fresh native settings read when the adapter has a read-only native getter. Unsupported fields retain their last native confirmation; do not resume or mutate a session just to read them. Guard asynchronous readbacks against newer native observations.
 
 The public relay owns accepted intent identities, supersession, deadlines and failure notices. It does not cancel active turns or resolve approval requests to apply a setting, and never retries a native mutation whose result is uncertain.
+
+## Host-owned session extensions
+
+Adapters opt into `descriptor.sessionExtensions` for appended `instructions` and callable `tools`. An absent capability is unsupported. `instructions` adds a role while preserving native base instructions and policy; `systemPrompt` retains its existing adapter-specific behavior. Both creation and `resumeSession(handle, extensions)` accept these extensions.
+
+Host tools use object JSON schemas and local callbacks. `bindAgentSessionTools` validates supported schemas and unique tool names before native session creation, validates every invocation without coercion, and checks binding availability before calling the Host. Tool callbacks and definitions are not serialized in persistence handles. The Host must restore its named tool binding on resume; stored instruction strings can be restored or explicitly replaced.

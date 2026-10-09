@@ -27,6 +27,10 @@ import { SessionTitle } from './components/SessionTitle.js';
 import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { TrackViewScope, useSessionAttention } from './hooks/useSessionAttention.js';
+import { TpmViewScope, useTpmVisibility } from './hooks/useTpmVisibility.js';
+import { useTpmWork, type TpmService } from './hooks/useTpmWork.js';
+import { TpmMenu } from './components/TpmMenu.js';
+import { TpmWorkspace } from './components/TpmWorkspace.js';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
 import { FavoritesHeading, FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
@@ -953,6 +957,18 @@ function AppContent({
     });
   }, [sessionEntries]);
   const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId);
+  const tpmView = useTpmVisibility();
+  const tpmTriggerRef = useRef<HTMLButtonElement>(null);
+  const candidateTpmService = hostClient as Partial<TpmService>;
+  const tpmService = candidateTpmService.tpmList && candidateTpmService.tpmWork && candidateTpmService.tpmCreate && candidateTpmService.tpmAction ? candidateTpmService as TpmService : undefined;
+  const tpmHosts = [...(providers.length > 0 ? [{ id: 'local', name: 'Lab server', online: true }] : []), ...remoteHosts];
+  const attachTpm = useCallback(async (item: SessionEntry): Promise<OpenedSession> => {
+    if (!accessReadyRef.current) throw new Error('Workspace access is restoring.');
+    const target = new SessionDirectoryClient(baseUrl, undefined, item.hostId ?? 'local');
+    const attached = await target.attach(item.providerId, item.nativeSessionId);
+    return { hostId: item.hostId, providerId: item.providerId, nativeSessionId: attached.nativeSessionId ?? item.nativeSessionId, title: item.title, agentId: attached.agentId };
+  }, [baseUrl]);
+  const tpm = useTpmWork(tpmService, tpmHosts, accessReady && !!directory, attachTpm, tpmView.visible);
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);
   const selectedRemoteHost = selectedHost.id !== 'local' ? remoteHosts.find((host) => host.id === selectedHost.id) : undefined;
@@ -1518,10 +1534,22 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       observations={tracking.observations} navigation={viewNavigation} />;
   }
-  return <TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
+    <TpmMenu tpm={tpm} main={visibleStackRoot ?? currentSession} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
+    {tpm.opened.map(key => {
+      const item = tpm.works.find(item => item.key === key);
+      if (!item) return null;
+      return <TpmWorkspace key={key} item={item} session={tpm.sessions[key]} replica={tpm.sessions[key] ? replicaFor(tpm.sessions[key]!.agentId) : undefined}
+        visible={tpmView.visible && tpm.expanded && tpm.selected === key && !supportingRailOpen} storageScope={baseUrl} triggerRef={tpmTriggerRef}
+        transport={transport} draftBinding={{ store: messageDrafts, key: `tpm:${key}` }} navigation={viewNavigation}
+        busy={!!tpm.busy} attaching={tpm.attaching[key] || tpm.detailsLoading[key]} error={tpm.detailErrors[key] ?? tpm.attachmentErrors[key]}
+        onClose={tpm.close} onShowList={() => { tpm.close(); tpmTriggerRef.current?.click(); }}
+        onOpenMain={() => { tpm.close(); void openSession({ hostId: item.hostId, providerId: item.work.providerId, nativeSessionId: item.work.mainNativeSessionId, title: sessionEntries.find(entry => entry.hostId === item.hostId && entry.providerId === item.work.providerId && entry.nativeSessionId === item.work.mainNativeSessionId)?.title ?? 'Main session' }); }}
+        onAction={action => tpm.action(key, action)} onConfirmTodo={decision => tpm.confirmTodo(key, decision)} onResolve={(id, resolution, nativeSessionId) => tpm.resolve(key, id, resolution, nativeSessionId)} onRetry={() => void tpm.open(key)} />;
+    })}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       <div ref={setMobileViewTarget} className="lab-global-view-slot" />
@@ -1532,7 +1560,7 @@ function AppContent({
         {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : null}
     </nav> : null}
-    <ViewOptions attentionControls={userScoped ? attention.controls : undefined} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sessionViewTarget}
+    <ViewOptions attentionControls={<>{userScoped ? attention.controls : null}{tpmView.controls}</>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -1779,7 +1807,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

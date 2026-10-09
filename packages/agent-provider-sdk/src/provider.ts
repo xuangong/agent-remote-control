@@ -28,6 +28,8 @@ export interface AgentCapabilities {
 export interface AgentProviderDescriptor {
   providerId: string;
   displayName: string;
+  /** Native support for Host-owned extensions on creation and reattachment. */
+  sessionExtensions?: { instructions: boolean; tools: boolean };
 }
 
 export interface AgentPersistenceHandle {
@@ -80,6 +82,9 @@ export interface AgentSessionTool {
 }
 export interface AgentSessionExtensions {
   tools?: readonly AgentSessionTool[];
+  /** Additional role instructions. Preserve the provider's native base prompt and policy. */
+  instructions?: string;
+  /** Existing provider-specific prompt configuration; use instructions for appended roles. */
   systemPrompt?: string;
 }
 export interface AgentHistoryQuery {

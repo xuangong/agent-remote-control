@@ -64,7 +64,7 @@ describe('Codex Lab composition', () => {
     const executable = fakeExecutable('codex-cli 0.162.0');
     const composition = await createCodexValidationServer({ executable });
     try {
-      expect(composition.relay.listProviders()).toEqual([{ providerId: 'codex', displayName: 'Codex (fixture)' }]);
+      expect(composition.relay.listProviders()).toEqual([{ providerId: 'codex', displayName: 'Codex (fixture)', sessionExtensions: { instructions: true, tools: true } }]);
     } finally {
       await composition.close();
     }

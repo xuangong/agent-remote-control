@@ -750,7 +750,7 @@ export class AgentManager {
           });
         }).catch(() => undefined);
       });
-      if (!historical) this.emitStream(event, row.timestamp, row);
+      if (!historical) this.emitStream(event, row.timestamp, row, observation.delivery);
       return;
     }
     const timestamp = new Date(observation.occurredAt).toISOString();
@@ -850,12 +850,14 @@ export class AgentManager {
     event: AgentStreamEvent,
     timestamp: string,
     row?: Extract<AgentManagerEvent, { type: 'agent_stream' }>['row'],
+    delivery?: 'history' | 'live',
   ): void {
     this.emit({
       type: 'agent_stream',
       agentId: this.agentId,
       event,
       timestamp,
+      ...(delivery === undefined ? {} : { delivery }),
       ...(row === undefined ? {} : { row }),
     });
   }

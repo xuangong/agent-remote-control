@@ -51,7 +51,7 @@ describe('CodexAppServerProvider contract', () => {
     });
     const provider = new CodexAppServerProvider({ spawn: () => appServer.child });
 
-    expect(provider.descriptor).toEqual({ providerId: 'codex', displayName: 'Codex' });
+    expect(provider.descriptor).toEqual({ providerId: 'codex', displayName: 'Codex', sessionExtensions: { instructions: true, tools: true } });
     const session = await provider.createSession({ sessionId: 'local', cwd: '/workspace' });
     validateAgentSessionCapabilities(session);
     const iterator = session.observe()[Symbol.asyncIterator]();

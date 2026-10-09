@@ -37,14 +37,14 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
   Type.Union([
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), tpmManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), tpmManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providers: Type.Array(provider, { minItems: 0, maxItems: 64 }) }, object),
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
@@ -99,7 +99,7 @@ function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplink
     if (sessionScoped !== (value.sessionId !== undefined)) return false;
     if (pathname === '/remote/previews' || pathname === '/remote/controller-update' || pathname === '/remote/codex-daemon' || pathname === '/remote/provider-settings') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
     if (pathname.startsWith('/remote/')) {
-      const isRead = pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
+      const isRead = pathname === '/remote/tpm' || pathname === '/remote/tpm/work' || pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
         || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models' || pathname === '/remote/vscode-tunnel';
       if ((isRead && (value.method !== 'GET' || value.body !== undefined))
         || (!isRead && (value.method !== 'POST' || value.body === undefined))) return false;

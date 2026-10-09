@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { CopilotClient, RuntimeConnection, type SessionConfig } from '@github/copilot-sdk';
 import { AgentSessionInUseError } from '@orchardworks/agent-provider-sdk';
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { CopilotAgentSession } from './session.js';
 import { deadline } from './channel.js';
 export interface CopilotAgentProviderOptions { executable?: string; env?: Record<string, string | undefined>; requestTimeoutMs?: number; onDiagnostic?: (message: string) => void; nativeSessionConfig?: Pick<SessionConfig, 'provider' | 'skillDirectories' | 'mcpServers'>; useLoggedInUser?: boolean; }
@@ -16,7 +16,7 @@ export function resolveCopilotExecutable(): string {
   return resolve(dirname(packagePath), manifest.bin.copilot);
 }
 export class CopilotAgentProvider implements AgentProviderAdapter {
-  readonly descriptor = { providerId: 'copilot', displayName: 'GitHub Copilot' };
+  readonly descriptor = { providerId: 'copilot', displayName: 'GitHub Copilot', sessionExtensions: { instructions: true, tools: true } };
   readonly sessionRenameRequiresOpen = true;
   private readonly client: CopilotClient;
   private readonly sessions = new Map<string, CopilotAgentSession>();
@@ -83,7 +83,7 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
     await this.ready();
     await deadline(this.client.rpc.sessions.close({sessionId}), this.options.requestTimeoutMs ?? 15000, 'Copilot immediate handoff');
   }
-  async resumeSession(handle: AgentPersistenceHandle): Promise<CopilotAgentSession> {
+  async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}): Promise<CopilotAgentSession> {
     if (handle.providerId !== 'copilot' || !handle.sessionId || /[\x00/\\]/u.test(handle.sessionId)) throw new Error('Invalid Copilot persistence handle.');
     let stored: unknown;
     try { stored = JSON.parse(handle.opaque); } catch { throw new Error('Invalid Copilot persistence configuration.'); }
@@ -92,7 +92,9 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
     await this.assertSessionAvailable(handle.sessionId);
     const cwd = typeof storedCwd === 'string' && storedCwd ? storedCwd : await this.sessionWorkspace(handle.sessionId);
     if (!cwd) throw new Error('Copilot session workspace is unavailable.');
-    return this.open({ sessionId: handle.sessionId, cwd }, true);
+    const saved = stored as { systemPrompt?: unknown; instructions?: unknown };
+    return this.open({ ...(typeof saved.systemPrompt === 'string' ? { systemPrompt: saved.systemPrompt } : {}),
+      ...(typeof saved.instructions === 'string' ? { instructions: saved.instructions } : {}), ...extensions, sessionId: handle.sessionId, cwd }, true);
   }
   private async open(config: AgentSessionConfig, resume: boolean): Promise<CopilotAgentSession> {
     await this.ready();

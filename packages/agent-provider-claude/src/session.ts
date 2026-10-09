@@ -14,6 +14,7 @@ import { ClaudeEventProjector } from './projector.js';
 import { discoverClaudeCommands } from './commands.js';
 import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
+import { createClaudeSessionTools } from './session-tools.js';
 
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
@@ -69,6 +70,7 @@ export class ClaudeAgentSession implements AgentSession {
   private disposed = false;
   private failure: Error | undefined;
   private native!: ClaudeQuery;
+  private hostTools?: ReturnType<typeof createClaudeSessionTools>;
   private readonly process: ClaudeNativeProcess;
   private closing?: Promise<void>;
   private pump!: Promise<void>;
@@ -105,13 +107,16 @@ export class ClaudeAgentSession implements AgentSession {
     if (config.reasoningEffort && !['low', 'medium', 'high', 'xhigh', 'max'].includes(config.reasoningEffort)) throw new Error('Unsupported Claude reasoning effort.');
     const session = new ClaudeAgentSession(config, options, messages);
     try {
+      if (config.tools?.length) session.hostTools = createClaudeSessionTools(config.tools, () => session.requireOpen());
       if (resume) await session.children.restore();
       session.native = (options.query ?? query)({ prompt: session.input, options: {
         ...(resume ? { resume: config.sessionId } : { sessionId: config.sessionId }), cwd: config.cwd,
         model: config.model, ...(config.reasoningEffort ? { effort: config.reasoningEffort as Options['effort'] } : {}),
         pathToClaudeCodeExecutable: options.executable ?? 'claude', env: { ...process.env, ...options.env },
         includePartialMessages: true, forwardSubagentText: true, persistSession: true, settingSources: ['user', 'project', 'local'],
-        systemPrompt: config.systemPrompt ?? { type: 'preset', preset: 'claude_code' },
+        systemPrompt: config.systemPrompt !== undefined ? [config.systemPrompt, config.instructions].filter(value => value !== undefined && value !== '').join('\n\n')
+          : { type: 'preset', preset: 'claude_code', ...(config.instructions ? { append: config.instructions } : {}) },
+        ...(session.hostTools ? { mcpServers: { agent_host: session.hostTools } } : {}),
         ...(options.restrictedNative ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } } : {}),
         permissionMode: session.permissionMode, canUseTool: session.interactions.request,
         stderr: options.onDiagnostic, spawnClaudeCodeProcess: session.process.spawn,
@@ -335,6 +340,7 @@ export class ClaudeAgentSession implements AgentSession {
     }
     return this.closing = (async () => {
       await this.children.close();
+      if (this.hostTools) await this.hostTools.instance.close();
       if (firstClose) {
         if (!this.failure) this.runtimeUpdated();
         this.output.close();
@@ -352,7 +358,7 @@ export class ClaudeAgentSession implements AgentSession {
   private info(): AgentRuntimeInfo {
     return { providerId: 'claude', sessionId: this.config.sessionId, status: this.status, cwd: this.config.cwd,
       model: this.config.model ?? null, planning: { active: this.planning }, settings: this.settings(), childSessions: this.children.descriptors(),
-      persistence: { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...this.config, planning: this.planning, permissionMode: this.resumePermissionMode }) } };
+      persistence: { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...persistedConfig(this.config), planning: this.planning, permissionMode: this.resumePermissionMode }) } };
   }
   private runtimeUpdated(): void { this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info(), activeTurnId: this.turnId ?? null }); }
   private emit(event: AgentStreamEvent): void {
@@ -422,3 +428,5 @@ export class ClaudeAgentSession implements AgentSession {
     } catch (error) { this.fail(error); }
   }
 }
+
+function persistedConfig({ tools: _tools, ...config }: ClaudeSessionConfig) { return config; }

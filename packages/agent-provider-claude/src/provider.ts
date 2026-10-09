@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { ClaudeShutdownError, ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
 import { record } from './projector.js';
@@ -17,7 +17,7 @@ export interface ClaudeSessionSummary {
 export interface ClaudeAgentProviderOptions extends ClaudeSessionOptions { catalog?: ClaudeCatalog }
 
 export class ClaudeAgentProvider implements AgentProviderAdapter {
-  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code' };
+  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true } };
   private readonly catalog: ClaudeCatalog;
   private readonly sessions = new Map<string, ClaudeAgentSession>();
   private readonly loading = new Set<string>();
@@ -83,7 +83,7 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     return session;
   }
 
-  async resumeSession(handle: AgentPersistenceHandle): Promise<AgentSession> {
+  async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
     if (handle.providerId !== 'claude') throw new Error('Claude persistence provider does not match.');
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(handle.sessionId)) throw new Error('Invalid Claude session identity.');
     const sessionId = handle.sessionId;
@@ -97,7 +97,7 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       const cwd = info.cwd ?? stored.cwd;
       if (!cwd) throw new Error('Claude session workspace is unavailable.');
       const messages = await this.catalog.messages(sessionId);
-      session = await ClaudeAgentSession.open({ ...stored, sessionId, cwd: await workspace(cwd) },
+      session = await ClaudeAgentSession.open({ ...stored, ...extensions, sessionId, cwd: await workspace(cwd) },
         { ...this.options, catalog: this.catalog, onDispose: () => {
           if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
         } }, messages, true);
@@ -126,7 +126,7 @@ function readConfig(opaque: string): Partial<ClaudeSessionConfig> {
   try { value = JSON.parse(opaque); } catch { throw new Error('Invalid Claude persistence configuration.'); }
   if (!record(value)) throw new Error('Invalid Claude persistence configuration.');
   const config: Partial<ClaudeSessionConfig> = {};
-  for (const key of ['cwd', 'model', 'reasoningEffort', 'systemPrompt'] as const) if (typeof value[key] === 'string') config[key] = value[key];
+  for (const key of ['cwd', 'model', 'reasoningEffort', 'systemPrompt', 'instructions'] as const) if (typeof value[key] === 'string') config[key] = value[key];
   if (typeof value.planning === 'boolean') config.planning = value.planning;
   if (typeof value.permissionMode === 'string' && ['default', 'acceptEdits', 'dontAsk'].includes(value.permissionMode)) config.permissionMode = value.permissionMode as ClaudeSessionConfig['permissionMode'];
   return config;

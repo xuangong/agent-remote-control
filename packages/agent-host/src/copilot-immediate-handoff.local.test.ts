@@ -54,7 +54,7 @@ it.skipIf(process.platform==='win32')('automatically stops the interactive termi
     let text='',buffer='',exit:unknown;
     terminal.stdout!.on('data',chunk=>{buffer+=chunk;for(;;){const end=buffer.indexOf('\n');if(end<0)break;const row=JSON.parse(buffer.slice(0,end));buffer=buffer.slice(end+1);text+=row.output??'';if('exit' in row)exit=row.exit;}});
     terminal.stderr!.on('data',chunk=>text+=chunk);
-    await waitFor(()=>text.includes('commands')).catch(error=>{throw new Error(String(error)+'\n'+text.slice(-3000));});
+    await waitFor(()=>text.includes('open sidebar')).catch(error=>{throw new Error(String(error)+'\n'+text.slice(-3000));});
     await new Promise(resolve=>setTimeout(resolve,300));
     terminal.stdin!.write(JSON.stringify({write:'INTERACTIVE_PENDING\r'})+'\n');
     await waitFor(()=>f.requests.length===2);

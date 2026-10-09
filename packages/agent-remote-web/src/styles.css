@@ -942,3 +942,25 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 @media (max-width: 1180px) {
   .agent-communication-letter { max-width: 100%; margin-inline: 0; transform: none !important; }
 }
+
+.agent-session-todo { position: relative; flex: 0 0 auto; min-width: 0; color: var(--agent-ink); background: var(--agent-panel); border-bottom: 1px solid var(--agent-rule); font-size: 12px; }
+.agent-session-todo > summary { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 12px; cursor: pointer; list-style: none; }
+.agent-session-todo > summary::-webkit-details-marker { display: none; }
+.agent-session-todo > summary::after { content: '⌄'; margin-left: auto; }
+.agent-session-todo[open] > summary::after { content: '⌃'; }
+.agent-session-todo-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--agent-muted); }
+.agent-session-todo-attention { flex-shrink: 0; color: var(--agent-setting-pending); }
+.agent-session-todo-panel { position: absolute; z-index: 35; inset: 100% 0 auto; max-height: min(60vh, 420px); overflow: auto; overscroll-behavior: contain; padding: 12px 16px; background: var(--agent-panel); border-bottom: 1px solid var(--agent-rule); box-shadow: 0 8px 16px oklch(20% 0.01 250 / 0.12); font-size: 13px; overflow-wrap: anywhere; }
+.agent-session-todo-panel > ol { list-style: none; padding: 0; margin: 8px 0; }
+.agent-session-todo-panel > ol > li { padding: 7px 0; color: var(--agent-muted); }
+.agent-session-todo-panel > ol > li[aria-current="step"] { color: var(--agent-ink); font-weight: 600; }
+.agent-session-todo-panel summary { cursor: pointer; }
+.agent-session-todo-panel p { margin: 6px 0; font-weight: 400; }
+.agent-session-todo-panel small { font-weight: 400; }
+.agent-session-todo-confirmation { padding-bottom: 12px; border-bottom: 1px solid var(--agent-rule); }
+.agent-session-todo-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.agent-session-todo-actions button { padding: 6px 12px; min-height: 36px; border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); background: var(--agent-panel); color: var(--agent-action-text); cursor: pointer; }
+.agent-session-todo-actions button:disabled { opacity: 0.55; cursor: default; }
+.agent-session-todo [role="alert"] { color: var(--agent-danger); }
+.agent-session-todo :focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+@media (pointer: coarse) { .agent-session-todo > summary, .agent-session-todo-actions button { min-height: 44px; } }

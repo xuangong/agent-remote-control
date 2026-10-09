@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
+import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 
 export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession'> & {
     listSessions(): Promise<RemoteSessionSummary[]>;
@@ -27,7 +28,7 @@ export function createManagedStdioDirectory(
   workspaces: readonly AgentHostWorkspace[],
   ownership?: {root: string; onDiagnostic?: (event: NativeOwnerDiagnostic) => void},
 ): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; owner?: NativeSessionLease }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; owner?: NativeSessionLease }>();
   const leases = new Map<string, NativeSessionLease>();
   const yielded = new Set<string>();
   const unconfirmedStarts = new Set<string>();
@@ -102,7 +103,7 @@ export function createManagedStdioDirectory(
     }
     return [...summaries.values()];
   }
-  async function remember(session: AgentSession, owner?: NativeSessionLease): Promise<string> {
+  async function remember(session: AgentSession, owner: NativeSessionLease | undefined, extensionIdentity: string): Promise<string> {
     try {
       if (closed) throw new Error(`${displayName} directory is closed.`);
       const info = await session.runtimeInfo();
@@ -111,7 +112,7 @@ export function createManagedStdioDirectory(
       owner ??= await lease(info.sessionId);
       if (closed) throw new Error(`${displayName} directory is closed.`);
       session = managed(session, info.sessionId, owner);
-      opened.set(info.sessionId, { session, handle: info.persistence, createdAt: new Date().toISOString(), owner });
+      opened.set(info.sessionId, { session, handle: info.persistence, createdAt: new Date().toISOString(), extensionIdentity, owner });
       return info.sessionId;
     } catch (error) { await session.dispose(); await owner?.release(); throw error; }
   }
@@ -137,26 +138,36 @@ export function createManagedStdioDirectory(
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(({ id }) => id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new Error(`Unknown ${displayName} workspace.`);
       const cwd = input.cwd ?? selected?.path ?? workspaces[0]?.path;
-      return remember(await provider.createSession({ ...input, sessionId: randomUUID(), ...(cwd ? { cwd } : {}) }));
+      const config = { ...input, sessionId: randomUUID(), ...(cwd ? { cwd } : {}) };
+      const identity = sessionExtensionIdentity(config);
+      return remember(await provider.createSession(config), undefined, identity);
     },
     setSessionHandoffHandler(handler) { onHandoff = handler; },
     async open(nativeSessionId, options) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
       const pending = loading.get(nativeSessionId);
-      if (pending) return pending;
+      if (pending) {
+        const session = await pending;
+        requireSessionExtensionIdentity(opened.get(nativeSessionId)?.extensionIdentity, options?.extensions);
+        return session;
+      }
       const opening = (async () => {
         await releaseFailedStart(nativeSessionId);
         const existing = opened.get(nativeSessionId);
-        if (existing && !yielded.has(nativeSessionId) && (await existing.session.runtimeInfo()).status !== 'closed') return existing.session;
+        if (existing && !yielded.has(nativeSessionId) && (await existing.session.runtimeInfo()).status !== 'closed') {
+          requireSessionExtensionIdentity(existing.extensionIdentity, options?.extensions);
+          return existing.session;
+        }
         if (existing && yielded.has(nativeSessionId)) {
           await existing.session.dispose();
           // Outside the handoff callback, so release can wait for a failed/in-flight transfer.
           await leases.get(nativeSessionId)?.release();
         }
         const owner = await lease(nativeSessionId, options?.takeOver);
+        const identity = sessionExtensionIdentity(options?.extensions);
         let session: AgentSession;
         try {
-          session = await provider.resumeSession(existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' });
+          session = await provider.resumeSession(existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, options?.extensions);
         } catch (error) {
           if (owner) {
             unconfirmedStarts.add(nativeSessionId);
@@ -164,7 +175,7 @@ export function createManagedStdioDirectory(
           }
           throw error;
         }
-        await remember(session, owner);
+        await remember(session, owner, identity);
         return opened.get(nativeSessionId)!.session;
       })();
       loading.set(nativeSessionId, opening);

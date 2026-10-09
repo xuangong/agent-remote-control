@@ -1,4 +1,4 @@
-import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
 import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import type { AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
@@ -72,6 +72,7 @@ interface StoredSessionConfig {
   model?: string;
   reasoningEffort?: string;
   systemPrompt?: string;
+  instructions?: string;
   collaborationMode?: 'plan';
 }
 
@@ -394,7 +395,7 @@ export class CodexAppServerSession implements AgentSession {
   ): Promise<CodexAppServerSession> {
     const stored = toStoredConfig(config, collaborationMode);
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
-    session.tools = config.tools ?? [];
+    session.tools = bindAgentSessionTools(config.tools, () => session.assertOpen());
     await session.initialize();
     const response = await transport.request('thread/start', {
       ...(session.tools.length ? { dynamicTools: session.tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) } : {}),
@@ -402,7 +403,7 @@ export class CodexAppServerSession implements AgentSession {
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
-      ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),
+      ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
     });
     session.setThreadFromResponse(response, 'thread/start');
     session.finishBootstrap([], new Map());
@@ -456,9 +457,10 @@ export class CodexAppServerSession implements AgentSession {
     if (handle.providerId !== PROVIDER_ID) {
       throw new Error(`Cannot resume ${handle.providerId} with the Codex provider`);
     }
-    const stored = { ...parseStoredConfig(handle.opaque), ...(extensions.systemPrompt ? { systemPrompt: extensions.systemPrompt } : {}), ...(collaborationMode ? { collaborationMode } : {}) };
+    const stored = { ...parseStoredConfig(handle.opaque), ...(extensions.systemPrompt ? { systemPrompt: extensions.systemPrompt } : {}),
+      ...(extensions.instructions !== undefined ? { instructions: extensions.instructions } : {}), ...(collaborationMode ? { collaborationMode } : {}) };
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
-    session.tools = extensions.tools ?? [];
+    session.tools = bindAgentSessionTools(extensions.tools, () => session.assertOpen());
     session.threadId = handle.sessionId;
     session.runtime.registerRoot(handle.sessionId);
     await session.initialize();
@@ -469,7 +471,7 @@ export class CodexAppServerSession implements AgentSession {
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(stored.model ? { model: stored.model } : {}),
-      ...(stored.systemPrompt ? { developerInstructions: stored.systemPrompt } : {}),
+      ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
     }).catch((error: unknown) => {
       if (error instanceof CodexAppServerRpcError && error.code === -32600
         && error.message === `thread ${handle.sessionId} already has an active writer`) {
@@ -772,7 +774,7 @@ export class CodexAppServerSession implements AgentSession {
       settings: {
         model,
         reasoning_effort: this.config.reasoningEffort ?? selected.reasoningEffort ?? null,
-        developer_instructions: [selected.developerInstructions, this.config.systemPrompt].filter(Boolean).join('\n\n') || null,
+        developer_instructions: [selected.developerInstructions, sessionInstructions(this.config)].filter(Boolean).join('\n\n') || null,
       },
     };
   }
@@ -1500,12 +1502,17 @@ function readThreadRuntimeStatus(value: unknown): AgentRuntimeInfo['status'] | u
     : 'running';
 }
 
+function sessionInstructions(config: StoredSessionConfig): string {
+  return [config.systemPrompt, config.instructions].filter(Boolean).join('\n\n');
+}
+
 function toStoredConfig(config: AgentSessionConfig, collaborationMode?: 'plan'): StoredSessionConfig {
   return {
     ...(config.cwd ? { cwd: config.cwd } : {}),
     ...(config.model ? { model: config.model } : {}),
     ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
     ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
+    ...(config.instructions ? { instructions: config.instructions } : {}),
     ...(config.planning === true || (config.planning === undefined && collaborationMode) ? { collaborationMode: 'plan' as const } : {}),
   };
 }
@@ -1523,6 +1530,7 @@ function parseStoredConfig(opaque: string): StoredSessionConfig {
     ...(readString(parsed.model) ? { model: readString(parsed.model) } : {}),
     ...(readString(parsed.reasoningEffort) ? { reasoningEffort: readString(parsed.reasoningEffort) } : {}),
     ...(readString(parsed.systemPrompt) ? { systemPrompt: readString(parsed.systemPrompt) } : {}),
+    ...(readString(parsed.instructions) ? { instructions: readString(parsed.instructions) } : {}),
     ...(parsed.collaborationMode === 'plan' ? { collaborationMode: 'plan' as const } : {}),
   };
 }

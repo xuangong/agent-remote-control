@@ -179,6 +179,7 @@ ardb
 |-- settings list <agent-id>
 |-- settings set <agent-id> <setting-id> <value>
 |-- provider list
+|-- tpm <list|create|show|pause|resume|check|reopen|resolve> <host-id>
 |-- session create <agent-id> --provider <provider-id>
 |-- session resume <agent-id> --persistence-file <path|->
 |-- observe <agent-id>
@@ -199,6 +200,49 @@ ardb
 ```
 
 `send` and `steer` accept message text as an argument or from `--file <path|->`; their success output follows a correlated Relay acknowledgement. With `--wait idle`, the command waits for the affected turn to become active and then finish instead of treating unrelated Timeline, resource, or diagnostic traffic as progress. `interaction respond` accepts one exact public interaction-response JSON value. `resource get` writes decoded bytes only after a correlated available response whose byte length and SHA-256 both match. File output uses an atomic same-directory replacement; `--output -` deliberately makes stdout the byte stream while metadata remains on stderr.
+
+## TPM work management
+
+TPM commands use the same Host control API as the browser, through the exported
+`RemoteHostControlClient`. Work records, background reviews and native sessions
+remain Controller-owned after the CLI exits. Host owners can list, create, read,
+pause, resume, check, reopen and resolve uncertain work operations. Shared Host
+users cannot manage another owner's work records.
+
+```bash
+ardb tpm list HOST_ID --relay http://127.0.0.1:5910 --json
+ardb tpm create HOST_ID "Deliver the agreed change" --provider codex \
+  --main-session NATIVE_MAIN_SESSION_ID --title "Delivery" \
+  --operation-id CREATE_OPERATION_ID --timeout 50000 --json
+ardb tpm show HOST_ID WORK_ID --json
+ardb tpm pause HOST_ID WORK_ID --revision 3 --operation-id PAUSE_OPERATION_ID --json
+ardb tpm resume HOST_ID WORK_ID --revision 4 --json
+ardb tpm check HOST_ID WORK_ID --revision 5 --json
+ardb tpm reopen HOST_ID WORK_ID --revision 6 --json
+ardb tpm resolve HOST_ID WORK_ID --revision 7 --intent-id INTENT_ID \
+  --resolution rejected --operation-id RESOLVE_OPERATION_ID --json
+```
+
+Creation accepts a requirement argument or `--file <path|->`. Every mutation
+carries one operation ID; `--operation-id` supplies an explicit identity, or the
+CLI generates one for that invocation. Actions require the revision read from
+`show` or `list`. A successful check request records an explicit wake request;
+it does not establish delivery completion. Resolving an uncertain intent records
+an `accepted` or `rejected` outcome without resending it. For `--intent-id creation`,
+an accepted outcome also requires `--native-session RECOVERED_NATIVE_SESSION_ID`;
+the Host verifies that identity before restoring the TPM binding. A rejected
+creation pauses the abandoned work. A later check is a new
+intent. No command automatically retries a mutation after a lost or invalid
+response.
+
+For an account-backed Relay, provide its existing user namespace in `--relay`,
+its origin in `--origin`, and `--cookie-file <path>` containing the existing
+browser session Cookie header value on one line. These are ordinary Relay
+credentials, subject to the same namespace, origin and Host owner checks as the
+browser. Cookie contents are not emitted in CLI output. The local standalone
+Relay continues to use its existing loopback authorization and temporary pairing
+keys; TPM does not add accounts. An older Controller reports
+`{ "supported": false, "works": [] }` for its TPM list.
 
 ## Output and exits
 

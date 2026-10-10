@@ -3,6 +3,34 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Claude source-history checkpoint (2026-10-10)
+
+The adapter-only public history reader passed independent scoped spec/quality
+review. Check live Git for its commit after baseline `889954b`. It reuses Claude
+normalized projection in an isolated catalog worker, without opening/resuming a
+source or starting a model request. Only small pages cross the worker boundary.
+Raw rows, bytes, blocks, normalized projection, output and time are bounded;
+oversized histories reject explicitly. SDK internal parsing is not constant-memory.
+
+Public history has message UUIDs but no verified root turn grouping. Entries keep
+native message identity with empty turnId; turn filters explicitly reject.
+User/assistant search, recent entries and tool context are supported. Two matching
+bounded observations detect some changes; they do not establish atomic snapshots
+or quiescence. An incoming page cursor detects changed fingerprints; first-page
+textOffset without a cursor remains a fresh observation.
+
+Evidence: `.tmp/claude-source-reader-report.md` and
+`.tmp/claude-source-reader-review.md`. Implementer ran 114 Claude and 45 SDK tests;
+Root verified the six-file manifest and freshly ran nine affected suites (62 tests)
+and Claude typecheck. Native-named tests use isolated transcripts and the real
+public SDK worker, not a native CLI/model or a user session.
+
+Next implement brief items 3–5 in `.tmp/claude-source-reader-slice-brief.md`:
+managed stdio durable grants, restored/composed extensions, dynamic source routing,
+and the content-send ownership fence. Adapt tool guidance for unavailable turn
+identity. No source-reference directory capability or succession readiness is
+certified by the adapter-only checkpoint.
+
 ## Ordinary relationship update checkpoint (2026-10-10)
 
 The trusted enrollment/native-result recovery baseline is committed as `00f6af9`.

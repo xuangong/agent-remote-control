@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { ClaudeShutdownError, ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
 import { record } from './projector.js';
@@ -29,6 +29,12 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error('Invalid Claude session identity.');
     const info = await this.catalog.info(sessionId);
     return info?.customTitle || info?.summary || info?.firstPrompt;
+  }
+
+  async readSessionHistory(sessionId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error('Invalid Claude session identity.');
+    if (!this.catalog.history) throw new Error('Claude source history is unsupported by this catalog.');
+    return this.catalog.history(sessionId, query);
   }
 
   async renameSession(sessionId: string, title: string): Promise<string> {

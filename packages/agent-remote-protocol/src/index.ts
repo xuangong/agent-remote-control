@@ -35,3 +35,4 @@ export * from './usage-state.js';
 export * from './tpm.js';
 
 export * from './session-todo.js';
+export * from './session-succession.js';

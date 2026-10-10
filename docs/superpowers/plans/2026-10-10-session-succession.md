@@ -30,7 +30,8 @@
 - [ ] Implement Tasks 1–6, marking each complete only with recorded evidence.
 
 Base: `cc3f359`; worktree: `.worktrees/session-succession`; branch: `feat/session-succession`.
-This documentation stage does not install dependencies or run runtime tests.
+Implementation started: dependencies installed with the frozen lockfile and Controller dependencies built.
+Baseline source-reference and TPM-store suites: 6 tests passed.
 At implementation start run `pnpm install --frozen-lockfile`, then build workspace
 dependencies and establish the affected suites' baseline. Inspect package-local
 AGENTS.md files before modifying their scope.
@@ -54,6 +55,10 @@ to obtain a passing test.
 
 ## Task 1: Role identity and local durable decision
 
+Status: Complete. Protocol suite: 221 tests passed; succession store plus existing
+source-reference/TPM-store suites: 13 tests passed. Controller typecheck passed.
+The new store is not connected to production admission or UI yet.
+
 **Create:** `packages/agent-remote-protocol/src/session-succession.ts` and `.test.ts`;
 `packages/agent-host/src/session-succession-store.ts` and `.test.ts`.
 **Modify:** protocol `src/index.ts` to export the new validated contracts.
@@ -67,17 +72,17 @@ failure code. Define `SessionSuccessionStore.read(roleId)`,
 `begin(request)` and `commit(operationId)`; begin returns the existing same-input
 record, rejects conflicting reuse and reserves the expected role revision.
 
-- [ ] Write store tests for same-ID retries, conflicting fingerprints, concurrent
+- [x] Write store tests for same-ID retries, conflicting fingerprints, concurrent
   begins, stale revisions, A -> B -> C and reopening persisted committed state.
-- [ ] Run the new tests and confirm the missing behavior fails.
-- [ ] Keep complete Controller/provider/native references in before/after records;
+- [x] Run the new store suite and confirm it fails because the store module is absent.
+- [x] Keep complete Controller/provider/native references in before/after records;
   role identity must not be derived from cwd or the current executor.
-- [ ] Implement validated versioned records, a single-writer serialized mutation
+- [x] Implement validated versioned records, a single-writer serialized mutation
   path and atomic replacement of the role plus operation receipt. Keep indexes
   in memory and preserve recovery records across restart.
-- [ ] Exercise a torn temporary write: the old committed record remains valid;
+- [x] Exercise a torn temporary write: the old committed record remains valid;
   a committed revision is never reconstructed from an uncommitted candidate.
-- [ ] Run protocol/store suites and commit `feat: persist primary session succession`.
+- [x] Run protocol/store suites and commit `feat: persist primary session succession`.
 
 Core observable expectation:
 

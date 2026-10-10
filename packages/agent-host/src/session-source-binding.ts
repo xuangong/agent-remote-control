@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, type SourceBinding } from '@orchardworks/agent-remote-protocol';
 import type { SessionSuccessionContextStore, SuccessionContextRecord } from './session-succession-context.js';
 import type { SessionSuccessionStore } from './session-succession-store.js';
 import type { SourceHistoryPage, SourceHistoryQuery } from './session-reference.js';
@@ -72,12 +72,29 @@ export class SessionSourceBindings {
     return this.store.setParticipants(roleId, expectedRevision, associationRevision, participants);
   }
 
-  async read(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
+  read(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
     read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>): Promise<SourceHistoryPage> {
+    return this.readSource(reader, originalSource, input, read);
+  }
+
+  /** Trusted Host consumers already hold a durable role binding; public source tools use enrolled readers. */
+  readRole(binding: SourceBinding, input: SourceHistoryQuery): Promise<SourceHistoryPage> {
+    const unavailable = async (): Promise<AgentHistoryPage> => { throw new Error('Role history requires a routed native reader.'); };
+    if (binding.kind === 'fixed') return this.readSource(binding.source, binding.source, input, unavailable);
+    const state = this.store.read(binding.roleId);
+    if (!sameRef(binding.origin, state.role.origin)) throw new Error('Primary role origin changed.');
+    const lineage = new Set([nativeSessionRefKey(state.role.origin), ...state.operations.filter(operation => operation.phase === 'committed').map(operation => nativeSessionRefKey(operation.to!))]);
+    return this.readSource(binding.origin, binding.origin, input, unavailable, {
+      source: state.role.current, roleId: state.role.id, roleRevision: state.role.revision, lineage,
+    });
+  }
+
+  private async readSource(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
+    read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, role?: RoleSource): Promise<SourceHistoryPage> {
     const readerRef = this.ref(reader), originalRef = this.ref(originalSource);
     const readerKey = typeof reader === 'string' ? reader : nativeSessionRefKey(readerRef);
     const originalKey = typeof originalSource === 'string' ? originalSource : nativeSessionRefKey(originalRef);
-    const resolved = this.resolveSource(readerRef, originalRef);
+    const resolved = role ?? this.resolveSource(readerRef, originalRef);
     const context = input.sourceContext ? this.decode(input.sourceContext, readerKey, originalKey, 'context') : undefined;
     const page = input.cursor ? this.decode(input.cursor, readerKey, originalKey, 'page') : undefined;
     if (context && page && (nativeSessionRefKey(context.source) !== nativeSessionRefKey(page.source) || context.roleRevision !== page.roleRevision || context.representation !== page.representation || context.attachmentId !== page.attachmentId)) throw new Error('Source context and page cursor disagree.');

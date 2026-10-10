@@ -1,3 +1,4 @@
+import { validSavedSessionSuccessions, type SavedSessionSuccession } from './session-successions.js';
 import { validSourceRelation } from './session-relations.js';
 import { MAX_SESSION_TITLES } from './session-titles.js';
 import { validBrowserId } from './browser-devices.js';
@@ -22,6 +23,7 @@ export interface HostedRelayState {
   sessionStars?: SavedSessionStar[];
   favoritesTrees?: SavedFavoritesTree[];
   sessionMigrations?: SavedSessionMigration[];
+  sessionSuccessions?: SavedSessionSuccession[];
   sessionTitles?: SessionTitleUpdate[];
   sessionTitleRevision?: number;
   config: { origin: string; issuer: string };
@@ -76,6 +78,7 @@ export function validateRelayState(value: unknown, auth: GatewayAuthOptions): Ho
     !value.consumedProofs.every((item: unknown) => Array.isArray(item) && item.length === 2 && string(item[0], 128) && item[0].length >= 16 && time(item[1])) ||
     !unique(value.sessions, item => item.hash) || !unique(value.tenants, item => item.namespace) || !unique(value.loginChallenges, item => item[0]) || !unique(value.consumedProofs, item => item[0])) return invalid();
   if (value.securityEvents !== undefined && (!Array.isArray(value.securityEvents) || value.securityEvents.length > 4096 || !value.securityEvents.every((event: unknown) => record(event) && string(event.id) && string(event.subject) && time(event.at) && string(event.action, 128) && ['allowed', 'denied'].includes(event.outcome) && (event.hostId === undefined || string(event.hostId))))) return invalid();
+  if (value.sessionSuccessions !== undefined && !validSavedSessionSuccessions(value.sessionSuccessions)) return invalid();
   if (value.sessionMigrations !== undefined) {
     if (!Array.isArray(value.sessionMigrations) || value.sessionMigrations.length > 16384 || !value.sessionMigrations.every((item: unknown) => {
       if (!record(item) || !string(item.subject)) return false;

@@ -42,3 +42,23 @@ export const isPreparedSuccession = (value: unknown): value is PreparedSuccessio
 export const isSuccessionParticipant = (value: unknown): value is SuccessionParticipant => Value.Check(SuccessionParticipant, value);
 export const isSuccessionRecord = (value: unknown): value is SuccessionRecord => Value.Check(SuccessionRecord, value);
 export const nativeSessionRefKey = (ref: NativeSessionRef): string => JSON.stringify([ref.controllerId, ref.providerId, ref.nativeSessionId]);
+
+export const CommittedSuccessionProjection = Type.Object({ version: Type.Literal(1), role: PrimaryRole, receipt: SuccessionRecord }, object);
+export type CommittedSuccessionProjection = Static<typeof CommittedSuccessionProjection>;
+/** Structural schemas alone cannot certify the role/receipt relationship. */
+export const isCommittedSuccessionProjection = (value: unknown): value is CommittedSuccessionProjection => {
+  if (!Value.Check(CommittedSuccessionProjection, value)) return false;
+  const { role, receipt } = value as CommittedSuccessionProjection;
+  if (!receipt.to || !receipt.prepared) return false;
+  return nativeSessionRefKey(receipt.from) !== nativeSessionRefKey(receipt.to)
+    && receipt.prepared!.targetProviderId === receipt.targetProviderId
+    && receipt.to!.providerId === (receipt.targetProviderId ?? receipt.from.providerId)
+    && receipt.phase === 'committed' && !!receipt.to && !!receipt.prepared && receipt.resumePhase === undefined
+    && role.id === receipt.roleId && role.revision === receipt.committedRevision && role.revision === receipt.expectedRevision + 1
+    && nativeSessionRefKey(role.current) === nativeSessionRefKey(receipt.to)
+    && nativeSessionRefKey(receipt.prepared.from) === nativeSessionRefKey(receipt.from)
+    && nativeSessionRefKey(receipt.prepared.to) === nativeSessionRefKey(receipt.to)
+    && receipt.prepared.operationId === receipt.operationId && receipt.prepared.roleId === receipt.roleId && receipt.prepared.expectedRevision === receipt.expectedRevision
+    && role.workspace.controllerId === role.current.controllerId && receipt.from.controllerId === role.current.controllerId
+    && receipt.prepared.workspace.controllerId === role.workspace.controllerId && receipt.prepared.workspace.canonicalCwd === role.workspace.canonicalCwd;
+};

@@ -30,13 +30,13 @@ succession state does not copy a workspace, process, credentials or native sessi
 | --- | --- | --- |
 | Controller role state | Version 3 | Committed versions 1 and 2 migrate with empty relation-change arrays; version 1 also receives empty admission/result arrays; ambiguous legacy association fields reject |
 | Pending context | Independently versioned context store | Use its validator and delivery-state recovery; never derive it from role state |
-| Relay outer state | Version 5 when association state exists | Legacy outer versions 2, 3 and 4 remain readable under their original inner-format rules; the next mutation containing associations upgrades the outer and inner state together |
-| Broker association state | Version 3 | Versions 1 and 2 migrate with empty pre-effect reset records; version 1 also receives an empty relation-change list; legacy files containing newer safety fields reject |
+| Relay outer state | Version 6 when association state exists | Legacy outer versions 2 through 5 migrate under their original inner-format rules and complete-lineage validation; newer inner formats cannot be disguised under an older outer version |
+| Broker association state | Version 4 | Versions 1 through 3 migrate only with valid complete committed lineage; earlier additive relation-change/reset migrations remain explicit |
 
 An unpublished experimental Controller version-2 file without
 `associationResults` is rejected, not migrated. Future or malformed versions also
 fail closed. Broker association version 2 requires at least Relay outer version 4; Broker
-association version 3 requires outer version 5. New safety fields must not be
+association version 3 requires outer version 5; version 4 requires outer version 6. New safety fields must not be
 hidden behind an older version number. An older writer must not overwrite a newer format. Do not edit a
 version number or delete recovery fields to make a previous binary accept them.
 
@@ -58,6 +58,42 @@ Association release follows a durable Relay decision and exact Host acknowledgem
 A terminal Host decision alone does not authorize releasing the other side's
 reservation. Old A-to-B status remains A-to-B evidence after a later B-to-C;
 current navigation can independently resolve C.
+
+## Authenticated committed replay
+
+The tenant Broker freeze projection is the sole Relay commit authority. A legacy
+top-level `sessionSuccessions` mirror migrates only if every full saved projection
+exactly matches an authenticated committed freeze for that owner. Missing chain
+prefixes, unmatched mirrors and contradictory surviving identities fail closed;
+new outer version 6 forbids that duplicate field. Never synthesize a freeze from
+browser state or remove recovery evidence to make an older writer accept it.
+
+Replay uses a version-1 envelope containing the immutable committed projection
+and authorized `from`/`to` Host, provider and native-session locators. A locator is
+not an attached session and contains no guessed agent ID. Reading replay performs
+no native open, prepare or model input. Owner authorization covers both endpoints;
+shared-only accounts gain no successor access. Offline owned Hosts can expose
+durable history while identity/provider metadata and owner authority remain valid.
+Missing current Host/provider metadata suppresses access without invalidating or
+deleting stored evidence; contradictory identity mappings still reject.
+
+The owner-scoped `v1/session-successions` endpoint returns bounded pages. Its
+`operation` endpoint replays an exact immutable operation; `current` separately
+resolves the latest visible role. After A-to-B-to-C, old A-to-B still names B while
+current names C. Page cursors are owner/selection-scoped positions, not global
+watermarks: recovery starts a fresh traversal so newly inserted roles are not
+missed. Inaccessible records do not prove a contiguous visible chain.
+
+Live delivery requires explicit `successions=1` channel opt-in and the
+`ready.successions=1` marker. The separate `session_succession_committed` frame
+never substitutes for prompt-edit `session_migrated`. Default transport opt-in is
+off. Old ready frames retain normal session traffic and report succession as
+unsupported. Delivery and HTTP reads consume already persisted outer state and
+recheck current access; a failed outer write cannot publish a new projection.
+
+This is the replay boundary only. Product store acknowledgement, Favorites/Track/
+Ask replacement and browser acceptance are separate work. A transport cache is
+not durable authority or proof that every product store has applied a revision.
 
 ## Ordinary relationship changes
 

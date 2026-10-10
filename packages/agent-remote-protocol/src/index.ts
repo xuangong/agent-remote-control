@@ -41,3 +41,5 @@ export * from './session-context.js';
 
 export * from './succession-enrollment.js';
 export * from './relation-change.js';
+
+export * from './session-succession-replay.js';

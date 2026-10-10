@@ -1,3 +1,4 @@
+import { createSuccessionReplay } from './session-successions.js';
 import { createDiagnosticJournal } from './diagnostic-journal.js';
 import type { RelayDiagnosticStore, RelayDiagnosticContext } from './relay-diagnostics.js';
 import { createFavorites } from './favorites.js';
@@ -53,7 +54,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const tenants = new Map<string, Tenant>();
   const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage,context:options.diagnosticContext});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
-  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string> }>();
+  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string> }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
@@ -71,7 +72,33 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const stars = createSessionStars(state, starAccess);
   const favorites = createFavorites(state, starAccess);
   const sessionTitles = createSessionTitles(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
+  const successions = createSuccessionReplay(() => state.read(), (subject, hostId, source) => {
+    const saved = state.read().tenants.find(tenant => tenant.subject === subject);
+    const owned = saved && tenants.get(saved.namespace);
+    const host = saved?.broker.hosts.find(host => host.id === hostId);
+    if (!owned || owned.subject !== subject || !owned.broker.canAccessHost(hostId, subject) || host?.installationId !== source.controllerId
+      || !host.providers.some(provider => provider.providerId === source.providerId)) return undefined;
+    return { hostId: host.id, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
+  });
   const migrations = createSessionMigrations(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
+  let successionPublishing: Promise<void> = Promise.resolve();
+  function publishSuccessions(socket: RelaySocket, channel: { subject: string; expiresAt(): number; successions?: Set<string> }) {
+    if (!channel.successions) return;
+    successionPublishing = successionPublishing.then(async () => {
+      if (closing || failed || socket.readyState !== 1 || channel.expiresAt() <= Date.now()) return;
+      const owned = [...tenants.values()].find(tenant => tenant.subject === channel.subject);
+      if (!owned || await activeOwner(owned) !== 'active' || closing || failed || browserChannels.get(socket) !== channel || owned.subject !== channel.subject || channel.expiresAt() <= Date.now() || socket.readyState !== 1) return;
+      for (const succession of successions.entries(channel.subject)) {
+        const key = JSON.stringify([succession.projection.role.id, succession.projection.role.revision, succession.projection.receipt.operationId]);
+        if (channel.successions!.has(key)) continue;
+        if (socket.readyState !== 1 || channel.expiresAt() <= Date.now() || owned.authorityUntil <= Date.now() && durable) return;
+        const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_succession_committed', succession });
+        if (encoded.status !== 'ok') { socket.close(1011, 'Succession replay unavailable'); return; }
+        if ((socket.bufferedAmount ?? 0) + Buffer.byteLength(encoded.json) > 16 * 1024 * 1024) { socket.close(1013, 'Succession replay backlog'); return; }
+        try { socket.send(encoded.json); channel.successions!.add(key); } catch { socket.close(1011, 'Succession replay failed'); return; }
+      }
+    }).catch(() => { socket.close(1011, 'Succession replay unavailable'); });
+  }
   function publishMigrations(socket: RelaySocket, channel: { subject: string; migrations?: Set<string> }) {
     if (!channel.migrations || socket.readyState !== 1) return;
     for (const migration of migrations.list(channel.subject)) {
@@ -146,7 +173,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   function published() {
     enforceChannels();
-    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); }
+    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); publishSuccessions(socket, channel); }
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
     void previewAccess.enforce(); void subdomainAccess?.enforce();
     if (initialized && !refreshing) queueSchedule();
@@ -496,6 +523,27 @@ export function createHostedRelay(options: HostedRelayOptions) {
         throw error;
       }
     }
+    if (path === '/v1/session-successions' || path === '/v1/session-successions/operation' || path === '/v1/session-successions/current') {
+      if (request.method !== 'GET') return json(405, { error: 'Method is not allowed.' });
+      const query = new URL(relative.url).searchParams;
+      const keys = path.endsWith('/operation') ? ['roleId', 'operationId'] : path.endsWith('/current') ? ['roleId'] : ['roleId', 'afterRevision', 'limit', 'cursor'];
+      if ([...query.keys()].some(key => !keys.includes(key) || query.getAll(key).length !== 1)) return json(400, { error: 'Invalid succession replay selection.' });
+      const roleId = query.get('roleId') ?? undefined;
+      if ((path !== '/v1/session-successions' || query.has('afterRevision')) && !roleId || roleId !== undefined && (!roleId || roleId.length > 512)) return json(400, { error: 'Invalid succession replay selection.' });
+      const authority = await activeOwner(owned);
+      if (authority !== 'active') return json(authority === 'denied' ? 403 : 503, { error: 'Succession access is unavailable.' });
+      if (closing || failed || sessions.expiresAt(request, grant) <= Date.now() || owned.subject !== grant.subject || durable && owned.authorityUntil <= Date.now()) return json(403, { error: 'Succession access is unavailable.' });
+      try {
+        if (path.endsWith('/operation')) {
+          const operationId = query.get('operationId');
+          if (!operationId || operationId.length > 512) return json(400, { error: 'Invalid succession replay selection.' });
+          return json(200, successions.operation(grant.subject, roleId!, operationId));
+        }
+        if (path.endsWith('/current')) return json(200, successions.current(grant.subject, roleId!));
+        const counter = (name: string) => { const value = query.get(name); if (value === null) return undefined; return /^(0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN; };
+        return json(200, successions.list(grant.subject, { roleId, afterRevision: counter('afterRevision'), limit: counter('limit'), cursor: query.get('cursor') ?? undefined }));
+      } catch (error) { if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message }); throw error; }
+    }
     if (path === '/v1/session-migrations' && request.method === 'GET') return json(200, { migrations: migrations.list(grant.subject) });
     if (path === '/v1/favorites') {
       try {
@@ -659,7 +707,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return { accept(socket: RelaySocket) {
         if (closing || failed || sessions.expiresAt(request, grant) <= Date.now()) { socket.close(1008, 'Session expired'); return; }
         if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
-        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}) });
+        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}), ...(route.searchParams.get('successions') === '1' ? { successions: new Set<string>() } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
         acceptSessionChannel(socket, mode, async agentId => {
@@ -674,9 +722,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
             return { code: status >= 500 || status === 429 ? 1013 : 1008, reason: 'Session subscription is unavailable.' };
           }
           return prepared;
-        });
+        }, route.searchParams.get('successions') === '1' ? { successions: 1 } : {});
         publishMigrations(socket, browserChannels.get(socket)!);
         publishTitles(socket, browserChannels.get(socket)!);
+        publishSuccessions(socket, browserChannels.get(socket)!);
       } };
     }
     const destination = routeTenant(route.pathname, grant.subject) ?? owned;

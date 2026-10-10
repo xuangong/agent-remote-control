@@ -245,6 +245,13 @@ send admissions use Task 2's resolver and Task 3's role gate.
 
 ## Task 5: Relay projection and complete product replacement
 
+Status: In progress. Authenticated hosted replay is implemented and scoped-reviewed:
+Broker4/Relay6 single freeze authority, bounded HTTP exact/current replay and
+negotiated default-off Remote channel delivery. Real HTTP/WebSocket and durable
+fixture Controller recovery passed, including authorization and write failure.
+Product store/application replacement and browser acceptance remain outstanding;
+this does not complete Task 5 or certify any native provider. See latest handoff.
+
 **Create:** hosted `src/session-successions.ts` and `.test.ts`;
 Lab `src/session-succession.ts`, `.test.ts`,
 `src/hooks/useSessionSuccession.tsx` and `.test.tsx`.

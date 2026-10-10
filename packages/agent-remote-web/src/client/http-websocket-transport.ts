@@ -1,6 +1,8 @@
 import type { SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
+  isSessionSuccessionReplay, isSessionSuccessionReplayPage, isSessionSuccessionCurrent,
+  type SessionSuccessionReplay, type SessionSuccessionReplayPage, type SessionSuccessionCurrent,
   type SessionMigration,
   decodeAgentSnapshot,
   decodeHistoryPage,
@@ -29,7 +31,7 @@ import type {
   RemoteRequestOptions,
   RemoteTransportDiagnostic,
   RemoteTransportListener,
-  RemoteServerMessage,
+  RemoteServerMessage, SessionSuccessionSelection, SessionSuccessionSupport,
 } from './transport.js';
 
 type WebSocketEventHandler<TEvent> = {
@@ -49,6 +51,7 @@ export interface WebSocketLike {
 
 export interface HttpWebSocketTransportDependencies {
   readonly sessionChannels?: boolean;
+  readonly sessionSuccessions?: boolean;
   readonly fetch?: typeof fetch;
   readonly WebSocket?: new (url: string) => WebSocketLike;
   readonly webSocketFactory?: (url: string) => WebSocketLike;
@@ -58,6 +61,35 @@ export interface HttpWebSocketTransportDependencies {
 
 export class HttpWebSocketTransport implements RemoteAgentTransport {
   readonly timelineRecovery = 'websocket' as const;
+  private successionSupport: SessionSuccessionSupport = 'disabled';
+  private successionDisposed = false;
+  get sessionSuccessionSupport(): SessionSuccessionSupport { return this.successionSupport; }
+  private readonly successionListeners = new Set<(succession: SessionSuccessionReplay) => void>();
+  private readonly successions = new Map<string, { value: SessionSuccessionReplay; identity: string; bytes: number }>();
+  private successionBytes = 0;
+  onSessionSuccession(listener: (succession: SessionSuccessionReplay) => void): () => void {
+    if (this.successionDisposed) return () => {};
+    this.successionListeners.add(listener);
+    for (const item of this.successions.values()) listener(structuredClone(item.value));
+    return () => { this.successionListeners.delete(listener); };
+  }
+  private receiveSuccession(value: SessionSuccessionReplay): void {
+    if (this.successionDisposed) return;
+    const key = JSON.stringify([value.projection.role.id, value.projection.role.revision]);
+    const identity = stableIdentity(value), previous = this.successions.get(key);
+    const operation = [...this.successions.values()].find(item => item.value.projection.receipt.operationId === value.projection.receipt.operationId);
+    if (previous || operation) {
+      if ((previous ?? operation)!.identity !== identity) this.diagnostic({ source: 'websocket', code: 'succession_replay_conflict', message: 'Committed succession replay changed.', recoverable: false });
+      return;
+    }
+    const bytes = new TextEncoder().encode(identity).byteLength;
+    if (bytes > 16 * 1024 * 1024) return;
+    this.successions.set(key, { value: structuredClone(value), identity, bytes }); this.successionBytes += bytes;
+    while (this.successions.size > 1024 || this.successionBytes > 16 * 1024 * 1024) {
+      const oldest = this.successions.keys().next().value!; this.successionBytes -= this.successions.get(oldest)!.bytes; this.successions.delete(oldest);
+    }
+    for (const listener of this.successionListeners) { try { listener(structuredClone(value)); } catch { /* Presentation hooks do not own delivery. */ } }
+  }
   private readonly titleListeners = new Set<(session: SessionTitleUpdate) => void>();
   private readonly titles = new Map<string, SessionTitleUpdate>();
   onSessionTitle(listener: (session: SessionTitleUpdate) => void): () => void {
@@ -91,8 +123,12 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.createWebSocket = dependencies.webSocketFactory ?? ((url) => new WebSocketImplementation(url));
     this.createRequestId = dependencies.requestId ?? (() => `remote-http-${++this.requestCounter}`);
     this.createOperationId = dependencies.operationId ?? (() => crypto.randomUUID());
+    this.successionSupport = dependencies.sessionSuccessions ? 'unknown' : 'disabled';
     if (dependencies.sessionChannels) {
       this.sessionChannels = new SessionChannelPool({
+        sessionSuccessions: dependencies.sessionSuccessions,
+        onSuccession: succession => this.receiveSuccession(succession),
+        onSuccessionSupport: supported => { if (dependencies.sessionSuccessions && !this.successionDisposed) this.successionSupport = supported ? 'supported' : 'unsupported'; },
         onTitle: session => {
           const key = JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]);
           const previous = this.titles.get(key);
@@ -107,12 +143,31 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           if (this.migrations.size > 1024) this.migrations.delete(this.migrations.keys().next().value!);
           for (const listener of this.migrationListeners) listener(migration);
         },
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1`)),
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1${dependencies.sessionSuccessions ? '&successions=1' : ''}`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),
       });
     }
+  }
+
+  async fetchSessionSuccessions(selection: SessionSuccessionSelection = {}, options?: RemoteRequestOptions): Promise<SessionSuccessionReplayPage> {
+    const query = new URLSearchParams();
+    for (const [name, value] of Object.entries(selection)) if (value !== undefined) query.set(name, String(value));
+    return this.fetchSuccession(`v1/session-successions?${query}`, isSessionSuccessionReplayPage, options);
+  }
+  async fetchSessionSuccessionOperation(roleId: string, operationId: string, options?: RemoteRequestOptions): Promise<SessionSuccessionReplay> {
+    return this.fetchSuccession(`v1/session-successions/operation?${new URLSearchParams({ roleId, operationId })}`, isSessionSuccessionReplay, options);
+  }
+  async fetchSessionSuccessionCurrent(roleId: string, options?: RemoteRequestOptions): Promise<SessionSuccessionCurrent> {
+    return this.fetchSuccession(`v1/session-successions/current?${new URLSearchParams({ roleId })}`, isSessionSuccessionCurrent, options);
+  }
+  private async fetchSuccession<T>(path: string, valid: (value: unknown) => value is T, options?: RemoteRequestOptions): Promise<T> {
+    const body = await this.fetchBody(path, undefined, options);
+    if (new TextEncoder().encode(body).byteLength <= 16 * 1024 * 1024) {
+      try { const value: unknown = JSON.parse(body); if (valid(value)) return value; } catch { /* Invalid JSON follows the same rejection path. */ }
+    }
+    this.invalidBody('http'); throw new Error('Relay succession response was invalid.');
   }
 
   async fetchSnapshot(agentId: string, options?: RemoteRequestOptions) {
@@ -203,6 +258,9 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   }
 
   dispose(): void {
+    this.successionDisposed = true;
+    this.successions.clear(); this.successionListeners.clear(); this.successionBytes = 0;
+    this.successionSupport = 'disabled';
     this.sessionChannels?.dispose();
     this.titles.clear(); this.titleListeners.clear();
     this.migrations.clear(); this.migrationListeners.clear();
@@ -469,4 +527,10 @@ function httpFailure(status: number, body: string): RemoteOperationError {
     status >= 500 || status === 408 || status === 429,
     typeof detail?.requestId === 'string' ? detail.requestId : undefined,
   );
+}
+
+function stableIdentity(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(stableIdentity).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stableIdentity((value as Record<string, unknown>)[key])).join(',') + '}';
+  return JSON.stringify(value);
 }

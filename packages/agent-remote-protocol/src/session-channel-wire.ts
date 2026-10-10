@@ -53,6 +53,7 @@ export function acceptSessionChannel(
   socket: SessionChannelSocket,
   mode: SessionChannelMode,
   openSession: (agentId: string) => Promise<SessionChannelOpenResult>,
+  readiness: { successions?: 1 } = {},
 ): () => void {
   const streams = new Map<number, Stream>();
   const removers: (() => void)[] = [];
@@ -211,6 +212,6 @@ export function acceptSessionChannel(
   }));
   removers.push(socket.onClose(() => stop(1001, 'Channel disconnected', false)));
   removers.push(socket.onError(() => stop(1011, 'Channel socket error')));
-  send({ protocolVersion: PROTOCOL_VERSION, type: 'ready' });
+  send({ protocolVersion: PROTOCOL_VERSION, type: 'ready', ...readiness });
   return () => stop();
 }

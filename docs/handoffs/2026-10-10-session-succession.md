@@ -3,6 +3,45 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Authenticated hosted replay checkpoint (2026-10-10)
+
+Task 5's hosted/protocol/Remote transport slice passed independent scoped review
+and a lifecycle correction. Check Git for the checkpoint following `9434d0d`.
+Broker freeze projections are now the sole replay authority. Broker4 / Relay6
+validate complete lineage and migrate only exact redundant legacy mirrors;
+unmatched or contradictory records reject without deleting source evidence.
+Missing current Host/provider metadata suppresses access rather than invalidating
+historical state. Offline owner history requires valid identity and authority.
+
+Authenticated bounded HTTP replay, exact-operation and separate current lookup
+use native locators without agentId or native attachment. Explicit channel opt-in
+and ready negotiation deliver `session_succession_committed`; default remains off
+and old clients retain the existing channel shape. Old A-to-B stays B after current
+C. Page cursors are traversal positions; recovery restarts from page one rather
+than treating a cursor as a permanent global watermark.
+
+Real loopback HTTP/WebSocket plus authenticated fixture Controller uplink tests
+cover publication, owner/shared isolation, cold targets, restart and persistence
+failure without duplicate native effects. No actual provider is certified by
+these fixture results. Dispose now retires succession cache/listeners/late
+callbacks; active reconnect retains exact duplicate handling. Relay rejects fresh
+role operations at capacity before native prepare, retaining existing recovery.
+
+Evidence: `.tmp/succession-hosted-replay-report.md`, original scoped review and
+`.tmp/succession-hosted-replay-fix1-review.md`. Root verified all 19 frozen files,
+ran protocol 13 tests and original affected hosted/Remote checks, then freshly ran
+five hosted suites (68 tests) and three Remote suites (65 tests) after the fix.
+Whole-workspace typecheck passed before the local correction; see final scoped
+validation logs for that correction. Compatibility is generated after review.
+
+Next is product-store projection and App composition/recovery. Read
+`.tmp/succession-product-store-next-brief.md` and the broader product brief; they
+record actual store/acknowledgement seams and draft/cold-target limits. Do not use
+legacy best-effort delayed storage writes as proof that a store revision is saved.
+No Favorites/Track/Ask/draft replacement or App opt-in is included yet. Keep native
+capability and the product entry disabled until the entire contract is verified.
+No merge, push, deployment, global install or user-service replacement occurred.
+
 ## Claude managed source-directory checkpoint (2026-10-10)
 
 The managed stdio integration passed independent scoped review after one correction

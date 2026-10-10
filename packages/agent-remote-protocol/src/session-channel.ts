@@ -1,3 +1,4 @@
+import { SessionSuccessionReplay } from './session-succession-replay.js';
 import { SessionMigration } from './session-migration.js';
 import { type Static, Type } from '@sinclair/typebox';
 import { ClientMessage, IncompatibleProtocolVersionErrorMessage, NegotiateRequest, ServerMessage } from './messages.js';
@@ -19,9 +20,10 @@ export const SessionTitleUpdate = Strict({ hostId: Type.String({ minLength: 1, m
 export type SessionTitleUpdate = Static<typeof SessionTitleUpdate>;
 
 export const SessionChannelServerMessage = Type.Union([
+  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_succession_committed'), succession: SessionSuccessionReplay }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_title_updated'), session: SessionTitleUpdate }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_migrated'), migration: SessionMigration }),
-  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready') }),
+  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready'), successions: Type.Optional(Type.Literal(1)) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('message'), subscriptionId: SubscriptionId, message: Type.Union([ServerMessage, IncompatibleProtocolVersionErrorMessage]) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('closed'), subscriptionId: SubscriptionId, code: Type.Integer(), reason: Type.String() }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('pong') }),

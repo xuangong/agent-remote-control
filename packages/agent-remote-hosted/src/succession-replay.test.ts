@@ -1,0 +1,249 @@
+import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { afterEach, expect, test } from 'vitest';
+import { createHostedRelay } from './gateway.js';
+import { emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
+import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
+import type { RelaySocket } from './transport.js';
+const { WebSocket, WebSocketServer } = createRequire(new URL('../../agent-remote-relay/package.json', import.meta.url))('ws');
+const closers: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
+const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
+const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
+const sequenceRef = (index: number) => ref(index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index);
+async function fixture(configure?: (state: HostedRelayState) => void) {
+  const credential = 'arc_' + 'k'.repeat(43);
+  let denied = false, unavailable = false;
+  const authority = createServer(async (request, response) => {
+    let text = ''; for await (const chunk of request) text += chunk;
+    const input = JSON.parse(text); const subject = input.subject ?? input.continuation;
+    response.writeHead(unavailable ? 503 : denied ? 403 : 200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ active: true, subject, validUntil: Date.now() + 60000, expiresAt: Date.now() + 600000 }));
+  });
+  authority.listen(0, '127.0.0.1'); await once(authority, 'listening');
+  const server = createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const auth = { origin, issuer: `http://127.0.0.1:${(authority.address() as { port: number }).port}`, secret: 's'.repeat(32) };
+  const namespace = (subject: string) => createHash('sha256').update(JSON.stringify([auth.issuer, subject])).digest('hex');
+  const root = await mkdtemp(join(tmpdir(), 'arc-hosted-replay-')); const path = join(root, 'relay.json');
+  const row = (revision = 2) => {
+    const request = { operationId: `op-${revision}`, roleId: 'role', expectedRevision: revision - 1, from: ref(revision === 2 ? 'A' : 'B') };
+    const projection: CommittedSuccessionProjection = { version: 1, role: { id: 'role', revision, origin: ref('A'), current: ref(revision === 2 ? 'B' : 'C'), workspace },
+      receipt: { ...request, to: ref(revision === 2 ? 'B' : 'C'), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
+        prepared: { ...request, to: ref(revision === 2 ? 'B' : 'C'), workspace, associationRevision: 1, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } } };
+    const receipt: SuccessionAssociationFreeze = { version: 1, token: `freeze-${revision}`, authority: { version: 1, origin, issuer: auth.issuer, namespace: namespace('owner'), ownerSubject: 'owner' },
+      controllerId: 'installation', request, associationRevision: 0, lineage: revision === 2 ? [ref('A')] : [ref('A'), ref('B')], relations: [] };
+    return { hostId: 'mapped-host', receipt, released: 'committed' as const, projection };
+  };
+  const initial = emptyRelayState(auth); initial.version = 5;
+  for (const subject of ['owner', 'viewer']) initial.sessions.push({ hash: createHash('sha256').update(subject).digest('hex'), sessionExpiresAt: Date.now() + 600000,
+    grant: { authenticatedAt: Date.now(), subject, namespace: namespace(subject), expiresAt: Date.now() + 60000, ticket: '', nonce: 'nonce', continuation: subject, sessionExpiresAt: Date.now() + 600000 } });
+  initial.tenants.push({ subject: 'owner', namespace: namespace('owner'), broker: { keys: [], hosts: [{ id: 'mapped-host', installationId: 'installation', name: 'Host', legacyDsh: false,
+    providers: [{ providerId: 'fixture', displayName: 'Fixture' }] }], bindings: [], creations: [], associations: { version: 3, revision: 2, admissions: [], relationChanges: [], relationResets: [], freezes: [row(), row(3)] } } });
+  initial.tenants[0]!.broker.keys = [[createHash('sha256').update(credential).digest('hex'), { expires: Date.now() + 600000, installationId: 'installation', kind: 'device' }]];
+  configure?.(initial);
+  let relay: ReturnType<typeof createHostedRelay>;
+  let failSave = false;
+  const start = (initial: unknown) => createHostedRelay({ ...auth, successionEnrollment: true, scheduler: { schedule() {}, cancel() {} }, storage: { initial,
+    async commit(value) { if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); } } });
+  relay = start(initial); await writeFile(path, JSON.stringify(initial));
+  const websockets = new WebSocketServer({ noServer: true });
+  server.on('request', (incoming, outgoing) => { void (async () => {
+    let body = ''; for await (const chunk of incoming) body += chunk;
+    const request = new Request(origin + incoming.url, { method: incoming.method, headers: incoming.headers as HeadersInit, ...(body ? { body } : {}) });
+    const result = await relay.fetch(request) ?? new Response(null, { status: 404 });
+    outgoing.writeHead(result.status, Object.fromEntries(result.headers)); outgoing.end(await result.text());
+  })().catch(() => { outgoing.writeHead(500); outgoing.end(); }); });
+  server.on('upgrade', (incoming, socket, head) => { void (async () => {
+    const result = await relay.prepareUpgrade(new Request(origin + incoming.url, { headers: incoming.headers as HeadersInit }));
+    if (!result || result instanceof Response) { socket.end(`HTTP/1.1 ${result?.status ?? 404} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); return; }
+    websockets.handleUpgrade(incoming, socket, head, (ws: any) => result.accept(adapt(ws)));
+  })(); });
+  const cookie = async (subject = 'owner') => (await import('./auth.js')).gatewayCookieName(origin, 'session') + '=' + subject;
+  const request = async (route: string, subject = 'owner', body?: unknown) => fetch(`${origin}/u/${namespace(subject)}/${route}`, { ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }), headers: { cookie: await cookie(subject), origin, 'content-type': 'application/json' } });
+  const channel = async (optIn = true) => {
+    const socket = new WebSocket(`${origin.replace('http', 'ws')}/u/${namespace('owner')}/v1/session-channel?observation=session${optIn ? '&successions=1' : ''}`, { headers: { origin, cookie: await cookie() } });
+    const frames: any[] = []; socket.on('message', (data: { toString(): string }) => frames.push(JSON.parse(data.toString())));
+    await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
+    return { socket, frames };
+  };
+  closers.push(async () => { for (const ws of websockets.clients) ws.terminate(); await relay.close(); await new Promise<void>(resolve => server.close(() => resolve()));
+    await new Promise<void>(resolve => authority.close(() => resolve())); await rm(root, { recursive: true, force: true }); });
+  return { auth, namespace, row, request, channel, cookie, origin, credential, recover: () => { failSave = false; }, fail: () => { failSave = true; }, deny: () => { denied = true; }, outage: () => { unavailable = true; },
+    saved: async () => JSON.parse(await readFile(path, 'utf8')) as HostedRelayState,
+    restart: async () => { const value = JSON.parse(await readFile(path, 'utf8')); await relay.close(); relay = start(value); } };
+}
+function adapt(socket: any): RelaySocket {
+  return { get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; }, send: value => socket.send(value), close: (code, reason) => socket.close(code, reason),
+    onMessage(listener) { const receive = (data: { toString(): string }, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => socket.off('message', receive); },
+    onClose(listener) { socket.on('close', listener); return () => socket.off('close', listener); }, onError(listener) { socket.on('error', listener); return () => socket.off('error', listener); } };
+}
+async function until(predicate: () => boolean) { const deadline = Date.now() + 3000; while (!predicate()) { if (Date.now() > deadline) throw new Error('Replay deadline'); await new Promise(resolve => setTimeout(resolve, 5)); } }
+
+test('replays exact A to B independently of current C over authenticated HTTP with a cold successor', async () => {
+  const f = await fixture();
+  const response = await f.request('v1/session-successions?limit=1'); expect(response.status).toBe(200);
+  const first = await response.json(); expect(first.successions).toHaveLength(1); expect(first.successions[0].to).toEqual({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'B' });
+  expect(first.successions[0].to).not.toHaveProperty('agentId'); expect(first.nextCursor).toBeTypeOf('string');
+  const next = await (await f.request('v1/session-successions?limit=1&cursor=' + encodeURIComponent(first.nextCursor))).json();
+  expect(next.successions[0].to.nativeSessionId).toBe('C');
+  const old = await (await f.request('v1/session-successions/operation?roleId=role&operationId=op-2')).json(); expect(old.projection.role.revision).toBe(2);
+  const current = await (await f.request('v1/session-successions/current?roleId=role')).json(); expect(current.locator.nativeSessionId).toBe('C');
+  await f.restart(); expect((await (await f.request('v1/session-successions')).json()).successions).toHaveLength(2);
+  expect((await f.saved()).tenants[0]!.broker.bindings).toEqual([]);
+}, 10000);
+test('does not expose owner successors to another authenticated namespace', async () => {
+  const f = await fixture(); const response = await f.request('v1/session-successions', 'viewer'); expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ version: 1, successions: [], nextCursor: null });
+  expect((await f.request('v1/session-successions/operation?roleId=role&operationId=op-2', 'viewer')).status).toBe(403);
+}, 10000);
+test('negotiates succession frames only for opted in channels and replays after reconnect', async () => {
+  const f = await fixture(); const legacy = await f.channel(false); const modern = await f.channel();
+  await until(() => modern.frames.filter(frame => frame.type === 'session_succession_committed').length === 2);
+  expect(legacy.frames).toEqual([{ protocolVersion: '1.7.0', type: 'ready' }]);
+  expect(modern.frames[0]).toEqual({ protocolVersion: '1.7.0', type: 'ready', successions: 1 });
+  for (const frame of modern.frames) expect(decodeSessionChannelServerMessage(JSON.stringify(frame)).status).toBe('ok');
+  modern.socket.close(); await once(modern.socket, 'close', { signal: AbortSignal.timeout(3000) });
+  const reconnected = await f.channel(); await until(() => reconnected.frames.length === 3);
+  expect(reconnected.frames[1].succession.to.nativeSessionId).toBe('B');
+}, 10000);
+
+test('suppresses replay for unavailable providers and removed mappings without losing durable evidence', async () => {
+  for (const remove of [(state: HostedRelayState) => { state.tenants[0]!.broker.hosts[0]!.providers = []; }, (state: HostedRelayState) => { state.tenants[0]!.broker.hosts = []; }]) {
+    const f = await fixture(remove); expect((await (await f.request('v1/session-successions')).json()).successions).toEqual([]);
+    expect((await f.request('v1/session-successions/operation?roleId=role&operationId=op-2')).status).toBe(403);
+    await f.restart(); expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(2);
+  }
+}, 10000);
+test('does not expose successors to shared-only readers or through foreign cursors and rejects browser receipts', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.sharing = { grants: [{ hostId: 'mapped-host', subject: 'viewer', label: 'Viewer', sessionLimit: 1, revoked: false }], reservations: [] }; });
+  expect((await (await f.request('v1/remote/hosts', 'viewer')).json()).hosts).toHaveLength(1);
+  expect((await (await f.request('v1/session-successions', 'viewer')).json()).successions).toEqual([]);
+  const page = await (await f.request('v1/session-successions?limit=1')).json();
+  expect((await f.request('v1/session-successions?cursor=' + page.nextCursor, 'viewer')).status).toBe(400);
+  expect((await f.request('v1/session-successions', 'owner', f.row().projection)).status).toBe(405);
+  for (const selection of ['limit=65', 'limit=1&limit=2', 'afterRevision=1', 'roleId=role&afterRevision=-1', 'cursor=invalid']) expect((await f.request('v1/session-successions?' + selection)).status).toBe(400);
+}, 10000);
+test('does not extend expired history access during an authority outage', async () => {
+  const f = await fixture(); await f.request('v1/session-successions'); f.outage(); await f.restart();
+  const response = await f.request('v1/session-successions'); expect(response.status).toBeGreaterThanOrEqual(500);
+  expect(await response.text()).not.toMatch(/nativeSessionId|operationId|mapped-host|installation/);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(2);
+}, 10000);
+test('requires renewed owner authority after restart and rejects contradictory Controller installation state', async () => {
+  const f = await fixture(); await f.request('v1/session-successions'); f.deny(); await f.restart();
+  const denied = await f.request('v1/session-successions'); expect(denied.status).toBe(401);
+  expect(await denied.text()).not.toMatch(/nativeSessionId|operationId|mapped-host|installation/);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(2);
+  const contradictory = await f.saved(); contradictory.tenants[0]!.broker.hosts[0]!.installationId = 'foreign';
+  expect(() => validateRelayState(contradictory, f.auth)).toThrow(/state/);
+}, 10000);
+
+async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit = false, malformed = false) {
+  const effects = { prepare: 0, commit: 0, input: 0, release: 0, rpc: [] as string[] };
+  const saved = (await f.saved()).tenants[0]!.broker.associations!.freezes;
+  const operations = new Map<string, any>(saved.filter(row => row.projection).map(row => [row.receipt.request.operationId, structuredClone(row.projection!.receipt)]));
+  let revision = saved.filter(row => row.projection).length + 1;
+  const sockets: any[] = [];
+  async function connect() {
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?successionEnrollment=1', { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
+    socket.on('message', (data: { toString(): string }) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
+      if (message.type !== 'rpc_request') return;
+      effects.rpc.push(message.path);
+      const input = JSON.parse(message.body ?? '{}'); let result: any = {};
+      if (message.path === '/remote/succession/enrollment') {
+        if (input.action === 'describe') {
+          result = { role: { id: 'role', revision, origin: ref('A'), current: sequenceRef(revision - 1), workspace }, lineage: Array.from({ length: revision }, (_, index) => sequenceRef(index)) };
+        } else {
+          const freeze = input.freeze; const request = freeze.request; let record = operations.get(request.operationId);
+          if (input.action === 'prepare' && !record) {
+            effects.prepare++; record = { ...request, phase: 'ready', to: ref(request.expectedRevision === 1 ? 'B' : 'C'), startedAt: 'now', updatedAt: 'now',
+              prepared: { ...request, to: ref(request.expectedRevision === 1 ? 'B' : 'C'), workspace, associationRevision: 1, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } };
+            operations.set(request.operationId, record);
+          }
+          if (input.action === 'commit' && record.phase !== 'committed') { effects.commit++; effects.input++; record.phase = 'committed'; record.committedRevision = ++revision; if (failAtCommit) f.fail(); }
+          if (input.action === 'release') effects.release++;
+          result = { record: structuredClone(record), role: { id: 'role', revision, origin: ref('A'), current: sequenceRef(revision - 1), workspace }, freeze };
+          if (malformed && record.phase === 'committed') result.record.prepared.from = ref('forged');
+        }
+      }
+      socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify(result) }));
+    });
+    const registered = new Promise<any>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('Controller registration deadline')), 3000);
+      socket.on('message', (data: { toString(): string }) => { const value = JSON.parse(data.toString()); if (value.type === 'registered') { clearTimeout(timer); resolve(value); } }); });
+    await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
+    socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', providers: [{ providerId: 'fixture', displayName: 'Fixture' }] }));
+    expect((await registered).successionEnrollment.ownerSubject).toBe('owner');
+  }
+  await connect();
+  return { effects, connect };
+}
+test('publishes authenticated Controller terminal readback from durable state before response and keeps exact replay after later commits', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; });
+  const native = await controller(f); const channel = await f.channel();
+  for (const revision of [2, 3]) {
+    expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-' + revision, providerId: 'fixture', nativeSessionId: revision === 2 ? 'A' : 'B', expectedRevision: revision - 1 })).status).toBe(200);
+    if (revision === 2) {
+      const lost = fetch(`${f.origin}/u/${f.namespace('owner')}/v1/remote/hosts/mapped-host/succession/commit`, { method: 'POST', body: JSON.stringify({ operationId: 'op-2' }), headers: { cookie: await f.cookie(), origin: f.origin, 'content-type': 'application/json' } });
+      await until(() => channel.frames.some(frame => frame.type === 'session_succession_committed'));
+      await (await lost).body?.cancel();
+      expect((await f.request('v1/session-successions/operation?roleId=role&operationId=op-2')).status).toBe(200);
+    } else expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-' + revision })).status).toBe(200);
+  }
+  await until(() => channel.frames.filter(frame => frame.type === 'session_succession_committed').length === 2);
+  expect(native.effects).toMatchObject({ prepare: 2, commit: 2, input: 2 }); expect(native.effects.rpc.every(path => path === '/remote/succession/enrollment')).toBe(true);
+  await f.restart(); await native.connect();
+  const old = await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' }); expect((await old.json()).role.current.nativeSessionId).toBe('B');
+  expect((await (await f.request('v1/session-successions/current?roleId=role')).json()).locator.nativeSessionId).toBe('C');
+  expect(native.effects).toMatchObject({ prepare: 2, commit: 2, input: 2 }); expect((await f.saved()).tenants[0]!.broker.bindings).toEqual([]);
+}, 10000);
+test('recovers native committed evidence after projection persistence failure without a new prepare or input', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }); const native = await controller(f, true);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  const failed = await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' }); expect(failed.status).toBeGreaterThanOrEqual(500);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]).not.toHaveProperty('projection'); expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1, release: 0 });
+  f.recover(); await f.restart(); await native.connect();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/reconcile', 'owner', { operationId: 'op-2' })).status).toBe(200);
+  expect((await (await f.request('v1/session-successions')).json()).successions[0].to.nativeSessionId).toBe('B');
+  expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1, release: 1 });
+}, 10000);
+test('rejects malformed authenticated readback and browser forged commit fields before they can publish', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }); const native = await controller(f, false, true);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2', receipt: f.row().projection.receipt })).status).toBe(400);
+  expect(native.effects.commit).toBe(0);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBeGreaterThanOrEqual(400);
+  expect((await (await f.request('v1/session-successions')).json()).successions).toEqual([]);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]).not.toHaveProperty('projection');
+}, 10000);
+
+test('rejects a fresh role operation at Relay capacity before freeze or native prepare while exact recovery remains available', async () => {
+  const f = await fixture(state => {
+    const template = state.tenants[0]!.broker.associations!.freezes[0]!;
+    state.tenants[0]!.broker.associations!.freezes = Array.from({ length: 512 }, (_, index) => {
+      const row = structuredClone(template), revision = index + 2;
+      const request = { operationId: 'op-' + revision, roleId: 'role', expectedRevision: revision - 1, from: sequenceRef(index) };
+      row.receipt.token = 'freeze-' + revision; row.receipt.request = request;
+      row.receipt.lineage = Array.from({ length: index + 1 }, (_, native) => sequenceRef(native));
+      row.projection!.role.revision = revision; row.projection!.role.current = sequenceRef(index + 1);
+      row.projection!.receipt = { ...row.projection!.receipt, ...request, to: sequenceRef(index + 1), committedRevision: revision,
+        prepared: { ...row.projection!.receipt.prepared!, ...request, to: sequenceRef(index + 1) } };
+      return row;
+    });
+  });
+  const native = await controller(f);
+  const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'over-capacity', providerId: 'fixture', nativeSessionId: 'N512', expectedRevision: 513 });
+  expect(response.status).toBe(409); expect((await response.json()).code).toBe('succession_role_capacity');
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(512);
+  expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
+  const old = await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' }); expect((await old.json()).role.current.nativeSessionId).toBe('B');
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/reconcile', 'owner', { operationId: 'op-2' })).status).toBe(200);
+  expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0, release: 1 });
+}, 10000);

@@ -1,7 +1,8 @@
+import { validCommittedSuccessionLineage } from './session-successions.js';
 import { validRelationChangeReset, validBrokerRelationChange, type RelationChangeReset, type BrokerRelationChange } from './relation-changes.js';
 import { isCommittedSuccessionProjection, isNativeSessionRef, isSuccessionAssociationFreeze, type CommittedSuccessionProjection, type NativeSessionRef, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 export interface BrokerAssociationState {
-  version: 3;
+  version: 4;
   relationResets: RelationChangeReset[];
   relationChanges: BrokerRelationChange[];
   revision: number;
@@ -10,7 +11,7 @@ export interface BrokerAssociationState {
 }
 export function validBrokerAssociations(value: unknown): value is BrokerAssociationState {
   const state = value as BrokerAssociationState;
-  return !!state && state.version === 3 && Number.isSafeInteger(state.revision) && state.revision >= 0
+  return !!state && state.version === 4 && Number.isSafeInteger(state.revision) && state.revision >= 0
     && Array.isArray(state.relationResets) && state.relationResets.length <= 1024 && state.relationResets.every(validRelationChangeReset)
     && new Set(state.relationResets.map(item => item.intent.operationId)).size === state.relationResets.length
     && Array.isArray(state.relationChanges) && state.relationChanges.length <= 1024 && state.relationChanges.every(validBrokerRelationChange)
@@ -24,7 +25,8 @@ export function validBrokerAssociations(value: unknown): value is BrokerAssociat
     && state.freezes.every(item => typeof item.hostId === 'string' && item.hostId.length > 0 && isSuccessionAssociationFreeze(item.receipt)
       && (item.released === undefined || ['committed', 'rejected', 'cancelled'].includes(item.released))
       && (item.released === 'committed' ? isCommittedSuccessionProjection(item.projection) && item.projection!.receipt.operationId === item.receipt.request.operationId : item.projection === undefined))
-    && new Set(state.freezes.map(item => item.receipt.token)).size === state.freezes.length;
+    && new Set(state.freezes.map(item => item.receipt.token)).size === state.freezes.length
+    && validCommittedSuccessionLineage(state.freezes);
 }
 
 /** Explicit additive migration; old writers must reject the resulting version. */
@@ -37,6 +39,7 @@ export function migrateBrokerAssociations(value: unknown): BrokerAssociationStat
   if (candidate?.version === 2 && !Object.hasOwn(candidate, 'relationResets')) {
     candidate = { ...candidate, version: 3, relationResets: [] };
   }
+  if (candidate?.version === 3) candidate = { ...candidate, version: 4 };
   if (!validBrokerAssociations(candidate)) throw new Error('Invalid durable association state.');
   return candidate;
 }

@@ -52,7 +52,15 @@ export interface RemoteConnection {
   close(): void;
 }
 
+export type SessionSuccessionSupport = 'disabled' | 'unknown' | 'supported' | 'unsupported';
+export interface SessionSuccessionSelection { roleId?: string; afterRevision?: number; limit?: number; cursor?: string }
+
 export interface RemoteAgentTransport {
+  readonly sessionSuccessionSupport?: SessionSuccessionSupport;
+  onSessionSuccession?(listener: (succession: import('@orchardworks/agent-remote-protocol').SessionSuccessionReplay) => void): () => void;
+  fetchSessionSuccessions?(selection?: SessionSuccessionSelection, options?: RemoteRequestOptions): Promise<import('@orchardworks/agent-remote-protocol').SessionSuccessionReplayPage>;
+  fetchSessionSuccessionOperation?(roleId: string, operationId: string, options?: RemoteRequestOptions): Promise<import('@orchardworks/agent-remote-protocol').SessionSuccessionReplay>;
+  fetchSessionSuccessionCurrent?(roleId: string, options?: RemoteRequestOptions): Promise<import('@orchardworks/agent-remote-protocol').SessionSuccessionCurrent>;
   /** Preferred recovery path; custom transports can retain HTTP history loading. */
   readonly timelineRecovery?: 'http' | 'websocket';
   onSessionTitle?(listener: (session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate) => void): () => void;

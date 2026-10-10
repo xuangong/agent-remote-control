@@ -112,7 +112,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const binding = bindings.get(value.agentId);
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
-  let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 3, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
+  let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 4, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
   function snapshot(): RemoteHostBrokerState {
     return { ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement }) => ({ ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
@@ -210,6 +210,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         frozen = await associationChange(state => {
           const duplicate = state.freezes.find(item => item.hostId === host.id && item.receipt.request.operationId === operationId);
           if (duplicate) { assertSameRequest(duplicate.receipt); return duplicate; }
+          if (state.freezes.filter(item => item.receipt.request.roleId === described.role.id).length >= 512) throw new BrokerError(409, 'succession_role_capacity', 'Succession role history is full; reconcile existing operations.');
           for (const ref of described.lineage as NativeSessionRef[]) assertAssociationOpen(ref);
           if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
           const receipt: SuccessionAssociationFreeze = { version: 1, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
@@ -225,6 +226,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     if (!frozen) throw new BrokerError(404, 'succession_not_found', 'No frozen succession operation exists.');
     if (successionAuthorityKey(frozen.receipt.authority) !== successionAuthorityKey(options.successionEnrollment!)) throw new BrokerError(409, 'succession_authority_changed', 'The frozen authority requires reconciliation.');
+    if (frozen.released === 'committed' && frozen.projection && ['status', 'reconcile', 'commit'].includes(action)) {
+      if (action !== 'status') await associationRpc(host, { action: 'release', freeze: frozen.receipt });
+      return { record: structuredClone(frozen.projection.receipt), role: structuredClone(frozen.projection.role), locator: { hostId: host.id, providerId: frozen.projection.role.current.providerId, nativeSessionId: frozen.projection.role.current.nativeSessionId } };
+    }
     const result = await associationRpc(host, { action, freeze: frozen.receipt });
     if (!isSuccessionRecord(result.record) || !isPrimaryRole(result.role) || !result.freeze || successionFreezeKey(result.freeze) !== successionFreezeKey(frozen.receipt)
       || result.record.operationId !== operationId || result.record.roleId !== frozen.receipt.request.roleId) throw new BrokerError(502, 'invalid_host_response', 'The saved succession receipt could not be verified.');
@@ -234,7 +239,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       await associationChange(state => {
         const item = state.freezes.find(item => item.receipt.token === frozen!.receipt.token)!;
         if (item.released) {
-          if (item.released !== result.record.phase || item.projection && !isDeepStrictEqual(item.projection.receipt, result.record)) throw new BrokerError(409, 'succession_decision_changed', 'The released succession decision changed.');
+          if (item.released !== result.record.phase || item.projection && !isDeepStrictEqual(item.projection, { version: 1, role: result.role, receipt: result.record })) throw new BrokerError(409, 'succession_decision_changed', 'The released succession decision changed.');
           return;
         }
         item.released = result.record.phase;

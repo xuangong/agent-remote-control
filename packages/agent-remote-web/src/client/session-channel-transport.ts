@@ -14,6 +14,9 @@ import type {
 type Mode = 'session' | 'activity';
 type Negotiation = Extract<ClientMessage, { type: 'negotiate' }>;
 interface Dependencies {
+  sessionSuccessions?: boolean;
+  onSuccession?(succession: import('@orchardworks/agent-remote-protocol').SessionSuccessionReplay): void;
+  onSuccessionSupport?(supported: boolean): void;
   onTitle?(session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate): void;
   onMigration?(migration: import('@orchardworks/agent-remote-protocol').SessionMigration): void;
   createSocket(mode: Mode): WebSocketLike;
@@ -41,6 +44,7 @@ interface Channel {
   active: boolean;
   opened: boolean;
   ready: boolean;
+  successions?: boolean;
   openTimer?: ReturnType<typeof setTimeout>;
   readyTimer?: ReturnType<typeof setTimeout>;
   pingTimer?: ReturnType<typeof setInterval>;
@@ -175,10 +179,16 @@ export class SessionChannelPool {
       const decoded = decodeSessionChannelServerMessage(data);
       if (decoded.status === 'rejected') { this.invalidBody(); this.failChannel(channel); return; }
       const frame = decoded.value;
+      if (frame.type === 'session_succession_committed') {
+        if (!channel.ready || !channel.successions) { this.invalidBody(); this.failChannel(channel); return; }
+        this.dependencies.onSuccession?.(frame.succession); return;
+      }
       if (frame.type === 'session_title_updated') { this.dependencies.onTitle?.(frame.session); return; }
       if (frame.type === 'session_migrated') { this.dependencies.onMigration?.(frame.migration); return; }
       if (frame.type === 'ready' && !channel.ready) {
         channel.ready = true;
+        channel.successions = this.dependencies.sessionSuccessions === true && frame.successions === 1;
+        this.dependencies.onSuccessionSupport?.(channel.successions);
         channel.opened = true;
         clearTimeout(channel.openTimer);
         channel.openTimer = undefined;
@@ -303,6 +313,7 @@ export class SessionChannelPool {
 
   private failChannel(channel: Channel, fallbackPolicy: 'remember' | 'temporary' | false = 'remember'): void {
     if (!channel.active) return;
+    if (!channel.ready && this.dependencies.sessionSuccessions) this.dependencies.onSuccessionSupport?.(false);
     const fallback = fallbackPolicy !== false && !channel.ready && !this.supportedModes.has(channel.mode) && !this.disposed;
     const subscriptions = [...channel.subscriptions.values()];
     this.stopChannel(channel);

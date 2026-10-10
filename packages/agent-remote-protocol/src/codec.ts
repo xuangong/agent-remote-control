@@ -1,3 +1,4 @@
+import { isSessionSuccessionReplay } from './session-succession-replay.js';
 import { SessionChannelClientMessage, SessionChannelServerMessage } from './session-channel.js';
 import type { TSchema } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
@@ -224,9 +225,12 @@ export function encodeSessionChannelClientMessage(value: SessionChannelClientMes
 }
 
 export function decodeSessionChannelServerMessage(json: string): WireDecodeResult<SessionChannelServerMessage> {
-  return decode(json, SessionChannelServerMessage);
+  const decoded = decode<SessionChannelServerMessage>(json, SessionChannelServerMessage);
+  if (decoded.status === 'ok' && decoded.value.type === 'session_succession_committed' && !isSessionSuccessionReplay(decoded.value.succession)) return { status: 'rejected', issues: [{ code: 'invalid_shape', path: '/succession', message: 'Invalid committed succession replay.' }] };
+  return decoded;
 }
 
 export function encodeSessionChannelServerMessage(value: SessionChannelServerMessage): WireEncodeResult {
+  if (value.type === 'session_succession_committed' && !isSessionSuccessionReplay(value.succession)) return { status: 'rejected', issues: [{ code: 'invalid_shape', path: '/succession', message: 'Invalid committed succession replay.' }] };
   return encode(value, SessionChannelServerMessage);
 }

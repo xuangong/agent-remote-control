@@ -1,13 +1,18 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
+import type { SessionSuccessionContextStore, SuccessionContextRecord } from './session-succession-context.js';
 import type { SessionSuccessionStore } from './session-succession-store.js';
 import type { SourceHistoryPage, SourceHistoryQuery } from './session-reference.js';
+
+const sameRef = (a: NativeSessionRef, b: NativeSessionRef) => nativeSessionRefKey(a) === nativeSessionRefKey(b);
 
 interface ResolvedSource { source: NativeSessionRef; roleId?: string; roleRevision?: number }
 interface RoleSource extends ResolvedSource { lineage: Set<string> }
 interface SourceCursor extends ResolvedSource {
   version: 1;
+  representation?: 'native' | 'attachment';
+  attachmentId?: string;
   reader: string;
   originalSource: string;
   kind: 'context' | 'page';
@@ -19,6 +24,17 @@ export interface SourceRelationEnrollment {
   nativeSessionId: string;
   sourceNativeSessionId: string;
   linked: boolean;
+  readerRef?: NativeSessionRef;
+  sourceRef?: NativeSessionRef;
+}
+export interface SourceGrantEnrollment { nativeSessionId: string; sourceNativeSessionId: string; readerRef?: NativeSessionRef; sourceRef?: NativeSessionRef }
+
+export interface SourceBindingOptions {
+  /** Must resolve the full address and recheck native workspace access on each call. */
+  readRouted?: (source: NativeSessionRef, query: AgentHistoryQuery) => Promise<AgentHistoryPage>;
+  /** Required for stored attachment reads, which cannot rely on a native read callback. */
+  authorizeRead?: (reader: NativeSessionRef, source: NativeSessionRef) => Promise<void>;
+  contexts?: SessionSuccessionContextStore;
 }
 
 /** Role lookups are cached by committed store generation; pagination pins an authenticated source. */
@@ -27,39 +43,44 @@ export class SessionSourceBindings {
   private readers = new Map<string, RoleSource>();
   private readonly key: Buffer;
   constructor(private readonly store: SessionSuccessionStore, private readonly controllerId: string,
-    private readonly providerId: string, cursorKey: Uint8Array) {
+    private readonly providerId: string, cursorKey: Uint8Array, private readonly options: SourceBindingOptions = {}) {
     if (cursorKey.byteLength < 32) throw new Error('Source cursor authentication key must contain at least 32 bytes.');
     this.key = Buffer.from(cursorKey);
   }
 
   /** Cross-check relation metadata against durable native grants before reserving the role. */
   async enrollSources(roleId: string, expectedRevision: number, associationRevision: number,
-    relations: readonly SourceRelationEnrollment[], grants: readonly { nativeSessionId: string; sourceNativeSessionId: string }[]) {
+    relations: readonly SourceRelationEnrollment[], grants: readonly SourceGrantEnrollment[]) {
     const state = this.store.read(roleId);
     const ref = (nativeSessionId: string): NativeSessionRef => ({ controllerId: this.controllerId, providerId: this.providerId, nativeSessionId });
-    if (state.role.current.controllerId !== this.controllerId || state.role.current.providerId !== this.providerId) throw new Error('Source enrollment is outside this local provider.');
+    if (state.role.current.controllerId !== this.controllerId) throw new Error('Source enrollment is outside this Controller.');
+    const reader = (item: SourceGrantEnrollment | SourceRelationEnrollment) => item.readerRef ? this.ref(item.readerRef) : ref(item.nativeSessionId);
+    const source = (item: SourceGrantEnrollment | SourceRelationEnrollment) => item.sourceRef ? this.ref(item.sourceRef) : ref(item.sourceNativeSessionId);
     const lineage = new Set([nativeSessionRefKey(state.role.origin), ...state.operations.filter(op => op.phase === 'committed').map(op => nativeSessionRefKey(op.to!))]);
     const participants = state.participants.filter(item => item.kind === 'tpm');
     for (const grant of grants) {
-      if (!lineage.has(nativeSessionRefKey(ref(grant.sourceNativeSessionId)))) continue;
-      const matches = relations.filter(relation => relation.nativeSessionId === grant.nativeSessionId);
+      if (!lineage.has(nativeSessionRefKey(source(grant)))) continue;
+      const matches = relations.filter(relation => sameRef(reader(relation), reader(grant)));
       if (matches.length !== 1) throw new Error('Source relationship enrollment is incomplete or ambiguous.');
       const relation = matches[0]!;
-      if (relation.sourceNativeSessionId !== grant.sourceNativeSessionId) throw new Error('Source relationship does not match its native grant.');
-      if (relation.linked) participants.push({ relationId: relation.relationId, kind: relation.kind, before: ref(grant.nativeSessionId), after: ref(grant.nativeSessionId) });
+      if (!sameRef(source(relation), source(grant))) throw new Error('Source relationship does not match its native grant.');
+      if (relation.linked) participants.push({ relationId: relation.relationId, kind: relation.kind, before: reader(grant), after: reader(grant) });
     }
     for (const relation of relations) {
-      if (lineage.has(nativeSessionRefKey(ref(relation.sourceNativeSessionId))) && !grants.some(grant => grant.nativeSessionId === relation.nativeSessionId && grant.sourceNativeSessionId === relation.sourceNativeSessionId)) throw new Error('Source relationship has no matching native grant.');
+      if (lineage.has(nativeSessionRefKey(source(relation))) && !grants.some(grant => sameRef(reader(grant), reader(relation)) && sameRef(source(grant), source(relation)))) throw new Error('Source relationship has no matching native grant.');
     }
     return this.store.setParticipants(roleId, expectedRevision, associationRevision, participants);
   }
 
-  async read(reader: string, originalSource: string, input: SourceHistoryQuery,
+  async read(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
     read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>): Promise<SourceHistoryPage> {
-    const resolved = this.resolveSource(reader, originalSource);
-    const context = input.sourceContext ? this.decode(input.sourceContext, reader, originalSource, 'context') : undefined;
-    const page = input.cursor ? this.decode(input.cursor, reader, originalSource, 'page') : undefined;
-    if (context && page && (nativeSessionRefKey(context.source) !== nativeSessionRefKey(page.source) || context.roleRevision !== page.roleRevision)) throw new Error('Source context and page cursor disagree.');
+    const readerRef = this.ref(reader), originalRef = this.ref(originalSource);
+    const readerKey = typeof reader === 'string' ? reader : nativeSessionRefKey(readerRef);
+    const originalKey = typeof originalSource === 'string' ? originalSource : nativeSessionRefKey(originalRef);
+    const resolved = this.resolveSource(readerRef, originalRef);
+    const context = input.sourceContext ? this.decode(input.sourceContext, readerKey, originalKey, 'context') : undefined;
+    const page = input.cursor ? this.decode(input.cursor, readerKey, originalKey, 'page') : undefined;
+    if (context && page && (nativeSessionRefKey(context.source) !== nativeSessionRefKey(page.source) || context.roleRevision !== page.roleRevision || context.representation !== page.representation || context.attachmentId !== page.attachmentId)) throw new Error('Source context and page cursor disagree.');
     const pinned = page ?? context;
     const selected: ResolvedSource = pinned ?? resolved;
     this.authorizePinned(resolved, selected);
@@ -75,12 +96,27 @@ export class SessionSourceBindings {
       for (const field of ['query', 'turnId', 'limit'] as const) if (input[field] !== undefined) Object.assign(query, { [field]: input[field] });
     }
     if (input.textOffset !== undefined) query.textOffset = input.textOffset;
-    // The directory's read callback rechecks native workspace access on every request.
-    const result = await read(selected.source.nativeSessionId, query);
-    const base: SourceCursor = { version: 1, reader, originalSource, kind: 'context', source: selected.source,
+    await this.options.authorizeRead?.(readerRef, selected.source);
+    const candidate = this.options.contexts?.forTarget(selected.source);
+    const attachment = pinned?.representation === 'attachment'
+      ? this.options.contexts?.read(pinned.attachmentId!)
+      : !pinned && candidate?.state !== 'materialized' ? candidate : undefined;
+    if (pinned?.representation === 'attachment' && !attachment) throw new Error('Pinned source attachment is unavailable.');
+    if (attachment && (!this.options.authorizeRead || !sameRef(attachment.target, selected.source)
+      || attachment.roleId !== selected.roleId || attachment.roleRevision !== selected.roleRevision)) throw new Error('Source attachment requires authorized matching routing.');
+    let result: AgentHistoryPage;
+    if (attachment) result = this.readAttachment(attachment, query);
+    else if (this.options.readRouted) result = await this.options.readRouted(selected.source, query);
+    else {
+      if (selected.source.providerId !== this.providerId) throw new Error('Cross-provider source reads require a routed reader.');
+      result = await read(selected.source.nativeSessionId, query);
+    }
+    const base: SourceCursor = { version: 1, reader: readerKey, originalSource: originalKey, kind: 'context', source: selected.source,
+      representation: attachment ? 'attachment' : 'native', ...(attachment ? { attachmentId: attachment.operationId } : {}),
       ...(selected.roleId ? { roleId: selected.roleId, roleRevision: selected.roleRevision } : {}) };
     const { nextCursor: nativeCursor, ...content } = result;
-    return { ...content, sourceSessionId: selected.source.nativeSessionId,
+    return { ...content, sourceRef: selected.source, sourceRepresentation: base.representation,
+      ...(attachment ? { sourceProvenance: { operationId: attachment.operationId, source: attachment.source, capturedAt: attachment.capturedAt, boundary: attachment.boundary } } : {}), sourceSessionId: selected.source.nativeSessionId,
       ...(selected.roleId ? { sourceRoleId: selected.roleId, sourceRoleRevision: selected.roleRevision } : {}),
       sourceContext: this.encode(base),
       ...(nativeCursor ? { nextCursor: this.encode({ ...base, kind: 'page', page: {
@@ -90,13 +126,31 @@ export class SessionSourceBindings {
     };
   }
 
-  resolveSource(reader: string, originalSource: string): RoleSource {
+  private ref(value: string | NativeSessionRef): NativeSessionRef {
+    const ref = typeof value === 'string' ? { controllerId: this.controllerId, providerId: this.providerId, nativeSessionId: value } : value;
+    if (ref.controllerId !== this.controllerId || !ref.providerId || !ref.nativeSessionId) throw new Error('Source address is outside this Controller.');
+    return { ...ref };
+  }
+  resolveSource(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef): RoleSource {
     this.refresh();
-    const source = { controllerId: this.controllerId, providerId: this.providerId, nativeSessionId: originalSource };
-    const role = this.readers.get(nativeSessionRefKey({ ...source, nativeSessionId: reader }));
+    const source = this.ref(originalSource), readerRef = this.ref(reader);
+    const role = this.readers.get(nativeSessionRefKey(readerRef));
     if (!role) return { source, lineage: new Set([nativeSessionRefKey(source)]) };
     if (!role.lineage.has(nativeSessionRefKey(source))) throw new Error('Source grant does not belong to the primary role.');
     return { ...role, source: { ...role.source }, lineage: new Set(role.lineage) };
+  }
+  private readAttachment(record: SuccessionContextRecord, query: AgentHistoryQuery): AgentHistoryPage {
+    if (query.query !== undefined && query.turnId !== undefined) throw new Error('Search query and turnId cannot be combined.');
+    const limit = query.limit ?? 10, offset = query.textOffset ?? 0;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10 || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid attachment history query.');
+    const rows = JSON.parse(record.text) as Array<{ role: string; text: string }>;
+    const entries = rows.map((row, index) => ({ id: `${record.operationId}:${index}`, turnId: `${record.operationId}:${index}`, role: row.role, text: row.text, textOffset: offset, totalChars: row.text.length }));
+    let selected = query.query !== undefined ? entries.filter(item => item.role !== 'tool' && item.text.toLowerCase().includes(query.query!.toLowerCase()))
+      : query.turnId !== undefined ? entries.filter(item => item.turnId === query.turnId) : entries.reverse();
+    const start = query.cursor === undefined ? 0 : Number(query.cursor);
+    if (!Number.isSafeInteger(start) || start < 0) throw new Error('Invalid attachment page cursor.');
+    const end = start + limit;
+    return { entries: selected.slice(start, end).map(item => ({ ...item, text: item.text.slice(offset, offset + 6000) })), ...(end < selected.length ? { nextCursor: String(end) } : {}) };
   }
   private refresh(): void {
     if (this.generation === this.store.generation) return;
@@ -116,7 +170,7 @@ export class SessionSourceBindings {
     this.readers = readers; this.generation = this.store.generation;
   }
   private authorizePinned(current: RoleSource, pinned: ResolvedSource): void {
-    if (pinned.source.controllerId !== this.controllerId || pinned.source.providerId !== this.providerId
+    if (pinned.source.controllerId !== this.controllerId
       || !current.lineage.has(nativeSessionRefKey(pinned.source))
       || pinned.roleId !== undefined && (pinned.roleId !== current.roleId || pinned.roleRevision! > current.roleRevision!)) throw new Error('Source cursor is outside the current authorized relationship.');
   }

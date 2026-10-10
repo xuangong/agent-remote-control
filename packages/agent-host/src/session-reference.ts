@@ -1,3 +1,4 @@
+import type { NativeSessionRef, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -6,6 +7,9 @@ import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, Agent
 export interface SourceHistoryQuery extends AgentHistoryQuery { sourceContext?: string }
 export interface SourceHistoryPage extends AgentHistoryPage {
   sourceSessionId: string;
+  sourceRef?: NativeSessionRef;
+  sourceRepresentation?: 'native' | 'attachment';
+  sourceProvenance?: { operationId: string; source: NativeSessionRef; capturedAt: string; boundary: TimelineCursor };
   sourceRoleId?: string;
   sourceRoleRevision?: number;
   sourceContext?: string;

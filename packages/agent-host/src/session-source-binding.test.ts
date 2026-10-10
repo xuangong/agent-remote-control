@@ -117,3 +117,69 @@ test('enrollment validates persisted grants including cold readers and excludes 
   expect(state.participants).toEqual([{ relationId: 'cold', kind: 'ask', before: ref('cold-Q'), after: ref('cold-Q') }]);
   expect(state.associationRevision).toBe(1);
 });
+
+test('routes cross-provider successors by complete address and pins the original provider', async () => {
+  const f = await fixture(); const old = await f.resolver.read('Q', 'A', {}, f.read);
+  await f.commit();
+  const state = f.store.read('role');
+  const to = { ...ref('A'), providerId: 'claude' };
+  const request = { operationId: 'cross', roleId: 'role', expectedRevision: 2, from: ref('B') };
+  await f.store.begin(request); await f.store.advance('cross', 'preparing', { phase: 'quiescing', to });
+  await f.store.advance('cross', 'quiescing', { phase: 'transferring' });
+  await f.store.advance('cross', 'transferring', { phase: 'ready', prepared: { ...request, to, workspace, participants: state.participants, associationRevision: state.associationRevision, capture: { epoch: 'e', seq: 3, capturedAt: '2026-10-10T00:00:00Z' } } });
+  await f.store.commit('cross');
+  await expect(f.resolver.read('Q', 'A', {}, f.read)).rejects.toThrow(/routed/i);
+  const routed: string[] = [];
+  const bindings = new SessionSourceBindings(f.store, 'host', 'codex', f.key, { readRouted: async (source, query) => { routed.push(source.providerId); return f.read(source.nativeSessionId, query); } });
+  expect((await bindings.read('Q', 'A', {}, f.read)).sourceRef).toEqual(to);
+  expect((await bindings.read('Q', 'A', { cursor: old.nextCursor }, f.read)).sourceRef).toEqual(ref('A'));
+  expect(routed).toEqual(['claude', 'codex']);
+});
+
+test('attachment cursors remain pinned after materialization and authorize every actual read', async () => {
+  const f = await fixture(); await f.commit();
+  const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
+  const contexts = new SessionSuccessionContextStore(join(f.directory, 'contexts')); await contexts.ready;
+  await contexts.attach({ operationId: 'op-1', roleId: 'role', roleRevision: 2, source: ref('A'), target: ref('B'), capturedAt: '2026-10-10T00:00:00Z', boundary: { epoch: 'e', seq: 5 }, text: '[{"role":"user","text":"captured old"}]', itemCount: 1 });
+  let denied = false; let checks = 0;
+  const bindings = new SessionSourceBindings(f.store, 'host', 'codex', f.key, { contexts, authorizeRead: async (_reader, source) => { checks++; expect(source).toEqual(ref('B')); if (denied) throw new Error('denied'); } });
+  const pending = await bindings.read('Q', 'A', {}, f.read);
+  expect(pending).toMatchObject({ sourceRepresentation: 'attachment', sourceProvenance: { source: ref('A') }, entries: [{ text: 'captured old' }] });
+  await contexts.begin('op-1', { operationId: 'first', roleId: 'role', roleRevision: 2, target: ref('B'), text: 'new' });
+  await contexts.settle('op-1', 'first', 'accepted');
+  await contexts.reconcile('op-1', { operationId: 'first', target: ref('B'), roleRevision: 2, outcome: 'materialized', nativeEvidence: 'native-proof' });
+  expect((await bindings.read('Q', 'A', {}, f.read)).sourceRepresentation).toBe('native');
+  expect((await bindings.read('Q', 'A', { sourceContext: pending.sourceContext }, f.read)).entries[0]!.text).toBe('captured old');
+  denied = true; await expect(bindings.read('Q', 'A', { sourceContext: pending.sourceContext }, f.read)).rejects.toThrow('denied'); expect(checks).toBe(4);
+});
+
+test('stored attachments require authorization and full reader identities cannot collide', async () => {
+  const f = await fixture(); await f.commit();
+  const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
+  const contexts = new SessionSuccessionContextStore(join(f.directory, 'contexts')); await contexts.ready;
+  await contexts.attach({ operationId: 'op-1', roleId: 'role', roleRevision: 2, source: ref('A'), target: ref('B'), capturedAt: '2026-10-10T00:00:00Z', boundary: { epoch: 'e', seq: 5 }, text: '[{"role":"user","text":"old"}]', itemCount: 1 });
+  const missingAuthorization = new SessionSourceBindings(f.store, 'host', 'codex', f.key, { contexts });
+  await expect(missingAuthorization.read('Q', 'A', {}, f.read)).rejects.toThrow(/authorized/);
+  const page = await f.resolver.read(ref('Q'), ref('A'), {}, f.read);
+  await expect(f.resolver.read({ ...ref('Q'), providerId: 'claude' }, ref('A'), { sourceContext: page.sourceContext }, f.read)).rejects.toThrow(/another read/);
+  await expect(f.resolver.read(ref('Q'), { ...ref('A'), controllerId: 'other' }, {}, f.read)).rejects.toThrow(/Controller/);
+});
+
+test('paginates captured rows and preserves raw history across another succession', async () => {
+  const f = await fixture(); await f.commit();
+  const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
+  const contexts = new SessionSuccessionContextStore(join(f.directory, 'contexts')); await contexts.ready;
+  const raw = JSON.stringify([{ role: 'user', text: 'old needle' }, { role: 'assistant', text: 'x'.repeat(6500) }]);
+  await contexts.attach({ operationId: 'op-1', roleId: 'role', roleRevision: 2, source: ref('A'), target: ref('B'), capturedAt: '2026-10-10T00:00:00Z', boundary: { epoch: 'e', seq: 5 }, text: raw, itemCount: 2 });
+  const bindings = new SessionSourceBindings(f.store, 'host', 'codex', f.key, { contexts, authorizeRead: async () => {} });
+  const first = await bindings.read('Q', 'A', { limit: 1 }, f.read);
+  expect(first.entries[0]!.text.length).toBe(6000);
+  expect((await bindings.read('Q', 'A', { sourceContext: first.sourceContext, textOffset: 6000, limit: 1 }, f.read)).entries[0]!.text.length).toBe(500);
+  expect((await bindings.read('Q', 'A', { cursor: first.nextCursor }, f.read)).entries[0]!.text).toBe('old needle');
+  await f.commit('B', 'C', 2);
+  const previous = contexts.read('op-1');
+  await contexts.attach({ operationId: 'op-2', roleId: 'role', roleRevision: 3, source: ref('B'), target: ref('C'), capturedAt: previous.capturedAt, boundary: previous.boundary, text: previous.text, itemCount: previous.itemCount });
+  expect((await bindings.read('Q', 'A', { query: 'needle' }, f.read)).entries[0]!.text).toBe('old needle');
+  expect((await bindings.read('Q', 'A', { cursor: first.nextCursor }, f.read)).sourceRef).toEqual(ref('B'));
+  expect(contexts.read('op-2').text).toBe(raw);
+});

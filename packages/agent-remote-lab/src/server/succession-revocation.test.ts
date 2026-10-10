@@ -39,26 +39,27 @@ function initial(kind: 'committed' | 'pending' | 'admission' | 'ordinary' = 'com
     bindings: [{ hostId: 'host', providerId: 'fixture', nativeSessionId: 'A', agentId: 'agent' }], creations: [],
     sharing: { grants: [{ hostId: 'host', subject: 'guest', label: 'Guest', sessionLimit: 2, revoked: false }],
       reservations: [{ key: 'quota', hostId: 'host', subject: 'guest', fingerprint: 'fingerprint', nativeRequestId: 'native-request', agentId: 'agent' }] },
-    ...(kind === 'ordinary' ? {} : { associations: { version: 4 as const, revision: 1, relationChanges: [], relationResets: [],
+    ...(kind === 'ordinary' ? {} : { associations: { version: 5 as const, revision: 1, relationChanges: [], relationResets: [],
       admissions: kind === 'admission' ? [{ id: 'source-admission', fingerprint: 'source-fingerprint', source: ref('A') }] : [],
       freezes: kind === 'admission' ? [] : [{ hostId: 'host', receipt, ...(kind === 'committed' ? { released: 'committed' as const, projection } : {}) }] } }),
   };
-  state.version = kind === 'ordinary' ? 2 : 6;
+  state.version = kind === 'ordinary' ? 2 : 9;
   state.tenants.push({ subject: 'owner', namespace, broker });
   return state;
 }
-async function fixture(saved = initial()) {
+async function fixture(saved: unknown = initial()) {
+  const initialState = validateRelayState(saved, auth);
   const directory = await mkdtemp(join(tmpdir(), 'succession-revoke-'));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, 'state.json');
   let hold: ((value: HostedRelayState) => Promise<void>) | undefined;
-  const state = createRelayState(auth, { initial: saved, async commit(value) {
+  const state = createRelayState(auth, { initial: initialState, async commit(value) {
     await hold?.(value); validateRelayState(value, auth);
     await writeFile(path + '.tmp', JSON.stringify(value)); await rename(path + '.tmp', path);
   } }, () => {}, () => {});
   const broker = createRemoteHostBroker({ origin, ownerSubject: 'owner', durable: true,
-    ...(saved.tenants[0]!.broker.associations ? { successionEnrollment: authority } : {}),
-    initialState: saved.tenants[0]!.broker, principalSubject: request => String(request.headers['x-subject'] ?? 'owner'),
+    ...(initialState.tenants[0]!.broker.associations ? { successionEnrollment: authority, successionProjectionAllowance: () => 2 * 1024 * 1024 } : {}),
+    initialState: initialState.tenants[0]!.broker, principalSubject: request => String(request.headers['x-subject'] ?? 'owner'),
     onStateChange: value => state.mutate(draft => { draft.tenants[0]!.broker = value; }), rpcTimeoutMs: 2000,
   });
   const server = createServer((_, response) => { response.writeHead(404); response.end(); });
@@ -72,8 +73,8 @@ async function fixture(saved = initial()) {
   return { broker, url, post, close, hold: (value?: typeof hold) => { hold = value; },
     read: async () => validateRelayState(JSON.parse(await readFile(path, 'utf8')), auth) };
 }
-async function connect(url: string, credential = 'arc_fixture', installationId = 'installation', register = true) {
-  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?successionEnrollment=1', { headers: { authorization: `Bearer ${credential}` } });
+async function connect(url: string, credential = 'arc_fixture', installationId = 'installation', register = true, enrollmentVersion: 1 | 2 = 1) {
+  const socket = new WebSocket(url.replace('http:', 'ws:') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}`, { headers: { authorization: `Bearer ${credential}` } });
   const frames: any[] = [];
   const listeners = new Set<() => void>();
   socket.on('error', () => {});
@@ -105,7 +106,7 @@ test.each(['committed', 'pending', 'admission'] as const)('revokes %s succession
   expect(snapshot.hosts).toEqual([]); expect(snapshot.bindings).toEqual([]); expect(snapshot.keys).toEqual([]);
   expect(snapshot.sharing!.grants[0]!.revoked).toBe(true);
   expect(snapshot.sharing!.reservations).toEqual(original.tenants[0]!.broker.sharing!.reservations);
-  expect(saved.version).toBe(8);
+  expect(saved.version).toBe(9);
   await f.close();
   const restored = await fixture(saved);
   expect(restored.broker.snapshot().associations).toEqual(snapshot.associations);
@@ -209,9 +210,11 @@ async function revokeDuringResponse(f: Awaited<ReturnType<typeof fixture>>, nati
 
 test('does not publish a described freeze queued behind revocation', async () => {
   const saved = initial('admission'); saved.tenants[0]!.broker.associations!.admissions = [];
-  const f = await fixture(saved), native = await connect(f.url); await native.next(frame => frame.type === 'registered');
+  const f = await fixture(saved), native = await connect(f.url, 'arc_fixture', 'installation', true, 2);
+  expect(await native.next(frame => frame.type === 'registered')).toMatchObject({ successionEnrollmentVersion: 2 });
   const preparing = f.post('/v1/remote/hosts/host/succession/prepare', { operationId: 'late-freeze', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
   const request = await native.next(frame => frame.type === 'rpc_request');
+  expect(request.path).toBe('/remote/succession/enrollment'); expect(JSON.parse(request.body).action).toBe('describe');
   await revokeDuringResponse(f, native, () => native.reply(request, { role: { id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'installation', canonicalCwd: '/workspace' } }, lineage: [ref('A')] }));
   expect((await preparing).status).toBe(401);
   expect((await f.read()).tenants[0]!.broker.associations!.freezes).toEqual([]);
@@ -295,7 +298,7 @@ test('closes the active browser stream while another Host remains connected and 
 });
 
 test('reserves identity capacity before source creation but still revokes an existing identity at capacity', async () => {
-  const saved = initial('admission'); saved.version = 8;
+  const saved = initial('admission');
   const broker = saved.tenants[0]!.broker; broker.associations!.admissions = [];
   broker.revokedHosts = Array.from({ length: MAX_RETAINED_HOST_IDENTITIES }, (_, index) => ({ hostId: `history-${index}`, installationId: `history-installation-${index}`, revocationId: randomUUID() }));
   const f = await fixture(saved), native = await connect(f.url); await native.next(frame => frame.type === 'registered');
@@ -306,7 +309,7 @@ test('reserves identity capacity before source creation but still revokes an exi
   expect((await f.post('/v1/remote/hosts/host/revoke')).status).toBe(200);
   expect((await f.read()).tenants[0]!.broker.revokedHosts).toHaveLength(MAX_RETAINED_HOST_IDENTITIES);
   await f.close();
-  const retained = initial('admission'); retained.version = 8;
+  const retained = initial('admission');
   retained.tenants[0]!.broker.revokedHosts = [...broker.revokedHosts.slice(0, -1), { hostId: 'host', installationId: 'installation', revocationId: randomUUID() }];
   const full = await fixture(retained);
   expect((await full.post('/v1/remote/hosts/host/revoke')).status).toBe(200);
@@ -361,29 +364,34 @@ test('recovers a legacy historical mapping without inheriting its previous crede
   expect(f.broker.snapshot().sharing!.reservations).toEqual(saved.tenants[0]!.broker.sharing!.reservations);
 });
 
-test('keeps a pre-effect reset through ordinary re-pair, Relay8 upgrade and restart without restoring old access', async () => {
-  const saved = initial('admission'), broker = saved.tenants[0]!.broker;
+test('migrates legacy history to Relay9 and keeps a pre-effect reset through ordinary re-pair and restart without restoring old access', async () => {
+  const ordinary = initial('ordinary'), tenant = ordinary.tenants[0]!;
+  const broker = { ...tenant.broker, associations: { version: 4, revision: 1, relationChanges: [], relationResets: [], freezes: [],
+    admissions: [{ id: 'retained-admission', fingerprint: 'retained', source: { ...ref('other'), controllerId: 'retained-installation' } }] } };
+  const saved = { ...ordinary, version: 6, tenants: [{ ...tenant, broker }] };
   broker.hosts.push({ ...broker.hosts[0]!, id: 'retained-host', installationId: 'retained-installation' });
-  broker.associations!.admissions = [{ id: 'retained-admission', fingerprint: 'retained', source: { ...ref('other'), controllerId: 'retained-installation' } }];
   broker.bindings.push({ hostId: 'host', providerId: 'fixture', nativeSessionId: 'S', agentId: 'side-agent', sourceRelation: { id: 'side', kind: 'side', sourceNativeSessionId: 'A', createdAt: '2026-10-10T00:00:00.000Z' } });
+  expect(validateRelayState(saved, auth)).toEqual(saved);
   const f = await fixture(saved), original = await connect(f.url); await original.next(frame => frame.type === 'registered');
+  const migrated = await f.read(); expect(migrated.version).toBe(9);
+  expect(migrated.tenants[0]!.broker.associations).toEqual({ ...broker.associations, version: 5 });
   const reset = await f.broker.resetSessionRelationChange('owner', { hostId: 'host', providerId: 'fixture', nativeSessionId: 'S', sourceNativeSessionId: 'A', id: 'side',
     linked: false, expectedRevision: 0, expectedRoleRevision: 1, operationId: 'reset-before-revoke' });
   expect(reset).toMatchObject({ reset: { phase: 'pre_effect', intent: { hostId: 'host' } } });
   const history = f.broker.snapshot().associations;
   expect((await f.post('/v1/remote/hosts/host/revoke')).status).toBe(200);
-  expect((await f.read()).version).toBe(6);
+  expect((await f.read()).version).toBe(9);
   expect(f.broker.snapshot().revokedHosts).toBeUndefined();
   const invitation = await (await f.post('/v1/remote/pairings')).json(), repaired = await connect(f.url, invitation.key);
   const issued = await repaired.next(frame => frame.type === 'credential_issued');
   repaired.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
   const { hostId } = await repaired.next(frame => frame.type === 'registered'); expect(hostId).not.toBe('host');
-  const legacy = await f.read(); expect(legacy.version).toBe(6); expect(legacy.tenants[0]!.broker.associations).toEqual(history);
-  expect(legacy.tenants[0]!.broker.bindings).toEqual([]); expect(f.broker.canAccessHost('host', 'guest')).toBe(false);
+  const paired = await f.read(); expect(paired.version).toBe(9); expect(paired.tenants[0]!.broker.associations).toEqual(history);
+  expect(paired.tenants[0]!.broker.bindings).toEqual([]); expect(f.broker.canAccessHost('host', 'guest')).toBe(false);
   await f.close();
-  const upgraded = await fixture(legacy), active = await connect(upgraded.url, issued.credential); await active.next(frame => frame.type === 'registered');
+  const upgraded = await fixture(paired), active = await connect(upgraded.url, issued.credential); await active.next(frame => frame.type === 'registered');
   expect((await upgraded.post('/v1/remote/hosts/retained-host/revoke')).status).toBe(200);
-  const durable = await upgraded.read(); expect(durable.version).toBe(8);
+  const durable = await upgraded.read(); expect(durable.version).toBe(9);
   expect(durable.tenants[0]!.broker.hosts.map(host => host.id)).toEqual([hostId]);
   expect(durable.tenants[0]!.broker.associations).toEqual(history);
   expect(durable.tenants[0]!.broker.revokedHosts!.map(marker => marker.hostId)).toEqual(['retained-host']);

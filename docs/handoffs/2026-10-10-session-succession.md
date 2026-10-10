@@ -6,9 +6,12 @@ Status: partially implemented; no usable end-to-end handoff yet.
 ## Product provenance checkpoint (2026-10-11)
 
 Task 10A passed independent spec and quality review after two scoped fix rounds.
-Root freshly passed 10 suites / 153 tests and the separate e2e typecheck. The main
-Lab typecheck retains one pre-existing association-v4/v5 revocation fixture error;
-Task 10V repairs that fixture separately before Task 10B.
+Root freshly passed 10 suites / 153 tests and the separate e2e typecheck. Task
+10V then repaired the pre-existing association-v4/v5 revocation fixture error
+without changing production code. Independent review passed; Root freshly passed
+20 revocation cases, 21 historical recovery cases and the complete Lab typecheck
+including e2e. Current typed v5/v9 and genuine raw legacy v4/v6 remain covered,
+including the real v2 describe request queued behind revocation.
 
 ForkStore now separates immutable local creation/input records from current shared
 navigation. Known-local effects require successful raw reads and cannot fall back

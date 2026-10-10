@@ -481,9 +481,11 @@ no production capability is enabled by these scripted fixtures.
 - [x] Split immutable ForkStore delivery source from projected navigation source;
   mutations read checked raw delivery records, not projected view records.
   Task 10A passed independent spec/quality review after two scoped fix rounds;
-  Root freshly passed 153 tests and the e2e typecheck. The separate 10V fixture
-  repair must clear the pre-existing Lab typecheck error before 10B. Stable Side
-  edit navigation survives source changes without retargeting unknown input.
+  Root freshly passed 153 tests and the e2e typecheck. The separate Task 10V
+  fixture repair cleared the pre-existing Lab typecheck error: independent review
+  and fresh 20 revocation / 21 history tests plus complete Lab typecheck passed.
+  Stable Side edit navigation survives source changes without retargeting unknown
+  input. Ask native routing and full state migration remain separate below.
 - [ ] Route existing Ask targets by their own complete native locator; preserve
   native identity, nested attachment and draft/window state across provider change.
 - [ ] Introduce stable pane slots and target intent independent of attachment;

@@ -1,16 +1,21 @@
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey,
+import { createHash, randomUUID } from 'node:crypto';
+import { successionAuthorityKey, successionFreezeKey, isNativeSessionRef, isSuccessionAssociationAuthority, isSuccessionAssociationFreeze, type SuccessionAssociationAuthority, type SuccessionAssociationFreeze, type NativeSessionRef, isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey,
   type PrimaryRole, type SuccessionParticipant, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
 
 export interface SuccessionRoleState {
+  associationAuthority?: SuccessionAssociationAuthority;
+  enrollments?: SuccessionAssociationFreeze[];
+  releasedEnrollments?: string[];
   role: PrimaryRole;
   operations: SuccessionRecord[];
   associationRevision: number;
   participants: SuccessionParticipant[];
 }
-interface StoreState { version: 1; roles: SuccessionRoleState[] }
+export interface SourceAssociationResult { id: string; fingerprint: string; scope: string; operationId: string; source: NativeSessionRef; reader: NativeSessionRef }
+export interface AssociationRecovery { createKey: string; createFingerprint: string }
+interface StoreState { version: 2; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery }> }
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
 const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId]);
@@ -19,7 +24,7 @@ const maxBytes = 8 * 1024 * 1024;
 /** One owning Controller serializes role decisions; publication follows atomic file replacement. */
 export class SessionSuccessionStore {
   readonly ready: Promise<void>;
-  private state: StoreState = { version: 1, roles: [] };
+  private state: StoreState = { version: 2, roles: [], associationAdmissions: [], associationResults: [] };
   private tail: Promise<unknown> = Promise.resolve();
   private loaded = false;
   private revision = 0;
@@ -54,6 +59,7 @@ export class SessionSuccessionStore {
     const input = structuredClone(participants);
     return this.mutate(state => {
       const item = this.findRole(state, roleId);
+      if (item.associationAuthority) throw new Error('An authenticated association reservation is required.');
       if (item.role.revision !== expectedRevision || item.associationRevision !== associationRevision) throw new Error('Primary role association revision changed.');
       if (item.operations.some(op => !terminal(op.phase))) throw new Error('Primary role is reserved by a succession in progress.');
       if (JSON.stringify(item.participants) === JSON.stringify(input)) return item;
@@ -62,23 +68,147 @@ export class SessionSuccessionStore {
     });
   }
 
+  ensureRole(source: NativeSessionRef, canonicalCwd: string): Promise<PrimaryRole> {
+    source = structuredClone(source);
+    return this.mutate(state => {
+      const existing = state.roles.find(item => this.lineage(item).some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)));
+      if (existing) return existing.role;
+      const id = `primary-${createHash('sha256').update(nativeSessionRefKey(source)).digest('hex')}`;
+      const role: PrimaryRole = { id, revision: 1, origin: source, current: source, workspace: { controllerId: source.controllerId, canonicalCwd } };
+      if (!isPrimaryRole(role) || state.roles.length >= 1024) throw new Error('Invalid or full primary role storage.');
+      state.roles.push({ role, operations: [], associationRevision: 0, participants: [] });
+      return role;
+    });
+  }
+  lineage(item: SuccessionRoleState): NativeSessionRef[] {
+    return [item.role.origin, ...item.operations.filter(operation => operation.phase === 'committed').map(operation => operation.to!)];
+  }
+  admitAssociation(id: string, fingerprint: string, source: NativeSessionRef, sourceReader = false, recovery?: AssociationRecovery): Promise<void> {
+    source = structuredClone(source); recovery = structuredClone(recovery);
+    return this.mutate(state => {
+      const prior = state.associationAdmissions.find(item => item.id === id);
+      if (prior) throw new Error(prior.fingerprint === fingerprint ? 'Source association outcome is unresolved.' : 'Source association identity conflict.');
+      const role = state.roles.find(item => this.lineage(item).some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)));
+      if (role?.enrollments?.some(receipt => !role.releasedEnrollments?.includes(receipt.token)) || role?.operations.some(operation => !terminal(operation.phase))) throw new Error('Source associations are reserved by succession.');
+      if (role && nativeSessionRefKey(role.role.current) !== nativeSessionRefKey(source)) throw new Error('Source session has been superseded.');
+      if (sourceReader && role?.associationAuthority && role.operations.some(operation => operation.phase === 'committed')) throw new Error('Trusted relationship updates are not enabled for this primary role.');
+      if (sourceReader && state.associationResults.length + state.associationAdmissions.filter(item => item.sourceReader).length >= 1024) throw new Error('Source creation result storage is full.');
+      if (state.associationAdmissions.length >= 1024) throw new Error('Source association admission storage is full. Resolve unsettled operations.');
+      state.associationAdmissions.push({ id, fingerprint, source, ...(sourceReader ? { sourceReader: true as const } : {}), ...(recovery ? { recovery } : {}) });
+    });
+  }
+  sourceResult(id: string, fingerprint: string): SourceAssociationResult | undefined {
+    if (!this.loaded) throw new Error('Session succession store is not ready.');
+    const result = this.state.associationResults.find(item => item.id === id);
+    if (result && result.fingerprint !== fingerprint) throw new Error('Source creation identity conflict.');
+    return result && structuredClone(result);
+  }
+  completeSourceAssociation(result: SourceAssociationResult): Promise<void> {
+    const input = structuredClone(result);
+    return this.mutate(state => {
+      const admission = state.associationAdmissions.find(item => item.id === input.id);
+      if (!admission?.sourceReader || admission.fingerprint !== input.fingerprint || nativeSessionRefKey(admission.source) !== nativeSessionRefKey(input.source)) throw new Error('Source creation admission changed.');
+      if (state.associationResults.length >= 1024 || state.associationResults.some(item => item.id === input.id)) throw new Error('Source creation result storage is full or conflicting.');
+      state.associationResults.push(input);
+      state.associationAdmissions = state.associationAdmissions.filter(item => item.id !== input.id);
+    });
+  }
+  settleRecoveredAssociation(recovery: AssociationRecovery, source: NativeSessionRef): Promise<void> {
+    const evidence = structuredClone(recovery), target = structuredClone(source);
+    return this.mutate(state => {
+      const pending = state.associationAdmissions.filter(item => item.recovery?.createKey === evidence.createKey);
+      if (pending.some(item => item.recovery?.createFingerprint !== evidence.createFingerprint || nativeSessionRefKey(item.source) !== nativeSessionRefKey(target))) throw new Error('Recovered source association evidence conflicts with admission.');
+      state.associationAdmissions = state.associationAdmissions.filter(item => item.recovery?.createKey !== evidence.createKey);
+    });
+  }
+  settleAssociation(id: string, fingerprint: string, allowMissing = false): Promise<void> {
+    return this.mutate(state => {
+      const prior = state.associationAdmissions.find(item => item.id === id);
+      if (!prior && allowMissing) return;
+      if (!prior || prior.fingerprint !== fingerprint) throw new Error('Source association identity conflict.');
+      state.associationAdmissions = state.associationAdmissions.filter(item => item.id !== id);
+    });
+  }
+  beginEnrolled(freeze: SuccessionAssociationFreeze, participants: SuccessionParticipant[], generation: number): Promise<SuccessionRecord> {
+    const receipt = structuredClone(freeze), enrolled = structuredClone(participants);
+    return this.mutate(state => {
+      if (!isSuccessionAssociationFreeze(receipt)) throw new Error('Invalid association receipt.');
+      const item = this.findRole(state, receipt.request.roleId);
+      const previous = item.enrollments?.find(value => value.request.operationId === receipt.request.operationId);
+      if (previous) {
+        if (successionFreezeKey(previous) !== successionFreezeKey(receipt)) throw new Error('Association receipt conflict.');
+        return this.findOperation(state, receipt.request.operationId);
+      }
+      if (item.operations.some(operation => operation.operationId === receipt.request.operationId)) throw new Error('Operation has no matching association receipt.');
+      if (item.enrollments?.some(receipt => !item.releasedEnrollments?.includes(receipt.token))) throw new Error('Previous association reservation has not been released.');
+      if (item.associationRevision >= Number.MAX_SAFE_INTEGER) throw new Error('Primary association revision is exhausted.');
+      if (this.generation !== generation) throw new Error('Source associations changed during enrollment.');
+      if (item.associationAuthority && successionAuthorityKey(item.associationAuthority) !== successionAuthorityKey(receipt.authority)) throw new Error('Primary role belongs to another association authority.');
+      const lineage = this.lineage(item);
+      if (JSON.stringify(lineage.map(nativeSessionRefKey)) !== JSON.stringify(receipt.lineage.map(nativeSessionRefKey))) throw new Error('Primary role lineage changed.');
+      if (state.associationAdmissions.some(admission => lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new Error('Source association outcome is unresolved.');
+      const record = this.beginRecord(state, receipt.request);
+      item.associationAuthority = receipt.authority;
+      (item.enrollments ??= []).push(receipt);
+      item.participants = enrolled; item.associationRevision++;
+      return record;
+    });
+  }
+  /** Cancel an authenticated reservation before enrollment without certifying its participant snapshot. */
+  cancelUnenrolled(freeze: SuccessionAssociationFreeze): Promise<SuccessionRecord> {
+    const receipt = structuredClone(freeze);
+    return this.mutate(state => {
+      if (!isSuccessionAssociationFreeze(receipt)) throw new Error('Invalid association receipt.');
+      const item = this.findRole(state, receipt.request.roleId);
+      const previous = item.enrollments?.find(value => value.request.operationId === receipt.request.operationId);
+      if (previous) {
+        if (successionFreezeKey(previous) !== successionFreezeKey(receipt)) throw new Error('Association receipt conflict.');
+        const record = this.findOperation(state, receipt.request.operationId);
+        if (record.phase !== 'cancelled') throw new Error('Reservation was enrolled concurrently; read its durable outcome before cancelling.');
+        return record;
+      }
+      if (item.operations.some(operation => operation.operationId === receipt.request.operationId)) throw new Error('Operation has no matching association receipt.');
+      if (item.associationAuthority && successionAuthorityKey(item.associationAuthority) !== successionAuthorityKey(receipt.authority)) throw new Error('Primary role belongs to another association authority.');
+      if (item.enrollments?.some(value => !item.releasedEnrollments?.includes(value.token))) throw new Error('Previous association reservation has not been released.');
+      if (JSON.stringify(this.lineage(item).map(nativeSessionRefKey)) !== JSON.stringify(receipt.lineage.map(nativeSessionRefKey))) throw new Error('Primary role lineage changed.');
+      const record = this.beginRecord(state, receipt.request);
+      record.phase = 'cancelled';
+      item.associationAuthority = receipt.authority;
+      (item.enrollments ??= []).push(receipt);
+      return record;
+    });
+  }
+  releaseEnrollment(freeze: SuccessionAssociationFreeze): Promise<void> {
+    const receipt = structuredClone(freeze);
+    return this.mutate(state => {
+      const item = this.findRole(state, receipt.request.roleId);
+      const saved = item.enrollments?.find(value => value.token === receipt.token);
+      if (!saved || successionFreezeKey(saved) !== successionFreezeKey(receipt)) throw new Error('Association receipt conflict.');
+      if (!terminal(this.findOperation(state, receipt.request.operationId).phase)) throw new Error('Unknown association decisions remain reserved.');
+      if (!item.releasedEnrollments?.includes(receipt.token)) (item.releasedEnrollments ??= []).push(receipt.token);
+    });
+  }
   begin(request: SuccessionRequest): Promise<SuccessionRecord> {
     const input = structuredClone(request);
     return this.mutate(state => {
-      if (!isSuccessionRequest(input)) throw new Error('Invalid succession request.');
-      const prior = state.roles.flatMap(item => item.operations).find(op => op.operationId === input.operationId);
-      if (prior) {
-        if (fingerprint(prior) !== fingerprint(input)) throw new Error('Succession operation identity conflict.');
-        return prior;
-      }
-      const item = this.findRole(state, input.roleId);
-      if (item.role.revision !== input.expectedRevision || nativeSessionRefKey(item.role.current) !== nativeSessionRefKey(input.from)) throw new Error('Primary role revision changed.');
-      if (item.operations.some(op => !terminal(op.phase))) throw new Error('Primary role is reserved by a succession in progress.');
-      if (item.operations.length >= 512) throw new Error('Succession history is full.');
-      const now = new Date().toISOString();
-      const record: SuccessionRecord = { ...input, phase: 'preparing', startedAt: now, updatedAt: now };
-      item.operations.push(record); return record;
+      if (this.findRole(state, input.roleId).associationAuthority) throw new Error('An authenticated association reservation is required.');
+      return this.beginRecord(state, input);
     });
+  }
+  private beginRecord(state: StoreState, input: SuccessionRequest): SuccessionRecord {
+    if (!isSuccessionRequest(input)) throw new Error('Invalid succession request.');
+    const prior = state.roles.flatMap(item => item.operations).find(op => op.operationId === input.operationId);
+    if (prior) {
+      if (fingerprint(prior) !== fingerprint(input)) throw new Error('Succession operation identity conflict.');
+      return prior;
+    }
+    const item = this.findRole(state, input.roleId);
+    if (item.role.revision !== input.expectedRevision || nativeSessionRefKey(item.role.current) !== nativeSessionRefKey(input.from)) throw new Error('Primary role revision changed.');
+    if (item.operations.some(op => !terminal(op.phase))) throw new Error('Primary role is reserved by a succession in progress.');
+    if (item.operations.length >= 512) throw new Error('Succession history is full.');
+    const now = new Date().toISOString();
+    const record: SuccessionRecord = { ...input, phase: 'preparing', startedAt: now, updatedAt: now };
+    item.operations.push(record); return record;
   }
 
   /** Unknown outcomes may advance only after the coordinator has reconciled their saved phase. */
@@ -163,13 +293,20 @@ export class SessionSuccessionStore {
     }
   }
   private validate(state: StoreState): void {
-    if (!state || state.version !== 1 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
+    if (!state || state.version !== 2 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
+    if (!Array.isArray(state.associationAdmissions) || state.associationAdmissions.length > 1024 || new Set(state.associationAdmissions.map(item => item.id)).size !== state.associationAdmissions.length
+      || state.associationAdmissions.some(item => !item.id || !item.fingerprint || item.id.length > 512 || item.fingerprint.length > 512 || !isNativeSessionRef(item.source) || item.sourceReader !== undefined && item.sourceReader !== true || item.recovery !== undefined && (typeof item.recovery.createKey !== 'string' || !item.recovery.createKey || item.recovery.createKey.length > 16384 || !/^[a-f0-9]{64}$/.test(item.recovery.createFingerprint)))) throw new Error('Invalid source association admission.');
+    if (!Array.isArray(state.associationResults) || state.associationResults.length > 1024 || new Set(state.associationResults.map(item => item.id)).size !== state.associationResults.length || state.associationResults.some(item => !item.id || !item.fingerprint || typeof item.scope !== 'string' || !item.scope || item.scope.length > 16384 || !item.operationId || item.operationId.length > 512 || !isNativeSessionRef(item.source) || !isNativeSessionRef(item.reader) || item.source.controllerId !== item.reader.controllerId || item.source.providerId !== item.reader.providerId || nativeSessionRefKey(item.source) === nativeSessionRefKey(item.reader))) throw new Error('Invalid source creation result.');
+    if (state.associationResults.length + state.associationAdmissions.filter(item => item.sourceReader).length > 1024) throw new Error('Source creation result reservations exceed storage capacity.');
     const roles = new Set<string>(), operations = new Set<string>(), executors = new Set<string>();
     for (const item of state.roles) {
       if (!item || !isPrimaryRole(item.role) || !Array.isArray(item.operations) || item.operations.length > 512 || roles.has(item.role.id)) throw new Error('Invalid primary role record.');
       if (!Number.isSafeInteger(item.associationRevision) || item.associationRevision < 0 || !Array.isArray(item.participants)
         || item.participants.length > 1024 || !item.participants.every(isSuccessionParticipant)
         || new Set(item.participants.map(participant => participant.relationId)).size !== item.participants.length) throw new Error('Invalid primary role participants.');
+      if (item.associationAuthority && !isSuccessionAssociationAuthority(item.associationAuthority)) throw new Error('Invalid association authority.');
+      if (item.enrollments && (!Array.isArray(item.enrollments) || item.enrollments.length > 512 || item.enrollments.some(receipt => !isSuccessionAssociationFreeze(receipt) || receipt.request.roleId !== item.role.id || (!item.associationAuthority || successionAuthorityKey(receipt.authority) !== successionAuthorityKey(item.associationAuthority)) || !item.operations.some(operation => operation.operationId === receipt.request.operationId && fingerprint(operation) === fingerprint(receipt.request))))) throw new Error('Invalid association receipt.');
+      if (item.releasedEnrollments && (!Array.isArray(item.releasedEnrollments) || item.releasedEnrollments.length > 512 || item.releasedEnrollments.some(token => !item.enrollments?.some(receipt => receipt.token === token && item.operations.some(operation => operation.operationId === receipt.request.operationId && terminal(operation.phase)))))) throw new Error('Invalid association release.');
       roles.add(item.role.id);
       const executor = nativeSessionRefKey(item.role.current);
       if (executors.has(executor)) throw new Error('Duplicate primary executor.');
@@ -191,8 +328,11 @@ export class SessionSuccessionStore {
     try { text = await readFile(join(this.directory, 'state.json'), 'utf8'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; this.loaded = true; return; }
     if (Buffer.byteLength(text) > maxBytes) throw new Error('Succession storage size limit exceeded.');
-    const state = JSON.parse(text) as StoreState; this.validate(state);
-    let changed = false;
+    const parsed = JSON.parse(text);
+    const migrated = parsed.version === 1;
+    if (migrated && (parsed.associationAdmissions !== undefined || parsed.associationResults !== undefined || parsed.roles.some((item: SuccessionRoleState) => item.associationAuthority || item.enrollments || item.releasedEnrollments))) throw new Error('Ambiguous legacy association storage.');
+    const state: StoreState = migrated ? { ...parsed, version: 2, associationAdmissions: [], associationResults: [] } : parsed; this.validate(state);
+    let changed = migrated;
     for (const item of state.roles) for (const op of item.operations) if (!terminal(op.phase) && op.phase !== 'unknown') {
       op.resumePhase = op.phase as SuccessionRecord['resumePhase']; op.phase = 'unknown';
       op.failureCode = 'succession_recovery_required'; changed = true;

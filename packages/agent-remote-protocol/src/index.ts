@@ -38,3 +38,5 @@ export * from './session-todo.js';
 export * from './session-succession.js';
 
 export * from './session-context.js';
+
+export * from './succession-enrollment.js';

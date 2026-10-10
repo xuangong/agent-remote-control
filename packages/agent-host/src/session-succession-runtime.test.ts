@@ -1,14 +1,16 @@
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
+import { createHostBroker, type RemoteHostBrokerState } from '../../agent-remote-hosted/src/broker.js';
 import { PROTOCOL_VERSION, type ServerMessage, type TpmWork } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
+import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
 import type { AgentSession, AgentSessionConfig, AgentCapabilities, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { createAgentHostRuntime } from './host.js';
+import { TpmStore } from './tpm-store.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 const ref=(nativeSessionId:string)=>({controllerId:'controller',providerId:'fixture',nativeSessionId});
 class Native implements AgentSession {
@@ -21,19 +23,24 @@ class Native implements AgentSession {
  async respondToInteraction(){}
  async dispose(){this.stop?.();}
 }
-async function fixture(enableTpm=false){
+async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Promise<void>){
  const root=await realpath(await mkdtemp(join(tmpdir(),'arc-succession-runtime-')));
  const store=new SessionSuccessionStore(join(root,'roles'));await store.ready;
- await store.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'controller',canonicalCwd:root}});
- const sessions=new Map([['A',new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];let creates=0,supported=true,busy='';
- const host=createAgentHostRuntime({...(enableTpm?{tpm:{stateDirectory:join(root,'tpm'),tickMs:20}}:{}),succession:{controllerId:'controller',stateDirectory:root,native:{
+ if(!enrollment) await store.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'controller',canonicalCwd:root}});
+ const grants:Array<{nativeSessionId:string;sourceNativeSessionId:string}>=[];let beforeGrants=async()=>{};
+ await setup?.(root);
+ const sessions=new Map([['A',new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};
+ const createHost=()=>createAgentHostRuntime({...(enableTpm?{tpm:{stateDirectory:join(root,'tpm'),tickMs:20}}:{}),succession:{controllerId:'controller',...(enrollment?{enrollment:true as const}:{}),stateDirectory:root,native:{
  supports:async()=>supported,
  inspect:async source=>({cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0}),
- createIdle:async()=>{creates++;sessions.set('B',new Native('B',root));return ref('B');},reconcileDelivery:async()=>undefined,
- }},registrations:[{adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',list:()=>[],workspaces:()=>[],create:async config=>{if(!enableTpm)throw new Error('unexpected');tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));return id;},open:async id=>sessions.get(id)!,sessionWorkspace:async()=>root,sourceReferences:async()=>[],setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}]});
- const server=createAgentRemoteHttpServer(host.relay,{websocketAuthorizer:{authenticate:()=>({subject:'owner'}),authorize:()=>true}});const address=await server.listen(0);
+ createIdle:async()=>{creates++;const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
+ }},registrations:[{adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',supportsSourceReferences:true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm)throw new Error('unexpected');tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async id=>sessions.get(id)!,sessionWorkspace:async()=>root,sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}]});
+ let host=createHost();
+ const createServer=()=>createAgentRemoteHttpServer(host.relay,{websocketAuthorizer:{authenticate:()=>({subject:'owner'}),authorize:()=>true}});
+ let server=createServer();let address=await server.listen(0);
+ const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
  const control=async(action:string,body:unknown)=>{const result=await host.control({method:'POST',path:`/remote/succession/${action}`,sessionId:'owner',body:JSON.stringify(body)});return {status:result.status,payload:JSON.parse(result.body)};};
- return {root,sessions,host,tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),url:address.url,creates:()=>creates,unsupported:()=>{supported=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sessions,get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
 }
 const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A')};
 /** Each send uses a fresh authenticated connection and closes it before returning. */
@@ -146,4 +153,404 @@ test('real Host TPM first postcommit main input consumes durable context once an
     expect(f.sessions.get('B')!.sent).toHaveLength(1);expect(f.sessions.get('A')!.sent).toEqual([]);
     expect(f.tpmConfigurations).toHaveLength(1);expect((await current()).tpmNativeSessionId).toBe(tpmId);
   } finally { await f.close(); }
+},15000);
+
+async function enrollmentTransport(f: Awaited<ReturnType<typeof fixture>>, initial?: RemoteHostBrokerState, options:{installationId?:string;enrollment?:boolean}={}) {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(server, 'listening');
+  const origin = `http://127.0.0.1:${(server.address() as {port:number}).port}`;
+  const authority = { version: 1 as const, origin, issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
+  let saved: RemoteHostBrokerState | undefined; let dropCreationResponse=false;const createRequests=new Set<string>();let failProjection = false, failBinding=false; let beforeControl=async(_input:{action?:string;freeze?:unknown})=>{};
+  const makeBroker=(initialState?:RemoteHostBrokerState)=>createHostBroker({ origin, ownerSubject: 'owner', durable: true, successionEnrollment: authority, initialState,
+    onStateChange: async state => { if (failProjection && state.associations?.freezes.some(item => item.released)) throw new Error('Projection storage unavailable'); if(failBinding&&state.bindings.some(item=>item.sourceRelation))throw new Error('Binding storage unavailable'); saved = structuredClone(state); }, rpcTimeoutMs: 2000 });
+  let broker=makeBroker(initial);
+  const request = (path:string, body:unknown, subject='owner') => broker.handleRequest(new Request(origin+path, {method:'POST',body:JSON.stringify(body)}), {principalSubject:()=>subject});
+  server.on('connection', async (socket, incoming) => {
+    const upgrade = await broker.prepareUpgrade(new Request(origin+incoming.url!, { headers: {authorization:incoming.headers.authorization!} }));
+    if (!upgrade || upgrade instanceof Response) { socket.close(1008); return; }
+    upgrade.accept({get readyState(){return socket.readyState;},get bufferedAmount(){return socket.bufferedAmount;},send:data=>{const message=JSON.parse(data);if(message.type==='rpc_request'&&message.path==='/remote/create')createRequests.add(message.requestId);socket.send(data);},close:(code,reason)=>socket.close(code,reason),
+      onMessage(listener){const handle=(data:WebSocket.RawData,binary:boolean)=>{const message=JSON.parse(data.toString());if(dropCreationResponse&&message.type==='rpc_response'&&createRequests.has(message.requestId)){dropCreationResponse=false;return;}void listener(data.toString(),binary);};socket.on('message',handle);return()=>{socket.off('message',handle);};},
+      onClose(listener){const handle=(code:number)=>listener({code});socket.on('close',handle);return()=>{socket.off('close',handle);};},
+      onError(listener){socket.on('error',listener);return()=>{socket.off('error',listener);};}});
+  });
+  const connect=async()=>{const pairing=await (await request('/v1/remote/pairings',{}))!.json();return createRemoteHostUplinkClient({relay:f.host.relay,installationId:options.installationId??'controller',name:'Fixture',providers:[{providerId:'fixture',displayName:'Fixture'}],
+    remoteKey:pairing.key,onCredential:async()=>{},url:origin.replace('http:','ws:')+'/ws/remote-host',resolveSession:f.host.resolveSession,acquireSession:f.host.acquireSession,
+    control:f.host.control,...(options.enrollment===false?{}:{successionEnrollment:{control:async(request,context)=>{const result=await f.host.enrollFromRelay(request,context);await beforeControl(JSON.parse(request.body??'{}'));return result;}}})});};
+  let client=await connect();const {hostId}=await client.ready;
+  return {get client(){return client;},get broker(){return broker;},authority,request,hostId,restart:async(beforeConnect?:()=>Promise<void>)=>{await client.close();broker.close();await beforeConnect?.();broker=makeBroker(saved);client=await connect();await client.ready;},failBinding:(value:boolean)=>{failBinding=value;},dropCreationResponse:()=>{dropCreationResponse=true;},beforeControl:(hook:typeof beforeControl)=>{beforeControl=hook;},failProjection:(value:boolean)=>{failProjection=value;},saved:()=>structuredClone(saved!),action:(action:string,input:unknown,subject='owner')=>request(`/v1/remote/hosts/${hostId}/succession/${action}`,input,subject),
+    close:async()=>{await client.close();broker.close();for(const socket of server.clients)socket.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));}};
+}
+
+test('authenticated broker enrollment derives a role, freezes associations and commits over a real uplink',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f);
+  try {
+    const input={operationId:'trusted-handoff',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
+    expect((await transport.action('prepare',{...input,authority:transport.authority}))!.status).toBe(400);
+    expect((await transport.action('prepare',input,'viewer'))!.status).toBe(403);
+    expect((await f.host.control({method:'POST',path:'/remote/succession/enrollment',body:JSON.stringify({action:'describe',providerId:'fixture',nativeSessionId:'A'})})).status).toBe(403);
+    const prepared=await transport.action('prepare',input);const ready=await prepared!.json();
+    expect(ready,JSON.stringify(ready)).toMatchObject({record:{phase:'ready'},role:{origin:ref('A'),workspace:{canonicalCwd:f.root}}});
+    expect(f.sessions.get('A')!.sent).toEqual([]);expect(f.sessions.get('B')!.sent).toEqual([]);
+    expect(transport.saved().associations?.freezes).toHaveLength(1);
+    expect(transport.saved().associations?.freezes[0]?.released).toBeUndefined();
+    const committed=await (await transport.action('commit',{operationId:input.operationId}))!.json();
+    expect(committed).toMatchObject({record:{phase:'committed'},role:{current:ref('B'),revision:2},locator:{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'B'}});
+    expect(transport.saved().associations?.freezes[0]).toMatchObject({released:'committed',projection:{role:{current:ref('B')}}});
+    const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+    expect(state).toMatchObject({version:2,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
+  } finally {await transport.close();await f.close();}
+},15000);
+
+
+test('old operation replay preserves A to B to C',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f);
+  const store=async()=>{const value=new SessionSuccessionStore(join(f.root,'roles'));await value.ready;return value;};
+  try {
+    const input={operationId:'first',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
+    expect((await transport.action('prepare',input))!.status).toBe(200);
+    expect((await transport.action('commit',{operationId:'first'}))!.status).toBe(200);
+    const released=await store();
+    expect(released.read(released.all()[0]!.role.id).releasedEnrollments).toHaveLength(1);
+    const projection=structuredClone(transport.saved().associations!.freezes[0]!.projection);
+    expect((await transport.action('prepare',{...input,operationId:'second',nativeSessionId:'B',expectedRevision:2}))!.status).toBe(200);
+    expect((await transport.action('commit',{operationId:'second'}))!.status).toBe(200);
+    const replay=await transport.action('status',{operationId:'first'});
+    expect(replay!.status).toBe(200);
+    expect(await replay!.json()).toMatchObject({record:{operationId:'first',committedRevision:2},role:{revision:3,current:ref('C')},locator:{nativeSessionId:'C'}});
+    expect(transport.saved().associations!.freezes[0]!.projection).toEqual(projection);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('broker persistence failure keeps a committed Host decision fenced across restart',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f);
+  try {
+    expect((await transport.action('prepare',{operationId:'first',providerId:'fixture',nativeSessionId:'A',expectedRevision:1}))!.status).toBe(200);
+    transport.failProjection(true);
+    expect((await transport.action('commit',{operationId:'first'}))!.status).toBe(503);
+    const blocked=new SessionSuccessionStore(join(f.root,'roles'));await blocked.ready;
+    expect(blocked.operation('first').phase).toBe('committed');
+    await expect(blocked.admitAssociation('new-reader','fingerprint',ref('B'))).rejects.toThrow(/reserved/);
+    expect(transport.saved().associations!.freezes[0]!.released).toBeUndefined();
+    expect(blocked.all()[0]!.releasedEnrollments).toBeUndefined();
+    transport.failProjection(false);await transport.restart(f.restart);
+    expect((await transport.action('status',{operationId:'first'}))!.status).toBe(200);
+    expect(transport.saved().associations!.freezes[0]!.released).toBe('committed');
+    const released=new SessionSuccessionStore(join(f.root,'roles'));await released.ready;
+    expect(released.all()[0]!.releasedEnrollments).toHaveLength(1);
+    expect(f.creates()).toBe(1);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('pre-begin validation failure can be durably cancelled without late preparation effects',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f);
+  try {
+    const input={operationId:'missing-grant-relation',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
+    f.grants.push({nativeSessionId:'cold-side',sourceNativeSessionId:'A'});
+    expect((await transport.action('prepare',input))!.status).toBe(409);
+    expect(transport.saved().associations!.freezes[0]!.released).toBeUndefined();
+    const cancelled=await transport.action('cancel',{operationId:input.operationId});
+    expect(cancelled!.status).toBe(200);
+    expect(await cancelled!.json()).toMatchObject({record:{phase:'cancelled'}});
+    f.grants.length=0;
+    expect(await (await transport.action('prepare',input))!.json()).toMatchObject({record:{phase:'cancelled'}});
+    expect(f.creates()).toBe(0);
+    const restored=new SessionSuccessionStore(join(f.root,'roles'));await restored.ready;
+    expect(restored.operation(input.operationId).phase).toBe('cancelled');
+    expect(restored.all()[0]!.releasedEnrollments).toHaveLength(1);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+test('cancellation serializes ahead of a delayed pre-begin grant snapshot',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f);
+  let resume!:()=>void;let entered!:()=>void;const reached=new Promise<void>(resolve=>{entered=resolve;});const gate=new Promise<void>(resolve=>{resume=resolve;});
+  try {
+    f.beforeGrants(async()=>{entered();await gate;});
+    const input={operationId:'delayed-prepare',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
+    const preparing=transport.action('prepare',input);await reached;
+    expect((await transport.action('cancel',{operationId:input.operationId}))!.status).toBe(200);
+    resume();
+    expect(await (await preparing)!.json()).toMatchObject({record:{phase:'cancelled'}});
+    expect(f.creates()).toBe(0);
+  }finally{resume();await transport.close();await f.close();}
+},15000);
+
+
+function coldAssociations(): RemoteHostBrokerState {
+  const hostId='cold-host';
+  const relation=(id:string,kind:'side'|'ask',sourceNativeSessionId:string,linked=true)=>({id,kind,sourceNativeSessionId,linked,revision:0,createdAt:'2026-10-10T00:00:00.000Z'});
+  return {keys:[],hosts:[{id:hostId,installationId:'controller',name:'Fixture',legacyDsh:false,providers:[{providerId:'fixture',displayName:'Fixture'}]}],creations:[],bindings:[
+    {hostId,providerId:'fixture',nativeSessionId:'A',agentId:'main'},
+    ...[['side',relation('side-relation','side','A')],['ask',relation('ask-relation','ask','A')],['unlinked',relation('unlinked-relation','side','A',false)],['nested',relation('nested-relation','ask','side')]].map(([id,sourceRelation])=>({hostId,providerId:'fixture',nativeSessionId:id as string,agentId:id as string,sourceRelation:sourceRelation as ReturnType<typeof relation>})),
+  ]};
+}
+test('cold complete grants enroll only linked direct readers and preserve immutable provenance',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f,coldAssociations());
+  try {
+    f.grants.push(...[{nativeSessionId:'side',sourceNativeSessionId:'A'},{nativeSessionId:'ask',sourceNativeSessionId:'A'},{nativeSessionId:'unlinked',sourceNativeSessionId:'A'},{nativeSessionId:'nested',sourceNativeSessionId:'side'}]);
+    const input={operationId:'cold',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
+    expect((await transport.action('prepare',input))!.status).toBe(200);
+    const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+    expect(state.roles[0].participants.map((item:{before:{nativeSessionId:string}})=>item.before.nativeSessionId).sort()).toEqual(['ask','side']);
+    const before=transport.saved().bindings;
+    const update={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0};
+    await expect(transport.broker.updateSessionRelation('owner',update)).rejects.toThrow(/reserved/);
+    expect((await transport.action('commit',{operationId:'cold'}))!.status).toBe(200);
+    await expect(transport.broker.updateSessionRelation('owner',update)).rejects.toThrow(/relationship updates/);
+    expect(transport.saved().bindings).toEqual(before);
+    expect(f.sessions.size).toBe(2);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+test('cancelling the first reservation restores ordinary relationship updates',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f,coldAssociations());
+  try {
+    const input={operationId:'cancel-first',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
+    expect((await transport.action('prepare',input))!.status).toBe(409);
+    expect((await transport.action('cancel',{operationId:input.operationId}))!.status).toBe(200);
+    await transport.broker.updateSessionRelation('owner',{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0});
+    expect(transport.saved().bindings.find(item=>item.nativeSessionId==='side')!.sourceRelation!.linked).toBe(false);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test.each(['source','revision','provider'] as const)('concurrent different %s cannot reuse one frozen operation identity',async conflict=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f);
+  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});let describes=0,prepares=0;
+  try {
+    f.sessions.set('X',new Native('X',f.root));
+    transport.beforeControl(async input=>{if(input.action==='describe'){if(++describes===2)release();await gate;}if(input.action==='prepare')prepares++;});
+    const input={operationId:'same-operation',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
+    const changed=conflict==='source'?{nativeSessionId:'X'}:conflict==='revision'?{expectedRevision:2}:{targetProviderId:'other'};
+    const results=await Promise.all([transport.action('prepare',input),transport.action('prepare',{...input,...changed})]);
+    expect(results.map(result=>result!.status).sort()).toEqual([200,409]);
+    expect(prepares).toBe(1);expect(f.creates()).toBe(1);
+  }finally{release();await transport.close();await f.close();}
+},15000);
+
+
+test.each([false,true])('unknown TPM creation retains exact admission and paused work without browser bindings (existing role %s)',async(existingRole)=>{
+  const f=await fixture(true,true,existingRole?async root=>{const store=new SessionSuccessionStore(join(root,'roles'));await store.ready;await store.ensureRole(ref('A'),root);}:undefined);const transport=await enrollmentTransport(f);
+  const roles=async()=>JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+  try {
+    f.loseTpmCreation(true);
+    const created=await f.host.control({method:'POST',path:'/remote/tpm/create',body:JSON.stringify({providerId:'fixture',mainNativeSessionId:'A',operationId:'unknown-tpm'})});
+    expect(created.status).toBe(409);
+    const workPath=join(f.root,'tpm',(await readdir(join(f.root,'tpm'))).find(path=>path.endsWith('.json'))!);
+    const record=JSON.parse(await readFile(workPath,'utf8'));
+    expect(record.creation).toBe('unknown');
+    expect((await roles()).associationAdmissions).toHaveLength(1);
+    expect((await transport.action('prepare',{operationId:'blocked-tpm',providerId:'fixture',nativeSessionId:'A',expectedRevision:1}))!.status).toBe(409);
+    expect((await transport.action('cancel',{operationId:'blocked-tpm'}))!.status).toBe(200);
+    const current=async()=>JSON.parse((await f.host.control({method:'GET',path:`/remote/tpm/work?id=${record.work.id}`})).body);
+    await expect.poll(async()=>(await current()).mainBinding?.kind).toBe('primary_role');
+    let paused:Awaited<ReturnType<typeof f.host.control>>|undefined;
+    for(let attempt=0;attempt<4;attempt++){
+      const latest=await current();
+      paused=await f.host.control({method:'POST',path:'/remote/tpm/action',body:JSON.stringify({id:latest.id,revision:latest.revision,action:'pause',operationId:`pause-tpm-${attempt}`})});
+      if(paused.status===200)break;
+      expect(paused.status).toBe(409);expect(JSON.parse(paused.body).error).toBe('TPM work changed. Refresh before applying this change.');
+    }
+    expect(paused!.status,paused!.body).toBe(200);
+    const recovered=await f.host.control({method:'POST',path:'/remote/tpm/action',body:JSON.stringify({id:record.work.id,revision:JSON.parse(paused!.body).revision,action:'resolve',intentId:'creation',resolution:'accepted',nativeSessionId:'tpm-1',operationId:'recover-tpm'})});
+    expect(recovered.status,recovered.body).toBe(200);
+    expect((await roles()).associationAdmissions).toEqual([]);
+    const accepted=JSON.parse(recovered.body);
+    expect((await transport.action('prepare',{operationId:'enroll-tpm',providerId:'fixture',nativeSessionId:'A',expectedRevision:1}))!.status).toBe(200);
+    expect((await roles()).roles[0].participants).toEqual([{relationId:`tpm:${accepted.id}`,kind:'tpm',before:ref('tpm-1'),after:ref('tpm-1')}]);
+    const persisted=JSON.parse(await readFile(workPath,'utf8'));
+    expect(persisted.work).toMatchObject({id:accepted.id,tpmNativeSessionId:'tpm-1',paused:true});
+    expect(transport.saved().bindings).toEqual([]);
+    expect(f.tpmConfigurations).toHaveLength(1);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('completed persisted TPM is enrolled without attaching its native session',async()=>{
+  const f=await fixture(true,true,async root=>{
+    const store=new TpmStore(join(root,'tpm'));await store.ready;
+    await store.insert({version:1,createKey:'completed-key',createFingerprint:'completed-fingerprint',creation:'accepted',requirement:'Done',dirty:false,lastReviewAt:0,actions:{},work:{
+      id:'completed-work',revision:1,title:'Completed work',providerId:'fixture',mainNativeSessionId:'A',tpmNativeSessionId:'cold-tpm',phase:'completed',waiting:'none',paused:false,summary:'Done',nextAction:'',document:'Approved plan',acceptance:'Accepted',evidence:['verified'],createdAt:'2026-10-10T00:00:00.000Z',updatedAt:'2026-10-10T00:00:00.000Z',nextCheckAt:0,outbox:[],
+    }});
+  });const transport=await enrollmentTransport(f);
+  try {
+    expect((await transport.action('prepare',{operationId:'completed-work-handoff',providerId:'fixture',nativeSessionId:'A',expectedRevision:1}))!.status).toBe(200);
+    const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+    expect(state.roles[0].participants).toEqual([{relationId:'tpm:completed-work',kind:'tpm',before:ref('cold-tpm'),after:ref('cold-tpm')}]);
+    expect(f.sessions.has('cold-tpm')).toBe(false);expect(transport.saved().bindings).toEqual([]);
+    const work=JSON.parse(await readFile(join(f.root,'tpm','completed-work.json'),'utf8')).work;
+    expect(work).toMatchObject({phase:'completed',document:'Approved plan',evidence:['verified']});
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('past and future expected revisions fail before any broker freeze or Host preparation',async()=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f);let prepares=0;
+  try {
+    transport.beforeControl(async input=>{if(input.action==='prepare')prepares++;});
+    const input={operationId:'future',providerId:'fixture',nativeSessionId:'A',expectedRevision:2};
+    expect((await transport.action('prepare',input))!.status).toBe(409);
+    expect(transport.saved().associations!.freezes).toHaveLength(0);expect(prepares).toBe(0);
+    expect((await transport.action('prepare',{...input,operationId:'valid-first',expectedRevision:1}))!.status).toBe(200);
+    expect((await transport.action('commit',{operationId:'valid-first'}))!.status).toBe(200);
+    expect((await transport.action('prepare',{...input,operationId:'past',nativeSessionId:'B',expectedRevision:1}))!.status).toBe(409);
+    expect(transport.saved().associations!.freezes).toHaveLength(1);expect(prepares).toBe(1);
+    expect((await transport.action('prepare',{...input,operationId:'valid-second',nativeSessionId:'B'}))!.status).toBe(200);
+    expect(prepares).toBe(2);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('lost source creation response recovers its original durable result without native replay',async()=>{
+  const f=await fixture(false,true);const initial=coldAssociations();initial.bindings=initial.bindings.filter(item=>item.nativeSessionId==='A');
+  const transport=await enrollmentTransport(f,initial);
+  try {
+    const input={providerId:'fixture',operationId:'00000000-0000-4000-8000-000000000002',sourceNativeSessionId:'A',conversationKind:'side'};
+    transport.dropCreationResponse();
+    expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input))!.status).toBe(504);
+    expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toHaveLength(1);
+    expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'blocked-reader',expectedRevision:1}))!.status).toBe(409);
+    await transport.restart(f.restart);
+    expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,{...input,model:'changed'}))!.status).toBe(409);
+    const grant=f.grants.pop()!;
+    expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input))!.status).toBe(409);
+    expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toHaveLength(1);
+    f.grants.push(grant);
+    const recovered=await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,{conversationKind:'side',sourceNativeSessionId:'A',operationId:'00000000-0000-4000-8000-000000000002',providerId:'fixture'});
+    expect(recovered!.status,JSON.stringify(await recovered!.clone().json())).toBe(200);
+    expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toEqual([]);
+    expect(transport.saved().bindings.find(item=>item.nativeSessionId==='source-1')!.sourceRelation).toMatchObject({id:'00000000-0000-4000-8000-000000000002',sourceNativeSessionId:'A',kind:'side'});
+    expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'known-reader',expectedRevision:1}))!.status).toBe(200);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('broker binding persistence failure recovers from the Host result after broker restart',async()=>{
+  const f=await fixture(false,true);const initial=coldAssociations();initial.bindings=initial.bindings.filter(item=>item.nativeSessionId==='A');
+  const transport=await enrollmentTransport(f,initial);
+  try {
+    const input={providerId:'fixture',operationId:'00000000-0000-4000-8000-000000000003',sourceNativeSessionId:'A',conversationKind:'side'};
+    transport.failBinding(true);
+    expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input))!.status).toBe(503);
+    expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toHaveLength(1);
+    transport.failBinding(false);await transport.restart();
+    const recovered=await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input);
+    expect(recovered!.status,JSON.stringify(await recovered!.clone().json())).toBe(200);
+    expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toEqual([]);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+test('native source creation and succession freeze have symmetric admission fences',async()=>{
+  const f=await fixture(false,true);const initial=coldAssociations();initial.bindings=initial.bindings.filter(item=>item.nativeSessionId==='A');
+  const transport=await enrollmentTransport(f,initial);let release!:()=>void,entered!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});const reached=new Promise<void>(resolve=>{entered=resolve;});
+  try {
+    f.beforeSourceCreate(async()=>{entered();await gate;});
+    const input={providerId:'fixture',operationId:'00000000-0000-4000-8000-000000000004',sourceNativeSessionId:'A',conversationKind:'side'};
+    const creating=transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input);await reached;
+    expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'racing-reader',expectedRevision:1}))!.status).toBe(409);
+    expect(transport.saved().associations!.freezes).toHaveLength(0);
+    release();expect((await creating)!.status).toBe(200);
+    expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'frozen-reader',expectedRevision:1}))!.status).toBe(200);
+    expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,{...input,operationId:'00000000-0000-4000-8000-000000000005'}))!.status).toBe(409);
+    const direct=await f.host.control({method:'POST',path:'/remote/create',sessionId:'bypass',body:JSON.stringify({providerId:'fixture',sourceNativeSessionId:'A',operationId:'00000000-0000-4000-8000-000000000006'})});
+    expect(direct.status,direct.body).toBe(400);expect(JSON.parse(direct.body!).code).toBe('succession_admission_closed');expect(f.sourceCreates()).toBe(1);
+  }finally{release();await transport.close();await f.close();}
+},15000);
+
+
+test('an unknown native creation without a result witness stays frozen and is never recreated',async()=>{
+  const f=await fixture(false,true);const initial=coldAssociations();initial.bindings=initial.bindings.filter(item=>item.nativeSessionId==='A');
+  const transport=await enrollmentTransport(f,initial);
+  try {
+    f.loseSourceCreation();
+    const input={providerId:'fixture',operationId:'00000000-0000-4000-8000-000000000007',sourceNativeSessionId:'A',conversationKind:'side'};
+    expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input))!.status).toBeGreaterThanOrEqual(400);
+    await transport.restart();
+    expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input))!.status).toBe(409);
+    expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toHaveLength(1);
+    const restored=new SessionSuccessionStore(join(f.root,'roles'));await restored.ready;
+    const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+    expect(state.associationAdmissions).toHaveLength(1);expect(state.associationResults).toEqual([]);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test.each([{installationId:'foreign'},{enrollment:false}])('mismatched Controller or unnegotiated peer fails before native creation: %j',async options=>{
+  const f=await fixture(false,true);const transport=await enrollmentTransport(f,undefined,options);
+  try {
+    expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'forbidden-peer',expectedRevision:1}))!.status).toBe(409);
+    expect(f.creates()).toBe(0);expect(transport.saved().associations!.freezes).toEqual([]);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+test('replacing the association authority never takes over a previously bound role',async()=>{
+  const f=await fixture(false,true);let transport=await enrollmentTransport(f);
+  try {
+    const input={providerId:'fixture',nativeSessionId:'A',operationId:'bound-role',expectedRevision:1};
+    expect((await transport.action('prepare',input))!.status).toBe(200);
+    expect((await transport.action('cancel',{operationId:input.operationId}))!.status).toBe(200);
+    await transport.close();transport=await enrollmentTransport(f);
+    expect((await transport.action('prepare',{...input,operationId:'replacement-authority'}))!.status).toBe(409);
+    expect(f.creates()).toBe(1);expect(transport.saved().associations!.freezes).toEqual([]);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('a full Host and broker restart preserves the frozen receipt when capture evidence cannot be revalidated',async()=>{
+  const f=await fixture(false,true);f.grants.push(...[{nativeSessionId:'side',sourceNativeSessionId:'A'},{nativeSessionId:'ask',sourceNativeSessionId:'A'},{nativeSessionId:'unlinked',sourceNativeSessionId:'A'},{nativeSessionId:'nested',sourceNativeSessionId:'side'}]);
+  const transport=await enrollmentTransport(f,coldAssociations());
+  try {
+    const input={providerId:'fixture',nativeSessionId:'A',operationId:'restart-frozen',expectedRevision:1};
+    expect((await transport.action('prepare',input))!.status).toBe(200);
+    const receipt=structuredClone(transport.saved().associations!.freezes[0]!.receipt);
+    await transport.restart(f.restart);
+    const restored=await (await transport.action('status',{operationId:input.operationId}))!.json();
+    expect(restored.record.phase).toBe('unknown');
+    expect(transport.saved().associations!.freezes[0]!.receipt).toEqual(receipt);
+    expect(transport.saved().associations!.freezes[0]!.released).toBeUndefined();
+    const blocked=await f.host.control({method:'POST',path:'/remote/create',sessionId:'blocked-restart',body:JSON.stringify({providerId:'fixture',sourceNativeSessionId:'A',operationId:'00000000-0000-4000-8000-000000000007'})});
+    expect(blocked.status).toBe(400);expect(f.sourceCreates()).toBe(0);
+    const reconciled=await transport.action('reconcile',{operationId:input.operationId});
+    expect(reconciled!.status).toBe(409);
+    expect(await reconciled!.json()).toMatchObject({code:'succession_enrollment_failed',error:'Source history changed beyond the captured handoff boundary.'});
+    expect((await (await transport.action('status',{operationId:input.operationId}))!.json()).record.phase).toBe('unknown');
+    expect(transport.saved().associations!.freezes[0]!.released).toBeUndefined();
+    expect(f.creates()).toBe(1);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('a revision-rejected TPM recovery cannot leave an unresolved association admission',async()=>{
+  const f=await fixture(true,true,async root=>{const store=new SessionSuccessionStore(join(root,'roles'));await store.ready;await store.ensureRole(ref('A'),root);});
+  try {
+    f.loseTpmCreation(true);
+    expect((await f.host.control({method:'POST',path:'/remote/tpm/create',body:JSON.stringify({providerId:'fixture',mainNativeSessionId:'A',operationId:'stale-recovery-create'})})).status).toBe(409);
+    const path=join(f.root,'tpm',(await readdir(join(f.root,'tpm'))).find(path=>path.endsWith('.json'))!);
+    const {work}=JSON.parse(await readFile(path,'utf8'));
+    const stale=await f.host.control({method:'POST',path:'/remote/tpm/action',body:JSON.stringify({id:work.id,revision:work.revision-1,action:'resolve',intentId:'creation',resolution:'accepted',nativeSessionId:'tpm-1',operationId:'stale-recovery'})});
+    expect(stale.status).toBe(409);expect(JSON.parse(stale.body).error).toMatch(/work changed/);
+    const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+    expect(state.associationAdmissions).toHaveLength(1);
+    const recovered=await f.host.control({method:'POST',path:'/remote/tpm/action',body:JSON.stringify({id:work.id,revision:work.revision,action:'resolve',intentId:'creation',resolution:'accepted',nativeSessionId:'tpm-1',operationId:'correct-recovery'})});
+    expect(recovered.status,recovered.body).toBe(200);
+    expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).associationAdmissions).toEqual([]);
+  }finally{await f.close();}
+},15000);
+
+
+test('a TPM recovery failure after native access retains its unresolved admission',async()=>{
+  const f=await fixture(true,true,async root=>{const store=new SessionSuccessionStore(join(root,'roles'));await store.ready;await store.ensureRole(ref('A'),root);});
+  try {
+    f.loseTpmCreation(true);
+    expect((await f.host.control({method:'POST',path:'/remote/tpm/create',body:JSON.stringify({providerId:'fixture',mainNativeSessionId:'A',operationId:'unknown-recovery-create'})})).status).toBe(409);
+    const path=join(f.root,'tpm',(await readdir(join(f.root,'tpm'))).find(path=>path.endsWith('.json'))!);
+    const {work}=JSON.parse(await readFile(path,'utf8'));
+    let inspections=0;f.sessions.get('tpm-1')!.runtimeInfo=async()=>{inspections++;throw new Error('Native recovery outcome is unavailable.');};
+    const body=JSON.stringify({id:work.id,revision:work.revision,action:'resolve',intentId:'creation',resolution:'accepted',nativeSessionId:'tpm-1',operationId:'unknown-recovery'});
+    expect((await f.host.control({method:'POST',path:'/remote/tpm/action',body})).status).toBe(409);
+    expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).associationAdmissions).toHaveLength(2);
+    const repeated=await f.host.control({method:'POST',path:'/remote/tpm/action',body});
+    expect(repeated.status).toBe(409);expect(JSON.parse(repeated.body).error).toMatch(/unresolved/);expect(inspections).toBe(1);
+  }finally{await f.close();}
 },15000);

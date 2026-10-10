@@ -35,6 +35,7 @@ export const SuccessionRecord = Type.Object({ ...request, phase: SuccessionPhase
   failureCode: Type.Optional(id), committedRevision: Type.Optional(revision),
 }, object);
 export type SuccessionRecord = Static<typeof SuccessionRecord>;
+export const isNativeSessionRef = (value: unknown): value is NativeSessionRef => Value.Check(NativeSessionRef, value);
 export const isPrimaryRole = (value: unknown): value is PrimaryRole => Value.Check(PrimaryRole, value);
 export const isSourceBinding = (value: unknown): value is SourceBinding => Value.Check(SourceBinding, value);
 export const isSuccessionRequest = (value: unknown): value is SuccessionRequest => Value.Check(SuccessionRequest, value);

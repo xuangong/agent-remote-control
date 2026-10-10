@@ -1,3 +1,4 @@
+import { SessionSuccessionEnrollment } from './session-succession-enrollment.js';
 import { successionTpmRouting } from './session-succession-tpm.js';
 import { SessionSuccessionService, type SessionSuccessionPorts } from './session-succession-service.js';
 import { captureSuccessionTimeline } from './session-succession-capture.js';
@@ -6,7 +7,7 @@ import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import type { SessionSuccessionStore } from './session-succession-store.js';
 import type { SessionSuccessionContextStore } from './session-succession-context.js';
 import type { SessionSuccessionCoordinator } from './session-succession.js';
-import { nativeSessionRefKey, isSuccessionRequest, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, isSuccessionRequest, type NativeSessionRef, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmOptions } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
 import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
@@ -81,7 +82,7 @@ export interface AgentHostRuntimeOptions {
   operationCache?: OperationCacheOptions;
   tpm?: TpmOptions;
   /** Internal wiring until provider readiness and product projection are certified together. */
-  succession?: { controllerId: string } & ({
+  succession?: { controllerId: string; enrollment?: true } & ({
     stateDirectory: string;
     /** Adapter-owned evidence. No provider is inferred to support succession from idle status. */
     native?: Pick<SessionSuccessionPorts, 'supports' | 'createIdle' | 'reconcileDelivery'> & {
@@ -106,6 +107,7 @@ export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
   addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
+  enrollFromRelay(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
   executeOperation(scope: string): SessionWireOperationExecutor;
   acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
   setRelayConnected(connected: boolean): void;
@@ -140,6 +142,7 @@ export interface AgentHost {
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
+  if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
   const runtime = createAgentHostRuntime({ ...options, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
@@ -160,6 +163,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
       ...(options.tpm ? { tpmManagement: true } : {}),
+      ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
@@ -565,7 +569,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         }
       },
       dispatch: () => {
-        const work = () => registration(providerId).directory.create(settings);
+        const create = () => registration(providerId).directory.create(settings);
+        const work = () => settings.sourceNativeSessionId && enrollment
+          ? enrollment.sourceMutation(operationScope(request), operationId, nativeRef({providerId, nativeSessionId:settings.sourceNativeSessionId}), settings, create,
+            async id => (await registration(providerId).directory.sourceReferences?.())?.some(grant => grant.nativeSessionId === id && grant.sourceNativeSessionId === settings.sourceNativeSessionId) === true) : create();
         const source = settings.sourceNativeSessionId ?? settings.editNativeSessionId;
         return source && successionBoundary ? successionBoundary.mutate(nativeRef({providerId, nativeSessionId:source}), work) : work();
       },
@@ -595,6 +602,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (draining && request.method === 'POST') throw new HostRequestError(503, 'controller_updating', 'Controller is updating. Reconnect before retrying.');
       const url = new URL(request.path, 'http://agent-host.local');
       const payload = request.method === 'POST' ? body(request.body) : undefined;
+      if (url.pathname === '/remote/succession/enrollment' || options.succession?.enrollment && url.pathname.startsWith('/remote/succession') && request.method === 'POST') return json(403, { code: 'succession_authority_required', error: 'Use the authenticated Relay association reservation.' });
       if (url.pathname.startsWith('/remote/succession')) {
         if (!successionService || !succession) return json(404, { code: 'succession_unavailable', error: 'Session succession is unavailable.' });
         try {
@@ -611,6 +619,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             const operationId = string(payload.operationId, 'operationId');
             const record = succession.coordinator.status(operationId);
             await authorizeSuccessionRead(record.from, record.to ?? record.from);
+            if (succession.store.read(record.roleId).associationAuthority) throw new Error('An authenticated association reservation is required.');
             if (url.pathname.endsWith('/commit')) {
               if (!Number.isSafeInteger(payload.expectedRevision) || (payload.expectedRevision as number) < 1) throw new Error('A valid expected revision is required.');
               return json(200, await successionService.commit(operationId, payload.expectedRevision as number));
@@ -628,10 +637,37 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (url.pathname.startsWith('/remote/tpm')) {
         if (!tpm) return json(404, { code: 'tpm_unavailable', error: 'TPM is unavailable on this Controller.' });
         try {
+          await tpm.ready;
           if (request.method === 'GET' && url.pathname === '/remote/tpm') return json(200, await tpm.list(url.searchParams.get('cursor') ?? undefined));
           if (request.method === 'GET' && url.pathname === '/remote/tpm/work') return json(200, await tpm.get(string(url.searchParams.get('id'), 'id')));
-          if (request.method === 'POST' && url.pathname === '/remote/tpm/create' && isTpmCreate(payload)) return json(200, await tpm.create(payload, operationScope(request)));
-          if (request.method === 'POST' && url.pathname === '/remote/tpm/action' && isTpmAction(payload)) return json(200, await tpm.action(payload, operationScope(request)));
+          if (request.method === 'POST' && url.pathname === '/remote/tpm/create' && isTpmCreate(payload)) {
+            const scope = operationScope(request);
+            const create = () => tpm.create(payload, scope);
+            const existing = tpm.store.all().some(record => record.createKey === JSON.stringify([scope, payload.operationId]));
+            const work = await (enrollment && !existing ? enrollment.tpmMutation(scope, payload.operationId, nativeRef({providerId:payload.providerId, nativeSessionId:payload.mainNativeSessionId}), payload, create,
+              async work => tpm.store.get(work.id).creation === 'accepted' && !!tpm.store.get(work.id).work.tpmNativeSessionId) : create());
+            if (enrollment && tpm.store.get(work.id).creation === 'accepted') await enrollment.recoverTpm(tpm.store.get(work.id));
+            return json(200, work);
+          }
+          if (request.method === 'POST' && url.pathname === '/remote/tpm/action' && isTpmAction(payload)) {
+            if (enrollment && payload.action === 'resolve' && payload.intentId === 'creation') {
+              const work = tpm.store.get(payload.id).work;
+              const source = work.mainSessionRef ?? nativeRef({providerId:work.providerId, nativeSessionId:work.mainNativeSessionId});
+              if (tpm.store.get(work.id).creation === 'accepted') {
+                const updated = await tpm.action(payload, operationScope(request));
+                await enrollment.recoverTpmAction(tpm.store.get(updated.id), operationScope(request), payload.operationId, source, payload);
+                return json(200, updated);
+              }
+              return json(200, await enrollment.mutation(operationScope(request), payload.operationId, source, payload,
+                () => tpm.action(payload, operationScope(request)), async updated => {
+                  const record = tpm.store.get(updated.id);
+                  if (record.creation !== 'accepted' || !record.work.tpmNativeSessionId) return false;
+                  await enrollment.recoverTpm(record);
+                  return true;
+                }));
+            }
+            return json(200, await tpm.action(payload, operationScope(request)));
+          }
           return json(400, { code: 'invalid_tpm_request', error: 'Invalid TPM request.' });
         } catch (error) { return json(409, { code: 'tpm_request_failed', error: error instanceof Error ? error.message : 'TPM request failed.' }); }
       }
@@ -799,7 +835,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     create: (providerId, cwd, extensions) => registration(providerId).directory.create({ ...(cwd ? { cwd } : {}), ...extensions }),
     execute: executeOperation('host:tpm'),
   }) : undefined;
-  return { relay, addRegistration, control, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => authorizeSuccessionRead(source, source)) : undefined;
+  const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
+    if (!options.succession?.enrollment || !enrollment || closed || draining) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
+    await tpm?.ready;
+    return enrollment.control(request, context);
+  };
+  return { relay, addRegistration, control, enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the

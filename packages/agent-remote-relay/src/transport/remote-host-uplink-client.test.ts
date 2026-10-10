@@ -152,3 +152,12 @@ it('delivers a session rename over the live uplink without disconnecting the Hos
   expect(b.registrations()).toBe(1);
   expect(b.states).toEqual(['connecting', 'registered']);
 }, 10000);
+
+it('keeps an older Relay connection while refusing unnegotiated succession control', async () => {
+  const b = await broker({ intervalMs: 30000, timeoutMs: 10000 }, [], async () => ({ status: 200, body: 'bypass' }));
+  b.connections[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId: 'untrusted', method: 'POST', path: '/remote/succession/enrollment', body: '{}' }));
+  await until(() => b.responses.some(response => response.requestId === 'untrusted'));
+  expect(b.responses.find(response => response.requestId === 'untrusted')!.status).toBe(403);
+  expect(b.states).toEqual(['connecting', 'registered']);
+  expect(b.connections[0]!.readyState).toBe(1);
+}, 10000);

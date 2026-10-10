@@ -1,9 +1,9 @@
 import { WebSocket } from 'ws';
 
 import {
-  decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
+  successionAuthorityKey, decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
   type ControllerIdentity, type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
-  type PreviewRegistrationSnapshot,
+  type PreviewRegistrationSnapshot, type TrustedSuccessionContext,
 } from '@orchardworks/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
@@ -53,6 +53,8 @@ export interface RemoteHostUplinkClientOptions {
   readonly resolveSession: RemoteHostPluginHostOptions['resolveSession'];
   readonly acquireSession?: RemoteHostPluginHostOptions['acquireSession'];
   readonly control: RemoteHostPluginHostOptions['control'];
+  /** Unpublished integration: the context is created from this registered socket only. */
+  readonly successionEnrollment?: { control(request: Parameters<RemoteHostPluginHostOptions['control']>[0], context: TrustedSuccessionContext): ReturnType<RemoteHostPluginHostOptions['control']> };
   readonly operationExecutor?: (scope: string) => SessionWireOperationExecutor;
   readonly registrationTimeoutMs?: number;
   readonly writeTimeoutMs?: number;
@@ -112,7 +114,9 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     const connectionId = ++connectionSequence;
     diagnose({ event: 'connecting', connectionId, registered: false });
     options.onStateChange?.('connecting');
-    const socket = new WebSocket(options.url, {
+    const endpoint = new URL(options.url);
+    if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '1');
+    const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
       maxPayload: UPLINK_MAX_FRAME_BYTES,
       handshakeTimeout: registrationTimeout,
@@ -128,6 +132,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     let lastHeartbeatAt: number | undefined;
     let retirement: DiagnosticDetails | undefined;
     let operationScope: string | undefined;
+    let successionContext: TrustedSuccessionContext | undefined;
     let unsubscribeProviders: (() => void) | undefined;
     let unsubscribePreviews: (() => void) | undefined;
     function details(): DiagnosticDetails {
@@ -143,7 +148,10 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       resolveSession: options.resolveSession,
       acquireSession: options.acquireSession,
       imageScope: () => { if (!operationScope) throw new Error('Image scope is unavailable before Host registration.'); return operationScope; },
-      control: request => options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
+      control: request => request.path === '/remote/succession/enrollment'
+        ? options.successionEnrollment && successionContext ? options.successionEnrollment.control({ ...request, ...(operationScope ? { operationScope } : {}) }, structuredClone(successionContext))
+          : { status: 403, body: JSON.stringify({ code: 'succession_authority_required', error: 'Succession enrollment was not negotiated.' }) }
+        : options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
       executeOperation: (agent, operation, work) => {
         if (!operationScope) throw new Error('Remote Host operation scope is unavailable before registration.');
         return (options.operationExecutor?.(operationScope) ?? options.relay.executeOperation(operationScope))(agent, operation, work);
@@ -227,7 +235,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         return;
       }
       if (registered && decoded.value.type === 'registered') {
-        if (decoded.value.hostId !== registeredHostId
+        if ((decoded.value.successionEnrollment && successionAuthorityKey(decoded.value.successionEnrollment)) !== (successionContext?.authority && successionAuthorityKey(successionContext.authority)) || decoded.value.hostId !== registeredHostId
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -239,6 +247,11 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         registered = true;
         registeredHostId = decoded.value.hostId;
         operationScope = JSON.stringify([new URL(options.url).origin, registeredHostId, options.installationId]);
+        if (options.successionEnrollment && decoded.value.successionEnrollment) {
+          const relayOrigin = new URL(options.url); relayOrigin.protocol = relayOrigin.protocol === 'wss:' ? 'https:' : 'http:';
+          if (decoded.value.successionEnrollment.origin !== relayOrigin.origin) { retire({ reason: 'protocol_error' }); return; }
+          successionContext = { authority: decoded.value.successionEnrollment, installationId: options.installationId };
+        }
         cloudHeartbeat = decoded.value.heartbeat;
         resetCloudDeadline();
         options.onStateChange?.('registered');

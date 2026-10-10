@@ -33,6 +33,8 @@ import type { BrokerRequestContext, RelaySocket } from './transport.js';
 import { gatewayCookieName, readGatewayCookie, validateGatewayOrigin, verifyGatewayGrant, type GatewayAuthOptions, type GatewayGrant } from './auth.js';
 
 export interface HostedRelayOptions extends GatewayAuthOptions {
+  /** Unpublished integration; native readiness remains independently required. */
+  successionEnrollment?: true;
   previewOrigin?: string;
   previewDomain?: string;
   storage?: RelayStateStore;
@@ -203,6 +205,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (tenants.size >= (options.maxTenants ?? 64)) return undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
         ownerSubject: grant.subject, durable, initialState, diagnostics,
+        ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const } : {}),
         userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
         onStateChange: async broker => { await state.mutate(draft => {
           const previous = draft.tenants.find(value => value.namespace === grant.namespace);

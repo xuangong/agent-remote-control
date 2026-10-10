@@ -1,3 +1,7 @@
+import { isDeepStrictEqual } from 'node:util';
+import { validBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
+import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
+import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
 import { isHostProviderChange } from '@orchardworks/agent-remote-protocol';
@@ -20,6 +24,7 @@ type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
 type DeviceCredential = { pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
+  successionEnrollment?: boolean;
   providerManagement?: true;
   tpmManagement?: true;
   connectionId?: string; stopDiagnostics?(): void;
@@ -38,6 +43,7 @@ class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
 export interface RemoteHostBrokerState {
+  associations?: BrokerAssociationState;
   pairings?: SavedPairingKey[];
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
@@ -47,6 +53,8 @@ export interface RemoteHostBrokerState {
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
 export interface HostBrokerOptions {
+  /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
+  successionEnrollment?: SuccessionAssociationAuthority;
   diagnostics?: DiagnosticJournal;
   ownerSubject?: string;
   userStreamCount?(subject: string): number;
@@ -66,6 +74,7 @@ export interface HostBrokerOptions {
 }
 export function createHostBroker(options: HostBrokerOptions) {
   const origin = new URL(options.origin).origin;
+  if (options.successionEnrollment && (!options.durable || !options.onStateChange || !isSuccessionAssociationAuthority(options.successionEnrollment) || options.successionEnrollment.origin !== origin || options.successionEnrollment.ownerSubject !== options.ownerSubject)) throw new Error('Succession enrollment requires a durable authenticated tenant authority.');
   const now = options.now ?? Date.now;
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
@@ -101,8 +110,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     const binding = bindings.get(value.agentId);
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
+  let associations: BrokerAssociationState = structuredClone(options.initialState?.associations ?? { version: 1, revision: 0, admissions: [], freezes: [] });
+  if (!validBrokerAssociations(associations)) throw new Error('Invalid durable association state.');
   function snapshot(): RemoteHostBrokerState {
-    return { pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
+    return { ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement }) => ({ ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
@@ -140,6 +151,91 @@ export function createHostBroker(options: HostBrokerOptions) {
     });
     commits = operation.catch(() => undefined);
     return operation;
+  }
+  function associationChange<T>(change: (state: BrokerAssociationState) => T): Promise<T> {
+    return commit(draft => {
+      const next = structuredClone(associations), value = change(next);
+      if (next.revision >= Number.MAX_SAFE_INTEGER) throw new BrokerError(409, 'association_capacity', 'Association revision is exhausted.');
+      next.revision++;
+      if (!validBrokerAssociations(next)) throw new BrokerError(409, 'association_capacity', 'Association storage is full or invalid.');
+      draft.associations = next;
+      return { value, publish() { associations = next; } };
+    });
+  }
+  function assertAssociationOpen(source: NativeSessionRef) {
+    if (associations.freezes.some(item => !item.released && item.receipt.lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)))) throw new BrokerError(409, 'succession_associations_frozen', 'Source relationships are reserved by succession.', true);
+  }
+  function assertAssociationMutable(source: NativeSessionRef): void {
+    assertAssociationOpen(source);
+    if (associations.freezes.some(item => item.projection && [...item.receipt.lineage, item.projection.role.current].some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)))) {
+      throw new BrokerError(409, 'succession_relationship_updates_unavailable', 'Trusted relationship updates are not enabled for this primary role.');
+    }
+  }
+  const associationSource = (host: Host, providerId: string, nativeSessionId: string): NativeSessionRef => ({ controllerId: host.installationId, providerId, nativeSessionId });
+  async function associationRpc(host: Host, input: unknown): Promise<Record<string, any>> {
+    if (!options.successionEnrollment || !host.successionEnrollment) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Trusted succession enrollment was not negotiated.');
+    const response = await rpc(host, 'POST', '/remote/succession/enrollment', undefined, JSON.stringify(input));
+    let payload: Record<string, any>;
+    try { payload = JSON.parse(response.body); } catch { throw new BrokerError(502, 'invalid_host_response', 'Invalid succession response.'); }
+    if (response.status !== 200) throw new BrokerError(response.status, String(payload.code ?? 'succession_enrollment_failed'), String(payload.error ?? 'Succession enrollment failed.'));
+    return payload;
+  }
+  async function successionAction(host: Host, action: string, input: Record<string, unknown>) {
+    if (!options.successionEnrollment || !host.successionEnrollment) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Trusted succession enrollment was not negotiated.');
+    const allowed = action === 'prepare' ? ['operationId', 'providerId', 'nativeSessionId', 'expectedRevision', 'targetProviderId'] : ['operationId'];
+    if (Object.keys(input).some(name => !allowed.includes(name))) throw new BrokerError(400, 'invalid_succession_request', 'Only source selection and operation identity may be supplied.');
+    const operationId = required(input.operationId, 'operationId');
+    let frozen = associations.freezes.find(item => item.hostId === host.id && item.receipt.request.operationId === operationId);
+    if (action === 'prepare') {
+      const providerId = required(input.providerId, 'providerId'), nativeSessionId = required(input.nativeSessionId, 'nativeSessionId');
+      const source = associationSource(host, providerId, nativeSessionId);
+      const targetProviderId = input.targetProviderId === undefined ? undefined : required(input.targetProviderId, 'targetProviderId');
+      if (!Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision as number) < 1) throw new BrokerError(400, 'invalid_succession_request', 'A current role revision is required.');
+      const assertSameRequest = (receipt: SuccessionAssociationFreeze) => {
+        const prior = receipt.request;
+        if (nativeSessionRefKey(prior.from) !== nativeSessionRefKey(source) || prior.expectedRevision !== input.expectedRevision || (prior.targetProviderId ?? prior.from.providerId) !== (targetProviderId ?? providerId)) throw new BrokerError(409, 'succession_identity_conflict', 'Succession operation identity changed.');
+      };
+      if (frozen) {
+        assertSameRequest(frozen.receipt);
+      } else {
+        const described = await associationRpc(host, { action: 'describe', providerId, nativeSessionId });
+        if (!isPrimaryRole(described.role) || !Array.isArray(described.lineage) || described.role.revision !== input.expectedRevision || described.role.current.controllerId !== host.installationId || nativeSessionRefKey(described.role.current) !== nativeSessionRefKey(source)) throw new BrokerError(409, 'invalid_host_response', 'The current primary role could not be verified.');
+        frozen = await associationChange(state => {
+          const duplicate = state.freezes.find(item => item.hostId === host.id && item.receipt.request.operationId === operationId);
+          if (duplicate) { assertSameRequest(duplicate.receipt); return duplicate; }
+          for (const ref of described.lineage as NativeSessionRef[]) assertAssociationOpen(ref);
+          if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
+          const receipt: SuccessionAssociationFreeze = { version: 1, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
+            request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}) },
+            associationRevision: state.revision, lineage: described.lineage,
+            relations: [...bindings.values()].filter(binding => binding.hostId === host.id && binding.sourceRelation).map(binding => ({
+              relationId: binding.sourceRelation!.id, kind: binding.sourceRelation!.kind, readerRef: associationSource(host, binding.providerId, binding.nativeSessionId),
+              sourceRef: associationSource(host, binding.providerId, binding.sourceRelation!.sourceNativeSessionId), linked: binding.sourceRelation!.linked ?? true, revision: binding.sourceRelation!.revision ?? 0,
+            })) };
+          const result = { hostId: host.id, receipt }; state.freezes.push(result); return result;
+        });
+      }
+    }
+    if (!frozen) throw new BrokerError(404, 'succession_not_found', 'No frozen succession operation exists.');
+    if (successionAuthorityKey(frozen.receipt.authority) !== successionAuthorityKey(options.successionEnrollment!)) throw new BrokerError(409, 'succession_authority_changed', 'The frozen authority requires reconciliation.');
+    const result = await associationRpc(host, { action, freeze: frozen.receipt });
+    if (!isSuccessionRecord(result.record) || !isPrimaryRole(result.role) || !result.freeze || successionFreezeKey(result.freeze) !== successionFreezeKey(frozen.receipt)
+      || result.record.operationId !== operationId || result.record.roleId !== frozen.receipt.request.roleId) throw new BrokerError(502, 'invalid_host_response', 'The saved succession receipt could not be verified.');
+    if (['committed', 'rejected', 'cancelled'].includes(result.record.phase)) {
+      const confirmed = await associationRpc(host, { action: 'status', freeze: frozen.receipt });
+      if (!isDeepStrictEqual(confirmed, result)) throw new BrokerError(409, 'succession_decision_changed', 'Read back the durable succession decision before releasing associations.');
+      await associationChange(state => {
+        const item = state.freezes.find(item => item.receipt.token === frozen!.receipt.token)!;
+        if (item.released) {
+          if (item.released !== result.record.phase || item.projection && !isDeepStrictEqual(item.projection.receipt, result.record)) throw new BrokerError(409, 'succession_decision_changed', 'The released succession decision changed.');
+          return;
+        }
+        item.released = result.record.phase;
+        if (result.record.phase === 'committed') item.projection = { version: 1, role: result.role as PrimaryRole, receipt: result.record as SuccessionRecord };
+      });
+    }
+    if (['committed', 'rejected', 'cancelled'].includes(result.record.phase)) await associationRpc(host, { action: 'release', freeze: frozen.receipt });
+    return { record: result.record, role: result.role, locator: { hostId: host.id, providerId: result.role.current.providerId, nativeSessionId: result.role.current.nativeSessionId } };
   }
   function changeSharing<T>(change: (draft: HostSharing) => T): Promise<T> {
     return commit(state => {
@@ -246,7 +342,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     for (const stream of host.streams.values()) { clearTimeout(stream.timer); stream.socket.close(1012, 'Remote Host disconnected'); }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -284,7 +380,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, ...(host.successionEnrollment && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
@@ -361,7 +457,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             host = existing ?? { ...next, generation: 0, pending: new Map(), streams: new Map() };
             hosts.set(host.id, host);
             if (host.socket) { const previous = host.socket; disconnected(host, previous, 'connection_replaced', 1012); previous.close(1012, 'Host connection replaced'); }
-            Object.assign(host, next); host.connectionId=randomUUID(); host.generation += 1; clearTimeout(timer);
+            Object.assign(host, next); host.successionEnrollment = enrollmentRequested && !!options.successionEnrollment; host.connectionId=randomUUID(); host.generation += 1; clearTimeout(timer);
             if (!retired && socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
               host.issueCredential = message.credentialRotation ? () => issueCredential(false) : undefined;
@@ -488,6 +584,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     const parentNativeSessionId = action === 'child/attach' ? required(body.parentNativeSessionId, 'parentNativeSessionId') : undefined;
     if (parentNativeSessionId) creatorSubject ??= nativeBindings.get(JSON.stringify([host.id, providerId, parentNativeSessionId]))?.creatorSubject;
     const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.operationId, 'operationId') : nativeSessionId]);
+    const source = action === 'create' && typeof body.sourceNativeSessionId === 'string' ? associationSource(host, providerId, body.sourceNativeSessionId) : undefined;
+    const admissionId = createHash('sha256').update(key).digest('hex');
+    const admissionFingerprint = createHash('sha256').update(JSON.stringify([providerId, Object.entries(body).sort(([a],[b])=>a.localeCompare(b))])).digest('hex');
+    const trackAssociation = !!source && (!!options.successionEnrollment || !!options.initialState?.associations);
     const operation = () => {
       const existingBinding = attaching ? nativeBindings.get(key) : undefined;
       if (existingBinding && existingBinding.parentNativeSessionId !== parentNativeSessionId) {
@@ -504,7 +604,25 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? { providerId, operationId: required(body.operationId, 'operationId'),
                 ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) }
             : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}), ...(body.takeOver === undefined ? {} : {takeOver: required(body.takeOver, 'takeOver')}) };
-        const result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
+        if (source) assertAssociationMutable(source);
+        let recoverSource = false;
+        if (trackAssociation) await associationChange(state => {
+          assertAssociationMutable(source!);
+          const previous = state.admissions.find(item => item.id === admissionId);
+          if (previous) {
+            if (previous.fingerprint !== admissionFingerprint) throw new BrokerError(409, 'association_outcome_unknown', 'Source creation identity changed.');
+            recoverSource = true; return;
+          }
+          state.admissions.push({ id: admissionId, fingerprint: admissionFingerprint, source: source! });
+        });
+        let result: RpcResponse;
+        let recoveredReaderId: string | undefined;
+        if (recoverSource) {
+          const recovered = await associationRpc(host, {action:'source-result',providerId,operationId:body.operationId,sourceNativeSessionId:body.sourceNativeSessionId,parameters:optionalSettings(body,['sourceNativeSessionId','cwd','workspaceId','model','reasoningEffort','planning'])});
+          if (!isNativeSessionRef(recovered.source) || !isNativeSessionRef(recovered.reader) || nativeSessionRefKey(recovered.source) !== nativeSessionRefKey(source!) || recovered.reader.controllerId !== host.installationId || recovered.reader.providerId !== providerId || recovered.operationId !== body.operationId) throw new BrokerError(409,'association_outcome_unknown','Source creation result evidence does not match.');
+          recoveredReaderId = recovered.reader.nativeSessionId;
+          result = await rpc(host,'POST','/remote/attach',proposedAgentId,JSON.stringify({providerId,nativeSessionId:recoveredReaderId}));
+        } else result = await rpc(host, 'POST', `/remote/${action}`, proposedAgentId, JSON.stringify(request));
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
         if (result.status >= 300) {
           if (attaching) {
@@ -527,10 +645,17 @@ export function createHostBroker(options: HostBrokerOptions) {
         }
         const actualNativeSessionId = host.legacyDsh ? nativeSessionId : requiredHostIdentity(returned.nativeSessionId, 'nativeSessionId');
         const agentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
+        if (recoveredReaderId && actualNativeSessionId !== recoveredReaderId) throw new BrokerError(409, 'native_identity_conflict', 'The recovered session attachment returned a different native identity.');
         if (attaching && actualNativeSessionId !== nativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
         if (body.conversationKind && actualNativeSessionId === body.sourceNativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The new conversation cannot be its own source.');
         const nativeKey = JSON.stringify([host.id, providerId, actualNativeSessionId]);
         return commit(draft => {
+          if (source) assertAssociationMutable(source);
+          if (trackAssociation) {
+            draft.associations = structuredClone(associations);
+            draft.associations.admissions = draft.associations.admissions.filter(item => item.id !== admissionId);
+            draft.associations.revision++;
+          }
           if (hosts.get(host.id) !== host || host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
           const byAgent = bindings.get(agentId); const byNative = nativeBindings.get(nativeKey);
           if ((byAgent && !sameBinding(byAgent, host.id, providerId, actualNativeSessionId)) || (byNative && byNative.agentId !== agentId)) {
@@ -545,6 +670,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           const { generation: _generation, recovery: _recovery, ...saved } = binding;
           draft.bindings = draft.bindings.filter(value => value.agentId !== agentId); draft.bindings.push(saved);
           return { value: binding, publish() {
+            if (draft.associations) associations = draft.associations;
             binding.generation = host.generation;
             bindings.set(agentId, binding); nativeBindings.set(nativeKey, binding); pendingBindingSlots.delete(slot);
             attached.set(nativeKey, Promise.resolve(binding));
@@ -576,8 +702,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     let binding: Binding;
     try { binding = await existing.result; }
     catch (error) {
-      // Only proven pre-dispatch rejections permit this intent to reach the Host again.
-      if (error instanceof BrokerError && error.creationRejected && creations.get(key) === existing) creations.delete(key);
+      // Unknown source retries may read a durable result witness; they never repeat native creation.
+      if (trackAssociation && creations.get(key) === existing) creations.delete(key);
+      if (error instanceof BrokerError && error.creationRejected && (trackAssociation || creations.get(key) === existing)) {
+        creations.delete(key);
+        if (trackAssociation) await associationChange(state => { state.admissions = state.admissions.filter(item => item.id !== admissionId); });
+      }
       throw error;
     }
     await commit(draft => {
@@ -716,6 +846,12 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (access?.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
     const subject = principal(context);
+    const succession = /^\/v1\/remote\/hosts\/([^/]+)\/succession\/(prepare|commit|cancel|status|reconcile)$/.exec(url.pathname);
+    if (succession) {
+      requireOwner(subject); requireAccess(succession[1]!, subject);
+      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+      return json(200, await successionAction(requireHost(succession[1]!), succession[2]!, await readBody(request)));
+    }
     if (url.pathname === '/v1/remote/controller-release' && request.method === 'GET') {
       requireOwner(subject);
       const refresh = url.searchParams.get('refresh') === '1';
@@ -944,8 +1080,12 @@ export function createHostBroker(options: HostBrokerOptions) {
       await readBody(request);
       const host = hosts.get(revoking[1]!);
       if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
-      previews.invalidate(host.id);
+      const assertRevocable = () => {
+        if (associations.admissions.some(item => item.source.controllerId === host.installationId) || associations.freezes.some(item => item.hostId === host.id && (!item.released || item.projection))) throw new BrokerError(409, 'succession_associations_frozen', 'Reconcile succession relationships before revoking this Host.');
+      };
+      assertRevocable();
       await commit(draft => {
+        assertRevocable();
         draft.keys = draft.keys.filter(([, credential]) => credential.installationId !== host.installationId);
         draft.bindings = draft.bindings.filter(binding => binding.hostId !== host.id);
         draft.creations = draft.creations.filter(([, value]) => draft.bindings.some(binding => binding.agentId === value.agentId));
@@ -1035,7 +1175,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!);
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
@@ -1174,6 +1314,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const source = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.sourceNativeSessionId]));
       const allowed = () => binding && source && binding !== source && sessionAllowed(binding, subject) && sessionAllowed(source, subject);
       if (!allowed()) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      assertAssociationMutable(associationSource(hosts.get(input.hostId)!, input.providerId, input.sourceNativeSessionId));
       const proven = [...completedCreations.values()].some(value => {
         if (value.agentId !== binding!.agentId) return false;
         try { return JSON.parse(value.fingerprint).sourceNativeSessionId === input.sourceNativeSessionId; } catch { return false; }
@@ -1182,18 +1323,23 @@ export function createHostBroker(options: HostBrokerOptions) {
       const relation: SourceRelation = { id: input.id, kind: input.kind, sourceNativeSessionId: input.sourceNativeSessionId, createdAt: input.createdAt };
       await commit(draft => {
         if (!allowed() || bindings.get(binding!.agentId) !== binding) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+        assertAssociationMutable(associationSource(hosts.get(input.hostId as string)!, input.providerId as string, input.sourceNativeSessionId as string));
+        if (options.successionEnrollment || draft.associations) { draft.associations = structuredClone(associations); draft.associations.revision++; }
         const prior = binding!.sourceRelation;
         if (prior && (prior.kind !== relation.kind || prior.id !== relation.id || prior.sourceNativeSessionId !== relation.sourceNativeSessionId)) {
           throw new SharingError(409, 'relation_conflict', 'This session already has a different relationship.');
         }
         const saved = draft.bindings.find(item => item.agentId === binding!.agentId)!;
         saved.sourceRelation = prior ?? relation;
-        return { value: undefined, publish() { binding!.sourceRelation = saved.sourceRelation; } };
+        return { value: undefined, publish() { if (draft.associations) associations = draft.associations; binding!.sourceRelation = saved.sourceRelation; } };
       });
     },
     async updateSessionRelation(subject: string, input: unknown): Promise<void> {
       if (!validSessionRelationUpdate(input)) throw new SharingError(400, 'invalid_relation', 'A complete session relation and current revision are required.');
+      const host = hosts.get(input.hostId);
+      if (host) assertAssociationMutable(associationSource(host, input.providerId, input.sourceNativeSessionId));
       await commit(draft => {
+        if (host) assertAssociationMutable(associationSource(host, input.providerId, input.sourceNativeSessionId));
         const binding = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.nativeSessionId]));
         const source = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.sourceNativeSessionId]));
         if (!binding || !source || !sessionAllowed(binding, subject) || !sessionAllowed(source, subject)) {
@@ -1207,8 +1353,9 @@ export function createHostBroker(options: HostBrokerOptions) {
         if (revision === input.expectedRevision + 1 && (relation.linked ?? true) === input.linked) return { value: undefined, publish() {} };
         if (revision !== input.expectedRevision) throw new SharingError(409, 'relation_conflict', 'This side relationship changed. Refresh before trying again.');
         const next = { ...relation, linked: input.linked, revision: revision + 1 };
+        if (options.successionEnrollment || draft.associations) { draft.associations = structuredClone(associations); draft.associations.revision++; }
         draft.bindings.find(item => item.agentId === binding.agentId)!.sourceRelation = next;
-        return { value: undefined, publish() { binding.sourceRelation = next; } };
+        return { value: undefined, publish() { if (draft.associations) associations = draft.associations; binding.sourceRelation = next; } };
       });
     },
     canAccessSession: (agentId: string, subject: string) => { const binding = bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },

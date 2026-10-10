@@ -52,17 +52,101 @@ with and without a requirement. Final focused verification: six suites, 79 tests
 passed; Controller typecheck and scoped reviews passed. Compatibility update/check
 also passed. These tests use a native fixture, not a certified real provider.
 
-The next substantial backend gap, now in implementation, is trusted association enrollment/freeze.
-Relay owns linked Side/Ask metadata; Host owns native grants and TPM records.
-Runtime does not yet reconcile and atomically reserve their complete snapshot.
-Separate `setParticipants` and `begin` cannot provide that guarantee. Include
-cold readers, nested/unlinked relationships and all TPM works, and fence concurrent
-create/import/link/unlink; unknown outcomes must not release a reservation.
-Do not expose the existing internal succession control routes as a usable feature.
+Trusted association enrollment/freeze is now verified locally after `552e507`.
+Its scoped reviews passed; inspect live Git before continuing.
+Relay freezes its durable Side/Ask catalog
+through its existing mutation queue. A negotiated, authenticated uplink context
+supplies authority separately from request JSON; Host reconciles native grants and
+TPM records through atomic `beginEnrolled`. Controller identity is the persistent
+installation identity, not the ephemeral Host socket identifier.
 
-After that: real adapter evidence/certification, authenticated broker projection,
+The first scoped review found and verified fixes for mutable caller references
+and JSON-key-order-sensitive receipt comparisons. The release review then found
+a concurrent same-operation/different-input race. The next fixed review snapshot
+adds a shared inner/outer fingerprint check with real uplink tests, pre-enrollment
+cancellation tombstones, cold/nested/unlinked grant coverage, and provider-scoped
+reader identities. Its review found that invalid expected revisions could freeze
+before Host rejection; a pre-freeze revision check now prevents that case. The
+TPM checkpoint scoped re-review passed this fix and exact TPM recovery. See
+`.tmp/enrollment-association-checkpoint.md` and its fixed diff/evidence file;
+`.tmp/enrollment-tpm-checkpoint.md` and `.tmp/enrollment-tpm-review.md` supersede
+that snapshot for revision and TPM behavior. The fixed source-result snapshot
+also passed scoped review (`.tmp/enrollment-source-review.md`): exact durable
+recovery, canonical parameter matching, grant validation, both creation/freeze
+fences, and pre-dispatch result-slot reservation. Later live edits belong to full
+Host reconstruction tests and the TPM recovery-action rejection boundary.
+
+Host retains an enrollment reservation until Relay has durably saved the terminal
+decision/projection and acknowledges the exact receipt. A lost response, unknown
+outcome, or storage failure does not release it. Old A-to-B status replay retains
+its original projection even after B-to-C; current navigation may report C.
+Host state uses version 2 with explicit version-1 migration. Relay uses outer
+version 3 when association state exists; legacy writers must reject newer state.
+Version-1 migration supplies empty enrollment/admission/result state. An earlier
+unpublished version-2 experiment without `associationResults` fails closed; it is
+not a supported migration input. Final incremental spec/quality review passed
+(`.tmp/enrollment-final-review.md`). Root reran four Host/runtime/store/TPM suites:
+96 tests passed. Whole-workspace typecheck and compatibility update/check passed.
+The initial typecheck failure was missing dist exports; building DSH provider,
+Controller and DSH workspace packages resolved it without unrelated source changes.
+
+Ordinary link/unlink/create/import on a committed reader overlay currently fails
+explicitly instead of reporting success with a stale Host binding. This is a
+temporary implementation gate, not the intended product behavior. Complete trusted
+overlay updates before enabling succession. A first cancelled reservation without
+any committed overlay must permit ordinary relationship changes after release.
+Exact TPM creation/action recovery and paused/completed cold-work inclusion have
+passed focused verification and scoped review. Native source-creation recovery
+now persists the exact operation result together with admission settlement; a
+native grant alone does not identify its creating operation. Broker retries attach
+that recorded reader instead of invoking native creation again. No witness means
+unknown, with the reservation retained. Full Host reconstruction and the TPM
+rejection regression passed. The latter repairs a confirmed pre-native stale-
+revision rejection that otherwise leaked an extra unresolved association admission;
+native recovery and subsequent persistence failures remain unknown and fenced.
+Do not expose internal succession control routes as a usable feature.
+
+Full Host restart has a deliberate recovery limit: a previously ready operation
+becomes unknown. If the recreated history epoch cannot certify the captured
+boundary, reconcile rejects and retains the fence. This must not be reported as
+automatic recovery of a prepared operation. A durable committed decision has a
+different forward-projection recovery path. Neither path certifies a real provider.
+
+Next implement trusted ordinary postcommit relationship updates using
+`.tmp/association-updates-implementation-brief.md`, then real adapter
+evidence/certification, authenticated broker projection,
 product reference replacement/recovery, then browser/native acceptance. No merge,
 push, publish, deployment, or user-service replacement has occurred.
+
+## Native evidence follow-up (2026-10-10)
+
+Isolated public-SDK probes have now run against the local default Claude CLI
+2.1.128 and the separately selected, already installed SDK-bundled CLI 2.1.247
+(SDK 0.3.247). These probes used empty temporary profiles/workspaces, a loopback
+Anthropic fixture and OS network restrictions; no user runtime or installed
+command was changed. The default binary is below the current Host registration
+minimum. The bundled binary is a test target, not the current product default.
+
+Both persisted the exact supplied user UUID, root identity and text body, readable
+through public `getSessionMessages` while running and after exit. The bundled
+producer also correlated first stream/result messages to the input UUID. Empty
+initialization made no model request in the bounded probe window. Neither baseline
+produced `session_state_changed`; SDK source inspection confirmed it does not
+filter that subtype. The producer itself is binary-only in the installed package.
+
+Correction to the earlier preflight: public `Query.reinitialize()` exists. A
+separate empty-profile bundled probe observed a complete empty background level
+after it, plus `session_state: idle` in the response. That response field is not
+declared in `SDKControlInitializeResponse`. Reinitialize can re-register hooks
+and replay/settle callbacks, so it is not a general readonly readiness getter.
+The full internal pending-work predicate remains unproven. Do not enable a real
+provider from these positive persistence/snapshot results alone.
+
+Read the retained local artifacts before further native work:
+`.tmp/claude-succession-implementation-brief.md`,
+`.tmp/claude-native-succession-probe.md`, and
+`.tmp/claude-readiness-contract-followup.md`. The implementation brief was corrected
+to remove the mistaken claim that no public reinitialize method exists.
 
 ## Start here
 
@@ -201,7 +285,10 @@ its public exposure before final integration; do not remove unrelated prompt-edi
 fork behavior. A future optional native enhancement must not determine the
 product's core role or relationship semantics.
 
-## Implementation checkpoint
+## Historical implementation checkpoint
+
+This table records the original handoff. Use the continuation checkpoint above
+for current status; do not repeat work solely because this table lists it missing.
 
 | Area | Present in code | Still missing or affected by the new decision |
 | --- | --- | --- |

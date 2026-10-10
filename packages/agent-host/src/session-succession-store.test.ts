@@ -115,3 +115,154 @@ test('freezes association changes during preparation and rejects a stale associa
   await expect(store.commit('op')).rejects.toThrow(/association/i);
   expect(store.read('role').role.current.nativeSessionId).toBe('A');
 });
+
+test('atomically enrolls a frozen association receipt and refuses unresolved source admissions across restart', async () => {
+  const { store, directory } = await fixture();
+  const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
+  const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 4, lineage: [source], relations: [] };
+  await store.admitAssociation('create', 'fingerprint', source);
+  await expect(store.beginEnrolled(freeze, [], store.generation)).rejects.toThrow(/unresolved/);
+  const reopened = new SessionSuccessionStore(directory); await reopened.ready;
+  await expect(reopened.beginEnrolled(freeze, [], reopened.generation)).rejects.toThrow(/unresolved/);
+  await reopened.settleAssociation('create', 'fingerprint');
+  const operation = await reopened.beginEnrolled(freeze, [], reopened.generation);
+  expect(operation.phase).toBe('preparing');
+  expect(reopened.read('role').associationAuthority).toEqual(authority);
+  expect(reopened.read('role').enrollments).toEqual([freeze]);
+  await expect(reopened.admitAssociation('another', 'fingerprint', source)).rejects.toThrow(/reserved/);
+  await expect(reopened.beginEnrolled({ ...freeze, token: 'forged' }, [], reopened.generation)).rejects.toThrow(/receipt/);
+  const restored = new SessionSuccessionStore(directory); await restored.ready;
+  expect(restored.operation('op').phase).toBe('unknown');
+  expect(restored.read('role').enrollments).toEqual([freeze]);
+});
+
+test('migrates legacy storage explicitly and rejects admission races or authority replacement', async () => {
+  const { store, directory } = await fixture();
+  const path = join(directory, 'state.json');
+  const legacy = JSON.parse(await readFile(path, 'utf8')); legacy.version = 1; delete legacy.associationAdmissions; delete legacy.associationResults;
+  await writeFile(path, JSON.stringify(legacy));
+  const restored = new SessionSuccessionStore(directory); await restored.ready;
+  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(2);
+  const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
+  const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
+  const before = restored.generation;
+  await restored.admitAssociation('create', 'fingerprint', source); await restored.settleAssociation('create', 'fingerprint');
+  await expect(restored.beginEnrolled(freeze, [], before)).rejects.toThrow(/changed/);
+  await restored.beginEnrolled(freeze, [], restored.generation);
+  await restored.advance('op', 'preparing', { phase: 'cancelled' });
+  await restored.releaseEnrollment(freeze);
+  await expect(restored.begin({ ...request, operationId: 'local-bypass' })).rejects.toThrow(/authenticated/);
+  await expect(restored.beginEnrolled({ ...freeze, token: 'replacement', authority: { ...authority, namespace: 'another' }, request: { ...request, operationId: 'new' } }, [], restored.generation)).rejects.toThrow(/authority/);
+  expect(restored.read('role').operations).toHaveLength(1);
+});
+
+test('copies source identities before queued association mutations', async () => {
+  const { store, directory } = await fixture();
+  const input = { ...source, nativeSessionId: 'new' };
+  const pending = store.ensureRole(input, '/workspace'); input.nativeSessionId = 'forged';
+  const created = await pending;
+  expect(created.origin.nativeSessionId).toBe('new');
+  const admitted = { ...source };
+  const admission = store.admitAssociation('guard', 'fingerprint', admitted); admitted.nativeSessionId = 'changed';
+  await admission;
+  const saved = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8'));
+  expect(saved.associationAdmissions[0].source).toEqual(source);
+  admitted.nativeSessionId = 'changed-again';
+  const authority={version:1 as const,origin:'https://relay.example',issuer:'https://issuer.example',namespace:'tenant',ownerSubject:'owner'};
+  const freeze={version:1 as const,token:'alias-check',authority,controllerId:source.controllerId,request,associationRevision:0,lineage:[source],relations:[]};
+  await expect(store.beginEnrolled(freeze,[],store.generation)).rejects.toThrow(/unresolved/);
+  expect(store.read(created.id).role.origin.nativeSessionId).toBe('new');
+});
+
+test('accepts semantically identical frozen receipts with reordered JSON object fields', async () => {
+  const { store } = await fixture();
+  const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
+  const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
+  await store.beginEnrolled(freeze, [], store.generation);
+  const reordered = { ...freeze, authority: { ownerSubject: authority.ownerSubject, namespace: authority.namespace, issuer: authority.issuer, origin: authority.origin, version: authority.version }, lineage: [{ nativeSessionId: source.nativeSessionId, providerId: source.providerId, controllerId: source.controllerId }] };
+  expect((await store.beginEnrolled(reordered, [], store.generation)).operationId).toBe('op');
+  await store.advance('op', 'preparing', { phase: 'cancelled' });
+  await store.releaseEnrollment(reordered);
+  expect((await store.beginEnrolled({ ...reordered, token: 'next', request: { ...request, operationId: 'next' } }, [], store.generation)).phase).toBe('preparing');
+});
+
+
+test('terminal enrolled decisions stay fenced across restart until the exact durable release', async () => {
+  const {store,directory}=await fixture();
+  const authority={version:1 as const,origin:'https://relay.example',issuer:'https://issuer.example',namespace:'tenant',ownerSubject:'owner'};
+  const freeze={version:1 as const,token:'release-token',authority,controllerId:source.controllerId,request,associationRevision:0,lineage:[source],relations:[]};
+  await store.beginEnrolled(freeze,[],store.generation);
+  await expect(store.releaseEnrollment(freeze)).rejects.toThrow(/Unknown/);
+  await store.advance('op','preparing',{phase:'cancelled'});
+  const restored=new SessionSuccessionStore(directory);await restored.ready;
+  await expect(restored.admitAssociation('reader','fingerprint',source)).rejects.toThrow(/reserved/);
+  await expect(restored.releaseEnrollment({...freeze,token:'forged'})).rejects.toThrow(/receipt/);
+  await restored.releaseEnrollment(freeze);
+  await restored.releaseEnrollment(freeze);
+  expect(restored.read('role').releasedEnrollments).toEqual(['release-token']);
+  await restored.admitAssociation('reader','fingerprint',source);
+});
+
+
+test('recovered TPM evidence settles only its exact persisted admission',async()=>{
+  const {store,directory}=await fixture();
+  const recovery={createKey:'["scope","create-tpm"]',createFingerprint:'a'.repeat(64)};
+  await store.admitAssociation('tpm','fingerprint',source,false,recovery);
+  await store.admitAssociation('unrelated','other',source);
+  recovery.createKey='tampered';
+  const restored=new SessionSuccessionStore(directory);await restored.ready;
+  const evidence={createKey:'["scope","create-tpm"]',createFingerprint:'a'.repeat(64)};
+  await expect(restored.settleRecoveredAssociation({...evidence,createFingerprint:'b'.repeat(64)},source)).rejects.toThrow(/conflict/);
+  await expect(restored.settleRecoveredAssociation(evidence,target)).rejects.toThrow(/conflict/);
+  await restored.settleRecoveredAssociation(evidence,source);
+  const state=JSON.parse(await readFile(join(directory,'state.json'),'utf8'));
+  expect(state.associationAdmissions.map((item:{id:string})=>item.id)).toEqual(['unrelated']);
+});
+
+
+test('persists exact source creation result atomically with admission settlement and replays after restart',async()=>{
+  const {store,directory}=await fixture();
+  await store.admitAssociation('source-op','fingerprint',source,true);
+  await store.completeSourceAssociation({id:'source-op',fingerprint:'fingerprint',scope:'scope',operationId:'source-op',source,reader:target});
+  const restored=new SessionSuccessionStore(directory);await restored.ready;
+  expect(restored.sourceResult('source-op','fingerprint')).toMatchObject({source,reader:target,operationId:'source-op'});
+  expect(()=>restored.sourceResult('source-op','different')).toThrow(/identity/);
+  expect(JSON.parse(await readFile(join(directory,'state.json'),'utf8')).associationAdmissions).toEqual([]);
+});
+
+
+test('failed native-result persistence retains admission and never publishes a result witness',async()=>{
+  const {store,directory}=await fixture();
+  await store.admitAssociation('source-op','fingerprint',source,true);
+  const path=join(directory,'state.json'),previous=await readFile(path,'utf8');
+  await rm(path);await mkdir(path);
+  await expect(store.completeSourceAssociation({id:'source-op',fingerprint:'fingerprint',scope:'scope',operationId:'source-op',source,reader:target})).rejects.toThrow();
+  expect(store.sourceResult('source-op','fingerprint')).toBeUndefined();
+  await expect(store.admitAssociation('source-op','fingerprint',source,true)).rejects.toThrow(/unresolved/);
+  await rm(path,{recursive:true});await writeFile(path,previous);
+  const restored=new SessionSuccessionStore(directory);await restored.ready;
+  expect(restored.sourceResult('source-op','fingerprint')).toBeUndefined();
+  await expect(restored.admitAssociation('source-op','fingerprint',source,true)).rejects.toThrow(/unresolved/);
+});
+
+
+test('reserves bounded native-result capacity before dispatch while keeping TPM admissions independent',async()=>{
+  const {directory}=await fixture();
+  const path=join(directory,'state.json'),state=JSON.parse(await readFile(path,'utf8'));
+  state.associationResults=Array.from({length:1023},(_,index)=>({id:`result-${index}`,fingerprint:'fingerprint',scope:'scope',operationId:`result-${index}`,source,reader:target}));
+  await writeFile(path,JSON.stringify(state));
+  const restored=new SessionSuccessionStore(directory);await restored.ready;
+  const outcomes=await Promise.allSettled([
+    restored.admitAssociation('first','fingerprint',source,true),
+    restored.admitAssociation('second','fingerprint',source,true),
+  ]);
+  expect(outcomes.map(item=>item.status)).toEqual(['fulfilled','rejected']);
+  expect((outcomes[1] as PromiseRejectedResult).reason.message).toMatch(/result storage is full/);
+  await restored.admitAssociation('tpm','fingerprint',source,false,{createKey:'tpm-create',createFingerprint:'a'.repeat(64)});
+  const reopened=new SessionSuccessionStore(directory);await reopened.ready;
+  await expect(reopened.admitAssociation('third','fingerprint',source,true)).rejects.toThrow(/result storage is full/);
+  await expect(reopened.completeSourceAssociation({id:'tpm',fingerprint:'fingerprint',scope:'scope',operationId:'tpm',source,reader:target})).rejects.toThrow(/admission/);
+  await reopened.completeSourceAssociation({id:'first',fingerprint:'fingerprint',scope:'scope',operationId:'first',source,reader:target});
+  expect(JSON.parse(await readFile(path,'utf8')).associationResults).toHaveLength(1024);
+  await expect(reopened.admitAssociation('fourth','fingerprint',source,true)).rejects.toThrow(/result storage is full/);
+});

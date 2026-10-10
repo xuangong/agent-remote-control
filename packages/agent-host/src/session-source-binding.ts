@@ -51,6 +51,10 @@ export class SessionSourceBindings {
   /** Cross-check relation metadata against durable native grants before reserving the role. */
   async enrollSources(roleId: string, expectedRevision: number, associationRevision: number,
     relations: readonly SourceRelationEnrollment[], grants: readonly SourceGrantEnrollment[]) {
+    const participants = this.sourceParticipants(roleId, relations, grants);
+    return this.store.setParticipants(roleId, expectedRevision, associationRevision, participants);
+  }
+  sourceParticipants(roleId: string, relations: readonly SourceRelationEnrollment[], grants: readonly SourceGrantEnrollment[]) {
     const state = this.store.read(roleId);
     const ref = (nativeSessionId: string): NativeSessionRef => ({ controllerId: this.controllerId, providerId: this.providerId, nativeSessionId });
     if (state.role.current.controllerId !== this.controllerId) throw new Error('Source enrollment is outside this Controller.');
@@ -69,7 +73,7 @@ export class SessionSourceBindings {
     for (const relation of relations) {
       if (lineage.has(nativeSessionRefKey(source(relation))) && !grants.some(grant => sameRef(reader(grant), reader(relation)) && sameRef(source(grant), source(relation)))) throw new Error('Source relationship has no matching native grant.');
     }
-    return this.store.setParticipants(roleId, expectedRevision, associationRevision, participants);
+    return participants;
   }
 
   read(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,

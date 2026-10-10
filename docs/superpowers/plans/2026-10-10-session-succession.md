@@ -140,8 +140,11 @@ delivery, full-ref readers, durable cursor-key provisioning and Host admission
 fences are implemented. Internal prepare/commit/reconcile routes and the TPM
 dispatch integration passed focused runtime verification (`93648f2`). The real
 Host TPM test also exposed operation-identity and initialization-race defects;
-`9939800` fixes both, with six affected suites passing 79 tests. Trusted complete relation enrollment,
-atomic association reservation and native provider certification remain open.
+`9939800` fixes both, with six affected suites passing 79 tests. Trusted complete
+relation enrollment, atomic association reservation and exact creation-result
+recovery now passed scoped reviews and fixture integration. The final restart/TPM
+increment passed 96 tests; whole-workspace typecheck and compatibility checks passed.
+Trusted ordinary postcommit relationship edits and native certification remain open.
 Codex native history fork was experimentally verified but is no longer the
 generic handoff preparation path. Do not mark this task complete or expose a
 product capability yet. See the continuation checkpoint in the handoff for

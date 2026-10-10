@@ -1,4 +1,4 @@
-import { nativeSessionRefKey, type NativeSessionRef, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, type SuccessionRecord, type SuccessionRequest, type SuccessionAssociationFreeze, type SuccessionParticipant } from '@orchardworks/agent-remote-protocol';
 import { LocalSuccessionPreparation, SuccessionPreparationRejected } from './local-succession-preparation.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 
@@ -12,6 +12,13 @@ export class SessionSuccessionCoordinator {
 
   async prepare(request: SuccessionRequest): Promise<SuccessionRecord> {
     const record = await this.store.begin(request);
+    return this.prepareRecord(record);
+  }
+  async prepareEnrolled(freeze: SuccessionAssociationFreeze, participants: SuccessionParticipant[], generation: number): Promise<SuccessionRecord> {
+    return this.prepareRecord(await this.store.beginEnrolled(freeze, participants, generation));
+  }
+  private async prepareRecord(record: SuccessionRecord): Promise<SuccessionRecord> {
+    const request = record;
     const running = this.preparing.get(request.operationId);
     if (running) return running;
     if (record.phase !== 'preparing') return record;

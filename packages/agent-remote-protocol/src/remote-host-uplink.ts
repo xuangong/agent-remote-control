@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
+import { SuccessionAssociationAuthority } from './succession-enrollment.js';
 import { PairingPurpose } from './pairing.js';
 import { ControllerIdentity } from './controller-release.js';
 import { HostEnvironment } from './host-environment.js';
@@ -37,7 +38,7 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
@@ -49,7 +50,7 @@ export const RemoteHostUplinkMessage = Type.Union([
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity, pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),

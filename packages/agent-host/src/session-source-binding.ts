@@ -116,7 +116,7 @@ export class SessionSourceBindings {
       ...(selected.roleId ? { roleId: selected.roleId, roleRevision: selected.roleRevision } : {}) };
     const { nextCursor: nativeCursor, ...content } = result;
     return { ...content, sourceRef: selected.source, sourceRepresentation: base.representation,
-      ...(attachment ? { sourceProvenance: { operationId: attachment.operationId, source: attachment.source, capturedAt: attachment.capturedAt, boundary: attachment.boundary } } : {}), sourceSessionId: selected.source.nativeSessionId,
+      ...(attachment ? { sourceProvenance: { operationId: attachment.operationId, source: attachment.source, capturedAt: attachment.capturedAt, boundary: attachment.boundary, ...(attachment.inheritedFrom ? { inheritedFrom: attachment.inheritedFrom } : {}) } } : {}), sourceSessionId: selected.source.nativeSessionId,
       ...(selected.roleId ? { sourceRoleId: selected.roleId, sourceRoleRevision: selected.roleRevision } : {}),
       sourceContext: this.encode(base),
       ...(nativeCursor ? { nextCursor: this.encode({ ...base, kind: 'page', page: {

@@ -17,6 +17,7 @@ export interface SuccessionContextAttachment {
   text: string;
   itemCount: number;
   shortenedToolCount?: number;
+  inheritedFrom?: { operationId: string; source: NativeSessionRef; boundary: TimelineCursor; capturedAt: string };
 }
 export interface SuccessionInput {
   operationId: string;
@@ -52,7 +53,7 @@ interface ContextState { version: 1; attachments: SuccessionContextRecord[] }
 const MAX_STORE_BYTES = 8 * 1024 * 1024;
 const isNativeSessionRef = (value: unknown): value is NativeSessionRef => { const ref = value as NativeSessionRef | undefined; return !!ref && nonempty(ref.controllerId) && nonempty(ref.providerId) && nonempty(ref.nativeSessionId); };
 const sameRef = (a: NativeSessionRef, b: NativeSessionRef) => nativeSessionRefKey(a) === nativeSessionRefKey(b);
-const attachmentIdentity = (input: SuccessionContextAttachment) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.source), nativeSessionRefKey(input.target), input.capturedAt, input.boundary.epoch, input.boundary.seq, input.text, input.itemCount, input.shortenedToolCount ?? 0]);
+const attachmentIdentity = (input: SuccessionContextAttachment) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.source), nativeSessionRefKey(input.target), input.capturedAt, input.boundary.epoch, input.boundary.seq, input.text, input.itemCount, input.shortenedToolCount ?? 0, input.inheritedFrom ? [input.inheritedFrom.operationId, nativeSessionRefKey(input.inheritedFrom.source), input.inheritedFrom.boundary.epoch, input.inheritedFrom.boundary.seq, input.inheritedFrom.capturedAt] : null]);
 const inputIdentity = (input: SuccessionInput) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.target), input.text, input.contentIdentity ?? null]);
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
@@ -172,6 +173,7 @@ export class SessionSuccessionContextStore {
       || !Number.isSafeInteger(record.itemCount) || record.itemCount < 0 || record.itemCount > MAX_NORMALIZED_CONTEXT_ENTRIES
       || record.shortenedToolCount !== undefined && (!Number.isSafeInteger(record.shortenedToolCount) || record.shortenedToolCount < 0 || record.shortenedToolCount > record.itemCount)) throw new Error('Invalid succession context attachment.');
     if (Buffer.byteLength(record.text) > MAX_NORMALIZED_CONTEXT_BYTES) throw new Error('Succession context byte limit exceeded.');
+    if (record.inheritedFrom && (!nonempty(record.inheritedFrom.operationId) || !isNativeSessionRef(record.inheritedFrom.source) || !nonempty(record.inheritedFrom.boundary?.epoch) || !Number.isSafeInteger(record.inheritedFrom.boundary.seq) || record.inheritedFrom.boundary.seq < 0 || !Number.isFinite(Date.parse(record.inheritedFrom.capturedAt)))) throw new Error('Invalid inherited succession provenance.');
     const rows: unknown = JSON.parse(record.text);
     if (!Array.isArray(rows) || rows.length !== record.itemCount || !rows.every(row => row && ['user', 'assistant', 'tool'].includes(row.role) && typeof row.text === 'string')) throw new Error('Invalid normalized succession history.');
   }
@@ -183,6 +185,10 @@ export class SessionSuccessionContextStore {
       const target = nativeSessionRefKey(record.target);
       if (record.version !== 1 || ids.has(record.operationId) || targets.has(target) || !Array.isArray(record.deliveries) || record.deliveries.length > 512
         || !['pending', 'dispatching', 'accepted', 'unknown', 'materialized'].includes(record.state)) throw new Error('Invalid succession context record.');
+      if (record.inheritedFrom) {
+        const parent = state.attachments.find(item => item.operationId === record.inheritedFrom!.operationId);
+        if (!parent || parent.operationId === record.operationId || !sameRef(parent.source, record.inheritedFrom.source) || !sameRef(parent.target, record.source) || parent.roleId !== record.roleId || parent.roleRevision + 1 !== record.roleRevision || parent.boundary.epoch !== record.inheritedFrom.boundary.epoch || parent.boundary.seq !== record.inheritedFrom.boundary.seq || parent.capturedAt !== record.inheritedFrom.capturedAt || parent.text !== record.text) throw new Error('Inherited succession provenance does not match retained attachment.');
+      }
       ids.add(record.operationId); targets.add(target);
       let contextState: SuccessionContextRecord['state'] = 'pending', unresolved = 0;
       for (const delivery of record.deliveries) {

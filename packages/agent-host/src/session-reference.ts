@@ -9,7 +9,7 @@ export interface SourceHistoryPage extends AgentHistoryPage {
   sourceSessionId: string;
   sourceRef?: NativeSessionRef;
   sourceRepresentation?: 'native' | 'attachment';
-  sourceProvenance?: { operationId: string; source: NativeSessionRef; capturedAt: string; boundary: TimelineCursor };
+  sourceProvenance?: { operationId: string; source: NativeSessionRef; capturedAt: string; boundary: TimelineCursor; inheritedFrom?: { operationId: string; source: NativeSessionRef; boundary: TimelineCursor; capturedAt: string } };
   sourceRoleId?: string;
   sourceRoleRevision?: number;
   sourceContext?: string;

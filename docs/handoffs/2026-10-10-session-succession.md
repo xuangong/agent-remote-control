@@ -3,6 +3,41 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Host grant and cursor implementation checkpoint (2026-10-11)
+
+Task 9D passed independent spec and quality review without retained findings.
+Root freshly passed seven scoped Host files / 183 tests and the Host typecheck;
+real-file fault/reopen and local HTTP/WebSocket fixtures were used, with no native
+provider execution. Source grants reuse the role/context publication helper: private
+exclusive temporary-file write, file sync, close, rename, containing-directory
+open, sync and close. Pre-rename-attempt failure is rejected publication; any
+attempted rename with rejected promise or later barrier failure fences the owner
+as unknown. Sync/close and cleanup failures retain the original cause and stage.
+Grant get/list and queued writes stop until fresh validated recreation; no schema,
+identity, prompt-presence, instructions or opaque native handle is rewritten.
+
+Codex, managed stdio and OpenCode creation retain native completion before grant
+publication. Failure cannot grant replay permission; disposal is local-control
+cleanup, not native rollback. Both failure causes remain available when disposal
+is uncertain, and source callbacks do not gain a reader identity before success.
+The separate role-file result requires exact matching grant evidence. Unknown
+result publication can recover only its saved exact operation on fresh reopen;
+a grant without that result remains unresolved.
+
+The cursor key remains an install-once 32-byte private key using link/EEXIST
+readback. Installation and reopening wait for the containing-directory barrier
+before readiness, retain the winning key and preserve initialization causes.
+Formats remain role6/context2/sourceWitness1, configured Relay10/associations5,
+freeze2/exact saved1 and SQL metadata3/record1. Backup requires the existing
+coherent owning-service boundary; recovery after native effects proceeds forward.
+
+Implementer evidence uses owned temporary filesystem fixtures, scripted native
+protocol peers and real local HTTP/WebSocket tests with both deadlines. It does
+not certify OS-crash, power-loss, new ancestor-entry sync, native-provider support
+or product readiness. Selected Windows directory-sync exceptions remain explicit.
+Root owns review, final verification, compatibility and local checkpoint. Task9E
+measurements, production enablement and native/product acceptance remain pending.
+
 ## Terminal and recovery consumption checkpoint (2026-10-11)
 
 Task 9C3 passed independent spec and quality review without retained findings.
@@ -27,7 +62,7 @@ tests use the normal Gateway fixture. Node/Worker storage cases use real SQLite
 and Miniflare/workerd with deterministic fake protocol peers. Rejected sync is
 unknown durability, not rollback. No native provider was run.
 
-Next is 9D Host source-grant/cursor file barriers, then 9E local Worker operating
+The reviewed 9D implementation above is followed by 9E local Worker operating
 measurements and product integration. Default SQL effects, native suppliers and
 production capability remain disabled. No merge, push, deployment, installation
 or user-service change is authorized here.

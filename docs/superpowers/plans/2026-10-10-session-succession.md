@@ -461,8 +461,12 @@ no production capability is enabled by these scripted fixtures.
   Favorites progress share the existing outer commit; current recovery claims
   and actual key overlap survive uncertain publication. Restarted overlap can
   require explicit recovery rather than another automatic key issuance.
-- [ ] Review role/context durable-file write consistency and record the actual
-  process-crash versus power-loss guarantees without unsupported claims.
+- [x] Review role/context/grant durable-file write consistency and cursor
+  install-once readiness (9D). Independent spec/quality review approved the slice
+  without findings; Root freshly passed 183 Host tests and typecheck. Attempted
+  rename uncertainty fences the owner, and cleanup preserves the first cause.
+  Controlled fault/reopen evidence does not certify OS crash, power loss, Windows
+  equivalence, ancestor-directory persistence or live multi-process writers.
 - [ ] Complete the separate local Worker operating-envelope checkpoint (9E),
   reporting measured cases and unavailable telemetry without production limits.
 

@@ -143,9 +143,29 @@ The binding owner checks the actual canonical result for fresh qualified output,
 preserving legal aliases. This post-effect check does not guarantee successful
 projection: a wider existing canonical identity leaves the witness retained and
 the operation unresolved. Exact recovery never silently rewrites its identity.
-Atomic Relay source completion does not establish source-grant sync durability.
-That Host-file contract remains pending; matching visible grant data does not
-prove power-loss durability.
+Atomic Relay source completion and Host grant publication remain separate files.
+The grant write now awaits private exclusive temporary-file write, file sync and
+close, rename, then containing-directory open, sync and close. The original
+hashed filename, opaque native handle, prompt-presence marker and instructions
+are unchanged; no grant format or capacity allowance is added. Only then may the
+role-file owner publish the complete exact source result and remove admission.
+Matching grant alone never proves which admitted operation created its reader.
+
+Before a rename attempt, a file-publication failure is rejected publication and
+keeps the preceding saved file. Once rename is attempted, rejection or a failed
+directory barrier is unknown publication; get/list and queued grant mutations
+are fenced in that store instance. Fresh recreation validates the complete file
+the filesystem exposes. Missing, malformed or conflicting grant/result evidence
+stays unresolved without replay or restoration of predecessor authority. Native
+creation already preceded the grant, so even rejected grant publication cannot
+become safe native rejection. Local-control disposal is not native rollback;
+its failure retains both publication and disposal causes.
+
+Cursor initialization writes and syncs a private 32-byte temporary key and links
+it without replacement. EEXIST reads the winning original key. Both installation
+and existing-key reopening validate that key and await the containing-directory
+barrier before service readiness; failure never rotates the historical key.
+Cleanup cannot hide the original initialization cause.
 
 ## Recover from facts, not elapsed time
 
@@ -441,8 +461,9 @@ succession/recovery state on restore and commit. An explicit constructor-only
 symbol permits isolated complete-codec fixtures; requests, stored state and
 production configuration cannot select it. The codec and Worker restart tests
 are complete. Derived feature admission and Host witness reservations have scoped
-verification; atomic consumers, source-grant durability, producer certification
-and combined acceptance remain required before enabling effects.
+verification. Host grant/cursor barriers passed independent review and fresh
+controlled fault/reopen verification (183 scoped Host tests and typecheck).
+Producer certification and combined acceptance remain required before enabling effects.
 
 ## Ordinary relationship changes
 
@@ -523,9 +544,13 @@ with all retained state versions and must not undo native effects.
 Current tests cover process reconstruction, exact replay, lost responses and
 selected persistence failures. They do not certify abrupt power loss, arbitrary
 filesystem failure, automatic backup restoration or native-provider process
-recovery. Both role and context writes sync the file and containing directory
-where supported. Pre-publication failure is distinct from uncertain publication
-after rename; the latter poisons reads and writes in that process until durable
-reopening. Windows keeps the existing unsupported-directory-sync exception and
+recovery. Role, context and source-grant writes sync the file and containing
+directory where supported. Failure before a rename attempt is distinct from
+uncertainty after that attempt; the latter fences reads and writes until validated
+fresh reopening. Cursor readiness also waits for its containing-directory
+barrier. Sync/close and cleanup errors retain the first cause. Windows keeps the
+existing unsupported-directory-sync exception and
 does not gain a stronger power-loss guarantee. These separate files, TPM state
-and Relay storage are not a cross-store durable transaction.
+and Relay storage are not a cross-store durable transaction. New ancestor
+directory entries are not individually synced; application restart and controlled
+fault/reopen evidence does not certify OS-crash or power-loss behavior.

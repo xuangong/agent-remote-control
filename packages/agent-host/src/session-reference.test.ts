@@ -8,6 +8,52 @@ import { createCodexSessionDirectory } from './directory.js';
 import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
 import { createScriptedAppServer } from '../../agent-provider-codex/src/test-utils/scripted-app-server.js';
 import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
+import { AgentOperationRejectedError, type AgentSession } from '@orchardworks/agent-provider-sdk';
+
+it('preserves grant and disposal causes after Codex creation without claiming rejection or forwarding a reader', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'codex-grant-failure-'));
+  const grantFailure = new AgentOperationRejectedError('operation_rejected', 'grant write refused'), disposalFailure = new Error('control disposal uncertain');
+  const store = new SessionReferenceStore(root); store.set = async () => { throw grantFailure; };
+  let creates = 0, completed = 0, read!: () => Promise<unknown>;
+  const session = { runtimeInfo: async () => ({ providerId: 'codex', sessionId: 'reader', status: 'idle', persistence: { providerId: 'codex', sessionId: 'reader', opaque: 'native opaque' } }),
+    dispose: async () => { throw disposalFailure; } } as unknown as AgentSession;
+  const directory = createCodexSessionDirectory({ listSessions: async () => ({ sessions: [] }), createSession: async config => {
+    creates++; read = () => config.tools![0]!.execute({}); return session;
+  }, resumeSession: async () => session, openChildSession: async () => session, readSessionHistory: async () => ({ entries: [] }) }, [], store);
+  try {
+    const failure = await directory.create({ sourceNativeSessionId: 'source' }, { completed() { completed++; } }).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
+    expect(failure.errors).toEqual([grantFailure, disposalFailure]); expect(creates).toBe(1); expect(completed).toBe(1);
+    await expect(read()).rejects.toThrow(/identity.*ready/i);
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+}, 10000);
+
+it('does not turn a grant rejection after native creation into replay permission when disposal succeeds', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'codex-grant-rejection-'));
+  const original = new AgentOperationRejectedError('operation_rejected', 'grant refused');
+  const store = new SessionReferenceStore(root); store.set = async () => { throw original; };
+  let creates = 0, disposed = 0;
+  const session = { runtimeInfo: async () => ({ providerId: 'codex', sessionId: 'reader', status: 'idle', persistence: { providerId: 'codex', sessionId: 'reader', opaque: '{}' } }),
+    dispose: async () => { disposed++; } } as unknown as AgentSession;
+  const directory = createCodexSessionDirectory({ listSessions: async () => ({ sessions: [] }), createSession: async () => { creates++; return session; },
+    resumeSession: async () => session, openChildSession: async () => session, readSessionHistory: async () => ({ entries: [] }) }, [], store);
+  try {
+    const failure = await directory.create({ sourceNativeSessionId: 'source' }).catch(error => error);
+    expect(failure).not.toBeInstanceOf(AgentOperationRejectedError); expect(failure.cause).toBe(original); expect(failure.message).toMatch(/unresolved/);
+    expect(creates).toBe(1); expect(disposed).toBe(1);
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+}, 10000);
+
+it('retains Codex native readiness and disposal causes after a single native creation', async () => {
+  const original = new Error('native runtime metadata unavailable'), cleanup = new Error('native cleanup uncertain'); let creates = 0;
+  const session = { runtimeInfo: async () => { throw original; }, dispose: async () => { throw cleanup; } } as unknown as AgentSession;
+  const directory = createCodexSessionDirectory({ listSessions: async () => ({ sessions: [] }), createSession: async () => { creates++; return session; },
+    resumeSession: async () => session, openChildSession: async () => session }, []);
+  try {
+    const failure = await directory.create({}).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError); expect(failure.errors).toEqual([original, cleanup]); expect(creates).toBe(1);
+  } finally { await directory.close(); }
+}, 10000);
 
 it('binds reads to the granted source and rejects unbounded or alternate source inputs', async () => {
   const calls: unknown[] = [];

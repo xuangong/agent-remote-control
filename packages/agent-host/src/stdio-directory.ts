@@ -4,7 +4,7 @@ import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
 import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
-import { SessionReferenceStore, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
+import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 
 export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession' | 'readSessionHistory'> & {
     listSessions(): Promise<RemoteSessionSummary[]>;
@@ -254,7 +254,12 @@ export function createManagedStdioDirectory(
       if (config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
         try { await references!.set({ sourceNativeSessionId, systemPrompt: inputConfig.systemPrompt ?? '', systemPromptProvided: inputConfig.systemPrompt !== undefined, instructions: inputConfig.instructions, handle: entry.handle }); }
-        catch (error) { await entry.session.dispose(); if (opened.get(id) === entry) opened.delete(id); controllerTools.delete(id); throw error; }
+        catch (error) {
+          entry.sourceAvailable = false;
+          return disposeAfterSourceGrantFailure(error, async () => {
+            await entry.session.dispose(); if (opened.get(id) === entry) opened.delete(id); controllerTools.delete(id);
+          });
+        }
       }
       if (closed) throw new Error(`${displayName} directory is closed.`);
       if (opened.get(id) !== entry || !entry.sourceAvailable || entry.owner && !entry.owner.active) throw new Error('Source reader control was transferred or closed during creation.');

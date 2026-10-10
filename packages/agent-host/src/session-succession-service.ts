@@ -8,6 +8,7 @@ import { SessionSuccessionContextStore, type SuccessionContextDelivery, type Suc
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
 import { SessionSourceBindings } from './session-source-binding.js';
+import { syncSuccessionDirectory, withSuccessionFile } from './succession-persistence.js';
 
 export interface SessionSuccessionPorts {
   /** Certifies zero-turn creation, normalized capture, quiescence and routed source-binding support for both adapters. */
@@ -104,19 +105,33 @@ export class SessionSuccessionService {
     await Promise.all([this.store.ready, this.contexts.ready]);
     await mkdir(this.directory, {recursive:true,mode:0o700});
     const path = join(this.directory,'source-cursor.key');
-    try { this.cursorKey = await readFile(path); }
+    const readKey = async () => {
+      const saved = await readFile(path);
+      if (saved.length !== 32) throw new Error('Invalid durable source cursor signing key.');
+      return saved;
+    };
+    let key: Buffer;
+    try { key = await readKey(); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      const key = randomBytes(32), temporary = `${path}.${randomUUID()}.tmp`;
+      const generated = randomBytes(32), temporary = `${path}.${randomUUID()}.tmp`;
+      let failed = false, failure: unknown;
       try {
         const file = await open(temporary,'wx',0o600);
-        try { await file.writeFile(key); await file.sync(); } finally { await file.close(); }
+        await withSuccessionFile(file, async () => { await file.writeFile(generated); await file.sync(); });
         try { await link(temporary,path); }
         catch (linkError) { if ((linkError as NodeJS.ErrnoException).code !== 'EEXIST') throw linkError; }
-        this.cursorKey = await readFile(path);
-      } finally { await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }); }
-
+        key = await readKey();
+      } catch (initializationError) { failed = true; failure = initializationError; }
+      try { await unlink(temporary); } catch (cleanupError) {
+        if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
+          if (failed) throw new AggregateError([failure, cleanupError], 'Source cursor initialization and cleanup failed.', { cause: failure });
+          throw cleanupError;
+        }
+      }
+      if (failed) throw failure;
     }
-    if (this.cursorKey.length !== 32) throw new Error('Invalid durable source cursor signing key.');
+    await syncSuccessionDirectory(this.directory);
+    this.cursorKey = key!;
   }
 }

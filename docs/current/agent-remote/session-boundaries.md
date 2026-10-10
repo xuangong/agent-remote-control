@@ -73,6 +73,17 @@ The cache retains terminal outcomes for 10 minutes, up to 1,000 entries and 8 Mi
 
 Native creation and public attachment are separate. Host retains a native creation result before binding it. DSH keeps its context-owned native creation identity across transport replacement, records confirmed creation before projection, and retries only attachment after a projection failure. An unconfirmed creation is not dispatched again. This registry is not an expiring public receipt cache.
 
+Source-reader grants await private temporary-file write, sync and close, rename,
+and containing-directory open, sync and close before creation returns or the
+separate role file saves an exact source result. Grant failure follows native
+creation and remains unresolved even when local control disposal succeeds;
+disposal failure preserves both causes. Any attempted rename with an uncertain
+outcome fences grant reads, listing and queued writes until validated fresh
+reopen. Recovery requires exact grant/result agreement and never another create.
+The install-once cursor key preserves the winning original 32-byte identity and
+waits for its directory barrier before service readiness. These application
+restart boundaries add no cross-file transaction or power-loss certification.
+
 `SessionBindings` reserves provider/native/public identities before attachment, joins compatible opens and preserves published identity through restore failure. Shutdown rejects work that has not begun and disposes completed late attachments through the integration extension. Borrowed DSH session disposal releases observation resources, not the underlying runtime.
 
 Relay starts cache draining and native disposal together. Native session ownership begins when a provider returns the session, before runtime metadata/history readiness. Late native returns after shutdown are disposed once. Providers remain responsible for canceling opening calls that never return a session; the framework does not invent a universal native cancellation mechanism.

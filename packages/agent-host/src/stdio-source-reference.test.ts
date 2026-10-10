@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import type { AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, type AgentSession, type AgentSessionConfig, type AgentSessionExtensions, type AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { createManagedStdioDirectory, type ManagedStdioProvider } from './stdio-directory.js';
 import { SessionReferenceStore } from './session-reference.js';
 import { acquireNativeSession, inspectNativeOwner } from './native-session-owner.js';
@@ -38,6 +38,23 @@ const fixture = () => {
   };
   return { provider, configurations, handles, reads, startRead: () => startRead, setId: (id: string) => { returnedId = id; }, setModel: (model: string) => { savedModel = model; } };
 };
+
+it('keeps grant and disposal failure causes after admitted stdio creation and disables the unconfirmed reader', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'stdio-grant-disposal-')), f = fixture();
+  const grantFailure = new AgentOperationRejectedError('operation_rejected', 'grant write refused'), disposalFailure = new Error('native control disposal uncertain');
+  const store = new SessionReferenceStore(root, 'claude'); store.set = async () => { throw grantFailure; };
+  const create = f.provider.createSession.bind(f.provider); let canExit = false, completed = 0;
+  const directory = createManagedStdioDirectory('claude', 'Claude', { ...f.provider, async createSession(config) {
+    const session = await create(config), dispose = session.dispose.bind(session);
+    session.dispose = async () => { if (!canExit) throw disposalFailure; await dispose(); }; return session;
+  } }, [], undefined, store);
+  try {
+    const failure = await directory.create({ sourceNativeSessionId: 'A' }, { completed() { completed++; } }).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
+    expect(failure.errors).toEqual([grantFailure, disposalFailure]); expect(completed).toBe(1); expect(f.configurations).toHaveLength(1);
+    await expect(f.configurations[0]!.tools![0]!.execute({})).rejects.toThrow(/identity.*ready|unavailable/i);
+  } finally { canExit = true; await directory.close(); await rm(root, { recursive: true, force: true }); }
+}, 10000);
 
 it('composes user tools and instructions, dynamically routes source reads, and restores durable grants on cold open', async () => {
   const root = await mkdtemp(join(tmpdir(), 'arc-stdio-source-')); const f = fixture();
@@ -88,7 +105,8 @@ it('fences source callbacks during managed shutdown and retains a failed grant-c
     session.dispose = async () => { if (!canExit) throw new Error('Native exit unconfirmed'); await dispose(); }; return session;
   } }, [], { root: join(root, 'owners') }, references);
   try {
-    await expect(directory.create({ sourceNativeSessionId: 'A' })).rejects.toThrow(/unconfirmed/);
+    const failure = await directory.create({ sourceNativeSessionId: 'A' }).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError); expect(failure.errors[0].message).toMatch(/grant/i); expect(failure.errors[1].message).toMatch(/unconfirmed/);
     const key = { root: join(root, 'owners'), providerId: 'claude', sessionId: 'reader' };
     expect(await inspectNativeOwner(key)).toMatchObject({ kind: 'controller' });
     await expect(acquireNativeSession({ ...key, kind: 'native_cli' })).rejects.toMatchObject({ code: 'native_session_owned' });

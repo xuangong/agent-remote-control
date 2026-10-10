@@ -9,9 +9,16 @@ import { createAgentHostRuntime, type AgentHostDirectory } from './host.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { jsonBytes, SUCCESSION_STORE_BYTES } from './succession-persistence.js';
 import * as directoryMutation from './directory-mutation.js';
+import * as fs from 'node:fs/promises';
+import { SessionReferenceStore } from './session-reference.js';
+
+vi.mock('node:fs/promises', async importOriginal => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...original, open: vi.fn(original.open) };
+});
 
 const closeables: Array<() => Promise<void>> = [];
-afterEach(async () => { vi.restoreAllMocks(); for (const close of closeables.splice(0).reverse()) await close(); });
+afterEach(async () => { vi.restoreAllMocks(); const original = await vi.importActual<typeof fs>('node:fs/promises'); vi.mocked(fs.open).mockReset(); vi.mocked(fs.open).mockImplementation(original.open); for (const close of closeables.splice(0).reverse()) await close(); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'fixture', nativeSessionId });
 const context: TrustedSuccessionContext = { installationId: 'controller', successionEnrollmentVersion: 2,
   authority: { version: 1, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' } };
@@ -26,12 +33,13 @@ class Native implements AgentSession {
   async sendMessage() {} async respondToInteraction() {}
   async dispose() { this.closed = true; this.stop?.(); }
 }
-async function fixture(certificate: boolean | undefined, nativeId = 'reader', cache?: { maxResultBytes?: number; maxBytes?: number; ttlMs?: number; now?: () => number }, policy = false) {
+async function fixture(certificate: boolean | undefined, nativeId = 'reader', cache?: { maxResultBytes?: number; maxBytes?: number; ttlMs?: number; now?: () => number }, policy = false, fileGrants = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'source-create-')));
   closeables.push(() => rm(root, { recursive: true, force: true }));
   let creates = 0, certificates = 0, granted = true, loseResult = false, rejectNative = false;
   let beforeCreate = async () => {}, beforeOpen = async (_id: string) => {};
   const grants: Array<{ nativeSessionId: string; sourceNativeSessionId: string }> = [];
+  let references = new SessionReferenceStore(join(root, 'references'), 'fixture');
   const sessions: Native[] = [];
   const directory: AgentHostDirectory = {
     providerId: 'fixture', supportsSourceReferences: true,
@@ -47,9 +55,11 @@ async function fixture(certificate: boolean | undefined, nativeId = 'reader', ca
       if (rejectNative) throw new AgentOperationRejectedError('operation_rejected', 'Fixture proved no effect');
       if (policy) expect(input.cwd).toBe(root);
       grants.push({ nativeSessionId: nativeId, sourceNativeSessionId: input.sourceNativeSessionId! }); evidence?.completed();
+      if (fileGrants) await references.set({ sourceNativeSessionId: input.sourceNativeSessionId!, systemPrompt: '', systemPromptProvided: false,
+        instructions: 'Original source instructions', handle: { providerId: 'fixture', sessionId: nativeId, opaque: 'original opaque handle' } });
       if (loseResult) throw new Error('Native result lost'); return nativeId;
     },
-    sourceReferences: async () => granted ? structuredClone(grants) : [], setSourceBindingReader: () => {},
+    sourceReferences: async () => granted ? fileGrants ? references.list() : structuredClone(grants) : [], setSourceBindingReader: () => {},
     async open(id) { await beforeOpen(id); const session = new Native(id, root); sessions.push(session); return session; },
     close: async () => { await Promise.all(sessions.map(session => session.dispose())); },
   };
@@ -63,10 +73,63 @@ async function fixture(certificate: boolean | undefined, nativeId = 'reader', ca
   return { root, get host() { return host; }, request, state, grants, counts: () => ({ creates, certificates }), setCertificate: (value: boolean) => { certificate = value; },
     missingGrant: () => { granted = false; }, loseResult: () => { loseResult = true; }, rejectNative: () => { rejectNative = true; },
     beforeCreate: (hook: typeof beforeCreate) => { beforeCreate = hook; }, beforeOpen: (hook: typeof beforeOpen) => { beforeOpen = hook; },
-    restart: async () => { await host.close(); host = createHost(); },
+    restart: async () => { await host.close(); references = new SessionReferenceStore(join(root, 'references'), 'fixture'); host = createHost(); },
     attach: (agentId: string, id = nativeId) => host.control({ method: 'POST', path: '/remote/attach', sessionId: agentId, body: JSON.stringify({ providerId: 'fixture', nativeSessionId: id }) }),
   };
 }
+
+test.each([false, true])('a held grant barrier withholds the source result and barrier failure=%s preserves the admitted native operation across exact retry and reopen', async failBarrier => {
+  const f = await fixture(true, 'reader', undefined, false, true), original = await vi.importActual<typeof fs>('node:fs/promises');
+  let entered!: () => void, release!: () => void;
+  const enteredPromise = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fs.open).mockImplementation(async (...args) => {
+    const file = await original.open(...args);
+    if (args[0] === join(f.root, 'references') && args[1] === 'r') vi.spyOn(file, 'sync').mockImplementation(async () => {
+      entered(); await gate; if (failBarrier) throw new Error('grant directory sync uncertain');
+    });
+    return file;
+  });
+  let returned = false;
+  const creating = f.host.enrollFromRelay(f.request(), context).then(response => { returned = true; return response; });
+  try {
+    await enteredPromise; expect(returned).toBe(false); expect(f.counts().creates).toBe(1);
+    expect((await f.state()).associationAdmissions).toHaveLength(1); expect((await f.state()).associationResults).toEqual([]);
+    release(); const response = await creating; expect(response.status).toBe(failBarrier ? 503 : 200);
+    const state = await f.state(); expect(state.associationResults).toHaveLength(failBarrier ? 0 : 1); expect(state.associationAdmissions).toHaveLength(failBarrier ? 1 : 0);
+    expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(failBarrier ? 503 : 200); expect(f.counts().creates).toBe(1);
+    vi.mocked(fs.open).mockImplementation(original.open); await f.restart();
+    expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(failBarrier ? 503 : 200); expect(f.counts().creates).toBe(1);
+    const key = createHash('sha256').update('reader').digest('hex');
+    expect(JSON.parse(await readFile(join(f.root, 'references', `${key}.json`), 'utf8'))).toMatchObject({ sourceNativeSessionId: 'source',
+      systemPromptProvided: false, instructions: 'Original source instructions', handle: { opaque: 'original opaque handle' } });
+  } finally { release(); await creating; }
+});
+
+test.each(['missing', 'conflicting', 'poisoned'] as const)('a durable source result with a %s file grant remains unresolved across reopen without native replay', async change => {
+  const f = await fixture(true, 'reader', undefined, false, true);
+  expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(200);
+  const path = join(f.root, 'references', `${createHash('sha256').update('reader').digest('hex')}.json`);
+  if (change === 'missing') await fs.unlink(path);
+  else if (change === 'poisoned') await writeFile(path, '{invalid JSON');
+  else { const grant = JSON.parse(await readFile(path, 'utf8')); grant.sourceNativeSessionId = 'other'; await writeFile(path, JSON.stringify(grant)); }
+  await f.restart();
+  expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(503);
+  expect((await f.state()).associationResults).toHaveLength(1); expect(f.counts().creates).toBe(1);
+});
+
+test('source-result directory uncertainty after the grant barrier recovers only its exact result on fresh reopen', async () => {
+  const f = await fixture(true, 'reader', undefined, false, true), original = await vi.importActual<typeof fs>('node:fs/promises');
+  vi.mocked(fs.open).mockImplementation(async (...args) => {
+    const file = await original.open(...args);
+    if (args[0] === join(f.root, 'roles') && args[1] === 'r' && f.counts().creates === 1) vi.spyOn(file, 'sync').mockRejectedValue(new Error('complete result barrier uncertain'));
+    return file;
+  });
+  expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(503);
+  expect((await f.state()).associationResults).toHaveLength(1); expect((await f.state()).associationAdmissions).toEqual([]);
+  expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(503); expect(f.counts().creates).toBe(1);
+  vi.mocked(fs.open).mockImplementation(original.open); await f.restart();
+  expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(200); expect(f.counts().creates).toBe(1);
+});
 
 test.each([false, undefined])('fresh trusted v2 source creation requires its own directory certificate=%s', async certificate => {
   const f = await fixture(certificate);

@@ -1,6 +1,6 @@
 import { AgentSessionInUseError } from '@orchardworks/agent-provider-sdk';
 import { NativeSessionOwnerError } from './native-session-owner.js';
-import { SessionReferenceStore, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
+import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
 import type { AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
@@ -26,8 +26,8 @@ export function createCodexSessionDirectory(
   }
   function sourceExtensions(source: string, reader: () => string | undefined) {
     return sourceSessionExtensions(source, readSource, async query => {
+      const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
       if (sourceBindingReader) {
-        const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
         return sourceBindingReader(id, source, query, readSource);
       }
       if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
@@ -65,7 +65,12 @@ export function createCodexSessionDirectory(
       if (!info.persistence || !info.sessionId) throw new Error('Codex did not return a native persistence handle.');
       opened.set(info.sessionId, { session, handle: info.persistence, createdAt: new Date().toISOString(), extensionIdentity });
       return info.sessionId;
-    } catch (error) { await session.dispose(); throw error; }
+    } catch (error) {
+      try { await session.dispose(); } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'Codex initialization cleanup could not be confirmed.', { cause: error });
+      }
+      throw error;
+    }
   }
   return {
     providerId: 'codex',
@@ -118,12 +123,12 @@ export function createCodexSessionDirectory(
       const session = await provider.createSession(nativeConfig);
       evidence?.completed();
       const id = await remember(session, identity);
-      readerId = id;
       if (extensions.tools?.length || config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
         try { await references!.set({ sourceNativeSessionId, systemPrompt, handle: opened.get(id)!.handle }); }
-        catch (error) { opened.delete(id); await session.dispose(); throw error; }
+        catch (error) { opened.delete(id); controllerTools.delete(id); return disposeAfterSourceGrantFailure(error, () => session.dispose()); }
       }
+      readerId = id;
       return id;
     },
     async open(nativeSessionId, options) {

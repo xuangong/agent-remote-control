@@ -1,8 +1,9 @@
 import type { NativeSessionRef, TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, type AgentHistoryPage, type AgentHistoryQuery, type AgentPersistenceHandle, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import { publishSuccessionState, SuccessionPublicationUnknown } from './succession-persistence.js';
 
 export interface SourceHistoryQuery extends AgentHistoryQuery { sourceContext?: string }
 export interface SourceHistoryPage extends AgentHistoryPage {
@@ -19,40 +20,63 @@ export type SourceBindingReader = (readerNativeSessionId: string, originalSource
 
 interface SourceGrant { sourceNativeSessionId: string; systemPrompt: string; systemPromptProvided?: boolean; instructions?: string; handle: AgentPersistenceHandle }
 
+/** Grant publication follows native creation; releasing local control cannot undo that effect. */
+export async function disposeAfterSourceGrantFailure(failure: unknown, dispose: () => Promise<void>): Promise<never> {
+  try { await dispose(); } catch (cleanupError) {
+    throw new AggregateError([failure, cleanupError], 'Source grant publication failed and native control disposal is uncertain.', { cause: failure });
+  }
+  if (failure instanceof AgentOperationRejectedError) throw new Error('Source grant publication failed after native creation; the operation remains unresolved.', { cause: failure });
+  throw failure;
+}
+
 /** Durable Host authorization, independent of browser storage and native prompt text. */
 export class SessionReferenceStore {
+  private mutation: Promise<void> = Promise.resolve();
+  private publicationUnknown?: SuccessionPublicationUnknown;
   constructor(private readonly directory: string, private readonly providerId = 'codex') {}
   private path(id: string): string { return join(this.directory, `${createHash('sha256').update(id).digest('hex')}.json`); }
-  async list(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>> {
-    let names: string[];
-    try { names = await readdir(this.directory); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
-    const result: Array<{ nativeSessionId: string; sourceNativeSessionId: string }> = [];
-    for (const name of names) {
-      if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
-      const value = JSON.parse(await readFile(join(this.directory, name), 'utf8')) as SourceGrant;
-      if (typeof value?.handle?.sessionId !== 'string' || this.path(value.handle.sessionId) !== join(this.directory, name)) throw new Error('The saved source reference identity is invalid.');
-      const grant = await this.get(value.handle.sessionId);
-      if (!grant) throw new Error('The saved source reference disappeared.');
-      result.push({ nativeSessionId: grant.handle.sessionId, sourceNativeSessionId: grant.sourceNativeSessionId });
-    }
-    return result;
+  list(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>> {
+    return this.serialize(async () => {
+      let names: string[];
+      try { names = await readdir(this.directory); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+      const result: Array<{ nativeSessionId: string; sourceNativeSessionId: string }> = [];
+      for (const name of names) {
+        if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
+        const value = JSON.parse(await readFile(join(this.directory, name), 'utf8')) as SourceGrant;
+        if (typeof value?.handle?.sessionId !== 'string' || this.path(value.handle.sessionId) !== join(this.directory, name)) throw new Error('The saved source reference identity is invalid.');
+        const grant = await this.read(value.handle.sessionId);
+        if (!grant) throw new Error('The saved source reference disappeared.');
+        result.push({ nativeSessionId: grant.handle.sessionId, sourceNativeSessionId: grant.sourceNativeSessionId });
+      }
+      return result;
+    });
   }
-  async get(id: string): Promise<SourceGrant | undefined> {
+  get(id: string): Promise<SourceGrant | undefined> {
+    return this.serialize(() => this.read(id));
+  }
+  private async read(id: string): Promise<SourceGrant | undefined> {
     let value: SourceGrant;
     try { value = JSON.parse(await readFile(this.path(id), 'utf8')) as SourceGrant; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('The saved source reference could not be read.'); }
     if (!value || typeof value.systemPrompt !== 'string' || !validPromptPresence(value) || value.instructions !== undefined && typeof value.instructions !== 'string' || typeof value.sourceNativeSessionId !== 'string' || !value.sourceNativeSessionId || value.handle?.sessionId !== id || value.handle.providerId !== this.providerId || typeof value.handle.opaque !== 'string') throw new Error('The saved source reference is invalid.');
     return value;
   }
-  async set(grant: SourceGrant): Promise<void> {
-    if (grant.handle.providerId !== this.providerId) throw new Error('Source reference provider does not match the store.');
-    if (!validPromptPresence(grant)) throw new Error('Source reference prompt presence is invalid.');
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    const path = this.path(grant.handle.sessionId), temporary = `${path}.${randomUUID()}.tmp`;
-    try { await writeFile(temporary, JSON.stringify(grant), { mode: 0o600, flag: 'wx' }); await rename(temporary, path); }
-    finally { await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }); }
+  set(grant: SourceGrant): Promise<void> {
+    const saved = structuredClone(grant);
+    return this.serialize(async () => {
+      if (saved.handle.providerId !== this.providerId) throw new Error('Source reference provider does not match the store.');
+      if (!validPromptPresence(saved)) throw new Error('Source reference prompt presence is invalid.');
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      try { await publishSuccessionState(this.directory, `${createHash('sha256').update(saved.handle.sessionId).digest('hex')}.json`, saved); }
+      catch (error) { if (error instanceof SuccessionPublicationUnknown) this.publicationUnknown = error; throw error; }
+    });
   }
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.mutation.then(() => { this.assertReadable(); return operation(); });
+    this.mutation = pending.then(() => undefined, () => undefined); return pending;
+  }
+  private assertReadable(): void { if (this.publicationUnknown) throw this.publicationUnknown; }
 }
 
 function validPromptPresence(grant: SourceGrant): boolean {

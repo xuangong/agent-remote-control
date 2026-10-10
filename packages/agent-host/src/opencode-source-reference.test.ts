@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import type { AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, type AgentSession, type AgentSessionConfig, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { SessionReferenceStore } from './session-reference.js';
 
@@ -23,6 +23,33 @@ function fixture(cwd: string) {
   };
   return { provider, extensions: () => extensions!, counts: () => ({ creates, resumes, reads }) };
 }
+it('preserves OpenCode grant and disposal causes after native completion and refuses an unconfirmed reader', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'opencode-grant-disposal-')), f = fixture(root);
+  const grantFailure = new AgentOperationRejectedError('operation_rejected', 'grant write refused'), disposalFailure = new Error('subscription disposal uncertain');
+  const store = new SessionReferenceStore(root, 'opencode'); store.set = async () => { throw grantFailure; };
+  const create = f.provider.createSession.bind(f.provider); let completed = 0;
+  const directory = createOpenCodeSessionDirectory({ ...f.provider, async createSession(config) {
+    const session = await create(config); session.dispose = async () => { throw disposalFailure; }; return session;
+  } }, [], store, true);
+  try {
+    const failure = await directory.create({ sourceNativeSessionId: 'source' }, { completed() { completed++; } }).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
+    expect(failure.errors).toEqual([grantFailure, disposalFailure]); expect(completed).toBe(1); expect(f.counts().creates).toBe(1);
+    await expect(f.extensions().tools![0]!.execute({})).rejects.toThrow(/identity.*ready/i);
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+}, 10000);
+it('retains OpenCode native handle validation and disposal failures after one create', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'opencode-native-cleanup-')), f = fixture(root), cleanup = new Error('native cleanup uncertain');
+  const directory = createOpenCodeSessionDirectory({ ...f.provider, async createSession(config) {
+    const session = await f.provider.createSession(config); session.runtimeInfo = async () => ({ providerId: 'opencode', status: 'idle' });
+    session.dispose = async () => { throw cleanup; }; return session;
+  } }, []);
+  try {
+    const failure = await directory.create({}).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
+    expect(failure.errors[0].message).toMatch(/native persistence handle/); expect(failure.errors[1]).toBe(cleanup); expect(f.counts().creates).toBe(1);
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+}, 10000);
 it('persists provider-scoped Ask grants, restores callbacks, and prevents release or editing', async () => {
   const root = await mkdtemp(join(tmpdir(), 'arc-opencode-ask-')); const f = fixture(root);
   const store = new SessionReferenceStore(root, 'opencode');

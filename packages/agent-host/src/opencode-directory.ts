@@ -1,4 +1,4 @@
-import { SessionReferenceStore, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
+import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
 import type { AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
@@ -23,8 +23,8 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
   }
   function sourceExtensions(source: string, reader: () => string | undefined) {
     return sourceSessionExtensions(source, readSource, async query => {
+      const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
       if (sourceBindingReader) {
-        const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
         return sourceBindingReader(id, source, query, readSource);
       }
       if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
@@ -37,7 +37,12 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       assertOpen(); const info = await session.runtimeInfo(); assertOpen();
       if (!info.sessionId || !info.persistence) throw new Error('OpenCode did not return a native persistence handle.');
       opened.set(info.sessionId, { session, handle: info.persistence, createdAt: new Date().toISOString() }); return info.sessionId;
-    } catch (error) { await session.dispose(); throw error; }
+    } catch (error) {
+      try { await session.dispose(); } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'OpenCode initialization cleanup could not be confirmed.', { cause: error });
+      }
+      throw error;
+    }
   }
   return {
     providerId: 'opencode',
@@ -106,12 +111,12 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
         ...(systemPrompt ? { systemPrompt } : {}), ...(tools.length ? { tools } : {}) });
       evidence?.completed();
       const id = await remember(session);
-      readerId = id;
       if (tools.length) controllerTools.add(id);
       if (source) {
         try { await references!.set({ sourceNativeSessionId: source, systemPrompt, handle: opened.get(id)!.handle }); }
-        catch (error) { opened.delete(id); controllerTools.delete(id); await session.dispose(); throw error; }
+        catch (error) { opened.delete(id); controllerTools.delete(id); return disposeAfterSourceGrantFailure(error, () => session.dispose()); }
       }
+      readerId = id;
       return id;
     },
     async open(id, options) {

@@ -64,3 +64,57 @@ it('omits unlinked navigation and counts only remaining side sessions', async ()
   expect(container.querySelector('.lab-fork-reference')).toBeNull();
   expect(container.querySelector('.lab-fork-entries')).toBeNull();
 });
+
+
+it('attributes the original snapshot while opening the explicit current source', async () => {
+  const current = { ...fork.source, providerId: 'claude', nativeSessionId: 'B', agentId: 'B-agent', title: 'Current B' };
+  const snapshot: SessionFork = { ...fork, mode: 'snapshot', boundary: { epoch: 'one', seq: 2 }, itemCount: 2, text: '[]', currentSource: current };
+  const opened: string[] = [];
+  const container = await render(<ForkReference fork={snapshot} onOpen={session => opened.push(session.nativeSessionId)} />);
+  expect(container.querySelector('summary')!.title).toBe('Context from parent-session');
+  expect(container.querySelector('strong')!.textContent).toBe('Context from Parent');
+  expect(container.querySelector('code')!.textContent).toBe('parent-session');
+  const currentButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open current source session');
+  expect(currentButton).toBeDefined();
+  await act(async () => currentButton!.click());
+  expect(opened).toEqual(['B']);
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  expect(opened).toEqual(['B', 'parent-session']);
+});
+
+
+it('shows known original reference identity without inventing an attachment for a shared-only source', async () => {
+  const current = { ...fork.source, hostId: 'host', providerId: 'claude', nativeSessionId: 'B', agentId: 'B-agent', title: 'Current B' };
+  const remote: SessionFork = { ...fork, remote: true, source: current,
+    nativeSourceRef: { controllerId: 'installation', providerId: 'codex', nativeSessionId: 'A' }, hostLocator: { hostId: 'host', controllerId: 'installation' } };
+  const opened: string[] = [];
+  const container = await render(<ForkReference fork={remote} onOpen={session => opened.push(session.nativeSessionId)} />);
+  expect(container.querySelector('summary')!.title).toBe('Context from A');
+  expect(container.querySelector('strong')!.textContent).toBe('Context from A');
+  expect(container.querySelector('code')!.textContent).toBe('A');
+  expect(container.querySelectorAll('button')).toHaveLength(1);
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  expect(opened).toEqual(['B']);
+});
+
+
+it.each(['host', 'controller', 'missing-host'])('does not attribute a shared historical reference across incompatible %s evidence', async collision => {
+  const source = { ...fork.source, hostId: collision === 'host' ? 'Host-Q' : 'Host-P', title: 'Current observed title' };
+  const remote: SessionFork = { ...fork, remote: true, source,
+    nativeSourceRef: { controllerId: 'installation-P', providerId: source.providerId, nativeSessionId: source.nativeSessionId },
+    hostLocator: collision === 'missing-host' ? undefined : { hostId: 'Host-P', controllerId: collision === 'controller' ? 'installation-Q' : 'installation-P' } };
+  const opened: string[] = [];
+  const container = await render(<ForkReference fork={remote} onOpen={session => opened.push(session.hostId!)} />);
+  expect(container.querySelector('strong')!.textContent).toBe('Context from parent-session');
+  expect(container.querySelectorAll('button')).toHaveLength(1);
+  expect(container.querySelector('button')!.textContent).toBe('Open current source session');
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  expect(opened).toEqual([source.hostId]);
+});
+
+it('retains a known legacy shared source attachment', async () => {
+  const remote: SessionFork = { ...fork, remote: true };
+  const container = await render(<ForkReference fork={remote} onOpen={() => {}} />);
+  expect(container.querySelector('strong')!.textContent).toBe('Context from Parent');
+  expect(container.querySelector('button')!.textContent).toBe('Open source session');
+});

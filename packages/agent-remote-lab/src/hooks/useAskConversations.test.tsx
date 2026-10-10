@@ -341,3 +341,20 @@ it('minimizes one source without cancelling another source restoration', async (
   expect(fixture.current().isOpen(source)).toBe(false);
   expect(fixture.current().isOpen(secondSource)).toBe(true);
 });
+
+
+it('discovers the original local Ask under its current shared source without moving local draft state', async () => {
+  const fixture = await setup();
+  const ask = fixture.current();
+  const record = ask.entryFor(source).record!;
+  const current = { ...source, providerId: 'claude', nativeSessionId: 'B', agentId: 'B-agent', title: 'Current B' };
+  await act(async () => ask.store.setSharedRelations([{ id: record.id, kind: 'ask', createdAt: record.capturedAt, source: current,
+    target: { ...record.target!, hostId: 'local' }, nativeSourceRef: { controllerId: 'installation', providerId: 'codex', nativeSessionId: source.nativeSessionId }, hostLocator: { hostId: 'local', controllerId: 'installation' } }]));
+  const discovered = ask.entryFor(current).record!;
+  expect(discovered.id).toBe(record.id);
+  expect(discovered.source).toEqual(source);
+  expect(discovered.target?.nativeSessionId).toBe('ask-native');
+  expect(ask.drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
+  expect(ask.drafts.get(sessionKey(current))).toBe('');
+  expect(fixture.requests).toHaveLength(1);
+});

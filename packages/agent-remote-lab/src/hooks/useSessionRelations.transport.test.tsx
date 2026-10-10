@@ -353,3 +353,22 @@ it('retains stale role intent after bare absence or failed reset and retires it 
   expect(patches[2]!.operationId).not.toBe(patches[0]!.operationId);expect(patches[2]!.expectedRoleRevision).toBe(3);
   expect(resets[0]).toMatchObject({operationId:patches[0]!.operationId,expectedRoleRevision:2});
 });
+
+
+it('imports original creation metadata over HTTP after shared current-source projection', async () => {
+  const imports: Record<string, unknown>[] = [];
+  const baseUrl = await serve(async (request, response) => {
+    if (request.method === 'POST') {
+      const input = await body(request); imports.push(input);
+      reply(response, [{ ...side, id: String(input.id), createdAt: String(input.createdAt) }]);
+    } else reply(response, []);
+  });
+  const sides = new ForkStore(baseUrl);
+  const record = sides.prepare(referenceForkContext(source), { sourceNativeSessionId: 'main', creationSource: { providerId: 'codex', nativeSessionId: 'main' } });
+  sides.bind(record.id, side.target); sides.markConfigured(record.id);
+  sides.setSharedRelations([{ ...side, id: record.id, source: { ...source, providerId: 'claude', nativeSessionId: 'B' },
+    nativeSourceRef: { controllerId: 'installation', providerId: 'codex', nativeSessionId: 'main' }, hostLocator: { hostId: 'host', controllerId: 'installation' } }]);
+  await mount(baseUrl, sides);
+  expect(imports).toEqual([{ hostId: 'host', providerId: 'codex', nativeSessionId: 'side', sourceNativeSessionId: 'main', id: record.id, kind: 'side', createdAt: record.capturedAt }]);
+  expect(new ForkStore(baseUrl).get(record.id)).toMatchObject({ source, options: { creationSource: { providerId: 'codex', nativeSessionId: 'main' } } });
+});

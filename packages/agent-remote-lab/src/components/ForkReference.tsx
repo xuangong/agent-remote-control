@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { createPortal } from 'react-dom';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
-import { sideLinkPending, sideLinkVisible, type SessionFork } from '../session-forks.js';
+import { currentForkSource, sideNavigationTarget, sideLinkPending, sideLinkVisible, type SessionFork } from '../session-forks.js';
 
 export function ForkIcon() {
   return <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="4" cy="3" r="1.75" /><circle cx="12" cy="3" r="1.75" /><circle cx="4" cy="13" r="1.75" /><path d="M4 4.75v6.5M12 4.75v1a3 3 0 0 1-3 3H4" /></svg>;
@@ -11,21 +11,28 @@ type UnlinkSide = (fork: SessionFork) => Promise<void>;
 
 export function ForkReference({ fork, onOpen, onUnlink, onRecover }: { fork: SessionFork; onOpen(session: OpenedSession): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide }) {
   if (!sideLinkVisible(fork)) return null;
+  const currentSource = currentForkSource(fork);
+  const contextId = fork.remote ? fork.nativeSourceRef?.nativeSessionId ?? fork.source.nativeSessionId : fork.source.nativeSessionId;
+  const origin = fork.nativeSourceRef;
+  const sourceKnown = !fork.remote || !origin || contextId === fork.source.nativeSessionId && origin.providerId === fork.source.providerId
+    && !!fork.hostLocator && fork.hostLocator.hostId === (fork.source.hostId ?? 'local') && fork.hostLocator.controllerId === origin.controllerId;
+  const contextTitle = sourceKnown ? fork.source.title : contextId;
   return <details className="lab-fork-reference">
-    <summary className="agent-skill-tag" title={`Context from ${fork.source.nativeSessionId}`}>
+    <summary className="agent-skill-tag" title={`Context from ${contextId}`}>
       <span className="lab-fork-symbol" aria-hidden="true">&amp;<span><ForkIcon /></span></span>
-      <span className="lab-fork-title">{fork.source.title}</span>
+      <span className="lab-fork-title">{contextTitle}</span>
     </summary>
     <div className="lab-fork-reference-details">
-      <strong>Context from {fork.source.title}</strong>
+      <strong>Context from {contextTitle}</strong>
       {fork.mode === 'reference' ? <p>Source reference · Read on demand. New source messages may be read.</p> : <>
       <p>Fixed snapshot · {fork.itemCount} items · {new Date(fork.capturedAt).toLocaleString()}</p>
       <p>Later source messages are not included.</p>
       {fork.shortenedToolCount ? <p>{fork.shortenedToolCount} tool records shortened. User and assistant messages are preserved.</p> : null}
       <small>Boundary {fork.boundary.epoch} / {fork.boundary.seq}</small>
       </>}
-      <code>{fork.source.nativeSessionId}</code>
-      <button type="button" onClick={() => onOpen(fork.source)}>Open source session</button>
+      <code>{contextId}</code>
+      {sourceKnown ? <button type="button" onClick={() => onOpen(fork.source)}>Open source session</button> : null}
+      {!sourceKnown || sessionKey(currentSource) !== sessionKey(fork.source) ? <button type="button" onClick={() => onOpen(currentSource)}>Open current source session</button> : null}
       {onUnlink ? <UnlinkAction fork={fork} onUnlink={onUnlink} onRecover={onRecover} /> : null}
     </div>
   </details>;
@@ -41,11 +48,12 @@ function ForkEntry({ fork, index, selectedChild, onOpen, onUnlink, onRecover }: 
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const menuId = useId();
-  const label = `Side ${index + 1} · ${fork.firstInput?.trim().slice(0, 72) || fork.target?.title || 'New session'}`;
+  const target = sideNavigationTarget(fork);
+  const label = `Side ${index + 1} · ${fork.firstInput?.trim().slice(0, 72) || target?.title || 'New session'}`;
   const close = useCallback(() => { setOpen(false); trigger.current?.focus({ preventScroll: true }); }, []);
   const dismiss = useCallback(() => setOpen(false), []);
   return <span className="lab-fork-entry">
-    <button type="button" aria-pressed={!!fork.target && selectedChild === sessionKey(fork.target)} title={label} onClick={() => onOpen(fork)}><ForkIcon /><span>{label}</span></button>
+    <button type="button" aria-pressed={!!target && selectedChild === sessionKey(target)} title={label} onClick={() => onOpen(fork)}><ForkIcon /><span>{label}</span></button>
     {onUnlink ? <>
       <button type="button" className="lab-fork-menu-trigger" ref={trigger} aria-label={`Actions for ${label}`} title={`Actions for ${label}`}
         aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(value => !value)}>⋯</button>

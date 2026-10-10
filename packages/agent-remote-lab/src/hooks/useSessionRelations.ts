@@ -45,9 +45,9 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
       let importedCount = 0;
       const known = new Set(relations.map(item => sessionKey(item.target)));
       for (const [store, kind] of [[sides, 'side'], [asks, 'ask']] as const) {
-        for (const record of store.all()) {
+        for (const record of store.allLocal()) {
           if (!currentResponse()) return;
-          if (importedCount >= 4 || record.remote || record.linked === false || record.mode !== 'reference' || !record.target || !record.configured || record.creationKey
+          if (importedCount >= 4 || record.remote || store.get(record.id).linked === false || record.mode !== 'reference' || !record.target || !record.configured || record.creationKey
             || !record.target.hostId || record.target.hostId === 'local' || known.has(sessionKey(record.target)) || rejectedImports.has(record.id)) continue;
           const { hostId, providerId, nativeSessionId } = record.target;
           importedCount++;

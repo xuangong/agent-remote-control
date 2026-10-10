@@ -7,7 +7,7 @@ import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { sessionKey } from './session-tree.js';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession } from './directory-client.js';
-import { ForkStore } from './session-forks.js';
+import { ForkStore, referenceForkContext } from './session-forks.js';
 import { createProtocolValidationServer } from './server.js';
 import { createRecordedLabProvider } from './server/recorded.js';
 import { replicaState } from './test/fixtures.js';
@@ -91,7 +91,7 @@ it('does not reopen a side unlinked during configuration, while still delivering
 }, 10000);
 
 
-it('opens a pending unlink under current B and Back clears B selection without navigating to fixed A', async () => {
+it.each([false, true])('opens a pending unlink under current B and Back clears B selection without navigating to fixed A (local delivery: %s)', async localDelivery => {
   const baseUrl = 'http://localhost/u/pending-side-navigation/';
   const original: OpenedSession = { hostId: 'host', providerId: 'pA', nativeSessionId: 'A', agentId: 'A-agent', title: 'Fixed A' };
   const current: OpenedSession = { ...original, providerId: 'pB', nativeSessionId: 'B', agentId: 'B-agent', title: 'Current B' };
@@ -99,8 +99,11 @@ it('opens a pending unlink under current B and Back clears B selection without n
   const origin = { controllerId: 'controller', providerId: 'pA', nativeSessionId: 'A' };
   localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([current]));
   window.history.replaceState(null, '', '/?host=host&provider=pB&session=B&agent=B-agent');
+  const local = new ForkStore(baseUrl);
+  const localRecord = localDelivery ? local.prepare(referenceForkContext(original), { sourceNativeSessionId: 'A' }) : undefined;
+  if (localRecord) { local.bind(localRecord.id, side); local.markConfigured(localRecord.id); }
   const projection = {
-    id: 'relation', kind: 'side', createdAt: '2026-10-10T00:00:00.000Z', source: original, target: side, nativeSourceRef: origin,
+    id: localRecord?.id ?? 'relation', kind: 'side', createdAt: '2026-10-10T00:00:00.000Z', source: original, target: side, nativeSourceRef: origin,
     sourceBinding: { kind: 'fixed', source: origin }, navigationSource: current, hostLocator: { hostId: 'host', controllerId: 'controller' },
     linked: false, revision: 1, roleRevision: 2, operation: { operationId: 'pending-edit', phase: 'metadata_committed' },
   };

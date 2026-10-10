@@ -3,6 +3,24 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Product provenance checkpoint (2026-10-11)
+
+Task 10A passed independent spec and quality review after two scoped fix rounds.
+Root freshly passed 10 suites / 153 tests and the separate e2e typecheck. The main
+Lab typecheck retains one pre-existing association-v4/v5 revocation fixture error;
+Task 10V repairs that fixture separately before Task 10B.
+
+ForkStore now separates immutable local creation/input records from current shared
+navigation. Known-local effects require successful raw reads and cannot fall back
+to plain sending when storage fails or disappears. Confirmed Side edit navigation
+retains its target across source projection and reload using complete stable
+Host/Controller/relation/original-source evidence. Shared-only views acquire no
+local delivery ledger. Legacy incomplete evidence remains conservative.
+
+Ask native routing and complete recoverable composition remain Tasks 10B/10C.
+Native D1/D2 evidence, product/browser and whole-branch acceptance remain open.
+Production capability, SQL effects and native suppliers stay gated.
+
 ## Local Worker operating checkpoint (2026-10-11)
 
 Task 9E passed independent spec and quality review after one finalization fix.
@@ -19,10 +37,9 @@ sample; evidence-write failure remains explicit. No production code changed.
 Measured values and limitations are in
 `docs/current/agent-remote/session-succession-operating-evidence.md`.
 
-Task 10A next separates immutable local fork delivery provenance from current
-navigation. Tasks 10B/10C then close Ask target routing and recoverable product
-composition. Native D1/D2 evidence, product/browser and whole-branch acceptance
-remain open. Production capability, SQL effects and native suppliers stay gated.
+Task 10A provenance work is recorded in the newer checkpoint above. Tasks
+10B/10C close Ask routing and recoverable product composition; native evidence
+and complete product/browser acceptance remain separate gates.
 
 ## Host grant and cursor implementation checkpoint (2026-10-11)
 

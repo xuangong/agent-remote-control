@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { captureForkContext, ForkStore, contextPrefix, referenceForkContext } from './session-forks.js';
+import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
 import { RemoteOperationError } from '@orchardworks/agent-remote-web';
 
 const source = { agentId: 'parent', nativeSessionId: 'native-parent', providerId: 'codex', title: 'Parent', hostId: 'local' };
@@ -175,10 +176,13 @@ it('restores shared navigation without replaying input or replacing the local de
 it('opens shared navigation when browser storage is unavailable', () => {
   const storage = { getItem() { throw new Error('Storage denied'); } } as unknown as Storage;
   const store = new ForkStore('denied', storage);
-  store.setSharedRelations([{ id: 'shared', kind: 'side', createdAt: '2026-09-29T00:00:00.000Z', source,
-    target: { ...source, agentId: 'child', nativeSessionId: 'child' } }]);
-  store.bind('shared', { ...source, agentId: 'attached', nativeSessionId: 'child' });
-  expect(store.get('shared').target?.agentId).toBe('attached');
+  const target = { ...source, hostId: 'host', agentId: 'child', nativeSessionId: 'child' };
+  store.setSharedRelations([{ id: 'shared', kind: 'side', createdAt: '2026-09-29T00:00:00.000Z', source: { ...source, hostId: 'host' }, target,
+    hostLocator: { hostId: 'host', controllerId: 'installation' }, nativeSourceRef: { controllerId: 'installation', providerId: source.providerId, nativeSessionId: source.nativeSessionId } }]);
+  const observed = store.all()[0]!;
+  store.bind(observed.id, { ...target, agentId: 'attached' });
+  expect(store.get(observed.id).target?.agentId).toBe('attached');
+  expect(() => store.bind('shared', { ...target, agentId: 'alias' })).toThrow('unavailable');
 });
 
 it('applies shared unlink state to a matching local target without losing its delivery ledger', async () => {
@@ -249,4 +253,286 @@ it('keeps acknowledged navigation separate from an older tab rewriting its deliv
   expect(restored.get(record.id)).toMatchObject({ linked: false, revision: 3, delivery: 'sent', firstInput: 'received' });
   restored.setSharedRelations([{ ...relation, linked: true, revision: 4 }]);
   expect(new ForkStore('old-delivery-writer').linked()).toHaveLength(1);
+});
+
+
+it('retains immutable reference delivery while projecting a different current source', async () => {
+  const original = { ...source, hostId: 'host-P' };
+  const current = { ...source, hostId: 'host-Q', providerId: 'claude', nativeSessionId: 'B', agentId: 'B-agent', title: 'Current B' };
+  const target = { ...original, nativeSessionId: 'X', agentId: 'X-agent' };
+  const store = new ForkStore('immutable-reference');
+  const options = { sourceNativeSessionId: original.nativeSessionId, creationSource: { providerId: original.providerId, nativeSessionId: original.nativeSessionId }, cwd: '/original', model: 'original-model' };
+  const record = store.prepare(referenceForkContext(original), options, [], 'creation-operation');
+  store.bind(record.id, target);
+  store.setSharedRelations([{ id: record.id, kind: 'side', createdAt: record.capturedAt, source: current, target,
+    nativeSourceRef: { controllerId: 'installation-P', providerId: original.providerId, nativeSessionId: original.nativeSessionId },
+    hostLocator: { hostId: 'host-P', controllerId: 'installation-P' }, revision: 2, roleRevision: 3 }]);
+  expect(store.get(record.id).source).toEqual(original);
+  const { sideNavigationSource } = await import('./session-forks.js');
+  expect(sideNavigationSource(store.get(record.id))).toEqual(current);
+  store.bind(record.id, { ...target, agentId: 'X-reattached' });
+  store.markConfigured(record.id);
+  store.finishCreation(record.id);
+  const restored = new ForkStore('immutable-reference').get(record.id);
+  expect(restored).toMatchObject({ source: original, options, target: { ...target, agentId: 'X-reattached' }, configured: true });
+  expect(restored.creationKey).toBeUndefined();
+  expect(restored.revision).toBe(2);
+  const sent: string[] = [];
+  await store.send(record.id, 'first', async input => { sent.push(input); }, async () => false);
+  expect(sent).toEqual([`<source-session-reference>${JSON.stringify({ id: record.id, sourceSession: 'native-parent' })}</source-session-reference>\n\nfirst`]);
+  expect(new ForkStore('immutable-reference').get(record.id)).toMatchObject({ source: original, options, delivery: 'sent', target: { nativeSessionId: 'X' } });
+});
+
+it('does not configure or complete a shared-only delivery ledger', () => {
+  const store = new ForkStore('remote-delivery');
+  const target = { ...source, nativeSessionId: 'X', agentId: 'X-agent' };
+  store.setSharedRelations([{ id: 'remote', kind: 'side', createdAt: '2026-10-10T00:00:00.000Z', source, target }]);
+  store.markConfigured('remote');
+  store.finishCreation('remote');
+  expect(store.get('remote').configured).toBeUndefined();
+  expect(localStorage.getItem('agent-remote-forks:remote-delivery:record:remote')).toBeNull();
+});
+
+it('does not combine a local delivery with a different Host or provider through a bare relation ID', async () => {
+  const original = { ...source, hostId: 'host-P' };
+  const target = { ...original, nativeSessionId: 'X', agentId: 'X-agent' };
+  const current = { ...original, providerId: 'claude', nativeSessionId: 'B' };
+  const store = new ForkStore('identity-collision');
+  const record = store.prepare(referenceForkContext(original), { sourceNativeSessionId: original.nativeSessionId });
+  store.bind(record.id, target);
+  store.setSharedRelations([{ id: record.id, kind: 'side', createdAt: record.capturedAt, source: current, target,
+    nativeSourceRef: { controllerId: 'installation', providerId: 'other-provider', nativeSessionId: original.nativeSessionId }, hostLocator: { hostId: 'host-P', controllerId: 'installation' } }]);
+  const { sideNavigationSource } = await import('./session-forks.js');
+  expect(sideNavigationSource(store.get(record.id))).toEqual(original);
+  expect(store.all()).toHaveLength(2);
+  store.setSharedRelations([{ id: record.id, kind: 'side', createdAt: record.capturedAt, source: { ...current, hostId: 'other-host' }, target,
+    nativeSourceRef: { controllerId: 'installation', providerId: original.providerId, nativeSessionId: original.nativeSessionId }, hostLocator: { hostId: 'other-host', controllerId: 'installation' } }]);
+  expect(sideNavigationSource(store.get(record.id))).toEqual(original);
+  expect(store.all()).toHaveLength(2);
+});
+
+it('keeps ambiguous missing-controller navigation separate from the local delivery', async () => {
+  const original = { ...source, hostId: 'host-P' };
+  const target = { ...original, nativeSessionId: 'X' };
+  const store = new ForkStore('ambiguous-controller');
+  const record = store.prepare(referenceForkContext(original), { sourceNativeSessionId: original.nativeSessionId });
+  store.bind(record.id, target);
+  store.setSharedRelations(['one', 'two'].map(controllerId => ({ id: record.id, kind: 'side' as const, createdAt: record.capturedAt,
+    source: { ...original, nativeSessionId: 'B', providerId: 'claude' }, target,
+    nativeSourceRef: { controllerId, providerId: original.providerId, nativeSessionId: original.nativeSessionId }, hostLocator: { hostId: 'host-P', controllerId } })));
+  const { sideNavigationSource } = await import('./session-forks.js');
+  expect(sideNavigationSource(store.get(record.id))).toEqual(original);
+  expect(store.all()).toHaveLength(3);
+});
+
+
+it('retains snapshot provenance through uncertain settlement and newer navigation revisions', async () => {
+  const original = { ...source, hostId: 'host' };
+  const target = { ...original, nativeSessionId: 'X', agentId: 'X-agent' };
+  const current = { ...original, providerId: 'claude', nativeSessionId: 'B', agentId: 'B-agent' };
+  const store = new ForkStore('snapshot-settlement');
+  const context = { source: original, capturedAt: '2026-10-10T00:00:00.000Z', boundary: { epoch: 'one', seq: 1 }, itemCount: 1, text: '[{"role":"user","text":"captured A"}]' };
+  const record = store.prepare(context, { cwd: '/A' });
+  store.bind(record.id, target);
+  const relation = { id: 'shared', kind: 'side' as const, createdAt: record.capturedAt, source: current, target,
+    nativeSourceRef: { controllerId: 'installation', providerId: original.providerId, nativeSessionId: original.nativeSessionId }, hostLocator: { hostId: 'host', controllerId: 'installation' }, revision: 3, roleRevision: 2 };
+  store.setSharedRelations([relation]);
+  const prefix = contextPrefix(record);
+  const sent: string[] = [];
+  await expect(store.send(record.id, 'question', async input => { sent.push(input); throw new Error('lost'); }, async () => false)).rejects.toThrow('lost');
+  expect(sent).toEqual([prefix + 'question']);
+  expect(prefix).toContain('native-parent');
+  expect(prefix).toContain('captured A');
+  store.setSharedRelations([{ ...relation, source: original, roleRevision: 1 }]);
+  const { currentForkSource } = await import('./session-forks.js');
+  expect(currentForkSource(store.get(record.id))).toEqual(current);
+  store.setSharedRelations([{ ...relation, linked: false, revision: 4 }]);
+  await expect(store.send(record.id, 'question', async input => { sent.push(input); }, async () => false)).rejects.toThrow('unknown delivery status');
+  await store.send(record.id, 'question', async input => { sent.push(input); }, async () => true);
+  expect(sent).toHaveLength(1);
+  expect(store.getLocal(record.id)).toMatchObject({ ...context, target, options: { cwd: '/A' }, delivery: 'sent', firstInput: 'question' });
+  expect(store.getLocal(record.id)?.revision).toBeUndefined();
+  expect(new ForkStore('snapshot-settlement').get(record.id)).toMatchObject({ linked: false, revision: 4, source: original });
+  store.setSharedRelations([{ ...relation, linked: true, revision: 5 }]);
+  expect(store.linked()).toHaveLength(1);
+  expect(new ForkStore('snapshot-settlement').get(record.id)).toMatchObject({ linked: true, revision: 5, delivery: 'sent', source: original });
+  expect(() => store.bind(record.id, { ...target, hostId: 'other-host' })).toThrow('target changed');
+});
+
+it('uses known installation identity and does not hide target-locator collisions', async () => {
+  const original = { ...source, hostId: 'host' };
+  const target = { ...original, nativeSessionId: 'X' };
+  const store = new ForkStore('known-controller');
+  const record = store.prepare(referenceForkContext(original), { sourceNativeSessionId: original.nativeSessionId });
+  store.bind(record.id, target);
+  const origin = { controllerId: 'known', providerId: original.providerId, nativeSessionId: original.nativeSessionId };
+  localStorage.setItem('agent-remote-forks:known-controller:record:' + record.id, JSON.stringify({ ...store.get(record.id), nativeSourceRef: origin, hostLocator: { hostId: 'host', controllerId: 'known' } }));
+  const current = { ...original, providerId: 'claude', nativeSessionId: 'B' };
+  const relation = { id: record.id, kind: 'side' as const, createdAt: record.capturedAt, source: current, target,
+    nativeSourceRef: origin, hostLocator: { hostId: 'host', controllerId: 'known' } };
+  store.setSharedRelations([{ ...relation, nativeSourceRef: { ...origin, controllerId: 'other' }, hostLocator: { hostId: 'host', controllerId: 'other' } }]);
+  const { currentForkSource } = await import('./session-forks.js');
+  expect(currentForkSource(store.get(record.id))).toEqual(original);
+  expect(store.all()).toHaveLength(2);
+  store.setSharedRelations([relation, { ...relation, id: 'other-target', target: { ...target, hostId: 'other-host' }, hostLocator: { hostId: 'other-host', controllerId: 'other' } }]);
+  expect(currentForkSource(store.get(record.id))).toEqual(current);
+  expect(store.all()).toHaveLength(2);
+  expect(store.all().find(item => item.remote)?.target?.hostId).toBe('other-host');
+});
+
+
+it('retains known controller evidence in independent navigation after delivery writes', async () => {
+  const original = { ...source, hostId: 'host' };
+  const target = { ...original, nativeSessionId: 'X' };
+  const store = new ForkStore('durable-controller');
+  const record = store.prepare(referenceForkContext(original), { sourceNativeSessionId: original.nativeSessionId });
+  store.bind(record.id, target);
+  const relation = { id: 'shared', kind: 'side' as const, createdAt: record.capturedAt, source: { ...original, providerId: 'claude', nativeSessionId: 'B' }, target,
+    nativeSourceRef: { controllerId: 'known', providerId: original.providerId, nativeSessionId: original.nativeSessionId }, hostLocator: { hostId: 'host', controllerId: 'known' }, revision: 2 };
+  store.setSharedRelations([relation]);
+  store.markConfigured(record.id);
+  const fresh = new ForkStore('durable-controller');
+  fresh.setSharedRelations([{ ...relation, nativeSourceRef: { ...relation.nativeSourceRef, controllerId: 'other' }, hostLocator: { hostId: 'host', controllerId: 'other' }, revision: 3 }]);
+  const { currentForkSource } = await import('./session-forks.js');
+  expect(currentForkSource(fresh.get(record.id))).toEqual(original);
+  expect(fresh.all()).toHaveLength(2);
+});
+
+
+it('recognizes an original source-reference prefix in a shared-only projected conversation', () => {
+  const store = new ForkStore('shared-reference-prefix');
+  const original = { controllerId: 'installation', providerId: 'codex', nativeSessionId: 'A' };
+  store.setSharedRelations([{ id: 'relation', kind: 'side', createdAt: '2026-10-10T00:00:00.000Z',
+    source: { ...source, nativeSessionId: 'B', providerId: 'claude', hostId: 'host' }, target: { ...source, hostId: 'host', nativeSessionId: 'X' },
+    nativeSourceRef: original, hostLocator: { hostId: 'host', controllerId: 'installation' } }]);
+  const record = store.all()[0]!;
+  expect(contextPrefix(record)).toBe('<source-session-reference>{"id":"relation","sourceSession":"A"}</source-session-reference>\n\n');
+});
+
+
+it('persists edited Side navigation without moving uncertain input ownership', async () => {
+  const { sideNavigationTarget } = await import('./session-forks.js');
+  const original = { ...source, hostId: 'host' };
+  const target = { ...original, nativeSessionId: 'X', agentId: 'X-agent' };
+  const edited = { ...target, nativeSessionId: 'Y', agentId: 'Y-agent' };
+  const store = new ForkStore('edited-navigation');
+  const record = store.prepare(referenceForkContext(original), { sourceNativeSessionId: original.nativeSessionId });
+  store.bind(record.id, target);
+  await expect(store.send(record.id, 'unknown X input', async () => { throw new Error('lost'); }, async () => false)).rejects.toThrow('lost');
+  const raw = store.getLocal(record.id);
+  store.followEditedSide(record.id, target, edited);
+  expect(sideNavigationTarget(new ForkStore('edited-navigation').get(record.id))).toEqual(edited);
+  expect(store.getLocal(record.id)).toEqual(raw);
+  expect(store.find(edited)).toBeUndefined();
+  expect(() => store.bind(record.id, edited)).toThrow('target changed');
+  expect(() => store.followEditedSide(record.id, target, edited)).toThrow('navigation changed');
+  expect(() => store.followEditedSide(record.id, edited, { ...edited, hostId: 'other' })).toThrow('retain its Host');
+  const sent: string[] = [];
+  await expect(store.send(record.id, 'unknown X input', async input => { sent.push(input); }, async () => false)).rejects.toThrow('unknown delivery status');
+  expect(sent).toEqual([]);
+  expect(store.getLocal(record.id)).toEqual(raw);
+  store.setLinked(record.id, false);
+  expect(sideNavigationTarget(new ForkStore('edited-navigation').get(record.id))).toEqual(edited);
+});
+
+
+function sharedEditedSide(): SessionRelation {
+  const origin = { controllerId: 'installation', providerId: 'codex', nativeSessionId: 'A' };
+  return { id: 'relation', kind: 'side', createdAt: '2026-10-10T00:00:00.000Z',
+    source: { ...source, hostId: 'host', nativeSessionId: 'B', agentId: 'B-agent' },
+    target: { ...source, hostId: 'host', nativeSessionId: 'X', agentId: 'X-agent' },
+    nativeSourceRef: origin, sourceBinding: { kind: 'fixed', source: origin },
+    hostLocator: { hostId: 'host', controllerId: 'installation' }, linked: true, revision: 1, roleRevision: 2 };
+}
+
+it('retains shared-only edited Side across current-source advancement and reload without delivery effects', async () => {
+  const { sideNavigationTarget, currentForkSource } = await import('./session-forks.js');
+  const relation = sharedEditedSide();
+  const edited = { ...relation.target, nativeSessionId: 'Y', agentId: 'Y-agent' };
+  const store = new ForkStore('moving-shared-source');
+  store.setSharedRelations([relation]);
+  store.followEditedSide('relation', relation.target, edited);
+  const advanced = { ...relation, source: { ...relation.source, nativeSessionId: 'C', agentId: 'C-agent' }, roleRevision: 3 };
+  store.setSharedRelations([advanced]);
+  expect(currentForkSource(store.get('relation')).nativeSessionId).toBe('C');
+  expect(sideNavigationTarget(store.get('relation'))).toEqual(edited);
+  const reloaded = new ForkStore('moving-shared-source');
+  reloaded.setSharedRelations([advanced]);
+  expect(sideNavigationTarget(reloaded.get('relation'))).toEqual(edited);
+  reloaded.markConfigured('relation'); reloaded.finishCreation('relation');
+  expect(reloaded.allLocal()).toEqual([]);
+  expect(store.allLocal()).toEqual([]);
+});
+
+it.each([
+  ['product Host', (r: SessionRelation) => ({ ...r, hostLocator: { ...r.hostLocator!, hostId: 'other-host' } })],
+  ['installation Controller', (r: SessionRelation) => ({ ...r, hostLocator: { ...r.hostLocator!, controllerId: 'other' }, nativeSourceRef: { ...r.nativeSourceRef!, controllerId: 'other' }, sourceBinding: undefined })],
+  ['raw target native', (r: SessionRelation) => ({ ...r, target: { ...r.target, nativeSessionId: 'other' } })],
+  ['raw target provider', (r: SessionRelation) => ({ ...r, target: { ...r.target, providerId: 'other' } })],
+  ['raw target Host', (r: SessionRelation) => ({ ...r, target: { ...r.target, hostId: 'other' } })],
+  ['relation', (r: SessionRelation) => ({ ...r, id: 'other-relation' })],
+  ['original source native', (r: SessionRelation) => ({ ...r, nativeSourceRef: { ...r.nativeSourceRef!, nativeSessionId: 'other' }, sourceBinding: undefined })],
+  ['original source provider', (r: SessionRelation) => ({ ...r, nativeSourceRef: { ...r.nativeSourceRef!, providerId: 'other' }, sourceBinding: undefined })],
+  ['missing Host evidence', (r: SessionRelation) => ({ ...r, hostLocator: undefined })],
+  ['missing original source', (r: SessionRelation) => ({ ...r, nativeSourceRef: undefined, sourceBinding: undefined })],
+  ['incompatible origin binding', (r: SessionRelation) => ({ ...r, sourceBinding: { kind: 'fixed' as const, source: { ...r.nativeSourceRef!, nativeSessionId: 'other' } } })],
+] as const)('refuses edited shared navigation with unrelated or incomplete %s evidence', async (_, collide) => {
+  const { sideNavigationTarget } = await import('./session-forks.js');
+  const relation = sharedEditedSide();
+  const store = new ForkStore('shared-collision');
+  store.setSharedRelations([relation]);
+  store.followEditedSide('relation', relation.target, { ...relation.target, nativeSessionId: 'Y', agentId: 'Y-agent' });
+  const unrelated = collide(relation);
+  const reloaded = new ForkStore('shared-collision');
+  reloaded.setSharedRelations([unrelated]);
+  expect(sideNavigationTarget(reloaded.get(unrelated.id))).toEqual(unrelated.target);
+  expect(reloaded.allLocal()).toEqual([]);
+});
+
+it.each(['missing', 'malformed'] as const)('keeps %s legacy navigation evidence conservative when current source moves', async evidence => {
+  const { sideNavigationTarget } = await import('./session-forks.js');
+  const relation = sharedEditedSide();
+  const store = new ForkStore('legacy-shared-edit');
+  store.setSharedRelations([relation]);
+  const edited = { ...relation.target, nativeSessionId: 'Y', agentId: 'Y-agent' };
+  store.followEditedSide('relation', relation.target, edited);
+  const key = [...Array(localStorage.length)].map((_, i) => localStorage.key(i)!).find(key => key.includes(':navigation:'))!;
+  const navigation = JSON.parse(localStorage.getItem(key)!);
+  if (evidence === 'missing') delete navigation.identity;
+  else navigation.identity = { relationId: 'relation' };
+  localStorage.setItem(key, JSON.stringify(navigation));
+  const reloaded = new ForkStore('legacy-shared-edit');
+  reloaded.setSharedRelations([{ ...relation, source: { ...relation.source, nativeSessionId: 'C' }, roleRevision: 3 }]);
+  expect(sideNavigationTarget(reloaded.get('relation'))).toEqual(relation.target);
+  expect(reloaded.allLocal()).toEqual([]);
+});
+
+
+it('does not use a shared fallback to send when a local delivery read is denied', async () => {
+  let denied = false;
+  const storage = { getItem(key: string) { if (denied) throw new Error('Read denied'); return localStorage.getItem(key); },
+    setItem(key: string, value: string) { localStorage.setItem(key, value); } } as unknown as Storage;
+  const store = new ForkStore('denied-shared-fallback', storage);
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  const target = { ...source, nativeSessionId: 'X', agentId: 'X-agent' };
+  store.bind(record.id, target);
+  await expect(store.send(record.id, 'unknown input', async () => { throw new Error('lost'); }, async () => false)).rejects.toThrow('lost');
+  const raw = store.getLocal(record.id);
+  store.setSharedRelations([{ id: record.id, kind: 'side', createdAt: record.capturedAt, source, target }]);
+  denied = true;
+  const sent: string[] = [];
+  await expect(store.send(record.id, 'unknown input', async input => { sent.push(input); }, async () => false)).rejects.toThrow('unavailable');
+  expect(sent).toEqual([]);
+  denied = false;
+  expect(store.getLocal(record.id)).toEqual(raw);
+});
+
+
+it('rejects a legacy shared alias attachment when storage cannot prove local absence', () => {
+  const storage = { getItem() { throw new Error('Read denied'); } } as unknown as Storage;
+  const store = new ForkStore('denied-legacy-bind', storage);
+  const target = { ...source, agentId: 'X-agent', nativeSessionId: 'X' };
+  store.setSharedRelations([{ id: 'same-local-id', kind: 'side', createdAt: '2026-10-10T00:00:00.000Z', source, target }]);
+  expect(() => store.bind('same-local-id', { ...target, agentId: 'attached' })).toThrow('unavailable');
+  expect(store.get('same-local-id').target).toEqual(target);
 });

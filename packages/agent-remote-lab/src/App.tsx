@@ -92,7 +92,7 @@ import { SideConversation } from './components/SideConversation.js';
 import { SessionAsk } from './components/SessionAsk.js';
 import { useAskConversations } from './hooks/useAskConversations.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
-import { sideNavigationSource, sideLinkVisible, referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
+import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
 import { CollapsedConversations } from './components/CollapsedConversations.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
@@ -538,7 +538,7 @@ function AppContent({
       if (!savedSide) { finishComposition(); return; }
       const source = recovered[index - 1]!;
       const isUnlinked = () => forkStore.all().some(record => !sideLinkVisible(record) && record.target
-        && sessionKey(record.source) === sessionKey(source) && sessionKey(record.target) === sessionKey(savedSide));
+        && sessionKey(sideNavigationSource(record)) === sessionKey(source) && sessionKey(sideNavigationTarget(record)!) === sessionKey(savedSide));
       const target = new SessionDirectoryClient(baseUrl, undefined, savedSide.hostId ?? 'local');
       cancellations.push(restoreSession({
         active,
@@ -1031,12 +1031,13 @@ function AppContent({
       if (record.navigationSource) pendingSideSources.current.set(record.id,record.navigationSource);
       if (sideLinkVisible(record) || !record.target || appliedUnlinks.get(record.id) === (record.revision ?? 0)) continue;
       appliedUnlinks.set(record.id, record.revision ?? 0);
-      const navigationSource = pendingSideSources.current.get(record.id) ?? record.source;
+      const navigationSource = pendingSideSources.current.get(record.id) ?? sideNavigationSource(record);
       pendingSideSources.current.delete(record.id);
-      trackedViews.unlink(navigationSource, record.target);
+      const navigationTarget = sideNavigationTarget(record)!;
+      trackedViews.unlink(navigationSource, navigationTarget);
       nextSideRequest(navigationSource);
       if (!visibleStackRoot) continue;
-      const sourceKey = sessionKey(navigationSource), targetKey = sessionKey(record.target);
+      const sourceKey = sessionKey(navigationSource), targetKey = sessionKey(navigationTarget);
       const current = { primary: visibleStackRoot, selections: sideSelections, focus: sideFocus, anchor: sideAnchor };
       const next = unlinkSideView(current, sourceKey, targetKey);
       if (next === current) continue;
@@ -1045,7 +1046,7 @@ function AppContent({
       setSideSelections(values => values[sourceKey] === targetKey ? { ...values, [sourceKey]: null } : values);
       if (next.focus !== sideFocus) {
         setDetachedSideRoot(targetKey);
-        const branch = sidePath(record.target, sideSessions, sideSelections);
+        const branch = sidePath(navigationTarget, sideSessions, sideSelections);
         if (!branch.some(session => sessionKey(session) === sideAnchor)) setSideAnchor(sideFocus ?? targetKey);
       } else {
         setSideFocus(next.focus);
@@ -1164,8 +1165,8 @@ function AppContent({
       if (!sideSessions.some(item => sessionKey(item) === sessionKey(source))) return openSession(session);
       const result = await new SessionDirectoryClient(baseUrl, undefined, session.hostId).attach(session.providerId, session.nativeSessionId);
       const target = { ...session, agentId: result.agentId };
-      const fork = forkStore.find(source);
-      if (fork) forkStore.bind(fork.id, target);
+      const fork = forkStore.findNavigationTarget(source);
+      if (fork) forkStore.followEditedSide(fork.id, source, target);
       rememberSession(target);
       setSideSessions(values => values.map(item => sessionKey(item) === sessionKey(source) ? target : item));
       setSideSelections(values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === sessionKey(source) ? sessionKey(target) : value])));
@@ -1408,15 +1409,17 @@ function AppContent({
     cancelCompositionRecovery();
     letterRequest.current?.abort();
     if (!record.target || !directory || !sideLinkVisible(forkStore.get(record.id))) return;
-    const saved = record.target;
+    const saved = sideNavigationTarget(record)!;
     const source = sideNavigationSource(record);
     const request = nextSideRequest(source);
     const target = (saved.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, saved.hostId);
     try {
       const result = await target.attach(saved.providerId, saved.nativeSessionId);
       const session = { ...saved, agentId: result.agentId };
-      forkStore.bind(record.id, session);
-      await configureFork(transport, forkStore, forkStore.get(record.id));
+      if (sessionKey(saved) === sessionKey(record.target)) {
+        forkStore.bind(record.id, session);
+        await configureFork(transport, forkStore, forkStore.get(record.id));
+      } else forkStore.followEditedSide(record.id, saved, session);
       rememberSession(session);
       if (sideRequests.current.get(sessionKey(source)) === request && sideLinkVisible(forkStore.get(record.id)) && session.agentId !== activeAgentId) selectSide(source, session);
     } catch (error) {

@@ -2,7 +2,7 @@ import { conversationLocalStorage, conversationSessionStorage } from '../convers
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
-import { ForkStore, referenceForkContext, type SessionFork } from '../session-forks.js';
+import { ForkStore, currentForkSource, referenceForkContext, type SessionFork } from '../session-forks.js';
 import { configureFork } from '../fork-actions.js';
 import { DraftStore } from '../draft-store.js';
 import { sessionKey } from '../session-tree.js';
@@ -118,7 +118,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     const key = sessionKey(source);
     let entry = entries.get(key);
     if (!entry) {
-      const saved = store.all().filter(record => sessionKey(record.source) === key).reverse();
+      const saved = store.all().filter(record => sessionKey(currentForkSource(record)) === key).reverse();
       entry = { source, restoring: windows.restoring.has(key), restoreOnly: windows.restoring.has(key), inputs: savedInputs(key), record: saved.find(record => record.target && !record.creationKey), pending: saved.find(record => !!record.creationKey) };
       entries.set(key, entry);
     }
@@ -130,7 +130,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
   }
   function withLatestRecord(key: string, entry: AskEntry): AskEntry {
     if (entry.pending) return entry;
-    const latest = store.all().filter(record => record.target && !record.creationKey && sessionKey(record.source) === key).at(-1);
+    const latest = store.all().filter(record => record.target && !record.creationKey && sessionKey(currentForkSource(record)) === key).at(-1);
     if (latest) return { ...entry, record: latest, attached: entry.record?.id === latest.id ? entry.attached : false };
     return entry.record?.remote ? { ...entry, record: undefined, attached: false } : entry;
   }

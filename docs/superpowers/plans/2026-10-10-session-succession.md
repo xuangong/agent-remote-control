@@ -478,8 +478,12 @@ no production capability is enabled by these scripted fixtures.
 
 ## Task 10: Product identities and recoverable composition
 
-- [ ] Split immutable ForkStore delivery source from projected navigation source;
-  mutations must read raw delivery records, not projected view records.
+- [x] Split immutable ForkStore delivery source from projected navigation source;
+  mutations read checked raw delivery records, not projected view records.
+  Task 10A passed independent spec/quality review after two scoped fix rounds;
+  Root freshly passed 153 tests and the e2e typecheck. The separate 10V fixture
+  repair must clear the pre-existing Lab typecheck error before 10B. Stable Side
+  edit navigation survives source changes without retargeting unknown input.
 - [ ] Route existing Ask targets by their own complete native locator; preserve
   native identity, nested attachment and draft/window state across provider change.
 - [ ] Introduce stable pane slots and target intent independent of attachment;

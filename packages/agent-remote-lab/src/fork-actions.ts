@@ -11,15 +11,18 @@ export const forkCommands = [
 ];
 
 export function forkActions(actions: LabWorkbenchActions, store: ForkStore, record: SessionFork | undefined, transport: RemoteAgentTransport): LabWorkbenchActions {
-  if (!record?.target || record.remote) return actions;
-  const target = record.target;
+  if (!record) return actions;
+  const delivery = store.getLocal(record.id) ?? (!record.remote ? record : undefined);
+  if (!delivery?.target) return actions;
+  record = delivery;
+  const target = delivery.target;
   async function withContext<T>(text: string, send: (input: string) => Promise<T>, identity?: string): Promise<T | undefined> {
     await inheritSettings(actions, store, record!, transport);
     return store.send(record!.id, text, send, async () => {
       const context = await captureForkContext(transport, target);
       const rows = JSON.parse(context.text) as { role: string; text: string }[];
       return rows.some((row) => row.role === 'user' && row.text.includes(contextPrefix(record!)));
-    }, identity);
+    }, identity, true);
   }
   return { ...actions,
     sendMessage: actions.sendMessage ? (text, options) => withContext(text, (input) => actions.sendMessage!(input, options)) : undefined,
@@ -39,9 +42,12 @@ export function forkActions(actions: LabWorkbenchActions, store: ForkStore, reco
 }
 
 async function inheritSettings(actions: LabWorkbenchActions, store: ForkStore, record: SessionFork, transport: RemoteAgentTransport): Promise<void> {
-  if (store.get(record.id).configured || !record.target) return;
+  const delivery = store.getLocalForEffect(record.id);
+  if (!delivery) throw new Error('The fork context is unavailable.');
+  if (delivery.configured || !delivery.target) return;
+  record = delivery;
   if (record.settings.length) {
-    const snapshot = await transport.fetchSnapshot(record.target.agentId);
+    const snapshot = await transport.fetchSnapshot(delivery.target.agentId);
     for (const desired of record.settings) {
       const setting = snapshot.payload.runtimeInfo.settings?.find(({ id }) => id === desired.id);
       if (setting?.value === desired.value) continue;
@@ -51,13 +57,17 @@ async function inheritSettings(actions: LabWorkbenchActions, store: ForkStore, r
       await actions.setSessionSetting(desired.id, desired.value);
     }
   }
-  store.markConfigured(record.id);
+  store.markConfigured(record.id, true);
 }
 
 export async function configureFork(transport: RemoteAgentTransport, store: ForkStore, record: SessionFork, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
-  if (record.remote || store.get(record.id).configured) return;
-  if (!record.settings.length) { store.markConfigured(record.id); return; }
+  if (record.remote && !store.getLocal(record.id)) return;
+  const delivery = store.getLocalForEffect(record.id);
+  if (!delivery) throw new Error('The fork context is unavailable.');
+  if (delivery.configured) return;
+  record = delivery;
+  if (!record.settings.length) { store.markConfigured(record.id, true); return; }
   await withForkClient(transport, record, (client) => inheritSettings(clientActions(client), store, record, transport), signal);
 }
 

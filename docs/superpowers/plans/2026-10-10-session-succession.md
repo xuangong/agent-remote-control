@@ -373,9 +373,21 @@ postcommit B fails exact cold resume; lost-ack U survives in public history.
 Claude durable succession is not certified. Task8C's isolated OpenCode 1.18.18
 existing `/session` API probe passed both empty-B and lost-ack-U crash cuts,
 independent review and Root's fresh verification. It proves raw native feasibility,
-not callback-enabled provider readiness. Next: 8B1 common operation/reservation
-and 8B2 entry-point wiring. The plan workspace contains their exact briefs.
-None enables production.
+not callback-enabled provider readiness. Task8B1 common operation/reservation is
+reviewed and verified, including its four review fixes. Root ran 280 tests in
+15 files before review and 174 tests in eight files after the fixes; affected
+build/typechecks passed. Next: 8B2A setting intent/effect lifetime, then 8B2B
+directory/provenance/ownership wiring. The plan workspace contains their exact
+briefs. None enables production or claims complete Host admission.
+
+- [x] Add entry-bound synchronous admission, bounded opt-in mutation retention,
+  source/candidate reservation and final serialized recheck to the existing
+  operation cache and succession boundary; preserve exact retry identity.
+- [x] Keep TPM accepted queued/unspecified intents unsettled in catalog/readiness,
+  with prepared intents visible but nonblocking.
+- [ ] Retain setting intent/effect lifetime and restore each intent's Host and
+  manager operation contexts; UI timeout is not native-effect settlement.
+- [ ] Complete directory/provenance, association and native-owner admission.
 
 - [ ] Enforce idle-only admission: reject working, queued, approval, active-child,
   disconnected and unknown states immediately. No draining, native pause or

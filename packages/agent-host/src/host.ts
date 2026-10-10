@@ -284,9 +284,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const lease = await acquireNative(source);
         try {
           const state = await nativeSuccession.inspect(source);
-          if (uncertainAgents.has(lease.agent.agentId) || tpm?.hasUnsettledMain(source)) {
+          if (operationCache.hasUnsettledMutation(nativeSessionRefKey(source)) || tpm?.hasUnsettledMain(source)) {
             throw new SuccessionPreparationRejected('succession_delivery_unresolved', 'Reconcile unsettled operations before succession.');
           }
+          assertHandoffState(source);
           const boundary = lease.agent.timelineCursor?.();
           if (!boundary) throw new SuccessionPreparationRejected('succession_boundary_unavailable', 'The native history boundary is unavailable.');
           return { ...state, boundary, inFlightInputs: successionBoundary?.pending(source) ?? 0 };
@@ -318,17 +319,26 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const nativeRef = (binding: Pick<Binding, 'providerId' | 'nativeSessionId'>): NativeSessionRef => ({
     controllerId: succession!.controllerId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId,
   });
+  const operationCache = createOperationCache(options.operationCache);
   const successionBoundary: SessionSuccessionBoundary | undefined = succession ? new SessionSuccessionBoundary(succession.contexts,
     target => succession.coordinator.assertAdmission(target), target => {
       const role = succession.store.all().find(state => nativeSessionRefKey(state.role.current) === nativeSessionRefKey(target))?.role;
       return role ? { roleId: role.id, roleRevision: role.revision } : undefined;
-    }) : undefined;
-  const operationCache = createOperationCache(options.operationCache);
+    }, operationCache, assertHandoffState) : undefined;
+  succession?.coordinator.setAdmission(successionBoundary!);
   const relay = createAgentRemoteRelay({ providers: relayAdapters, operationCache, operationLifecycle: {
     target: agent => { const binding = bindingFor(agent); return JSON.stringify([binding.providerId, binding.nativeSessionId]); },
     admit: () => { if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.'); },
     beforeDispatch: agent => { if (succession) succession.coordinator.assertAdmission(nativeRef(bindingFor(agent))); },
-    dispatch: (_agent, operation, scope, work) => successionBoundary ? successionBoundary.run(operation, scope, work) : work(),
+    mutationTargets: agent => succession ? [nativeSessionRefKey(nativeRef(bindingFor(agent)))] : [],
+    admission: (agent, _operation, _scope, entry) => {
+      if (!successionBoundary || !succession) return () => {};
+      const target = nativeRef(bindingFor(agent));
+      try { succession.coordinator.assertAdmission(target); }
+      catch (error) { throw new OperationCacheError('operation_rejected', error instanceof Error ? error.message : 'Session handoff admission is closed.'); }
+      return successionBoundary.admit([target], entry.key);
+    },
+    run: (_agent, operation, scope, entry, work) => successionBoundary ? successionBoundary.run(operation, scope, work, entry) : work(),
     retain: agent => idle.retain(bindingFor(agent).agentId),
     uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
   }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}) });
@@ -343,6 +353,23 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   let closed = false;
   let closePromise: Promise<void> | undefined;
 
+  function assertHandoffState(target: NativeSessionRef, captured?: { epoch: string; seq: number }, allowMissing = false): void {
+    const family = nativeFamily(target.providerId, target.nativeSessionId);
+    const own = family.find(binding => binding.nativeSessionId === target.nativeSessionId);
+    if (!own && allowMissing) return;
+    const state = own && liveAgent(own.agentId)?.handoffAdmissionState();
+    if (!state || !state.connected || !state.synchronized || state.closed || state.status !== 'idle' || state.activeTurn
+      || state.pendingInteractions || state.commandWork || state.settingWork || tpm?.hasUnsettledMain(target)) {
+      throw new SuccessionPreparationRejected('succession_not_quiescent', 'Session has active, unknown or unsynchronized Host work.');
+    }
+    const cursor = own && liveAgent(own.agentId)?.timelineCursor();
+    if (captured && (!cursor || cursor.epoch !== captured.epoch || cursor.seq !== captured.seq)) throw new SuccessionPreparationRejected('succession_boundary_changed', 'Source history changed beyond the captured handoff boundary.');
+    for (const child of family.filter(binding => binding !== own)) {
+      const childState = liveAgent(child.agentId)?.handoffAdmissionState();
+      if (!childState || !childState.connected || !childState.synchronized || childState.activeTurn || childState.status !== 'idle'
+        || childState.pendingInteractions || childState.commandWork || childState.settingWork) throw new SuccessionPreparationRejected('succession_not_quiescent', 'Session has unresolved child work.');
+    }
+  }
   function nativeFamily(providerId: string, nativeSessionId: string): Binding[] {
     const ids = new Set([nativeSessionId]);
     const family: Binding[] = [];
@@ -739,7 +766,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             throw new HostRequestError(400, 'invalid_request', 'Stop requires only an operation identity.');
           }
           const operationId = string(payload.operationId, 'operationId');
-          const targets = [...bindings.values()].map(binding => binding.agentId).filter(id => liveAgent(id));
+          const targetBindings = [...bindings.values()].filter(binding => liveAgent(binding.agentId));
+          const targets = targetBindings.map(binding => binding.agentId);
+          const mutationTargets = succession ? [...new Map(targetBindings.map(binding => { const target = nativeRef(binding); return [nativeSessionRefKey(target), target] as const; })).values()] : [];
           const results = await operationCache.execute({
             operationId,
             scope: operationScope(request),
@@ -747,6 +776,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             target: 'host',
             parameters: null,
           }, {
+            mutationTargets: mutationTargets.map(nativeSessionRefKey),
+            admit: entry => successionBoundary?.admit(mutationTargets, entry.key),
+            run: (entry, work) => successionBoundary ? successionBoundary.run({ operationId, kind: 'cancel', parameters: null, maximumResultBytes: 256 * 1024 }, operationScope(request), work, entry) : work(),
             dispatch: () => Promise.all(targets.map(cancelAgent)),
             maximumResultBytes: 256 * 1024,
           });
@@ -853,12 +885,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },
     close(): Promise<void> { return closePromise ??= (async () => {
       closed = true;
+      await bounded(successionReady, shutdownTimeoutMs).catch(() => undefined);
       await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       bindings.close();
       const releasing = idle.close();
       for (const catalog of catalogs.values()) catalog.dispose();
       const cleanup = Promise.allSettled([releasing, relay.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
       await bounded(cleanup, shutdownTimeoutMs);
+      successionBoundary?.close();
     })(); } };
 }
 

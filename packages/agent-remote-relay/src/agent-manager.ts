@@ -234,6 +234,15 @@ export class AgentManager {
     }
   }
 
+  /** Mutation facts only; subscribers and read-only history loading are not writes. */
+  handoffAdmissionState() {
+    const state = this.state.payload;
+    return { connected: !state.runtimeInfo.connection || state.runtimeInfo.connection.state === 'connected',
+      synchronized: this.boundarySeen, closed: this.closed, status: state.status, activeTurn: state.activeTurn !== null,
+      pendingInteractions: state.pendingInteractions.length, commandWork: this.pendingCommandExecutions,
+      settingWork: this.settingChanges.hasUnsettledWork() };
+  }
+
   /** Small safety predicate without cloning the potentially large snapshot. */
   canReleaseIdle(): boolean {
     const state = this.state.payload;

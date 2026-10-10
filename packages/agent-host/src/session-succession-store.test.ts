@@ -121,6 +121,7 @@ test('atomically enrolls a frozen association receipt and refuses unresolved sou
   const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
   const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 4, lineage: [source], relations: [] };
   await store.admitAssociation('create', 'fingerprint', source);
+  await expect(store.begin(request, true)).rejects.toThrow(/unresolved/);
   await expect(store.beginEnrolled(freeze, [], store.generation)).rejects.toThrow(/unresolved/);
   const reopened = new SessionSuccessionStore(directory); await reopened.ready;
   await expect(reopened.beginEnrolled(freeze, [], reopened.generation)).rejects.toThrow(/unresolved/);

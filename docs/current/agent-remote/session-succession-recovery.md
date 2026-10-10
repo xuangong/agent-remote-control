@@ -63,6 +63,34 @@ A terminal Host decision alone does not authorize releasing the other side's
 reservation. Old A-to-B status remains A-to-B evidence after a later B-to-C;
 current navigation can independently resolve C.
 
+## ARC mutation admission
+
+The existing process-local operation cache owns mutation target identities and
+native-effect or asynchronous-work handles. A fresh operation reserves capacity
+and obtains synchronous admission before asynchronous validation. An exact retry
+observes the same entry and does not acquire another grant. Source reservation,
+candidate registration and the final serialized commit check inspect this shared
+evidence. A late recovery result cannot reacquire a durably cancelled reservation.
+
+Only explicitly succession-enabled targets retain unsettled entries beyond
+ordinary cache expiry. The reserved budget is the smaller of 125 entries or
+one eighth of configured entries, and the smaller of 1 MiB or one eighth of
+configured bytes. Target metadata, handles and result reservations count toward
+that budget, including later handles for an ordinary target on an already pinned
+entry. Capacity refusal preserves existing evidence. This cache does not survive
+process restart; native recovery must independently cover that boundary.
+
+Input acceptance settles only when its disposition is started or handled;
+queued or absent disposition is still unresolved. TPM catalog and admission use
+the same predicate. Prepared TPM intents remain visible but are not yet native
+work. Read-only inspection, handoff cancel/reconcile, unrelated sessions and
+security revocation remain available during a reservation.
+
+This checkpoint covers wired session operations, complete stop-route target sets
+and enrolled association admission. Settings intent lifetime, remaining directory
+and association writes, and native ownership are subsequent implementation slices;
+the shared mechanism alone is not complete Host exclusion or provider readiness.
+
 ## Native evidence checkpoint
 
 An isolated macOS experiment on 2026-10-10 used Claude Agent SDK 0.3.247 and

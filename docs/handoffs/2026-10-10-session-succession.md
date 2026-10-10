@@ -3,6 +3,36 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Shared mutation admission checkpoint (2026-10-10)
+
+Task8B1 and its first fix round passed independent spec/quality review. The
+existing operation cache now owns entry-bound native and asynchronous mutation
+handles. Admission is synchronous before asynchronous validation; an exact retry
+observes the original entry without acquiring another grant or repeating effects.
+Only succession-enabled targets pin unsettled entries, within the reserved entry
+and byte budgets. This is process-local retention, not a durable generic ledger.
+
+Source reservation, synchronous candidate registration and the serialized final
+commit check share this boundary. Terminal cancellation cannot resurrect those
+reservations through a late recovery result. Session writes, the stop route's
+complete deduplicated target set and enrolled association admission use it; TPM
+catalog/readiness agree that accepted queued or unspecified input is unsettled.
+Prepared TPM intents remain visible without blocking handoff.
+
+Root verified the frozen source hashes and freshly ran 280 tests in 15 files
+before review, then 174 tests in eight files after the four review fixes. Relay
+build, affected typechecks and diff checks passed. The plan workspace preserves
+the reports, scoped fix review and source manifest; Root logs are
+`.tmp/root-task8b1-{build,tests,typecheck}.log` and
+`.tmp/root-task8b1-fix1-{tests,typecheck}.log`.
+
+Next is Task8B2A: retain each accepted setting intent and its native effects in
+the same operation entry, preserving both asynchronous contexts. Task8B2B then
+covers directory provenance, remaining association writes and native ownership.
+Ordinary immediate takeover may still interrupt working; only succession requires
+idle admission. Native evidence integration, deployed SQL and product composition
+remain open. No whole-Host exclusion or production capability is claimed yet.
+
 ## Native crash evidence checkpoint (2026-10-10)
 
 Task8A passed scoped independent spec/quality review after isolating its native
@@ -33,9 +63,9 @@ evidence and review live in the plan workspace. There was one create and one
 input, U appeared once, and reconciliation issued zero model requests.
 No callback-enabled production profile or complete readiness was certified.
 
-Next apply the prepared common admission slice
-`task-8b1-implementation-brief.md`, followed by 8B2's settings,
-directory/provenance and ownership wiring. Native readiness/evidence integration,
+The common admission slice is now reviewed as recorded above. Continue with
+8B2A's settings, then 8B2B's directory/provenance and ownership wiring.
+Native readiness/evidence integration,
 complete SQL persistence and client composition still block release. No merge,
 push, deployment, package publication, global install or user-service changes
 are authorized by this checkpoint.

@@ -4,12 +4,12 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { createHostBroker, type RemoteHostBrokerState } from '../../agent-remote-hosted/src/broker.js';
 import { PROTOCOL_VERSION, type ServerMessage, type TpmWork } from '@orchardworks/agent-remote-protocol';
 import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
-import type { AgentSession, AgentSessionConfig, AgentCapabilities, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import type { AgentSession, AgentSessionConfig, AgentCapabilities, AgentInputAcceptance, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { createAgentHostRuntime } from './host.js';
 import { TpmStore } from './tpm-store.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
@@ -18,9 +18,9 @@ class Native implements AgentSession {
  capabilities:AgentCapabilities={history:true,sendMessage:true,steer:false,cancel:false,readResource:false,interactions:{question:false,toolApproval:false,planApproval:false}};
  constructor(readonly id:string,readonly cwd:string){}
  async runtimeInfo(){return {providerId:'fixture',sessionId:this.id,status:'idle' as const,cwd:this.cwd};}
- sent:string[]=[];private stop?:()=>void;
+ sent:string[]=[];cancels=0;async cancel(){this.cancels++;}private stop?:()=>void;
  async *observe():AsyncIterable<ProviderStreamItem>{if(this.id==='A') yield {type:'observation',sourceKey:'history-user',occurredAt:1,delivery:'history',event:{type:'timeline',provider:'fixture',item:{type:'user_message',text:'Original requirement'}}};yield {type:'history_boundary'};await new Promise<void>(resolve=>{this.stop=resolve;});}
- async sendMessage(text:string){this.sent.push(text);return {disposition:'queued' as const};}
+ async sendMessage(text:string):Promise<AgentInputAcceptance | void>{this.sent.push(text);return {disposition:'queued' as const};}
  async respondToInteraction(){}
  async dispose(){this.stop?.();}
 }
@@ -30,10 +30,10 @@ async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Pr
  if(!enrollment) await store.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'controller',canonicalCwd:root}});
  const grants:Array<{nativeSessionId:string;sourceNativeSessionId:string}>=[];let beforeGrants=async()=>{};
  await setup?.(root);
- const sessions=new Map([['A',new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
+ const sessions=new Map([['A',new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,coverage=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
  const createHost=()=>createAgentHostRuntime({...(enableTpm?{tpm:{stateDirectory:join(root,'tpm'),tickMs:20}}:{}),succession:{controllerId:'controller',...(enrollment?{enrollment:true as const}:{}),stateDirectory:root,native:{
  supports:async()=>supported,
- inspect:async source=>({cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0}),
+ inspect:async source=>{if(!coverage)throw new Error('Native queue and work coverage unavailable');return {cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0};},
  createIdle:async()=>{creates++;await beforeIdleCreate();const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
  }},registrations:[{adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',supportsSourceReferences:true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm)throw new Error('unexpected');tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async id=>sessions.get(id)!,sessionWorkspace:async()=>root,sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}]});
  let host=createHost();
@@ -41,11 +41,11 @@ async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Pr
  let server=createServer();let address=await server.listen(0);
  const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
  const control=async(action:string,body:unknown)=>{const result=await host.control({method:'POST',path:`/remote/succession/${action}`,sessionId:'owner',body:JSON.stringify(body)});return {status:result.status,payload:JSON.parse(result.body)};};
- return {root,sessions,get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sessions,get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
 }
 const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A')};
 /** Each send uses a fresh authenticated connection and closes it before returning. */
-async function sendOverWebSocket(url: string, agentId: string, text: string, operationId: string, subject = 'owner') {
+async function sendOverWebSocket(url: string, agentId: string, text: string, operationId: string, subject = 'owner', content = false) {
   const socket = new WebSocket(`${url.replace('http', 'ws')}/v1/sessions/${agentId}/events`, {
     headers: { 'x-test-subject': subject },
   });
@@ -84,7 +84,7 @@ async function sendOverWebSocket(url: string, agentId: string, text: string, ope
     if (granted.type !== 'session_control') throw new Error('Missing control grant');
     socket.send(JSON.stringify({
       protocolVersion: PROTOCOL_VERSION, type: 'send_message', controlToken: granted.payload.token,
-      payload: { requestId: operationId, operationId, agentId, text },
+      payload: { requestId: operationId, operationId, agentId, ...(content ? { content: [{ type: 'text', text }] } : { text }) },
     }));
     return await next(message => (message.type === 'protocol_error' || message.type === 'command_acknowledged')
       && message.payload.requestId === operationId);
@@ -747,3 +747,166 @@ test('durable exact pre-effect reset fences a delayed absent operation before re
   expect(await transport.broker.resetSessionRelationChange('owner',{...input,operationId:'fresh-edit',expectedRoleRevision:3})).toMatchObject({operation:{phase:'committed'}});
  }finally{release?.();await transport.close();await f.close();}
 });
+
+
+test('real WebSocket validation admission blocks first handoff and is released after rejection', async () => {
+  const f = await fixture(); let finish!: () => void; let entered!: () => void;
+  const validation = new Promise<void>(resolve => { finish = resolve; }); const waiting = new Promise<void>(resolve => { entered = resolve; });
+  try {
+    const attached = await f.attach('A'); const agent = f.host.relay.requireAgent(attached.agentId);
+    agent.validateMessageContent = async () => { entered(); await validation; throw new Error('Invalid image preparation'); };
+    const send = sendOverWebSocket(f.url, attached.agentId, 'blocked validation', '00000000-0000-4000-8000-000000000091', 'owner', true);
+    await waiting;
+    expect((await f.control('prepare', request)).payload.phase).toBe('rejected'); expect(f.creates()).toBe(0);
+    finish(); expect((await send).type).toBe('protocol_error');
+    expect(f.sessions.get('A')!.sent).toEqual([]);
+    expect((await f.control('prepare', { ...request, operationId: 'after-validation' })).payload.phase).toBe('ready');
+  } finally { finish(); await f.close(); }
+}, 10000);
+
+test('retained queued input blocks first enablement for an existing role', async () => {
+  const f = await fixture();
+  try {
+    const attached = await f.attach('A');
+    expect((await sendOverWebSocket(f.url, attached.agentId, 'queued first', '00000000-0000-4000-8000-000000000092')).type).toBe('command_acknowledged');
+    expect((await f.control('prepare', request)).payload.phase).toBe('rejected'); expect(f.creates()).toBe(0);
+  } finally { await f.close(); }
+}, 10000);
+
+
+const deferredBoundary = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
+
+test('source reservation precedes store begin and exact retries join while unrelated WebSocket writes remain available', async () => {
+  const f = await fixture(); const gate = deferredBoundary(), entered = deferredBoundary();
+  const original = SessionSuccessionStore.prototype.begin;
+  const spy = vi.spyOn(SessionSuccessionStore.prototype, 'begin').mockImplementation(async function (input, local) {
+    if (input.operationId === 'begin-reservation') { entered.resolve(); await gate.promise; }
+    return original.call(this, input, local);
+  });
+  try {
+    const a = await f.attach('A'); f.sessions.set('C', new Native('C', f.root)); const c = await f.attach('C');
+    const input = { ...request, operationId: 'begin-reservation' };
+    const preparing = f.control('prepare', input); await entered.promise;
+    const retry = f.control('prepare', input);
+    expect((await sendOverWebSocket(f.url, a.agentId, 'forbidden', '00000000-0000-4000-8000-000000000093')).type).toBe('protocol_error');
+    expect((await sendOverWebSocket(f.url, c.agentId, 'unrelated', '00000000-0000-4000-8000-000000000094')).type).toBe('command_acknowledged');
+    expect((await f.control('prepare', { ...input, operationId: 'different-attempt' })).status).toBe(409);
+    expect(f.creates()).toBe(0); expect(f.sessions.get('A')!.sent).toEqual([]);
+    gate.resolve(); expect((await preparing).payload.phase).toBe('ready'); expect((await retry).payload.phase).toBe('ready'); expect(f.creates()).toBe(1);
+    expect((await f.control('cancel', { operationId: input.operationId })).payload.phase).toBe('cancelled');
+    expect((await sendOverWebSocket(f.url, a.agentId, 'after cancel', '00000000-0000-4000-8000-000000000095')).type).toBe('command_acknowledged');
+  } finally { gate.resolve(); spy.mockRestore(); await f.close(); }
+}, 10000);
+
+test('known candidate is fenced before save and cancellation cannot resurrect its reservation', async () => {
+  const f = await fixture(); const gate = deferredBoundary(), entered = deferredBoundary();
+  const original = SessionSuccessionStore.prototype.saveCandidate;
+  const spy = vi.spyOn(SessionSuccessionStore.prototype, 'saveCandidate').mockImplementation(async function (operationId, target) {
+    entered.resolve(); await gate.promise; return original.call(this, operationId, target);
+  });
+  try {
+    const a = await f.attach('A'); const preparing = f.control('prepare', request); await entered.promise; const b = await f.attach('B');
+    for (const [agentId, id] of [[a.agentId, '96'], [b.agentId, '97']]) {
+      expect((await sendOverWebSocket(f.url, agentId, 'forbidden before save', `00000000-0000-4000-8000-0000000000${id}`)).type).toBe('protocol_error');
+    }
+    const cancelling = f.control('cancel', { operationId: request.operationId }); gate.resolve();
+    expect((await cancelling).payload.phase).toBe('cancelled'); await preparing;
+    expect(f.sessions.get('A')!.sent).toEqual([]); expect(f.sessions.get('B')!.sent).toEqual([]);
+    expect((await sendOverWebSocket(f.url, a.agentId, 'after cancellation', '00000000-0000-4000-8000-000000000098')).type).toBe('command_acknowledged');
+    expect((await sendOverWebSocket(f.url, b.agentId, 'orphan', '00000000-0000-4000-8000-000000000099')).type).toBe('command_acknowledged');
+    expect(f.creates()).toBe(1);
+  } finally { gate.resolve(); spy.mockRestore(); await f.close(); }
+}, 10000);
+
+test('source and candidate remain excluded during commit publication and only committed B opens', async () => {
+  const f = await fixture(); const gate = deferredBoundary(), entered = deferredBoundary();
+  const original = SessionSuccessionStore.prototype.commit;
+  const spy = vi.spyOn(SessionSuccessionStore.prototype, 'commit').mockImplementation(async function (operationId, generation) {
+    entered.resolve(); await gate.promise; return original.call(this, operationId, generation);
+  });
+  try {
+    expect((await f.control('prepare', request)).payload.phase).toBe('ready');
+    const a = await f.attach('A'), b = await f.attach('B'); const committing = f.control('commit', { operationId: 'handoff', expectedRevision: 1 }); await entered.promise;
+    for (const [agentId, id] of [[a.agentId, '101'], [b.agentId, '102']]) expect((await sendOverWebSocket(f.url, agentId, 'forbidden', `00000000-0000-4000-8000-000000000${id}`)).type).toBe('protocol_error');
+    gate.resolve(); expect((await committing).payload.phase).toBe('committed');
+    expect((await sendOverWebSocket(f.url, a.agentId, 'superseded', '00000000-0000-4000-8000-000000000103')).type).toBe('protocol_error');
+    expect((await sendOverWebSocket(f.url, b.agentId, 'continue', '00000000-0000-4000-8000-000000000104')).type).toBe('command_acknowledged');
+  } finally { gate.resolve(); spy.mockRestore(); await f.close(); }
+}, 10000);
+
+test('native call lifetime blocks handoff while known completion survives a later local receipt failure', async () => {
+  const f = await fixture(); const gate = deferredBoundary(), entered = deferredBoundary();
+  try {
+    const a = await f.attach('A'); const native = f.sessions.get('A')!;
+    native.sendMessage = async text => { native.sent.push(text); entered.resolve(); await gate.promise; return { disposition: 'started' }; };
+    const agent = f.host.relay.requireAgent(a.agentId), original = agent.sendMessage.bind(agent);
+    agent.sendMessage = async (...args) => { await original(...args); throw new Error('Local receipt readback failed'); };
+    const sending = sendOverWebSocket(f.url, a.agentId, 'complete native once', '00000000-0000-4000-8000-000000000105'); await entered.promise;
+    expect((await f.control('prepare', request)).payload.phase).toBe('rejected'); expect(f.creates()).toBe(0);
+    gate.resolve(); expect(await sending).toMatchObject({ type: 'protocol_error', payload: { code: 'operation_outcome_unknown' } });
+    expect((await f.control('prepare', { ...request, operationId: 'known-completed' })).payload.phase).toBe('ready');
+    expect(native.sent).toHaveLength(1);
+  } finally { gate.resolve(); await f.close(); }
+}, 10000);
+
+test('conflicting candidate admission persists its identity, rejects preparation and never repeats create', async () => {
+  const f = await fixture(); const creating = deferredBoundary(), createEntered = deferredBoundary(), validating = deferredBoundary(), validateEntered = deferredBoundary();
+  f.beforeIdleCreate(async () => { createEntered.resolve(); await creating.promise; });
+  try {
+    const preparing = f.control('prepare', request); await createEntered.promise;
+    f.sessions.set('B', new Native('B', f.root)); const b = await f.attach('B');
+    const agent = f.host.relay.requireAgent(b.agentId);
+    agent.validateMessageContent = async () => { validateEntered.resolve(); await validating.promise; throw new Error('Invalid content'); };
+    const sending = sendOverWebSocket(f.url, b.agentId, 'already admitted', '00000000-0000-4000-8000-000000000106', 'owner', true); await validateEntered.promise;
+    creating.resolve(); expect(await preparing).toMatchObject({ status: 200, payload: { phase: 'rejected', to: ref('B'), failureCode: 'succession_candidate_busy' } });
+    expect((await f.control('prepare', request)).payload.to).toEqual(ref('B')); expect(f.creates()).toBe(1);
+    validating.resolve(); expect((await sending).type).toBe('protocol_error');
+  } finally { creating.resolve(); validating.resolve(); await f.close(); }
+}, 10000);
+
+test('uncertain store begin publication retains the synchronous source fence', async () => {
+  const f = await fixture();
+  const { SuccessionPublicationUnknown } = await import('./succession-persistence.js');
+  const spy = vi.spyOn(SessionSuccessionStore.prototype, 'begin').mockImplementation(async () => { throw new SuccessionPublicationUnknown('Uncertain storage'); });
+  try {
+    const a = await f.attach('A'); expect((await f.control('prepare', request)).status).toBe(409);
+    expect((await sendOverWebSocket(f.url, a.agentId, 'fenced unknown begin', '00000000-0000-4000-8000-000000000107')).type).toBe('protocol_error');
+    expect(f.creates()).toBe(0); expect(f.sessions.get('A')!.sent).toEqual([]);
+  } finally { spy.mockRestore(); await f.close(); }
+}, 10000);
+
+
+test('restored durable role with fresh empty cache still requires native queue and work coverage', async () => {
+  const f = await fixture();
+  try {
+    f.unavailableCoverage(); await f.restart();
+    expect((await f.control('prepare', request)).payload.phase).toBe('rejected'); expect(f.creates()).toBe(0);
+    const a = await f.attach('A');
+    expect((await sendOverWebSocket(f.url, a.agentId, 'ordinary remains available', '00000000-0000-4000-8000-000000000108')).type).toBe('command_acknowledged');
+  } finally { await f.close(); }
+}, 10000);
+
+test('pre-role retained queued input blocks enrolled first enablement', async () => {
+  const f = await fixture(false, true); const transport = await enrollmentTransport(f);
+  try {
+    const a = await f.attach('A');
+    expect((await sendOverWebSocket(f.url, a.agentId, 'queued before role', '00000000-0000-4000-8000-000000000109')).type).toBe('command_acknowledged');
+    const result = await transport.action('prepare', { providerId: 'fixture', nativeSessionId: 'A', operationId: 'first-role', expectedRevision: 1 });
+    expect(result!.status).toBe(200); expect((await result!.json()).record.phase).toBe('rejected'); expect(f.creates()).toBe(0);
+  } finally { await transport.close(); await f.close(); }
+}, 10000);
+
+
+test('bulk stop rejects all captured targets before any cancellation when one source is reserved', async () => {
+  const f = await fixture();
+  try {
+    f.sessions.get('A')!.capabilities.cancel = true; await f.attach('A');
+    const c = new Native('C', f.root); c.capabilities.cancel = true; f.sessions.set('C', c); await f.attach('C');
+    expect((await f.control('prepare', request)).payload.phase).toBe('ready');
+    const stopped = await f.host.control({ method: 'POST', path: '/remote/stop', body: JSON.stringify({ operationId: '00000000-0000-4000-8000-000000000110' }) });
+    expect(stopped.status).not.toBe(200); expect(c.cancels).toBe(0); expect(f.sessions.get('A')!.cancels).toBe(0);
+    expect((await f.control('cancel', { operationId: 'handoff' })).payload.phase).toBe('cancelled');
+    const after = await f.host.control({ method: 'POST', path: '/remote/stop', body: JSON.stringify({ operationId: '00000000-0000-4000-8000-000000000111' }) });
+    expect(after.status).toBe(200); expect(c.cancels).toBe(1); expect(f.sessions.get('A')!.cancels).toBe(1);
+  } finally { await f.close(); }
+}, 10000);

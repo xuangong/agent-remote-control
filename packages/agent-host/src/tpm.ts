@@ -84,7 +84,7 @@ export class TpmCoordinator {
     const works = this.store.all().map(record => this.visibleWork(record.work)).filter(work => cursor === undefined || work.id > cursor).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     for (const work of works) {
       const summary: TpmWork = { ...work, detailsOmitted: true, todo: undefined, todoRevision: work.todo?.revision, document: '', acceptance: '', evidence: [],
-        outbox: work.outbox?.filter(intent => ['prepared', 'dispatching', 'unknown'].includes(intent.status)).map(({ error: _error, ...intent }) => ({ ...intent, purpose: intent.purpose.slice(0, 64), text: '[Details omitted; open work details.]' })) };
+        outbox: work.outbox?.filter(intent => !isTpmIntentSettled(intent)).map(({ error: _error, ...intent }) => ({ ...intent, purpose: intent.purpose.slice(0, 64), text: '[Details omitted; open work details.]' })) };
       const candidate = { ...catalog, works: [...catalog.works, summary], nextCursor: work.id };
       if (catalog.works.length >= 100 || Buffer.byteLength(JSON.stringify(candidate)) > 512 * 1024) {
         if (!catalog.works.length) throw new Error('TPM catalog summary exceeded its size budget.');
@@ -98,7 +98,7 @@ export class TpmCoordinator {
   /** Call after ready. Queue acceptance remains unsettled without native execution evidence. */
   hasUnsettledMain(target: NativeSessionRef): boolean {
     return this.store.all().some(record => (record.work.outbox ?? []).some(intent => {
-      if (intent.target !== 'main' || !(['dispatching', 'unknown'].includes(intent.status) || intent.status === 'accepted' && intent.acceptance === 'queued')) return false;
+      if (intent.target !== 'main' || intent.status === 'prepared' || isTpmIntentSettled(intent)) return false;
       const recipient = intent.resolvedTarget ?? (record.work.mainBinding && this.access.mainRouting
         ? this.access.mainRouting.resolve(record.work.mainBinding).target : record.work.mainSessionRef);
       return recipient ? nativeSessionRefKey(recipient) === nativeSessionRefKey(target)

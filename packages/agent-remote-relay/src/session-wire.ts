@@ -25,7 +25,18 @@ import type { AgentManagerEvent } from './agent-manager-events.js';
 import { AgentBusyError, UnsupportedAgentCapabilityError, type AgentManagerListener } from './agent-manager.js';
 import type { TimelinePageRequest } from './timeline-projector.js';
 
+export interface HandoffAdmissionState {
+  connected: boolean;
+  synchronized: boolean;
+  closed: boolean;
+  status: AgentStatus;
+  activeTurn: boolean;
+  pendingInteractions: number;
+  commandWork: number;
+  settingWork: boolean;
+}
 export interface SessionWireAgent {
+  handoffAdmissionState?(): HandoffAdmissionState;
   readonly agentId: string;
   runOperation?<T>(work: () => Promise<T>, beforeDispatch?: () => void): Promise<T>;
   validateOperation?(kind: SessionOperationKind): void;

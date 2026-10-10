@@ -2,6 +2,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import type { SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
 import { LocalSuccessionPreparation, type LocalSuccessionAccess, type SuccessionReadiness } from './local-succession-preparation.js';
@@ -56,6 +57,37 @@ test('prepares once, gates both executors, then admits only the committed succes
   expect(() => f.coordinator.assertAdmission(source)).toThrow(/superseded/i);
   expect((await f.coordinator.commit('op', 1)).committedRevision).toBe(2);
 });
+
+test.each(['token', 'snapshot', 'enrolled-to-local', 'local-to-enrolled'] as const)('in-flight preparation rejects changed %s identity before begin while exact retries join', async change => {
+  const f = await fixture(); const generation = f.store.generation;
+  const freeze: SuccessionAssociationFreeze = { version: 1, token: 'freeze',
+    authority: { version: 1, origin: 'https://relay.test', issuer: 'relay', namespace: 'tenant', ownerSubject: 'owner' },
+    controllerId: source.controllerId, request, associationRevision: 0, lineage: [source], relations: [] };
+  let entered!: () => void, resume!: () => void;
+  const reached = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { resume = resolve; });
+  const inspect = f.access.inspect;
+  f.access.inspect = async target => { entered(); await gate; return inspect(target); };
+  const local = change === 'local-to-enrolled';
+  const first = local ? f.coordinator.prepare(request) : f.coordinator.prepareEnrolled(freeze, [], generation);
+  await reached;
+  const exact = local ? f.coordinator.prepare({ ...request }) : f.coordinator.prepareEnrolled(structuredClone(freeze), [], generation);
+  const changed = structuredClone(freeze);
+  if (change === 'token') changed.token = 'other';
+  if (change === 'snapshot') changed.relations.push({ relationId: 'new-reader', kind: 'side', sourceRef: source,
+    readerRef: { ...source, nativeSessionId: 'C' }, linked: true, revision: 1 });
+  let outcome: unknown;
+  const conflict = (change === 'enrolled-to-local' ? f.coordinator.prepare(request)
+    : f.coordinator.prepareEnrolled(changed, [], generation)).then(() => { outcome = 'joined'; }, error => { outcome = error; });
+  try {
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    expect(outcome).toBeInstanceOf(Error); expect((outcome as Error).message).toMatch(/identity/);
+    expect(f.store.read('role').operations).toEqual([]); expect(f.effects).toEqual([]);
+    resume(); expect((await first).phase).toBe('ready'); expect(await exact).toEqual(await first); await conflict;
+    expect(f.effects.filter(effect => effect.startsWith('create:'))).toEqual(['create:A:op:create']);
+    expect(f.store.read('role').enrollments ?? []).toEqual(local ? [] : [freeze]);
+  } finally { resume(); await Promise.allSettled([first, exact, conflict]); }
+}, 10000);
 
 test.each(['pendingInputs', 'pendingInteractions', 'activeChildren'] as const)('rejects unsafe %s before creating another executor', async field => {
   const f = await fixture(); f.sourceState[field] = 1;
@@ -116,6 +148,42 @@ test('a ready candidate can be reconciled after restart without copying context 
   expect((await coordinator.commit('op', 1)).committedRevision).toBe(2);
   expect(f.effects).toEqual(['capture:A:op:context', 'create:A:op:create', 'bind:B:op', 'bind:B:op']);
 });
+
+test.each(['source', 'source-error', 'supports', 'candidate', 'verify'] as const)('cancelling deferred recovery at %s never recreates source or candidate fences', async stage => {
+  const f = await fixture(); await f.coordinator.prepare(request);
+  const store = new SessionSuccessionStore(join(f.root, 'state')); await store.ready;
+  const coordinator = new SessionSuccessionCoordinator(store, f.preparation);
+  const { createOperationCache } = await import('@orchardworks/agent-remote-relay');
+  const { SessionSuccessionBoundary } = await import('./session-succession-boundary.js');
+  const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
+  const contexts = new SessionSuccessionContextStore(join(f.root, 'contexts')); await contexts.ready;
+  const cache = createOperationCache();
+  const boundary = new SessionSuccessionBoundary(contexts, target => coordinator.assertAdmission(target), () => undefined, cache);
+  coordinator.setAdmission(boundary);
+  let entered!: () => void, resume!: () => void;
+  const reached = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { resume = resolve; });
+  const pause = async () => { entered(); await gate; if (stage === 'source-error') throw new Error('Readiness unavailable'); };
+  const inspect = f.access.inspect;
+  f.access.inspect = async target => {
+    if ((stage === 'source' || stage === 'source-error') && target.nativeSessionId === 'A'
+      || stage === 'candidate' && target.nativeSessionId === 'B') await pause();
+    return inspect(target);
+  };
+  if (stage === 'supports') f.access.supports = async () => { await pause(); return true; };
+  if (stage === 'verify') f.access.verifyAttachment = pause;
+  const recovery = coordinator.reconcileReady('op');
+  try {
+    await reached;
+    expect((await coordinator.cancel('op')).phase).toBe('cancelled');
+    expect(() => boundary.admit([source, target], 'after-cancel')()).not.toThrow();
+    resume(); expect((await recovery).phase).toBe('cancelled');
+    expect(() => boundary.admit([source, target], 'after-recovery')()).not.toThrow();
+    expect((await coordinator.reconcileReady('op')).phase).toBe('cancelled');
+    expect(f.effects.filter(effect => effect.startsWith('create:'))).toEqual(['create:A:op:create']);
+    expect(store.read('role').role.current).toEqual(source);
+  } finally { resume(); await recovery; boundary.close(); await cache.close(); }
+}, 10000);
 
 test('a ready candidate that became busy cannot be committed or silently interrupted', async () => {
   const f = await fixture(); await f.coordinator.prepare(request);
@@ -178,3 +246,25 @@ test('retains actual candidate identity before rejecting a wrong provider result
   expect(await f.coordinator.prepare(request)).toMatchObject({ phase: 'rejected', to: { ...target, providerId: 'wrong' }, failureCode: 'succession_target_provider_mismatch' });
   expect(f.effects).toEqual(['capture:A:op:context']);
 });
+
+test('final synchronous Host check rejects facts changed after asynchronous verification', async () => {
+  const f = await fixture();
+  const { createOperationCache } = await import('@orchardworks/agent-remote-relay');
+  const { SessionSuccessionBoundary } = await import('./session-succession-boundary.js');
+  const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
+  const contexts = new SessionSuccessionContextStore(join(f.root, 'contexts')); await contexts.ready;
+  const cache = createOperationCache(); let changed = false;
+  const boundary = new SessionSuccessionBoundary(contexts, target => f.coordinator.assertAdmission(target), () => undefined, cache,
+    () => { if (changed) throw new Error('Host execution changed'); });
+  f.coordinator.setAdmission(boundary);
+  try {
+    expect((await f.coordinator.prepare(request)).phase).toBe('ready');
+    const verify = f.preparation.verify.bind(f.preparation);
+    f.preparation.verify = async (...args) => { await verify(...args); changed = true; };
+    await expect(f.coordinator.commit('op', 1)).rejects.toThrow('Host execution changed');
+    expect(f.store.operation('op').phase).toBe('ready'); expect(f.store.read('role').role.current).toEqual(source);
+    expect(() => boundary.admit([source], 'blocked')).toThrow();
+    changed = false; f.preparation.verify = verify;
+    expect((await f.coordinator.commit('op', 1)).phase).toBe('committed');
+  } finally { boundary.close(); await cache.close(); }
+}, 10000);

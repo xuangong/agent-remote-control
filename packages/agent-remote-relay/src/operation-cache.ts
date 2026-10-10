@@ -17,11 +17,27 @@ export interface OperationDescriptor {
   readonly parameters: unknown;
 }
 
+export interface NativeEffectHandle {
+  /** The native call completed, or was definitely rejected without effects. */
+  settled(): void;
+  /** The call ended without proving native queue/effect disposition. */
+  unresolved(): void;
+}
+export interface MutationEntry {
+  readonly key: string;
+  readonly targets: readonly string[];
+  startNativeEffect(target: string): NativeEffectHandle;
+  retainAsyncWork(target: string): () => void;
+}
 export interface OperationWork<T> {
+  readonly mutationTargets?: readonly string[];
+  /** Runs synchronously once, after capacity reservation and before validation. */
+  readonly admit?: (entry: MutationEntry) => (() => void) | void;
+  readonly run?: (entry: MutationEntry, work: () => Promise<T>) => Promise<T>;
   readonly validate?: () => Promise<void> | void;
   /** Synchronous, side-effect-free admission; may run again after queued preparation. */
   readonly beforeDispatch?: () => void;
-  readonly dispatch: () => Promise<T>;
+  readonly dispatch: (entry: MutationEntry) => Promise<T>;
   readonly maximumResultBytes?: number;
 }
 
@@ -36,6 +52,8 @@ export interface OperationCacheOptions {
 
 export interface OperationCache {
   execute<T>(descriptor: OperationDescriptor, work: OperationWork<T>): Promise<T>;
+  hasUnsettledMutation(target: string): boolean;
+  enableMutationTarget(target: string): () => void;
   close(): Promise<void>;
 }
 
@@ -51,6 +69,14 @@ type CacheEntry = InFlightEntry | SettledEntry;
 interface EntryBase {
   readonly fingerprint: string;
   bytes: number;
+  readonly mutation: MutationState;
+}
+interface MutationState {
+  readonly targets: readonly string[];
+  readonly metadataBytes: number;
+  readonly reservation: number;
+  readonly handles: Set<{ target: string; kind: 'native' | 'async'; state: 'pending' | 'unknown'; pinned: boolean }>;
+  resultBytes: number;
 }
 interface InFlightEntry extends EntryBase {
   readonly state: 'in_flight';
@@ -73,13 +99,18 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
   const cleanupIntervalMs = positive(options.cleanupIntervalMs ?? Math.min(ttlMs, 60_000), 'cleanupIntervalMs');
   const now = options.now ?? Date.now;
   const entries = new Map<string, CacheEntry>();
+  const enabledTargets = new Map<string, number>();
+  const maxPinnedEntries = Math.min(125, Math.floor(maxEntries / 8));
+  const maxPinnedBytes = Math.min(1024 * 1024, Math.floor(maxBytes / 8));
+  const handleBytes = 64;
+  const pinned = (entry: CacheEntry) => [...entry.mutation.handles].some(handle => handle.pinned);
   let retainedBytes = 0;
   let closing = false;
 
   function cleanup(): void {
     const cutoff = validNow(now) - ttlMs;
     for (const [key, entry] of entries) {
-      if (entry.state === 'in_flight' || entry.settledAt > cutoff) continue;
+      if (entry.state === 'in_flight' || pinned(entry) || entry.settledAt > cutoff) continue;
       entries.delete(key);
       retainedBytes -= entry.bytes;
     }
@@ -113,7 +144,11 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     if (resultReservation > maxResultBytes) {
       throw new OperationCacheError('operation_result_too_large', 'The operation result reservation exceeds the cache limit.');
     }
-    const reservedBytes = entryBytes(key, resultReservation);
+    const targets = Object.freeze([...new Set(work.mutationTargets ?? [])]);
+    if (targets.some(target => typeof target !== 'string' || !target)) throw new OperationCacheError('invalid_operation_target', 'Invalid mutation target.');
+    const metadataBytes = targets.reduce((bytes, target) => bytes + Buffer.byteLength(target) + 16, 0);
+    const mutation: MutationState = { targets, metadataBytes, reservation: resultReservation, resultBytes: resultReservation, handles: new Set() };
+    const reservedBytes = entryBytes(key, resultReservation) + metadataBytes;
     if (entries.size >= maxEntries || retainedBytes + reservedBytes > maxBytes) {
       throw new OperationCacheError('operation_capacity_exceeded', 'The operation cache is full. Wait for retained operations to expire before trying a new mutation.');
     }
@@ -124,9 +159,10 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       resolvePending = resolve;
       rejectPending = reject;
     });
-    entries.set(key, { state: 'in_flight', fingerprint, bytes: reservedBytes, promise: pending });
+    entries.set(key, { state: 'in_flight', fingerprint, bytes: reservedBytes, promise: pending, mutation });
     retainedBytes += reservedBytes;
-    void runOperation(key, fingerprint, reservedBytes, resultReservation, work).then(resolvePending, rejectPending);
+    const entry = mutationEntry(key, mutation);
+    void runOperation(key, fingerprint, reservedBytes, resultReservation, work, entry).then(resolvePending, rejectPending);
     return pending;
   }
 
@@ -136,69 +172,127 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     reservedBytes: number,
     resultReservation: number,
     work: OperationWork<T>,
+    entry: MutationEntry,
   ): Promise<T> {
+    let release: (() => void) | undefined;
     try {
-      await work.validate?.();
-      work.beforeDispatch?.();
-    } catch (error) {
-      const messageBytes = error instanceof OperationCacheError ? Buffer.byteLength(error.message) : 0;
-      const errorMessage = messageBytes > 0 && messageBytes <= Math.min(1024, resultReservation) ? (error as OperationCacheError).message : undefined;
-      settle(key, fingerprint, reservedBytes, {
-        state: 'rejected', errorCode: safeErrorCode(error), errorMessage, bytes: entryBytes(key, errorMessage ? messageBytes : 0), settledAt: validNow(now),
-      });
-      throw error;
-    }
+      try { release = work.admit?.(entry) || undefined; }
+      catch (error) { return await perform({ ...work, validate: () => { throw error; } }); }
+      return await (work.run ? work.run(entry, () => perform(work)) : perform(work));
+    } finally { try { release?.(); } catch { /* Cleanup cannot change the published receipt. */ } }
 
-    let result: T;
-    try {
-      result = await work.dispatch();
-    } catch (error) {
-      if (error instanceof AgentOperationRejectedError) {
-        const errorCode = safeErrorCode(error);
+    async function perform(work: OperationWork<T>): Promise<T> {
+      try {
+        await work.validate?.();
+        work.beforeDispatch?.();
+      } catch (error) {
+        const messageBytes = error instanceof OperationCacheError ? Buffer.byteLength(error.message) : 0;
+        const errorMessage = messageBytes > 0 && messageBytes <= Math.min(1024, resultReservation) ? (error as OperationCacheError).message : undefined;
         settle(key, fingerprint, reservedBytes, {
-          state: 'rejected', errorCode, bytes: entryBytes(key, 0), settledAt: validNow(now),
+          state: 'rejected', errorCode: safeErrorCode(error), errorMessage, bytes: entryBytes(key, errorMessage ? messageBytes : 0), settledAt: validNow(now),
         });
-        throw new OperationCacheError(errorCode, 'The operation was rejected without side effects.');
+        throw error;
       }
-      const errorCode = error instanceof AgentRuntimeError && error.code === 'native_file_limit' ? error.code : undefined;
-      settle(key, fingerprint, reservedBytes, {
-        state: 'unknown', errorCode, bytes: entryBytes(key, 0), settledAt: validNow(now),
-      });
-      throw unknownOutcome(errorCode);
-    }
 
-    try {
-      const resultUndefined = result === undefined;
-      const encoded = resultUndefined ? '' : JSON.stringify(result);
-      const resultBytes = Buffer.byteLength(encoded);
-      if (resultBytes > resultReservation) throw new Error('Result exceeds its retained reservation.');
-      const retained = resultUndefined ? undefined : JSON.parse(encoded);
-      settle(key, fingerprint, reservedBytes, {
-        state: 'completed', result: retained, resultUndefined, bytes: entryBytes(key, resultBytes), settledAt: validNow(now),
-      });
-      return result;
-    } catch {
-      settle(key, fingerprint, reservedBytes, {
-        state: 'unknown', bytes: entryBytes(key, 0), settledAt: validNow(now),
-      });
-      throw new OperationCacheError('operation_outcome_unknown', 'The operation result could not be retained after dispatch.');
+      let result: T;
+      try {
+        result = await work.dispatch(entry);
+      } catch (error) {
+        if (error instanceof AgentOperationRejectedError) {
+          const errorCode = safeErrorCode(error);
+          settle(key, fingerprint, reservedBytes, {
+            state: 'rejected', errorCode, bytes: entryBytes(key, 0), settledAt: validNow(now),
+          });
+          throw new OperationCacheError(errorCode, 'The operation was rejected without side effects.');
+        }
+        const errorCode = error instanceof AgentRuntimeError && error.code === 'native_file_limit' ? error.code : undefined;
+        settle(key, fingerprint, reservedBytes, {
+          state: 'unknown', errorCode, bytes: entryBytes(key, 0), settledAt: validNow(now),
+        });
+        throw unknownOutcome(errorCode);
+      }
+
+      try {
+        const resultUndefined = result === undefined;
+        const encoded = resultUndefined ? '' : JSON.stringify(result);
+        const resultBytes = Buffer.byteLength(encoded);
+        if (resultBytes > resultReservation) throw new Error('Result exceeds its retained reservation.');
+        const retained = resultUndefined ? undefined : JSON.parse(encoded);
+        settle(key, fingerprint, reservedBytes, {
+          state: 'completed', result: retained, resultUndefined, bytes: entryBytes(key, resultBytes), settledAt: validNow(now),
+        });
+        return result;
+      } catch {
+        settle(key, fingerprint, reservedBytes, {
+          state: 'unknown', bytes: entryBytes(key, 0), settledAt: validNow(now),
+        });
+        throw new OperationCacheError('operation_outcome_unknown', 'The operation result could not be retained after dispatch.');
+      }
     }
   }
 
-  function settle(key: string, fingerprint: string, reservedBytes: number, entry: Omit<SettledEntry, 'fingerprint'>): void {
-    if (entries.get(key)?.state !== 'in_flight') return;
-    retainedBytes += entry.bytes - reservedBytes;
-    entries.set(key, { ...entry, fingerprint });
+  function settle(key: string, fingerprint: string, _reservedBytes: number, entry: Omit<SettledEntry, 'fingerprint' | 'mutation'>): void {
+    const prior = entries.get(key);
+    if (prior?.state !== 'in_flight') return;
+    const mutation = prior.mutation;
+    mutation.resultBytes = entry.bytes - entryBytes(key, 0);
+    entries.set(key, { ...entry, bytes: prior.bytes, fingerprint, mutation });
+    account(key);
+  }
+  function accountedBytes(key: string, entry: CacheEntry): number {
+    const mutation = entry.mutation;
+    return entryBytes(key, pinned(entry) ? Math.max(mutation.resultBytes, mutation.reservation) : mutation.resultBytes)
+      + mutation.metadataBytes + mutation.handles.size * handleBytes;
+  }
+  function account(key: string): void {
+    const entry = entries.get(key); if (!entry) return;
+    const bytes = accountedBytes(key, entry);
+    retainedBytes += bytes - entry.bytes; entry.bytes = bytes;
+  }
+  function mutationEntry(key: string, mutation: MutationState): MutationEntry {
+    function retain(target: string, kind: 'native' | 'async') {
+      const entry = entries.get(key);
+      if (closing || !entry || entry.mutation !== mutation) throw new AgentOperationRejectedError('operation_cache_closed', 'Mutation evidence is no longer available.');
+      if (!mutation.targets.includes(target)) throw new AgentOperationRejectedError('invalid_operation_target', 'Mutation target was not admitted.');
+      const handle = { target, kind, state: 'pending' as 'pending' | 'unknown', pinned: enabledTargets.has(target) };
+      mutation.handles.add(handle);
+      const bytes = accountedBytes(key, entry);
+      const pins = [...entries.entries()].filter(([, item]) => pinned(item));
+      if (retainedBytes + bytes - entry.bytes > maxBytes || pinned(entry) && (pins.length > maxPinnedEntries
+        || pins.reduce((sum, [id, item]) => sum + accountedBytes(id, item), 0) > maxPinnedBytes)) {
+        mutation.handles.delete(handle);
+        throw new AgentOperationRejectedError('mutation_evidence_capacity', 'Mutation evidence capacity is full. Resolve retained native work before retrying.');
+      }
+      account(key);
+      return {
+        settled() { if (entries.get(key)?.mutation !== mutation) return; mutation.handles.delete(handle); account(key); },
+        unresolved() { handle.state = 'unknown'; },
+      };
+    }
+    return { key, targets: mutation.targets, startNativeEffect: target => retain(target, 'native'),
+      retainAsyncWork(target) { const handle = retain(target, 'async'); return () => handle.settled(); } };
   }
 
   return {
     execute,
+    hasUnsettledMutation(target) {
+      cleanup();
+      return [...entries.values()].some(entry => entry.mutation.targets.includes(target)
+        && (entry.state === 'in_flight' || [...entry.mutation.handles].some(handle => handle.target === target)));
+    },
+    enableMutationTarget(target) {
+      enabledTargets.set(target, (enabledTargets.get(target) ?? 0) + 1);
+      let released = false;
+      return () => { if (released) return; released = true; const count = (enabledTargets.get(target) ?? 1) - 1;
+        if (count > 0) enabledTargets.set(target, count); else enabledTargets.delete(target); };
+    },
     async close(): Promise<void> {
       if (closing) return;
       closing = true;
       clearInterval(timer);
       await Promise.allSettled([...entries.values()].flatMap((entry) => entry.state === 'in_flight' ? [entry.promise] : []));
       entries.clear();
+      enabledTargets.clear();
       retainedBytes = 0;
     },
   };

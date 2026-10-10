@@ -261,7 +261,6 @@ export class SessionSuccessionStore {
       if (item.associationAuthority && successionAuthorityKey(item.associationAuthority) !== successionAuthorityKey(receipt.authority)) throw new Error('Primary role belongs to another association authority.');
       const lineage = this.lineage(item);
       if (JSON.stringify(lineage.map(nativeSessionRefKey)) !== JSON.stringify(receipt.lineage.map(nativeSessionRefKey))) throw new Error('Primary role lineage changed.');
-      if (state.associationAdmissions.some(admission => lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new Error('Source association outcome is unresolved.');
       const record = this.beginRecord(state, receipt.request, local);
       item.associationAuthority = receipt.authority;
       (item.enrollments ??= []).push(receipt);
@@ -287,7 +286,7 @@ export class SessionSuccessionStore {
       if (item.associationAuthority && successionAuthorityKey(item.associationAuthority) !== successionAuthorityKey(receipt.authority)) throw new Error('Primary role belongs to another association authority.');
       if (item.enrollments?.some(value => !item.releasedEnrollments?.includes(value.token))) throw new Error('Previous association reservation has not been released.');
       if (JSON.stringify(this.lineage(item).map(nativeSessionRefKey)) !== JSON.stringify(receipt.lineage.map(nativeSessionRefKey))) throw new Error('Primary role lineage changed.');
-      const record = this.beginRecord(state, receipt.request);
+      const record = this.beginRecord(state, receipt.request, false, true);
       record.phase = 'cancelled';
       item.associationAuthority = receipt.authority;
       (item.enrollments ??= []).push(receipt);
@@ -311,7 +310,7 @@ export class SessionSuccessionStore {
       return this.beginRecord(state, input, local);
     });
   }
-  private beginRecord(state: StoreState, input: SuccessionRequest, local = false): SuccessionRecord {
+  private beginRecord(state: StoreState, input: SuccessionRequest, local = false, cancelling = false): SuccessionRecord {
     if (!isSuccessionRequest(input)) throw new Error('Invalid succession request.');
     const prior = state.roles.flatMap(item => item.operations).find(op => op.operationId === input.operationId);
     if (prior) {
@@ -320,6 +319,8 @@ export class SessionSuccessionStore {
     }
     const item = this.findRole(state, input.roleId);
     if (item.role.revision !== input.expectedRevision || nativeSessionRefKey(item.role.current) !== nativeSessionRefKey(input.from)) throw new Error('Primary role revision changed.');
+    const lineage = new Set(this.lineage(item).map(nativeSessionRefKey));
+    if (!cancelling && state.associationAdmissions.some(admission => lineage.has(nativeSessionRefKey(admission.source)))) throw new Error('Source association outcome is unresolved.');
     if (item.relationChanges?.some(change => change.phase !== 'released')) throw new Error('Primary role associations are reserved.');
       if (item.operations.some(op => !terminal(op.phase))) throw new Error('Primary role is reserved by a succession in progress.');
     if (item.operations.length >= 512) throw new Error('Succession history is full.');

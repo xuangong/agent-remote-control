@@ -508,12 +508,22 @@ it('reports uncertain and queued main recipients to readiness using their pinned
   expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
   route.commit('successor'); await f.coordinator.tick();
   expect(f.coordinator.hasUnsettledMain(route.target)).toBe(false);
-  for (const status of ['dispatching', 'unknown'] as const) {
+  for (const acceptance of [undefined, 'queued', 'started', 'handled'] as const) {
+    await f.coordinator.store.update(work.id, undefined, record => { const item = record.work.outbox!.find(item => item.id === intent.id)!; item.status = 'accepted'; item.acceptance = acceptance; });
+    expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(acceptance === undefined || acceptance === 'queued');
+    expect(f.coordinator.hasUnsettledMain(route.target)).toBe(false);
+    const summary = (await f.coordinator.list()).works.find(item => item.id === work.id)!;
+    expect(summary.outbox?.some(item => item.id === intent.id)).toBe(acceptance === undefined || acceptance === 'queued');
+  }
+  for (const status of ['prepared', 'dispatching', 'unknown'] as const) {
     await f.coordinator.store.update(work.id, undefined, record => { record.work.outbox!.find(item => item.id === intent.id)!.status = status; });
-    expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+    expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(status !== 'prepared');
+    const summary = (await f.coordinator.list()).works.find(item => item.id === work.id)!;
+    expect(summary.outbox?.some(item => item.id === intent.id)).toBe(true);
   }
   await f.coordinator.store.update(work.id, undefined, record => { record.work.outbox!.find(item => item.id === intent.id)!.status = 'rejected'; });
   expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(false);
+  expect((await f.coordinator.list()).works.find(item => item.id === work.id)!.outbox?.some(item => item.id === intent.id)).toBe(false);
 }, 10000);
 
 it('requires the contextual reader after succession and passes signed source cursors without native reinterpretation', async () => {

@@ -23,7 +23,7 @@ export interface TpmRecord {
   actions: Record<string, { fingerprint: string; revision: number }>;
 }
 
-export const isTpmIntentSettled = (intent: TpmIntent): boolean => intent.status === 'rejected' || intent.status === 'accepted' && intent.acceptance !== 'queued';
+export const isTpmIntentSettled = (intent: TpmIntent): boolean => intent.status === 'rejected' || intent.status === 'accepted' && (intent.acceptance === 'started' || intent.acceptance === 'handled');
 
 const OUTBOX_MAX_BYTES = 512 * 1024;
 function boundOutbox(record: TpmRecord): void {

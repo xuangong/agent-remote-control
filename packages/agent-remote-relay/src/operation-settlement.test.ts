@@ -29,9 +29,11 @@ it('keeps lifecycle admission, resource retention and uncertainty separate from 
     await expect(execute(target, operation, { dispatch })).rejects.toMatchObject({ code: 'service_draining' });
     expect(retain).not.toHaveBeenCalled(); expect(dispatch).not.toHaveBeenCalled();
     draining = false;
-    await expect(execute(target, operation, { dispatch })).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
-    await expect(execute(target, operation, { dispatch })).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
-    expect(dispatch).toHaveBeenCalledOnce(); expect(retain).toHaveBeenCalledTimes(2); expect(release).toHaveBeenCalledTimes(2); expect(uncertain).toHaveBeenCalledTimes(2);
+    await expect(execute(target, operation, { dispatch })).rejects.toMatchObject({ code: 'service_draining' });
+    const fresh = { ...operation, operationId: '00000000-0000-4000-8000-000000000002' };
+    await expect(execute(target, fresh, { dispatch })).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+    await expect(execute(target, fresh, { dispatch })).rejects.toMatchObject({ code: 'operation_outcome_unknown' });
+    expect(dispatch).toHaveBeenCalledOnce(); expect(retain).toHaveBeenCalledTimes(1); expect(release).toHaveBeenCalledTimes(1); expect(uncertain).toHaveBeenCalledTimes(2);
   } finally { await cache.close(); }
 }, 10000);
 

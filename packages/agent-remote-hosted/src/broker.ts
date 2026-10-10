@@ -23,6 +23,7 @@ import { HostSharing, SharingError, type HostSharingState } from './host-sharing
 import { createHostPreviews, type HostPreviewState } from './host-previews.js';
 import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
+import { isSuccessionCapacityError, SUCCESSION_FEATURE_BYTES } from './succession-capacity.js';
 
 type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
@@ -60,8 +61,8 @@ export interface RemoteHostBrokerState {
 export interface HostBrokerOptions {
   /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
   successionEnrollment?: SuccessionAssociationAuthority;
-  /** Pure synchronous selection inside associationChange; absent until aggregate admission is enabled. */
-  successionProjectionAllowance?: (state: Readonly<BrokerAssociationState>, freeze: Omit<BoundedSuccessionAssociationFreeze, 'maxProjectionBytes'>) => number;
+  /** Pure synchronous selection from the complete post-increment Broker draft; no native effects. */
+  successionProjectionAllowance?: (context: { hostId: string; broker: Readonly<RemoteHostBrokerState>; freeze: Omit<BoundedSuccessionAssociationFreeze, 'maxProjectionBytes'> }) => number;
   diagnostics?: DiagnosticJournal;
   ownerSubject?: string;
   userStreamCount?(subject: string): number;
@@ -160,13 +161,17 @@ export function createHostBroker(options: HostBrokerOptions) {
     for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket, 'relay_state_unavailable', 1011);
     for (const client of clients) client.close(1011, 'Relay state is unavailable');
   }
-  function commit<T>(stage: (draft: RemoteHostBrokerState) => { value: T; publish(): void }): Promise<T> {
+  function commit<T>(stage: (draft: RemoteHostBrokerState) => { value: T; unchanged?: true; publish(): void }, preEffect = false): Promise<T> {
     const operation = commits.then(async () => {
       assertAvailable();
       const draft = structuredClone(snapshot());
       const result = stage(draft);
+      if (result.unchanged) return result.value;
       try { await options.onStateChange?.(draft); }
-      catch (error) { failClosed(); throw error; }
+      catch (error) {
+        if (preEffect && isSuccessionCapacityError(error)) throw new BrokerError(error.status, error.code, error.message);
+        failClosed(); throw error;
+      }
       assertAvailable();
       result.publish();
       return result.value;
@@ -233,10 +238,11 @@ export function createHostBroker(options: HostBrokerOptions) {
         if (host.successionEnrollmentVersion !== 2 || !options.successionProjectionAllowance) throw new BrokerError(409, 'succession_preparation_unavailable', 'New succession preparation requires negotiated v2 and projection admission.');
         const described = await associationRpc(host, { action: 'describe', providerId, nativeSessionId });
         if (!isPrimaryRole(described.role) || !Array.isArray(described.lineage) || described.role.revision !== input.expectedRevision || described.role.current.controllerId !== host.installationId || nativeSessionRefKey(described.role.current) !== nativeSessionRefKey(source)) throw new BrokerError(409, 'invalid_host_response', 'The current primary role could not be verified.');
-        frozen = await associationChange(state => {
+        frozen = await commit(draft => {
+          const state = structuredClone(associations);
           assertHostCurrent(host, generation);
           const duplicate = state.freezes.find(item => item.hostId === host.id && item.receipt.request.operationId === operationId);
-          if (duplicate) { assertSameRequest(duplicate.receipt); return duplicate; }
+          if (duplicate) { assertSameRequest(duplicate.receipt); return { value: duplicate, unchanged: true, publish() {} }; }
           if (state.freezes.filter(item => item.receipt.request.roleId === described.role.id).length >= 512) throw new BrokerError(409, 'succession_role_capacity', 'Succession role history is full; reconcile existing operations.');
           for (const ref of described.lineage as NativeSessionRef[]) assertAssociationOpen(ref);
           if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
@@ -247,11 +253,19 @@ export function createHostBroker(options: HostBrokerOptions) {
               relationId: binding.sourceRelation!.id, kind: binding.sourceRelation!.kind, readerRef: associationSource(host, binding.providerId, binding.nativeSessionId),
               sourceRef: binding.sourceRelation!.nativeSourceRef ?? associationSource(host, binding.providerId, binding.sourceRelation!.sourceNativeSessionId), linked: binding.sourceRelation!.linked ?? true, revision: binding.sourceRelation!.revision ?? 0,
             })) };
-          const maxProjectionBytes = options.successionProjectionAllowance!(structuredClone(state), structuredClone(proposal));
-          if (!Number.isSafeInteger(maxProjectionBytes) || maxProjectionBytes < 1) throw new BrokerError(409, 'succession_projection_capacity_exceeded', 'No valid committed projection allowance is available.');
+          if (state.revision >= Number.MAX_SAFE_INTEGER) throw new BrokerError(409, 'association_capacity', 'Association revision is exhausted.');
+          state.revision++;
+          draft.associations = state;
+          let maxProjectionBytes: number;
+          try { maxProjectionBytes = options.successionProjectionAllowance!({ hostId: host.id, broker: structuredClone(draft), freeze: structuredClone(proposal) }); }
+          catch (error) { if (isSuccessionCapacityError(error)) throw new BrokerError(error.status, error.code, error.message); failClosed(); throw error; }
+          if (!Number.isSafeInteger(maxProjectionBytes) || maxProjectionBytes < 1 || maxProjectionBytes > SUCCESSION_FEATURE_BYTES) throw new BrokerError(409, 'succession_projection_capacity_exceeded', 'No valid committed projection allowance is available.');
           const receipt: SuccessionAssociationFreeze = { ...proposal, version: 2, maxProjectionBytes };
-          const result = { hostId: host.id, receipt }; state.freezes.push(result); return result;
-        });
+          const result = { hostId: host.id, receipt }; state.freezes.push(result);
+          if (!validBrokerAssociations(state)) throw new BrokerError(409, 'association_capacity', 'Association storage is full or invalid.');
+          retainedIdentities(state);
+          return { value: result, publish() { associations = state; } };
+        }, true);
       }
     }
     if (frozen?.receipt.version === 2 && host.successionEnrollmentVersion !== 2) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Saved bounded succession requires negotiated v2 recovery.');

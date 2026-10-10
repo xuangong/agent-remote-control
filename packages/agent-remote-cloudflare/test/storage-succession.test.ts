@@ -4,10 +4,42 @@ import { createHash } from 'node:crypto';
 import { createRelayState } from '../../agent-remote-hosted/src/state.js';
 import { createHostBroker, emptyRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
 import { SqliteRelayStore, TEST_ONLY_COMPLETE_SQL_CODEC } from '../src/storage.js';
-import { decodeSqlSnapshot, encodeSqlSnapshot, SQL_CHUNK_BYTES, type SqlChunk, type SqlManifest } from '../src/storage-codec.js';
+import { decodeSqlSnapshot, encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, type SqlChunk, type SqlManifest } from '../src/storage-codec.js';
 import { codecState } from './storage-codec-fixture.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 's'.repeat(32) };
+test('quotes the actual record envelope and manifest without allocating a payload', () => {
+  const state: any = emptyRelayState(auth);
+  state.padding = '';
+  const baseline = encodeSqlSnapshot(state, auth).costs[0]!;
+  for (const length of [SQL_CHUNK_BYTES, SQL_CHUNK_BYTES + 1, SQL_CHUNK_BYTES * 9, SQL_CHUNK_BYTES * 9 + 1]) {
+    state.padding = 'x'.repeat(length - baseline.byteLength);
+    const actual = encodeSqlSnapshot(state, auth).costs[0]!;
+    const quote = quoteSqlRecord({ kind: 'relayHeader', owner: '', key: 'relay', payloadJsonBytesUpperBound: Buffer.byteLength(JSON.stringify(state)) });
+    expect(quote).toEqual({ byteLength: actual.byteLength, chunkCount: actual.chunkCount, manifestBytes: actual.manifestBytes });
+  }
+  const full = codecState(auth);
+  full.tenants[0]!.broker.creations[0]![0] = 'escape\\"😀\ud800';
+  for (const cost of encodeSqlSnapshot(full, auth).costs) {
+    const framing = quoteSqlRecord({ ...cost, payloadJsonBytesUpperBound: 0 }).byteLength;
+    expect(Buffer.byteLength(JSON.stringify([cost.kind, cost.owner, cost.key]))).toBeLessThanOrEqual(framing);
+    const exact = quoteSqlRecord({ ...cost, payloadJsonBytesUpperBound: cost.byteLength - framing });
+    expect(exact).toEqual({ byteLength: cost.byteLength, chunkCount: cost.chunkCount, manifestBytes: cost.manifestBytes });
+    const larger = quoteSqlRecord({ ...cost, payloadJsonBytesUpperBound: cost.byteLength - framing + 1 });
+    expect(larger.byteLength).toBeGreaterThanOrEqual(cost.byteLength);
+    expect(larger.manifestBytes).toBeGreaterThanOrEqual(cost.manifestBytes);
+  }
+  expect(quoteSqlRecord({ kind: 'freeze', owner: 'owner', key: 'token', payloadJsonBytesUpperBound: 10 ** 12 }).byteLength).toBeGreaterThan(10 ** 12);
+}, 10000);
+
+test('rejects unsupported or incomplete quote tuples and unsafe lengths before allocation', () => {
+  for (const input of [
+    { kind: 'invented', owner: '', key: 'relay', payloadJsonBytesUpperBound: 1 },
+    { kind: 'freeze', key: 'token', payloadJsonBytesUpperBound: 1 },
+    { kind: 'freeze', owner: 'owner', payloadJsonBytesUpperBound: 1 },
+    ...[-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1].map(payloadJsonBytesUpperBound => ({ kind: 'freeze', owner: 'owner', key: 'token', payloadJsonBytesUpperBound })),
+  ]) expect(() => quoteSqlRecord(input as any)).toThrow(/quote|length|tuple|kind/i);
+}, 10000);
 const databases: DatabaseSync[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); }, 10000);
 function fixture(complete = false) {
@@ -264,4 +296,47 @@ test('preserves empty optional collections and complete ordinary metadata throug
   (state as any).extension = { retained: 'complete' };
   await f.store.commit(state);
   expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(state);
+}, 10000);
+
+test('configured accounting fences SQL writes at ten, holds publication on sync and restores unknown complete evidence', async () => {
+  const f = fixture(true); const initial = codecState(auth);
+  const unresolved: any = initial.tenants[0]!.broker.associations!.freezes.find(row => row.released === undefined)!;
+  unresolved.receipt = { ...unresolved.receipt, version: 2, maxProjectionBytes: 65536 };
+  await f.store.commit(initial);
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  let publications = 0, failures = 0, replies = 0;
+  const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => { failures++; }, () => { publications++; }, encoding);
+  expect(reopen(f.storage).initial.version).toBe(9);
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  f.storage.sync = () => { enter(); return new Promise<void>(resolve => { release = resolve; }); };
+  const before = structuredClone(relay.read());
+  const pending = relay.mutate(draft => { draft.securityEvents!.push({ id: 'accounting', subject: 'owner', action: 'fixture', outcome: 'allowed', at: 1 }); }).then(() => { replies++; });
+  await entered;
+  expect(relay.read()).toEqual(before); expect(publications).toBe(0); expect(replies).toBe(0);
+  expect(reopen(f.storage).initial.version).toBe(10);
+  release(); await pending;
+  expect(relay.read().version).toBe(10); expect(publications).toBe(1); expect(replies).toBe(1);
+  expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/succession/i);
+  f.storage.sync = async () => { throw new Error('unknown accounting sync'); };
+  await expect(relay.mutate(draft => { (draft.tenants[0]!.broker.associations as any).unknownEvidence = 'complete'; })).rejects.toThrow(/unknown accounting sync/);
+  expect(failures).toBe(1); expect(publications).toBe(1);
+  expect(relay.read().tenants[0]!.broker.associations).not.toHaveProperty('unknownEvidence');
+  const restored = reopen(f.storage).initial;
+  expect(restored.version).toBe(10); expect(restored.tenants[0]!.broker.associations).toHaveProperty('unknownEvidence', 'complete');
+  expect(() => createRelayState(auth, { initial: restored, async commit() {} }, () => {}, () => {})).toThrow(/cost/i);
+  expect(() => createRelayState(auth, { initial: restored, async commit() {} }, () => {}, () => {}, encoding)).not.toThrow();
+}, 10000);
+
+test('configured accounting rolls back a late SQL fault before format and runtime publication', async () => {
+  const f = fixture(true); const initial = emptyRelayState(auth); initial.version = 9;
+  await f.store.commit(initial); const before = f.snapshot();
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  let failures = 0, publications = 0;
+  const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => { failures++; }, () => { publications++; }, encoding);
+  f.db.exec("CREATE TRIGGER fail_accounting BEFORE UPDATE ON relay_snapshot_manifests WHEN NEW.kind = 'relayHeader' BEGIN SELECT RAISE(ABORT, 'accounting rollback'); END");
+  await expect(relay.mutate(() => {})).rejects.toThrow(/accounting rollback/);
+  expect(f.snapshot()).toBe(before); expect(relay.read().version).toBe(9); expect(publications).toBe(0); expect(failures).toBe(1);
+  f.db.exec('DROP TRIGGER fail_accounting');
+  expect(reopen(f.storage).initial.version).toBe(9);
 }, 10000);

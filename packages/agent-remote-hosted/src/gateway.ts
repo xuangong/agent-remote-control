@@ -19,7 +19,8 @@ import { SharingError } from './host-sharing.js';
 import { createGatewaySessions } from './sessions.js';
 import { queryGatewayAuthority, type AuthorityDiagnostic } from './authority.js';
 import { provisionGatewayHostKey, revokeGatewayHostKey, validateBootstrapBody } from './host-bootstrap.js';
-import { createRelayState, type RelayStateStore } from './state.js';
+import { createRelayState, stageRelayState, type HostedRelayState, type RelayStateStore } from './state.js';
+import { assertSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { createTimerRelayScheduler, type RelayScheduler } from './scheduler.js';
 import { readJson } from './request.js';
 import { createSubdomainPreviewAccess } from './preview-subdomain-access.js';
@@ -37,8 +38,10 @@ import { gatewayCookieName, readGatewayCookie, validateGatewayOrigin, verifyGate
 export interface HostedRelayOptions extends GatewayAuthOptions {
   /** Unpublished integration; native readiness remains independently required. */
   successionEnrollment?: true;
-  /** No default allowance: production preparation remains disabled until aggregate admission owns selection. */
+  /** Optional selector inside configured accounting; absent costs keep fresh preparation disabled. */
   successionProjectionAllowance?: HostBrokerOptions['successionProjectionAllowance'];
+  /** Trusted composition only; does not certify native producers or enable SQL effects. */
+  successionEncodingCosts?: SuccessionEncodingCosts;
   previewOrigin?: string;
   previewDomain?: string;
   storage?: RelayStateStore;
@@ -65,7 +68,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let closing = false; let failed = false; let initialized = false; let refreshing: Promise<void> | undefined;
   let scheduling: Promise<unknown> = Promise.resolve();
   let renewalAt = Date.now() + 60_000;
-  const state = createRelayState(auth, options.storage, failClosed, published);
+  const state = createRelayState(auth, options.storage, failClosed, published, options.successionEncodingCosts);
   const sessions = createGatewaySessions(auth, state, durable);
   const starAccess = (subject: string, item: import('./session-stars.js').StarIdentity) => {
     const broker = [...tenants.values()].find(value => value.broker.canStarSession(item, subject))?.broker;
@@ -233,16 +236,33 @@ export function createHostedRelay(options: HostedRelayOptions) {
     let entry = tenants.get(grant.namespace);
     if (!entry) {
       if (tenants.size >= (options.maxTenants ?? 64)) return undefined;
+      const stageBroker = (draft: HostedRelayState, broker: RemoteHostBrokerState) => {
+        const previous = draft.tenants.find(value => value.namespace === grant.namespace);
+        if (previous) previous.broker = broker;
+        else draft.tenants.push({ subject: grant.subject, namespace: grant.namespace, broker });
+        projectSuccessionFavorites(draft, grant.subject, !!entry && entry.authorityUntil > Date.now());
+        pruneSessionTitles(draft);
+      };
+      const allowance: HostBrokerOptions['successionProjectionAllowance'] = options.successionEncodingCosts ? context => {
+        // Check each discrete candidate independently; no monotonicity or maximum-utilization assumption.
+        const candidates = options.successionProjectionAllowance ? [options.successionProjectionAllowance(context)] : [2097152, 1048576, 524288, 262144, 65536, 1];
+        let refusal: unknown;
+        for (const ceiling of candidates) {
+          if (!Number.isSafeInteger(ceiling) || ceiling < 1 || ceiling > 8388608) return 0;
+          const draft = structuredClone(state.read()), broker = structuredClone(context.broker);
+          broker.associations!.freezes.push({ hostId: context.hostId, receipt: { ...context.freeze, maxProjectionBytes: ceiling } });
+          stageBroker(draft, broker); stageRelayState(draft, state.read().version, true);
+          try { assertSuccessionCapacity(draft, options.successionEncodingCosts!); return ceiling; }
+          catch (error) { if (!isSuccessionCapacityError(error)) throw error; refusal = error; }
+        }
+        throw refusal;
+      } : undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
         ownerSubject: grant.subject, durable, initialState, diagnostics,
-        ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: options.successionProjectionAllowance } : {}),
+        ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
         onStateChange: async broker => { await state.mutate(draft => {
-          const previous = draft.tenants.find(value => value.namespace === grant.namespace);
-          if (previous) previous.broker = broker;
-          else draft.tenants.push({ subject: grant.subject, namespace: grant.namespace, broker });
-          projectSuccessionFavorites(draft, grant.subject, !!entry && entry.authorityUntil > Date.now());
-          pruneSessionTitles(draft);
+          stageBroker(draft, broker);
         }); await scheduling; },
         onPairing(_key, expiresAt) { const owned = tenants.get(grant.namespace); if (owned) owned.expiresAt = Math.max(owned.expiresAt, expiresAt); },
       });
@@ -565,7 +585,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         if (request.method === 'POST') return json(200, await favorites.execute(grant.subject, await readJson(request)));
         return json(405, { error: 'Method is not allowed.' });
       } catch (error) {
-        if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message });
+        if (error instanceof StarError || isSuccessionCapacityError(error)) return json(error.status, { code: error.code, error: error.message });
         throw error;
       }
     }
@@ -577,7 +597,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         else return json(405, { error: 'Method is not allowed.' });
         return json(200, { stars: stars.list(grant.subject) });
       } catch (error) {
-        if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message });
+        if (error instanceof StarError || isSuccessionCapacityError(error)) return json(error.status, { code: error.code, error: error.message });
         throw error;
       }
     }

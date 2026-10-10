@@ -30,7 +30,7 @@ succession state does not copy a workspace, process, credentials or native sessi
 | --- | --- | --- |
 | Controller role state | Version 6 | Versions 1 through 5 retain explicit migration rules; legacy receipts gain no invented projection budget, source-witness reservation or creation evidence |
 | Pending context | Version 2 | Reads version 1 attachments; new target-independent preparations share attachment capacity, and delivery-state recovery remains independent of role state |
-| Relay outer state | Version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Legacy outer versions 2 through 8 retain explicit inner-format rules and complete-lineage validation; no applied progress, budget or native result is fabricated |
+| Relay outer state | Version 10 for configured succession accounting; version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Restore10 requires complete encoding costs; successful accounting writes retain10. No-cost versions 2 through 9 preserve ordinary and exact saved recovery with explicit inner-format rules; no applied progress, budget or native result is fabricated |
 | Cloudflare SQL snapshot | Metadata format 3; record/envelope/manifest format 1 | Format 2 migrates atomically on the first complete commit; old readers reject 3. This physical format does not enable effectful succession |
 | Broker association state | Version 5 | Versions 1 through 4 retain explicit migrations and valid complete committed lineage; saved freeze-v1 identities remain unchanged |
 | Enrollment freeze | Version 2 for new preparation | Requires an immutable positive safe-integer `maxProjectionBytes`; exact saved version-1 recovery remains supported without retrofitting a budget |
@@ -69,7 +69,34 @@ An output invariant violation after commit reports
 and receipt. Saved prepare/status/reconcile/commit/release cannot conceal that
 defect as success. Recovery never creates another candidate to fit a ceiling.
 No production allowance supplier or native producer certificate is enabled by
-this contract; aggregate SQL admission and real producer certification remain pending.
+this contract. The derived accounting gate is implemented in isolation; atomic
+terminal consumers and real producer certification remain pending.
+
+## Relay accounting admission
+
+Configured accounting performs a pure startup preflight and asserts the complete
+staged snapshot immediately before storage. It measures actual retained feature
+records and conservatively quotes all remaining outcome, header, slot and revision
+growth. The sole SQL codec owns envelopes, manifests and per-record chunk counts.
+The 8,388,608-byte shared feature envelope charges logical-envelope bytes plus
+manifest bytes across tenants; unrelated ordinary data is not charged wholesale.
+This does not measure physical SQL allocation or guarantee a memory limit.
+
+New freeze selection uses the real Host, authenticated tenant and complete
+post-increment Broker draft. The saved ceiling never shrinks or changes on retry.
+The final outer gate may refuse a stale fresh quote before persistence or Host
+preparation; exact queued duplicates perform no write or revision increment.
+Branded admission failure alone proves no earlier native-effect disposition:
+only explicitly pre-effect callers may report a safe, non-poisoning refusal.
+Post-native or unknown-durability failures preserve existing reconciliation rules.
+
+Configuration alone does not write storage. Its successful mutations, including
+ordinary-only changes, write outer10 without downgrading. Restore10 without both
+cost methods refuses before runtime availability; prior readers reject10 on
+restore/reload. No cross-version live-writer CAS is promised. No-cost outer<=9
+ordinary and exact legacy recovery remain supported, without fresh Hosted
+preparation. Accounting arithmetic does not yet authorize source/relation terminal,
+Favorites or recovery consumers; their atomic integration remains required.
 
 ## Source-witness admission
 
@@ -92,7 +119,7 @@ The binding owner checks the actual canonical result for fresh qualified output,
 preserving legal aliases. This post-effect check does not guarantee successful
 projection: a wider existing canonical identity leaves the witness retained and
 the operation unresolved. Exact recovery never silently rewrites its identity.
-Source-grant sync and Relay completion allowances are separate pending contracts;
+Source-grant sync and atomic Relay completion are separate pending contracts;
 matching visible grant data does not prove power-loss durability.
 
 ## Recover from facts, not elapsed time
@@ -362,8 +389,9 @@ The production store still accepts ordinary Relay2 state only and rejects
 succession/recovery state on restore and commit. An explicit constructor-only
 symbol permits isolated complete-codec fixtures; requests, stored state and
 production configuration cannot select it. The codec and Worker restart tests
-are complete, but feature-envelope admission, Host witness reservations, producer
-certification and combined acceptance remain required before enabling effects.
+are complete. Derived feature admission and Host witness reservations have scoped
+verification; atomic consumers, source-grant durability, producer certification
+and combined acceptance remain required before enabling effects.
 
 ## Ordinary relationship changes
 

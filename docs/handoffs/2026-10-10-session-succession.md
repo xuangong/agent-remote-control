@@ -3,6 +3,43 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Relay accounting checkpoint (2026-10-11)
+
+Task9C1 passed independent source-spec and quality review with no blocking
+finding. The configured accounting runtime derives retained evidence and complete
+remaining outcomes from each complete staged snapshot. One internal two-method
+cost interface uses the actual SQL codec; each record costs its logical-envelope
+bytes plus exact manifest bytes. The shared 8,388,608-byte feature envelope spans
+tenants and is not a whole-state quota or a physical storage reservation.
+
+Fresh freeze admission saves one immutable projection ceiling before Host
+preparation. A stale quote can be refused at the final outer mutation without
+reselection, publication or forwarding. Only explicitly pre-effect policy
+refusals keep both queues available; native-outcome and storage uncertainty retain
+their failure/recovery boundaries. Source/relation/recovery/Favorites consumers
+still require the following slices.
+
+Accounting configuration performs a no-write preflight. Every successful durable
+mutation under that configuration writes outer Relay10 monotonically; restore10
+without the complete cost interface refuses before runtime availability. Old
+Hosted and complete SQL readers reject10 on restore. This is not a live-writer
+CAS guarantee. No-cost outer<=9 ordinary and exact saved recovery remain available;
+Hosted fresh preparation requires the full accounting configuration.
+
+Root freshly passed 109 Hosted tests, 38 Cloudflare tests, an actual frozen-BASE
+prior-reader check, both affected typechecks and the Hosted build. These include
+real HTTP/WebSocket admission and isolated workerd SQLite transaction/sync/reopen
+checks. Review suggestion T9C1-M1 remains on the whole-branch list: independently
+measure payload bytes in the all-record escaped-tuple quote test rather than
+derive them from the quote helper's framing. No incorrect current quote was found.
+
+Next is9C2: save source binding, full creation identity, applicable quota result,
+admission removal and terminal revision together, and enforce pre-effect claims.
+Then9C3 completes terminal/Favorites/recovery consumers, followed by9D/9E and
+product integration. Default SQL effects, native suppliers and production
+capability remain disabled. The9C0 execution incident below remains unresolved
+as an independent cleanup claim; no native fixture was run for9C1.
+
 ## Host source-witness checkpoint (2026-10-10)
 
 Task9C0 passed independent source-spec and quality review. Role-file 6 retains a

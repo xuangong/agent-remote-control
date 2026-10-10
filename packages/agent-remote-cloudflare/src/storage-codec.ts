@@ -53,6 +53,25 @@ const identityHash = (tuple: Identity) => digest(tupleKey(tuple));
 const physicalKey = (kind: SqlRecordKind, identity: string) => JSON.stringify([kind, identity]);
 function invalid(message: string): never { throw new Error(`Invalid SQL snapshot: ${message}.`); }
 function isKind(value: unknown): value is SqlRecordKind { return SQL_RECORD_KINDS.includes(value as SqlRecordKind); }
+const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+const envelope = (kind: SqlRecordKind, owner: string, key: string, payload: unknown) => ({ format: SQL_RECORD_FORMAT, kind, owner, key, payload });
+function manifestFor(kind: SqlRecordKind, identity: string, byteLength: number, contentDigest: string): SqlManifest {
+  return { format: SQL_RECORD_FORMAT, kind, identity, byte_length: byteLength, chunk_count: Math.ceil(byteLength / SQL_CHUNK_BYTES), digest: contentDigest };
+}
+
+/** Encoding bound only. The payload is never allocated or treated as valid domain evidence. */
+export function quoteSqlRecord(input: { kind: string; owner: string; key: string; payloadJsonBytesUpperBound: number }): Pick<SqlRecordCost, 'byteLength' | 'chunkCount' | 'manifestBytes'> {
+  if (!input || !isKind(input.kind) || typeof input.owner !== 'string' || typeof input.key !== 'string') invalid('quote tuple or kind');
+  const bound = input.payloadJsonBytesUpperBound;
+  if (!Number.isSafeInteger(bound) || bound < 0) invalid('quote payload length');
+  const framing = jsonBytes(envelope(input.kind, input.owner, input.key, null)).byteLength - 4;
+  const byteLength = framing + bound;
+  if (!Number.isSafeInteger(byteLength)) invalid('quote length overflow');
+  const manifest = manifestFor(input.kind, identityHash([input.kind, input.owner, input.key]), byteLength, '0'.repeat(64));
+  const manifestBytes = jsonBytes(manifest).byteLength;
+  if (!Number.isSafeInteger(byteLength + manifestBytes)) invalid('quote charge overflow');
+  return { byteLength, chunkCount: manifest.chunk_count, manifestBytes };
+}
 
 /** Exact logical bytes and per-record chunks; manifestBytes measures its explicit JSON fields, not SQLite disk allocation. */
 export function encodeSqlSnapshot(input: HostedRelayState, auth: GatewayAuthOptions): SqlSnapshot {
@@ -64,13 +83,13 @@ export function encodeSqlSnapshot(input: HostedRelayState, auth: GatewayAuthOpti
     if (tuples.has(logical)) invalid('duplicate logical identity');
     if (hashes.has(identity) && hashes.get(identity) !== logical) invalid('identity hash collision');
     tuples.add(logical); hashes.set(identity, logical);
-    const bytes = new TextEncoder().encode(JSON.stringify({ format: SQL_RECORD_FORMAT, kind, owner, key, payload }));
-    const chunkCount = Math.ceil(bytes.byteLength / SQL_CHUNK_BYTES);
-    const manifest: SqlManifest = { format: SQL_RECORD_FORMAT, kind, identity, byte_length: bytes.byteLength, chunk_count: chunkCount, digest: digest(bytes) };
+    const bytes = jsonBytes(envelope(kind, owner, key, payload));
+    const manifest = manifestFor(kind, identity, bytes.byteLength, digest(bytes));
+    const chunkCount = manifest.chunk_count;
     const chunks: SqlChunk[] = [];
     for (let ordinal = 0; ordinal < chunkCount; ordinal++) chunks.push({ kind, identity, ordinal, bytes: bytes.slice(ordinal * SQL_CHUNK_BYTES, (ordinal + 1) * SQL_CHUNK_BYTES) });
     records.set(physicalKey(kind, identity), { manifest, chunks });
-    costs.push({ kind, owner, key, identity, byteLength: bytes.byteLength, chunkCount, manifestBytes: new TextEncoder().encode(JSON.stringify(manifest)).byteLength });
+    costs.push({ kind, owner, key, identity, byteLength: bytes.byteLength, chunkCount, manifestBytes: jsonBytes(manifest).byteLength });
     return tuple;
   }
   function references<T, K extends SqlRecordKind>(values: T[], kind: K, owner: string, key: (value: T) => string, payload?: (value: T) => unknown): Identity<K>[];

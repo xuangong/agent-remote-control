@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { afterEach, expect, test } from 'vitest';
 import { createHostedRelay } from './gateway.js';
+import type { HostBrokerOptions } from './broker.js';
+import { deriveSuccessionCapacity } from './succession-capacity.js';
+import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
 import { emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { RelaySocket } from './transport.js';
@@ -16,7 +19,7 @@ afterEach(async () => { for (const close of closers.splice(0).reverse()) await c
 const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
 const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
 const sequenceRef = (index: number) => ref(index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index);
-async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false) {
+async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false, accounting = false) {
   const credential = 'arc_' + 'k'.repeat(43);
   let denied = false, unavailable = false;
   const authority = createServer(async (request, response) => {
@@ -48,9 +51,13 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
   initial.tenants[0]!.broker.keys = [[createHash('sha256').update(credential).digest('hex'), { expires: Date.now() + 600000, installationId: 'installation', kind: 'device' }]];
   configure?.(initial);
   let relay: ReturnType<typeof createHostedRelay>;
-  let failSave = false, failAfterSave = false;
-  const start = (initial: unknown) => createHostedRelay({ ...auth, successionEnrollment: true, successionProjectionAllowance: () => 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage: { initial,
-    async commit(value) { if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } } });
+  let failSave = false, failAfterSave = false, writes = 0;
+  let select: HostBrokerOptions['successionProjectionAllowance'];
+  let beforeCommit = async (_value: HostedRelayState) => {};
+  const start = (initial: unknown) => createHostedRelay({ ...auth, ...(accounting ? { successionEncodingCosts: {
+    measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord,
+  } } : {}), successionEnrollment: true, successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage: { initial,
+    async commit(value) { await beforeCommit(value); writes++; if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } } });
   relay = start(initial); await writeFile(path, JSON.stringify(initial));
   const websockets = new WebSocketServer({ noServer: true });
   server.on('request', (incoming, outgoing) => { void (async () => {
@@ -74,7 +81,16 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
   };
   closers.push(async () => { for (const ws of websockets.clients) ws.terminate(); await relay.close(); await new Promise<void>(resolve => server.close(() => resolve()));
     await new Promise<void>(resolve => authority.close(() => resolve())); await rm(root, { recursive: true, force: true }); });
-  return { auth, namespace, row, request, channel, cookie, origin, credential, recover: () => { failSave = false; failAfterSave = false; }, failAfterWrite: () => { failAfterSave = true; }, fail: () => { failSave = true; }, deny: () => { denied = true; }, outage: () => { unavailable = true; },
+  return { auth, namespace, row, request, channel, cookie, origin, credential,
+    select: (selector: NonNullable<HostBrokerOptions['successionProjectionAllowance']>) => { select = selector; },
+    writes: () => writes,
+    hold: (matches: (value: HostedRelayState) => boolean) => {
+      let enter!: () => void, release!: () => void;
+      const entered = new Promise<void>(resolve => { enter = resolve; }), waiting = new Promise<void>(resolve => { release = resolve; });
+      beforeCommit = async value => { if (matches(value)) { beforeCommit = async () => {}; enter(); await waiting; } };
+      closers.push(async () => { release(); });
+      return { entered, release };
+    }, recover: () => { failSave = false; failAfterSave = false; }, failAfterWrite: () => { failAfterSave = true; }, fail: () => { failSave = true; }, deny: () => { denied = true; }, outage: () => { unavailable = true; },
     saved: async () => JSON.parse(await readFile(path, 'utf8')) as HostedRelayState,
     replaceSaved: async (change: (state: HostedRelayState) => void) => { const value = JSON.parse(await readFile(path, 'utf8')); change(value); await writeFile(path, JSON.stringify(value)); },
     restart: async () => { const value = JSON.parse(await readFile(path, 'utf8')); await relay.close(); relay = start(value); } };
@@ -165,14 +181,16 @@ test('requires renewed owner authority after restart and rejects contradictory C
 }, 10000);
 
 async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit = false, malformed = false, enrollmentVersion = 2) {
-  const effects = { prepare: 0, commit: 0, input: 0, release: 0, rpc: [] as string[] };
+  const effects = { prepare: 0, commit: 0, input: 0, release: 0, rpc: [] as string[], receivedFreezes: [] as unknown[] };
   const saved = (await f.saved()).tenants[0]!.broker.associations!.freezes;
   const operations = new Map<string, any>(saved.filter(row => row.projection).map(row => [row.receipt.request.operationId, structuredClone(row.projection!.receipt)]));
   let revision = saved.filter(row => row.projection).length + 1;
   const sockets: any[] = [];
+  let decline = false;
+  let describeHold: { entered(): void; waiting: Promise<void> } | undefined;
   async function connect() {
     const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
-    socket.on('message', (data: { toString(): string }) => {
+    socket.on('message', async (data: { toString(): string }) => {
       const message = JSON.parse(data.toString());
       if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
       if (message.type !== 'rpc_request') return;
@@ -180,9 +198,13 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
       const input = JSON.parse(message.body ?? '{}'); let result: any = {};
       if (message.path === '/remote/succession/enrollment') {
         if (input.action === 'describe') {
+          const hold = describeHold; describeHold = undefined; if (hold) { hold.entered(); await hold.waiting; }
           result = { role: { id: 'role', revision, origin: ref('A'), current: sequenceRef(revision - 1), workspace }, lineage: Array.from({ length: revision }, (_, index) => sequenceRef(index)) };
         } else {
-          const freeze = input.freeze; const request = freeze.request; let record = operations.get(request.operationId);
+          const freeze = input.freeze; effects.receivedFreezes.push(structuredClone(freeze)); const request = freeze.request; let record = operations.get(request.operationId);
+          if (input.action === 'prepare' && !record && decline) {
+            socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 409, body: JSON.stringify({ code: 'succession_projection_capacity_exceeded', error: 'Complete participant projection exceeds the admitted ceiling.' }) })); return;
+          }
           if (input.action === 'prepare' && !record) {
             effects.prepare++; record = { ...request, phase: 'ready', to: ref(request.expectedRevision === 1 ? 'B' : 'C'), startedAt: 'now', updatedAt: 'now',
               prepared: { ...request, to: ref(request.expectedRevision === 1 ? 'B' : 'C'), workspace, associationRevision: 1, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } };
@@ -203,10 +225,14 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
     expect((await registered).successionEnrollment.ownerSubject).toBe('owner');
   }
   await connect();
-  return { effects, connect, seed: (record: any) => { operations.set(record.operationId, structuredClone(record)); } };
+  return { effects, connect, decline: () => { decline = true; }, holdDescribe: () => {
+    let entered!: () => void, release!: () => void;
+    const start = new Promise<void>(resolve => { entered = resolve; }), waiting = new Promise<void>(resolve => { release = resolve; });
+    describeHold = { entered, waiting }; closers.push(async () => { release(); }); return { entered: start, release };
+  }, seed: (record: any) => { operations.set(record.operationId, structuredClone(record)); } };
 }
 test('publishes authenticated Controller terminal readback from durable state before response and keeps exact replay after later commits', async () => {
-  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; });
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
   const native = await controller(f); const channel = await f.channel();
   for (const revision of [2, 3]) {
     expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-' + revision, providerId: 'fixture', nativeSessionId: revision === 2 ? 'A' : 'B', expectedRevision: revision - 1 })).status).toBe(200);
@@ -225,7 +251,7 @@ test('publishes authenticated Controller terminal readback from durable state be
   expect(native.effects).toMatchObject({ prepare: 2, commit: 2, input: 2 }); expect((await f.saved()).tenants[0]!.broker.bindings).toEqual([]);
 }, 10000);
 test('recovers native committed evidence after projection persistence failure without a new prepare or input', async () => {
-  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }); const native = await controller(f, true);
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true); const native = await controller(f, true);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
   const failed = await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' }); expect(failed.status).toBeGreaterThanOrEqual(500);
   expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]).not.toHaveProperty('projection'); expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1, release: 0 });
@@ -235,7 +261,7 @@ test('recovers native committed evidence after projection persistence failure wi
   expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1, release: 1 });
 }, 10000);
 test('rejects malformed authenticated readback and browser forged commit fields before they can publish', async () => {
-  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }); const native = await controller(f, false, true);
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true); const native = await controller(f, false, true);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2', receipt: f.row().projection.receipt })).status).toBe(400);
   expect(native.effects.commit).toBe(0);
@@ -244,7 +270,7 @@ test('rejects malformed authenticated readback and browser forged commit fields 
   expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]).not.toHaveProperty('projection');
 }, 10000);
 
-test('rejects a fresh role operation at Relay capacity before freeze or native prepare while exact recovery remains available', async () => {
+test('retains oversized legacy exact recovery while fresh preparation has no accounting runtime', async () => {
   const f = await fixture(state => {
     const template = state.tenants[0]!.broker.associations!.freezes[0]!;
     state.tenants[0]!.broker.associations!.freezes = Array.from({ length: 512 }, (_, index) => {
@@ -260,7 +286,7 @@ test('rejects a fresh role operation at Relay capacity before freeze or native p
   });
   const native = await controller(f);
   const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'over-capacity', providerId: 'fixture', nativeSessionId: 'N512', expectedRevision: 513 });
-  expect(response.status).toBe(409); expect((await response.json()).code).toBe('succession_role_capacity');
+  expect(response.status).toBe(409); expect((await response.json()).code).toBe('succession_preparation_unavailable');
   expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(512);
   expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
   const old = await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' }); expect((await old.json()).role.current.nativeSessionId).toBe('B');
@@ -361,7 +387,7 @@ test('persists native committed freeze while favorite revision or tree capacity 
     const f = await fixture(state => {
       state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'A', subject: 'owner', starredAt: 100 }];
       state.favoritesTrees = exhausted ? [{ subject: 'owner', revision: Number.MAX_SAFE_INTEGER, folders: [] }] : Array.from({ length: 1024 }, (_, index) => ({ subject: 'other-' + index, revision: 0, folders: [] }));
-    });
+    }, false, true);
     const native = await controller(f);
     expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
     expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBe(200);
@@ -376,7 +402,7 @@ test('persists native committed freeze while favorite revision or tree capacity 
 }, 10000);
 
 test('publishes favorite and ack atomically with original native decision recovery after failed outer write', async () => {
-  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 3, folders: [] }]; });
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 3, folders: [] }]; }, false, true);
   const native = await controller(f, true); const channel = await f.channel();
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBeGreaterThanOrEqual(500);
@@ -439,7 +465,7 @@ test('failed legacy projection persistence retains original favorite and no appl
 }, 10000);
 
 test('lost outer persistence acknowledgement recovers the durable projection without replaying favorite or native effects', async () => {
-  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 3, folders: [] }]; });
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 3, folders: [] }]; }, false, true);
   const native = await controller(f); const channel = await f.channel();
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
   f.failAfterWrite(); expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBeGreaterThanOrEqual(500);
@@ -478,3 +504,133 @@ test.each([1,2])('feature %s recovers an exact saved v1 ready candidate without 
   expect(native.effects.prepare).toBe(0);expect(native.effects.commit).toBe(1);expect(native.effects.release).toBe(1);
   if(enrollmentVersion===1)expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare','owner',{operationId:'new-operation',providerId:'fixture',nativeSessionId:'B',expectedRevision:2})).status).toBe(409);
 },10000);
+
+
+test('refuses the 513th same-role freeze through real transport before preparing or spending a revision', async () => {
+  const f = await fixture(state => {
+    const template = state.tenants[0]!.broker.associations!.freezes[0]!;
+    state.tenants[0]!.broker.associations!.freezes = Array.from({ length: 512 }, (_, index) => ({ hostId: template.hostId, released: 'cancelled' as const,
+      receipt: { ...template.receipt, token: 'cancelled-' + index, request: { ...template.receipt.request, operationId: 'cancelled-operation-' + index }, lineage: [ref('A')] } }));
+  }, false, true);
+  const native = await controller(f); const before = await f.saved();
+  const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'over-capacity', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
+  expect(response.status).toBe(409); expect((await response.json()).code).toBe('succession_role_capacity');
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before.tenants[0]!.broker.associations);
+  expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
+  expect((await f.request('v1/remote/hosts')).status).toBe(200);
+}, 10000);
+
+
+test('freezes one exact quote with the real Host and post-staging Broker revision across queued duplicates and reopen', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
+  const native = await controller(f); const before = await f.saved();
+  const quotes: Parameters<NonNullable<HostBrokerOptions['successionProjectionAllowance']>>[0][] = [];
+  f.select(context => { quotes.push(structuredClone(context)); return 777777; });
+  const hold = f.hold(value => value.tenants[0]!.broker.associations!.freezes.length === 1);
+  const input = { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  let completed = 0;
+  const first = f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input).then(response => { completed++; return response; });
+  await hold.entered; const writesBeforeFreeze = f.writes();
+  const second = f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input).then(response => { completed++; return response; });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  expect(completed).toBe(0); expect(native.effects.prepare).toBe(0);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before.tenants[0]!.broker.associations);
+  hold.release(); expect((await first).status).toBe(200); expect((await second).status).toBe(200);
+  expect(f.writes() - writesBeforeFreeze).toBe(1);
+  expect(quotes).toHaveLength(1); expect(quotes[0]!.hostId).toBe('mapped-host');
+  expect(quotes[0]!.broker.hosts[0]!.installationId).toBe('installation');
+  expect(quotes[0]!.broker.associations!.revision).toBe(before.tenants[0]!.broker.associations!.revision + 1);
+  expect(quotes[0]!.freeze.associationRevision).toBe(before.tenants[0]!.broker.associations!.revision);
+  const saved = await f.saved(), exact = saved.tenants[0]!.broker.associations!.freezes[0]!.receipt;
+  expect(exact).toMatchObject({ version: 2, maxProjectionBytes: 777777 });
+  expect(saved.tenants[0]!.broker.associations!.revision).toBe(quotes[0]!.broker.associations!.revision);
+  expect(native.effects.prepare).toBe(1);
+  f.select(() => { throw new Error('Saved retries must never requote'); });
+  await f.restart(); await native.connect();
+  const resumed = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input);
+  expect(resumed.status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]!.receipt).toEqual(exact);
+  expect(native.effects.receivedFreezes.length).toBeGreaterThan(1);
+  expect(native.effects.receivedFreezes.every(receipt => JSON.stringify(receipt) === JSON.stringify(exact))).toBe(true);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { ...input, targetProviderId: 'different' })).status).toBe(409);
+}, 10000);
+
+test('refuses a stale immutable quote after an ordinary star overtakes it and keeps both queues usable', async () => {
+  const ceiling = 1000000;
+  const f = await fixture(state => {
+    const broker = state.tenants[0]!.broker;
+    broker.associations!.freezes = [];
+    broker.bindings.push({ agentId: 'agent-A', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A' });
+    (broker.associations as any).retainedExtra = 'x'.repeat(8388608 - ceiling - 10000);
+  }, false, true);
+  const native = await controller(f); let quotes = 0;
+  f.select(() => { quotes++; return ceiling; });
+  const hold = f.hold(value => !!value.sessionStars?.length && !value.tenants[0]!.broker.associations!.freezes.length);
+  const star = f.request('v1/stars', 'owner', { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'A' });
+  await hold.entered;
+  const prepare = f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
+  await until(() => quotes === 1); const before = await f.saved();
+  hold.release(); expect((await star).status).toBe(200);
+  const result = await prepare; expect(result.status).toBe(409); expect((await result.json()).code).toBe('succession_projection_capacity_exceeded');
+  expect(quotes).toBe(1); expect(native.effects.prepare).toBe(0);
+  const saved = await f.saved(); expect(saved.tenants[0]!.broker.associations).toEqual(before.tenants[0]!.broker.associations);
+  expect(saved.sessionStars).toHaveLength(1);
+  expect((await f.request('v1/remote/hosts')).status).toBe(200);
+  expect((await f.request('v1/stars', 'owner', { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A' }, 'DELETE')).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  expect(native.effects.prepare).toBe(1);
+}, 10000);
+
+test('keeps an admitted exact freeze when the Controller declines its participant projection ceiling', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
+  const native = await controller(f); native.decline(); let quoted = 0;
+  f.select(() => { quoted++; return 1; });
+  const input = { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input)).status).toBe(409);
+  const exact = (await f.saved()).tenants[0]!.broker.associations!.freezes;
+  expect(exact).toHaveLength(1); expect(exact[0]!.receipt).toMatchObject({ version: 2, maxProjectionBytes: 1 });
+  expect(exact[0]!.released).toBeUndefined(); expect(native.effects.prepare).toBe(0);
+  await f.restart(); await native.connect();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input)).status).toBe(409);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual(exact); expect(quoted).toBe(1); expect(native.effects.prepare).toBe(0);
+}, 10000);
+
+test('does not exempt a generic quote callback failure from Broker fail closed behavior', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
+  const native = await controller(f); const before = (await f.saved()).tenants[0]!.broker.associations;
+  f.select(() => { throw new Error('Unexpected codec failure'); });
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBeGreaterThanOrEqual(500);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before); expect(native.effects.prepare).toBe(0);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'retry', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(503);
+}, 10000);
+
+test('rejects delayed describe after Host generation changes without freezing or redirecting preparation', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
+  const native = await controller(f); const hold = native.holdDescribe(); let quoted = 0;
+  f.select(() => { quoted++; return 65536; });
+  const request = f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
+  await hold.entered; await native.connect(); hold.release();
+  expect((await request).status).toBeGreaterThanOrEqual(400);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
+  expect(quoted).toBe(0); expect(native.effects.prepare).toBe(0);
+  expect((await f.request('v1/remote/hosts')).status).toBe(200);
+}, 10000);
+
+test('maps ordinary star capacity refusal without losing the admitted freeze or closing either queue', async () => {
+  const ceiling = 1000000;
+  const f = await fixture(state => {
+    const broker = state.tenants[0]!.broker; broker.associations!.freezes = [];
+    broker.bindings.push({ agentId: 'agent-A', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A' });
+    (broker.associations as any).retainedExtra = 'x'.repeat(8388608 - ceiling - 10000);
+  }, false, true);
+  const native = await controller(f); f.select(() => ceiling);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  const before = await f.saved();
+  const refused = await f.request('v1/stars', 'owner', { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'Saved' });
+  expect(refused.status).toBe(409); expect((await refused.json()).code).toBe('succession_projection_capacity_exceeded');
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before.tenants[0]!.broker.associations);
+  expect((await f.saved()).sessionStars ?? []).toEqual([]); expect(native.effects.prepare).toBe(1);
+  expect((await f.request('v1/remote/hosts')).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  expect(native.effects.prepare).toBe(1);
+}, 10000);

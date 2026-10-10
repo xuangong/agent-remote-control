@@ -441,8 +441,14 @@ no production capability is enabled by these scripted fixtures.
   both typechecks and the actual prior-writer rejection check. The broad run was
   not all-green and accidentally included native fixtures; retain that execution
   incident and the unverified cleanup boundary in whole-branch acceptance.
-- [ ] Integrate the Relay feature envelope, exact codec costs, outcome/slot/revision
-  allowances and atomic source completion before allowing effectful SQL succession.
+- [x] Derive the Relay feature envelope using the sole codec's complete costs and
+  finite outcome/slot/revision allowances. Task9C1 adds immutable fresh-freeze
+  admission and the configured outer10 fence; independent source/quality review
+  passed, with 147 fresh scoped tests, actual prior-reader validation and affected
+  build/typechecks. The quote-test independence suggestion remains on the final
+  review list. This slice does not enable effectful SQL succession.
+- [ ] Complete atomic source/relation consumers and pre-effect contention (9C2),
+  then terminal/Favorites/recovery consumption and fault acceptance (9C3).
 - [ ] Review role/context durable-file write consistency and record the actual
   process-crash versus power-loss guarantees without unsupported claims.
 

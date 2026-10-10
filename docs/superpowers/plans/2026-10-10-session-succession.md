@@ -252,6 +252,14 @@ fixture Controller recovery passed, including authorization and write failure.
 Product store/application replacement and browser acceptance remain outstanding;
 this does not complete Task 5 or certify any native provider. See latest handoff.
 
+Server Favorites projection is now implemented and scoped-reviewed: Relay7 adds
+exact pending/applied acknowledgements in the same outer transaction as Broker4
+freeze evidence. Stable slots and target metadata survive chained replacement;
+stale owner predecessor saves/removes conflict. Mapping/capacity failures remain
+pending without blocking native commit evidence. Root verified 48 affected Hosted
+tests, 12 Cloudflare tests and whole-workspace typecheck. The SQL guard prevents
+loss but full SQL persistence and all client stores remain outstanding.
+
 **Create:** hosted `src/session-successions.ts` and `.test.ts`;
 Lab `src/session-succession.ts`, `.test.ts`,
 `src/hooks/useSessionSuccession.tsx` and `.test.tsx`.
@@ -301,6 +309,10 @@ documentation, recorded fixtures and `compatibility.json`.
   Record actual context recall, source-tool retargeting and no duplicate execution.
 - [ ] Run the verification commands above; distinguish environment-dependent
   native tests from fixture success. Record every unresolved failure explicitly.
+- [ ] Implement and verify complete Cloudflare SQL succession persistence before
+  enabling that backend: preserve outer version, Broker associations and per-store
+  recovery progress atomically. The existing Relay2 codec does not encode these;
+  a fail-closed guard is protection, not implementation or production acceptance.
 - [ ] Document durable-state version compatibility, backups, precommit cancel and
   postcommit forward recovery before considering a separately authorized release.
 - [ ] Update this checklist with evidence and commit

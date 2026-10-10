@@ -1,3 +1,4 @@
+import { assertOrdinaryFavoriteAddress } from './favorites-succession.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { HostedRelayState, RelayState } from './state.js';
 import { MAX_USER_STARS, StarError, starKey, validSessionStar, validStarIdentity, type SavedSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from './session-star-schema.js';
@@ -174,6 +175,7 @@ export function createFavorites(state: RelayState, access: Access) {
             break;
           }
           case 'save-session': {
+            assertOrdinaryFavoriteAddress(draft, subject, command.session);
             destination(command.folderId);
             if (!access(subject, command.session)) fail(404, 'session_unavailable', 'This session is not available to your account.');
             const session = { ...command.session, title: confirmedFavoriteTitle(draft, command.session) };
@@ -191,6 +193,7 @@ export function createFavorites(state: RelayState, access: Access) {
             break;
           }
           case 'remove-session': {
+            assertOrdinaryFavoriteAddress(draft, subject, command.session);
             if (!savedStars(draft, subject).some(item => starKey(item) === starKey(command.session))) fail(404, 'favorite_not_found', 'The favorite no longer exists.');
             draft.sessionStars = (draft.sessionStars ?? []).filter(item => item.subject !== subject || starKey(item) !== starKey(command.session));
             break;

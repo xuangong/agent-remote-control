@@ -1,3 +1,4 @@
+import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createSuccessionReplay } from './session-successions.js';
 import { createDiagnosticJournal } from './diagnostic-journal.js';
 import type { RelayDiagnosticStore, RelayDiagnosticContext } from './relay-diagnostics.js';
@@ -238,6 +239,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
           const previous = draft.tenants.find(value => value.namespace === grant.namespace);
           if (previous) previous.broker = broker;
           else draft.tenants.push({ subject: grant.subject, namespace: grant.namespace, broker });
+          projectSuccessionFavorites(draft, grant.subject, !!entry && entry.authorityUntil > Date.now());
           pruneSessionTitles(draft);
         }); await scheduling; },
         onPairing(_key, expiresAt) { const owned = tenants.get(grant.namespace); if (owned) owned.expiresAt = Math.max(owned.expiresAt, expiresAt); },
@@ -545,6 +547,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
       } catch (error) { if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message }); throw error; }
     }
     if (path === '/v1/session-migrations' && request.method === 'GET') return json(200, { migrations: migrations.list(grant.subject) });
+    if (path === '/v1/favorites' || path === '/v1/stars') {
+      const saved = state.read().tenants.find(tenant => tenant.subject === grant.subject);
+      const pending = saved?.broker.associations?.freezes.some(row => row.projection
+        && !saved.favoritesSuccession?.receipts.some(entry => entry.token === row.receipt.token && entry.status === 'applied'));
+      if (pending) {
+        const authority = await activeOwner(owned);
+        if (authority !== 'active' || closing || failed || sessions.expiresAt(request, grant) <= Date.now()) return json(authority === 'denied' ? 403 : 503, { error: 'Favorites are unavailable.' });
+        if (projectSuccessionFavorites(structuredClone(state.read()), grant.subject)) await state.mutate(draft => { projectSuccessionFavorites(draft, grant.subject, owned.authorityUntil > Date.now()); });
+      }
+    }
     if (path === '/v1/favorites') {
       try {
         if (request.method === 'GET') return json(200, favorites.list(grant.subject));

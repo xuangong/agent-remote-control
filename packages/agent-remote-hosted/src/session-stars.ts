@@ -1,3 +1,4 @@
+import { assertOrdinaryFavoriteAddress } from './favorites-succession.js';
 import type { RelayState } from './state.js';
 import { organizeFavorites, advanceFavorites, newFavoriteIdentity, confirmedFavoriteTitle } from './favorites.js';
 
@@ -19,6 +20,7 @@ export function createSessionStars(state: RelayState, access: (subject: string, 
         throw new StarError(400, 'invalid_star', 'A session identity and title are required.');
       }
       await state.mutate(draft => {
+        assertOrdinaryFavoriteAddress(draft, subject, item);
         if (!access(subject, item)) throw new StarError(404, 'session_unavailable', 'This session is not available to your account.');
         const title = confirmedFavoriteTitle(draft, item);
         const tree = organizeFavorites(draft, subject);
@@ -38,6 +40,7 @@ export function createSessionStars(state: RelayState, access: (subject: string, 
     async remove(subject: string, body: unknown): Promise<void> {
       if (!validStarIdentity(body) || Object.keys(body).some(key => !['hostId', 'providerId', 'nativeSessionId'].includes(key))) throw new StarError(400, 'invalid_star', 'A session identity is required.');
       await state.mutate(draft => {
+        assertOrdinaryFavoriteAddress(draft, subject, body);
         const tree = organizeFavorites(draft, subject);
         draft.sessionStars = (draft.sessionStars ?? []).filter(item => item.subject !== subject || starKey(item) !== starKey(body));
         advanceFavorites(draft, tree);

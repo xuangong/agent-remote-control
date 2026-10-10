@@ -3,6 +3,41 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Atomic server Favorites checkpoint (2026-10-10)
+
+Task5's server Favorites slice passed independent scoped spec/quality review.
+Check Git for the checkpoint after `86455aa`. Relay7 stores bounded schema1
+pending/applied acknowledgements tied to exact committed Broker4 freezes. These
+are recovery progress, not another role or commit authority. Broker snapshot,
+favorite replacement and acknowledgement share the outer durable transaction.
+
+A-to-B-to-C preserves A's stable favorite slot, folder and timestamp, retaining
+B's target metadata before duplicate removal. No-star/target-only creates no new
+favorite tree. One aggregate change increments revision once. Missing mapping,
+authority or favorite capacity remains pending without preventing native commit
+evidence. Owner predecessor save and remove reject generic conflict, including
+current-revision requests. Shared-only A neither moves nor gains B access.
+
+Legacy freezes are recovered through authenticated Favorites/stars requests and
+Host/provider publication, without polling or native attachment. Failed or lost
+write acknowledgement recovers the original operation without new native effects.
+The Cloudflare SQL codec now fails closed before writes for unsupported succession
+state; a complete SQL codec remains mandatory before enabling that backend.
+
+Evidence: `.tmp/succession-favorites-report.md`, frozen eight-file manifest and
+`.tmp/succession-favorites-review.md` (spec/quality PASS, no confirmed findings).
+Implementer ran all Hosted 236 tests and 12 affected Cloudflare tests. Root freshly
+verified all hashes, Hosted build, 48 affected Hosted tests, 12 Cloudflare tests
+and whole-workspace typecheck. Root logs: `.tmp/succession-favorites-root-*.log`.
+These are fixture/transport/storage results, not native provider certification.
+
+Next: read `.tmp/succession-client-projection-brief.md` for the client preflight,
+plus `.tmp/succession-product-store-next-brief.md`. No client replacement/App opt-in
+is implemented by this checkpoint. Cold successor target intent, actual storage
+acknowledgement, independent draft collisions, native-bound inputs, nested Ask,
+ordinary/history navigation and desktop/mobile acceptance still need work. Keep
+capability/UI disabled. No merge, push, deployment, install or user-service change.
+
 ## Authenticated hosted replay checkpoint (2026-10-10)
 
 Task 5's hosted/protocol/Remote transport slice passed independent scoped review

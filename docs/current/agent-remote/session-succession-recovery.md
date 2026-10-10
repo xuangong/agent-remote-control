@@ -30,13 +30,14 @@ succession state does not copy a workspace, process, credentials or native sessi
 | --- | --- | --- |
 | Controller role state | Version 3 | Committed versions 1 and 2 migrate with empty relation-change arrays; version 1 also receives empty admission/result arrays; ambiguous legacy association fields reject |
 | Pending context | Independently versioned context store | Use its validator and delivery-state recovery; never derive it from role state |
-| Relay outer state | Version 6 when association state exists | Legacy outer versions 2 through 5 migrate under their original inner-format rules and complete-lineage validation; newer inner formats cannot be disguised under an older outer version |
+| Relay outer state | Version 7 when Favorites succession progress exists; otherwise version 6 with associations | Legacy outer versions 2 through 6 retain explicit inner-format rules and complete-lineage validation; no applied Favorites progress is fabricated |
 | Broker association state | Version 4 | Versions 1 through 3 migrate only with valid complete committed lineage; earlier additive relation-change/reset migrations remain explicit |
+| Favorites succession progress | Version 1, requiring Relay7 | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
 
 An unpublished experimental Controller version-2 file without
 `associationResults` is rejected, not migrated. Future or malformed versions also
 fail closed. Broker association version 2 requires at least Relay outer version 4; Broker
-association version 3 requires outer version 5; version 4 requires outer version 6. New safety fields must not be
+association version 3 requires outer version 5; version 4 requires outer version 6. Favorites progress requires outer version 7. New safety fields must not be
 hidden behind an older version number. An older writer must not overwrite a newer format. Do not edit a
 version number or delete recovery fields to make a previous binary accept them.
 
@@ -65,7 +66,7 @@ The tenant Broker freeze projection is the sole Relay commit authority. A legacy
 top-level `sessionSuccessions` mirror migrates only if every full saved projection
 exactly matches an authenticated committed freeze for that owner. Missing chain
 prefixes, unmatched mirrors and contradictory surviving identities fail closed;
-new outer version 6 forbids that duplicate field. Never synthesize a freeze from
+outer versions 6 and 7 forbid that duplicate field. Never synthesize a freeze from
 browser state or remove recovery evidence to make an older writer accept it.
 
 Replay uses a version-1 envelope containing the immutable committed projection
@@ -91,9 +92,40 @@ off. Old ready frames retain normal session traffic and report succession as
 unsupported. Delivery and HTTP reads consume already persisted outer state and
 recheck current access; a failed outer write cannot publish a new projection.
 
-This is the replay boundary only. Product store acknowledgement, Favorites/Track/
-Ask replacement and browser acceptance are separate work. A transport cache is
-not durable authority or proof that every product store has applied a revision.
+The transport cache is not durable authority or proof that every product store
+has applied a revision. Server Favorites progress is described below; client
+Track/Ask/draft replacement and browser acceptance remain separate work.
+
+## Atomic server Favorites projection
+
+The owning tenant's committed Broker snapshot, Favorites replacement and exact
+store acknowledgement share one outer state transaction. A's favorite ID, folder,
+timestamp and slot survive A-to-B-to-C. A duplicate normal B slot yields to A;
+confirmed B title and B's own parent/workspace metadata are retained. Inherited
+display text never causes a native rename or transplants A's native parent to B.
+Target-only and unstarred cases create no new favorite or tree. One aggregate
+observable change advances the tree revision once; repeated replay does not.
+
+Tenant `favoritesSuccession` version 1 records pending/applied acknowledgements
+against exact existing freeze evidence. Legacy valid freezes acquire no fabricated
+applied status. Missing authority/mapping, tree capacity or exhausted revision
+retains pending progress without blocking durable native commit evidence.
+Authenticated Favorites/stars requests and Host/provider publication can recover
+that progress; no polling or native attachment is required. A failed outer write
+publishes neither replacement nor acknowledgement. Recover the original operation
+after uncertain persistence, never repeat native creation or input.
+
+Ordinary owner saves and removes for a committed predecessor reject with generic
+conflict, including current-tree-revision requests and unavailable successor
+mapping. A shared-only viewer retains its separately authorized concrete A; it
+acquires no B identity or access. Historical favorite schema and its navigation UI
+must be implemented together in the client slice. Other explicit historical
+addresses remain concrete.
+
+The current Cloudflare SQL codec supports ordinary Relay2 only. It rejects newer
+outer formats, Broker associations and Favorites progress before SQL writes.
+This prevents silent loss; it is not SQL succession support. Complete durable SQL
+encoding/decoding and restart acceptance are mandatory before enabling that backend.
 
 ## Ordinary relationship changes
 

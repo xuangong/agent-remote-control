@@ -12,7 +12,7 @@ import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, 
 import type { RelaySocket } from './transport.js';
 const { WebSocket, WebSocketServer } = createRequire(new URL('../../agent-remote-relay/package.json', import.meta.url))('ws');
 const closers: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
+afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); }, 10000);
 const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
 const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
 const sequenceRef = (index: number) => ref(index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index);
@@ -48,9 +48,9 @@ async function fixture(configure?: (state: HostedRelayState) => void) {
   initial.tenants[0]!.broker.keys = [[createHash('sha256').update(credential).digest('hex'), { expires: Date.now() + 600000, installationId: 'installation', kind: 'device' }]];
   configure?.(initial);
   let relay: ReturnType<typeof createHostedRelay>;
-  let failSave = false;
+  let failSave = false, failAfterSave = false;
   const start = (initial: unknown) => createHostedRelay({ ...auth, successionEnrollment: true, scheduler: { schedule() {}, cancel() {} }, storage: { initial,
-    async commit(value) { if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); } } });
+    async commit(value) { if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } } });
   relay = start(initial); await writeFile(path, JSON.stringify(initial));
   const websockets = new WebSocketServer({ noServer: true });
   server.on('request', (incoming, outgoing) => { void (async () => {
@@ -65,7 +65,7 @@ async function fixture(configure?: (state: HostedRelayState) => void) {
     websockets.handleUpgrade(incoming, socket, head, (ws: any) => result.accept(adapt(ws)));
   })(); });
   const cookie = async (subject = 'owner') => (await import('./auth.js')).gatewayCookieName(origin, 'session') + '=' + subject;
-  const request = async (route: string, subject = 'owner', body?: unknown) => fetch(`${origin}/u/${namespace(subject)}/${route}`, { ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }), headers: { cookie: await cookie(subject), origin, 'content-type': 'application/json' } });
+  const request = async (route: string, subject = 'owner', body?: unknown, method = 'POST') => fetch(`${origin}/u/${namespace(subject)}/${route}`, { ...(body === undefined ? {} : { method, body: JSON.stringify(body) }), headers: { cookie: await cookie(subject), origin, 'content-type': 'application/json' } });
   const channel = async (optIn = true) => {
     const socket = new WebSocket(`${origin.replace('http', 'ws')}/u/${namespace('owner')}/v1/session-channel?observation=session${optIn ? '&successions=1' : ''}`, { headers: { origin, cookie: await cookie() } });
     const frames: any[] = []; socket.on('message', (data: { toString(): string }) => frames.push(JSON.parse(data.toString())));
@@ -74,8 +74,9 @@ async function fixture(configure?: (state: HostedRelayState) => void) {
   };
   closers.push(async () => { for (const ws of websockets.clients) ws.terminate(); await relay.close(); await new Promise<void>(resolve => server.close(() => resolve()));
     await new Promise<void>(resolve => authority.close(() => resolve())); await rm(root, { recursive: true, force: true }); });
-  return { auth, namespace, row, request, channel, cookie, origin, credential, recover: () => { failSave = false; }, fail: () => { failSave = true; }, deny: () => { denied = true; }, outage: () => { unavailable = true; },
+  return { auth, namespace, row, request, channel, cookie, origin, credential, recover: () => { failSave = false; failAfterSave = false; }, failAfterWrite: () => { failAfterSave = true; }, fail: () => { failSave = true; }, deny: () => { denied = true; }, outage: () => { unavailable = true; },
     saved: async () => JSON.parse(await readFile(path, 'utf8')) as HostedRelayState,
+    replaceSaved: async (change: (state: HostedRelayState) => void) => { const value = JSON.parse(await readFile(path, 'utf8')); change(value); await writeFile(path, JSON.stringify(value)); },
     restart: async () => { const value = JSON.parse(await readFile(path, 'utf8')); await relay.close(); relay = start(value); } };
 }
 function adapt(socket: any): RelaySocket {
@@ -246,4 +247,197 @@ test('rejects a fresh role operation at Relay capacity before freeze or native p
   const old = await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' }); expect((await old.json()).role.current.nativeSessionId).toBe('B');
   expect((await f.request('v1/remote/hosts/mapped-host/succession/reconcile', 'owner', { operationId: 'op-2' })).status).toBe(200);
   expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0, release: 1 });
+}, 10000);
+
+const favorite = (nativeSessionId = 'A', subject = 'owner') => ({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId,
+  title: nativeSessionId + ' title', workspace: '/workspace', subject, starredAt: 100, favoriteId: 'favorite-' + nativeSessionId,
+  folderId: null, order: 0 });
+test('atomically projects legacy A through C and preserves the stable slot without repeated revision bumps', async () => {
+  const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 4, folders: [] }]; });
+  const result = await f.request('v1/favorites'); expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({ revision: 5, stars: [{ nativeSessionId: 'C', favoriteId: 'favorite-A', starredAt: 100, folderId: null, order: 0 }] });
+  expect(await f.saved()).toMatchObject({ version: 7, tenants: [{ favoritesSuccession: { version: 1, receipts: [{ status: 'applied' }, { status: 'applied' }] } }] });
+  await f.request('v1/favorites'); await f.restart(); await f.request('v1/favorites');
+  expect((await f.saved()).favoritesTrees![0]!.revision).toBe(5);
+  expect((await (await f.request('v1/session-successions/operation?roleId=role&operationId=op-2')).json()).to.nativeSessionId).toBe('B');
+}, 10000);
+
+test('rejects owner ordinary predecessor save and delete even at fresh revision and unavailable successor', async () => {
+  const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 0, folders: [] }]; state.tenants[0]!.broker.hosts[0]!.providers = []; });
+  const first = await (await f.request('v1/favorites')).json();
+  for (const type of ['save-session', 'remove-session']) {
+    const session = { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', ...(type === 'save-session' ? { title: 'stale' } : {}) };
+    const result = await f.request('v1/favorites', 'owner', { type, revision: first.revision, session, ...(type === 'save-session' ? { folderId: null } : {}) });
+    expect(result.status).toBe(409); expect(await result.text()).not.toMatch(/nativeSessionId|installation|role/);
+  }
+  expect((await f.saved()).sessionStars![0]!.nativeSessionId).toBe('A');
+  expect(await f.saved()).toMatchObject({ tenants: [{ favoritesSuccession: { receipts: [{ status: 'pending' }, { status: 'pending' }] } }] });
+}, 10000);
+
+test('keeps A placement and B target metadata before duplicate removal across different folders', async () => {
+  const f = await fixture(state => {
+    state.tenants[0]!.broker.associations!.freezes.pop();
+    state.favoritesTrees = [{ subject: 'owner', revision: 8, folders: [{ id: 'a-folder', parentId: null, order: 0, title: 'A folder' }, { id: 'b-folder', parentId: null, order: 1, title: 'B folder' }] }];
+    state.sessionStars = [{ ...favorite(), folderId: 'a-folder', parentNativeSessionId: 'old-parent' },
+      { ...favorite('B'), folderId: 'b-folder', parentNativeSessionId: 'target-parent', workspace: '/target-workspace', starredAt: 200 },
+      { ...favorite('unrelated'), order: 2 }, { ...favorite('other', 'viewer') }];
+    state.favoritesTrees.push({ subject: 'viewer', revision: 10, folders: [] });
+    state.sessionTitleRevision = 5; state.sessionTitles = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'B', title: 'Confirmed native B', revision: 5 }];
+  });
+  const value = await (await f.request('v1/favorites')).json();
+  expect(value).toMatchObject({ revision: 9, stars: [{ nativeSessionId: 'B', favoriteId: 'favorite-A', folderId: 'a-folder', starredAt: 100,
+    title: 'Confirmed native B', workspace: '/target-workspace', parentNativeSessionId: 'target-parent' }, { nativeSessionId: 'unrelated' }] });
+  expect(value.folders.map((folder: any) => folder.id)).toEqual(['a-folder', 'b-folder']);
+  expect((await f.saved()).sessionStars!.find(star => star.subject === 'viewer')).toEqual(favorite('other', 'viewer'));
+  const stale = await f.request('v1/favorites', 'owner', { type: 'remove-session', revision: 8, session: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A' } });
+  expect(stale.status).toBe(409);
+  for (const method of ['POST', 'DELETE']) expect((await f.request('v1/stars', 'owner', { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', ...(method === 'POST' ? { title: 'old A' } : {}) }, method)).status).toBe(409);
+}, 10000);
+
+test('does not create favorites for absent source and does not disturb an already favorite target', async () => {
+  for (const target of [false, true]) {
+    const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes.pop();
+      if (target) { state.sessionStars = [favorite('B')]; state.favoritesTrees = [{ subject: 'owner', revision: 8, folders: [] }]; } });
+    await f.request('v1/favorites'); const saved = await f.saved();
+    expect(saved.sessionStars).toEqual(target ? [favorite('B')] : undefined);
+    expect(saved.favoritesTrees).toEqual(target ? [{ subject: 'owner', revision: 8, folders: [] }] : undefined);
+    expect(saved.tenants[0]!.favoritesSuccession!.receipts[0]!.status).toBe('applied');
+  }
+}, 10000);
+
+test('shared-only A stays concrete and never acquires the owner successor identity', async () => {
+  const f = await fixture(state => {
+    state.sessionStars = [favorite(), favorite('A', 'viewer')];
+    state.favoritesTrees = ['owner', 'viewer'].map(subject => ({ subject, revision: 0, folders: [] }));
+    const broker = state.tenants[0]!.broker;
+    broker.sharing = { grants: [{ hostId: 'mapped-host', subject: 'viewer', label: 'Viewer', sessionLimit: 1, revoked: false }], reservations: [] };
+    broker.bindings.push({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', agentId: 'shared-A', creatorSubject: 'viewer' });
+  });
+  await f.request('v1/favorites');
+  const result = await f.request('v1/favorites', 'viewer'); expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({ revision: 0, stars: [{ nativeSessionId: 'A', available: true }] });
+  const sharedSave = await f.request('v1/favorites', 'viewer', { type: 'save-session', revision: 0, folderId: null,
+    session: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'Shared A' } });
+  expect(sharedSave.status).toBe(200); expect(await sharedSave.text()).not.toMatch(/nativeSessionId":"[BC]"|roleRevision|receiptHash/);
+}, 10000);
+
+test('keeps absent Host or provider pending and recovers legacy identity only when metadata returns', async () => {
+  for (const removeHost of [false, true]) {
+    const f = await fixture(state => {
+      state.sessionStars = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'Legacy A', subject: 'owner', starredAt: 100 }];
+      if (removeHost) state.tenants[0]!.broker.hosts = []; else state.tenants[0]!.broker.hosts[0]!.providers = [];
+    });
+    await f.request('v1/favorites'); const pending = await f.saved();
+    expect(pending.sessionStars![0]!.nativeSessionId).toBe('A'); expect(pending.sessionStars![0]!.favoriteId).toBeUndefined();
+    expect(pending.tenants[0]!.favoritesSuccession!.receipts.every(entry => entry.status === 'pending')).toBe(true);
+    await f.replaceSaved(state => { state.tenants[0]!.broker.hosts = [{ id: 'mapped-host', installationId: 'installation', name: 'Host', legacyDsh: false, providers: [{ providerId: 'fixture', displayName: 'Fixture' }] }]; });
+    await f.restart(); const result = await (await f.request('v1/favorites')).json();
+    expect(result).toMatchObject({ revision: 1, stars: [{ nativeSessionId: 'C', starredAt: 100, folderId: null, order: 0 }] });
+    expect(result.stars[0].favoriteId).toMatch(/^star_/); expect(result.stars[0]).not.toHaveProperty('parentNativeSessionId');
+  }
+}, 10000);
+
+test('persists native committed freeze while favorite revision or tree capacity stays pending', async () => {
+  for (const exhausted of [false, true]) {
+    const f = await fixture(state => {
+      state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'A', subject: 'owner', starredAt: 100 }];
+      state.favoritesTrees = exhausted ? [{ subject: 'owner', revision: Number.MAX_SAFE_INTEGER, folders: [] }] : Array.from({ length: 1024 }, (_, index) => ({ subject: 'other-' + index, revision: 0, folders: [] }));
+    });
+    const native = await controller(f);
+    expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+    expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBe(200);
+    const saved = await f.saved(); expect(saved.tenants[0]!.broker.associations!.freezes[0]!.projection).toBeDefined();
+    expect(saved.tenants[0]!.favoritesSuccession!.receipts[0]!.status).toBe('pending');
+    expect(saved.sessionStars![0]!.nativeSessionId).toBe('A'); expect(saved.sessionStars![0]!.favoriteId).toBeUndefined();
+    expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1 });
+    await f.replaceSaved(state => { state.favoritesTrees = [{ subject: 'owner', revision: 10, folders: [] }]; });
+    await f.restart(); await f.request('v1/favorites');
+    expect((await f.saved()).sessionStars![0]!.nativeSessionId).toBe('B'); expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1 });
+  }
+}, 10000);
+
+test('publishes favorite and ack atomically with original native decision recovery after failed outer write', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 3, folders: [] }]; });
+  const native = await controller(f, true); const channel = await f.channel();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBeGreaterThanOrEqual(500);
+  const failed = await f.saved(); expect(failed.sessionStars![0]!.nativeSessionId).toBe('A'); expect(failed.favoritesTrees![0]!.revision).toBe(3);
+  expect(failed.tenants[0]!.favoritesSuccession).toBeUndefined(); expect(failed.tenants[0]!.broker.associations!.freezes[0]!.projection).toBeUndefined();
+  expect(channel.frames.filter(frame => frame.type === 'session_succession_committed')).toEqual([]);
+  f.recover(); await f.restart(); await native.connect();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/reconcile', 'owner', { operationId: 'op-2' })).status).toBe(200);
+  expect(await f.saved()).toMatchObject({ sessionStars: [{ nativeSessionId: 'B', favoriteId: 'favorite-A' }], favoritesTrees: [{ revision: 4 }], tenants: [{ favoritesSuccession: { receipts: [{ status: 'applied' }] } }] });
+  await f.request('v1/favorites'); await f.restart(); await native.connect();
+  expect((await f.saved()).favoritesTrees![0]!.revision).toBe(4); expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1 });
+}, 10000);
+
+test('validates exact bounded acknowledgements and rejects gaps, tampering and unsupported versions', async () => {
+  const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 0, folders: [] }]; });
+  await f.request('v1/favorites'); const saved = await f.saved();
+  expect(() => validateRelayState(saved, f.auth)).not.toThrow();
+  for (const change of [
+    (state: any) => { state.version = 6; },
+    (state: any) => { state.tenants[0].favoritesSuccession.version = 2; },
+    (state: any) => { state.tenants[0].favoritesSuccession.receipts[0].operationId = 'forged'; },
+    (state: any) => { state.tenants[0].favoritesSuccession.receipts[0].receiptHash = 'f'.repeat(64); },
+    (state: any) => { state.tenants[0].favoritesSuccession.receipts[0].roleRevision = 100; },
+    (state: any) => { state.tenants[0].favoritesSuccession.receipts[0].status = 'pending'; },
+    (state: any) => { state.tenants[0].favoritesSuccession.receipts.shift(); },
+    (state: any) => { state.tenants[0].favoritesSuccession.receipts.push(state.tenants[0].favoritesSuccession.receipts[0]); },
+    (state: any) => { state.tenants[0].broker.associations.freezes[0].projection.role.workspace.canonicalCwd = '/forged'; },
+  ]) {
+    const modified = structuredClone(saved); change(modified);
+    expect(() => validateRelayState(modified, f.auth)).toThrow();
+  }
+  await f.replaceSaved(state => { state.tenants[0]!.broker.hosts = []; state.sessionTitles = []; });
+  await f.restart(); const value = await (await f.request('v1/favorites')).json();
+  expect(value).toMatchObject({ revision: 1, stars: [{ nativeSessionId: 'C', available: false }] });
+  expect((await f.saved()).tenants[0]!.favoritesSuccession).toEqual(saved.tenants[0]!.favoritesSuccession);
+}, 10000);
+
+test('repeated provider publication and unrelated edits do not replay acknowledgements or title inheritance', async () => {
+  const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 0, folders: [] }]; });
+  const native = await controller(f); await f.request('v1/favorites');
+  expect((await f.saved()).favoritesTrees![0]!.revision).toBe(1);
+  await f.request('v1/favorites', 'owner', { type: 'create-folder', revision: 1, id: 'unrelated-folder', parentId: null, title: 'Unrelated' });
+  await f.restart(); await native.connect(); await f.request('v1/favorites');
+  const saved = await f.saved(); expect(saved.favoritesTrees![0]!.revision).toBe(2);
+  const { createRelayState } = await import('./state.js'); const { createSessionTitles } = await import('./session-titles.js'); const { createFavorites } = await import('./favorites.js');
+  const state = createRelayState(f.auth, { initial: saved, async commit() {} }, () => {}, () => {});
+  await createSessionTitles(state, () => true).record({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'C' }, 'Real native C');
+  expect(createFavorites(state, () => ({ online: true, hostName: 'Host' })).list('owner')).toMatchObject({ revision: 3, stars: [{ nativeSessionId: 'C', title: 'Real native C', favoriteId: 'favorite-A' }] });
+  expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
+}, 10000);
+
+test('failed legacy projection persistence retains original favorite and no applied progress until retry', async () => {
+  const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 4, folders: [] }]; });
+  await f.request('v1/session-successions'); f.fail();
+  expect((await f.request('v1/favorites')).status).toBeGreaterThanOrEqual(500);
+  expect(await f.saved()).toMatchObject({ sessionStars: [{ nativeSessionId: 'A' }], favoritesTrees: [{ revision: 4 }] });
+  expect((await f.saved()).tenants[0]!.favoritesSuccession).toBeUndefined();
+  f.recover(); await f.restart(); await f.request('v1/favorites');
+  expect(await f.saved()).toMatchObject({ sessionStars: [{ nativeSessionId: 'C' }], favoritesTrees: [{ revision: 5 }] });
+}, 10000);
+
+test('lost outer persistence acknowledgement recovers the durable projection without replaying favorite or native effects', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 3, folders: [] }]; });
+  const native = await controller(f); const channel = await f.channel();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  f.failAfterWrite(); expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBeGreaterThanOrEqual(500);
+  expect(channel.frames.filter(frame => frame.type === 'session_succession_committed')).toEqual([]);
+  expect(await f.saved()).toMatchObject({ sessionStars: [{ nativeSessionId: 'B' }], favoritesTrees: [{ revision: 4 }], tenants: [{ favoritesSuccession: { receipts: [{ status: 'applied' }] } }] });
+  f.recover(); await f.restart(); await native.connect();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/reconcile', 'owner', { operationId: 'op-2' })).status).toBe(200);
+  await f.request('v1/favorites'); expect((await f.saved()).favoritesTrees![0]!.revision).toBe(4);
+  expect(native.effects).toMatchObject({ prepare: 1, commit: 1, input: 1, release: 1 });
+}, 10000);
+
+test('concurrent stale browser edits conflict after pending legacy projection and preserve the current slot', async () => {
+  const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 0, folders: [] }]; });
+  const results = await Promise.all(['one', 'two'].map(id => f.request('v1/favorites', 'owner', { type: 'create-folder', revision: 0, id, parentId: null, title: id })));
+  expect(results.map(result => result.status)).toEqual([409, 409]);
+  const snapshot = await (await f.request('v1/favorites')).json(); expect(snapshot).toMatchObject({ revision: 1, folders: [], stars: [{ nativeSessionId: 'C', favoriteId: 'favorite-A' }] });
+  const fresh = await Promise.all(['one', 'two'].map(id => f.request('v1/favorites', 'owner', { type: 'create-folder', revision: 1, id, parentId: null, title: id })));
+  expect(fresh.map(result => result.status).sort()).toEqual([200, 409]);
+  expect((await f.saved()).favoritesTrees![0]!.revision).toBe(2);
 }, 10000);

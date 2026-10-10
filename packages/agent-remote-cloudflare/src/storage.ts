@@ -42,6 +42,10 @@ export class SqliteRelayStore implements RelayStateStore {
     this.initial = validateRelayState(decode(rows, auth), auth);
   }
   async commit(state: HostedRelayState): Promise<void> {
+    // This codec cannot retain succession authority or its outer recovery progress.
+    if (state.version !== 2 || state.tenants.some(tenant => tenant.broker.associations !== undefined || tenant.favoritesSuccession !== undefined)) {
+      throw new Error('Unsupported Relay succession state for SQLite storage.');
+    }
     const next = encode(state);
     this.storage.transactionSync(() => {
       for (const [id, row] of this.records) {

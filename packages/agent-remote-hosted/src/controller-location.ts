@@ -8,6 +8,8 @@ export interface ControllerLocation {
   providerId?: string;
   nativeSessionId?: string;
   parentNativeSessionId?: string;
+  sessionIntent?: 'history';
+  keepOriginal?: boolean;
 }
 const fields = { host: 'hostId', agent: 'agentId', provider: 'providerId', session: 'nativeSessionId', parent: 'parentNativeSessionId', preview: 'previewId', path: 'previewPath', challenge: 'previewChallenge' } as const;
 
@@ -23,8 +25,19 @@ export function readControllerLocation(query: URLSearchParams): ControllerLocati
       (key === 'preview' && !/^[A-Za-z0-9_-]{1,128}$/.test(value))) throw new Error('Invalid session link.');
     result[field] = value;
   }
+  if (query.has('intent')) {
+    const values = query.getAll('intent');
+    if (values.length !== 1 || values[0] !== 'history') throw new Error('Invalid session intent.');
+    result.sessionIntent = 'history';
+  }
+  if (query.has('keepOriginal')) {
+    const values = query.getAll('keepOriginal');
+    if (values.length !== 1 || values[0]!.length > 4096 || /[\u0000-\u001f\u007f]/.test(values[0]!)) throw new Error('Invalid original-session option.');
+    result.keepOriginal = true;
+  }
   if ((result.nativeSessionId || result.providerId || result.parentNativeSessionId) &&
     !(result.nativeSessionId && result.providerId && result.hostId)) throw new Error('Incomplete session link.');
+  if ((result.sessionIntent || result.keepOriginal) && !(result.hostId && result.providerId && result.nativeSessionId)) throw new Error('Incomplete session link.');
   if (result.previewId || result.previewPath || result.previewChallenge) {
     if (!result.hostId || !result.previewId || !result.previewPath || result.agentId || result.providerId || result.nativeSessionId || result.parentNativeSessionId) throw new Error('Invalid preview link.');
     const prefix = '/p/' + result.previewId + '/';
@@ -37,6 +50,8 @@ export function readControllerLocation(query: URLSearchParams): ControllerLocati
 export function controllerPath(location: ControllerLocation): string {
   const query = new URLSearchParams();
   for (const [key, field] of Object.entries(fields)) if (location[field]) query.set(key, location[field]!);
+  if (location.sessionIntent !== undefined) query.set('intent', location.sessionIntent);
+  if (location.keepOriginal) query.set('keepOriginal', '1');
   readControllerLocation(query);
   return query.size ? `/?${query}` : '/';
 }

@@ -361,6 +361,23 @@ async function waitForSession(container: HTMLElement, agent: string) {
   expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain(agent);
 }
 
+function conversationVisits() {
+  return JSON.parse(sessionStorage.getItem('agent-remote-conversation-history') ?? '[]')
+    .map((visit: { session: { nativeSessionId: string }; sessionIntent?: string }) => [visit.session.nativeSessionId, visit.sessionIntent ?? 'ordinary']);
+}
+
+it('keeps the current visit while an explicit history attachment is pending or fails', async () => {
+  const f = await setup(true, { navigation: true, deferChild: true });
+  await act(async () => f.container.querySelector<HTMLAnchorElement>('.agent-session-reference')!.click());
+  expect(conversationVisits()).toEqual([['native-parent', 'ordinary']]);
+  expect(new URL(window.location.href).searchParams.get('intent')).toBeNull();
+  await act(async () => { f.releaseChild!(); });
+  await waitForSession(f.container, 'parent');
+  expect(f.container.querySelector('[role="alert"]')?.textContent).toContain('Child is unavailable.');
+  expect(conversationVisits()).toEqual([['native-parent', 'ordinary']]);
+  expect(f.container.querySelector<HTMLButtonElement>('[aria-label="Back to previous conversation"]')!.disabled).toBe(true);
+});
+
 it('navigates activity links between a parent and siblings with browser and conversation back/forward', async () => {
   const f = await setup(false, { navigation: true });
   await draft(f.container, 'Parent draft');
@@ -369,9 +386,11 @@ it('navigates activity links between a parent and siblings with browser and conv
   expect(back().disabled).toBe(true);
   await act(async () => f.container.querySelector<HTMLAnchorElement>('.agent-session-reference')!.click());
   await waitForSession(f.container, 'child');
+  expect(conversationVisits()).toEqual([['native-parent', 'ordinary'], ['native-child', 'history']]);
   await draft(f.container, 'Child draft');
   await act(async () => f.container.querySelector<HTMLAnchorElement>('.agent-session-reference')!.click());
   await waitForSession(f.container, 'sibling');
+  expect(conversationVisits()).toEqual([['native-parent', 'ordinary'], ['native-child', 'history'], ['native-sibling', 'history']]);
   expect(f.attachments).toEqual([
     { path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } },
     { path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-sibling' } },

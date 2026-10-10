@@ -1,11 +1,14 @@
 import { assertOrdinaryFavoriteAddress } from './favorites-succession.js';
+import { committedSuccessionRows } from './session-successions.js';
+import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
 import type { HostedRelayState, RelayState } from './state.js';
 import { MAX_USER_STARS, StarError, starKey, validSessionStar, validStarIdentity, type SavedSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from './session-star-schema.js';
 
 export interface Folder { id: string; parentId: string | null; title: string; order: number }
 export type OrganizedSessionStar = VisibleSessionStar & { favoriteId: string; folderId: string | null; order: number };
-export interface FavoritesSnapshot { revision: number; folders: Folder[]; stars: OrganizedSessionStar[] }
+export interface FavoritesSuccessionCheckpoint { hostId: string; controllerId: string; roleId: string; roleRevision: number; operationId: string; status: 'pending' | 'applied' }
+export interface FavoritesSnapshot { revision: number; folders: Folder[]; stars: OrganizedSessionStar[]; successionProgress?: { version: 1; roles: FavoritesSuccessionCheckpoint[] } }
 export interface SavedFavoritesTree { subject: string; revision: number; folders: Folder[] }
 export type FavoriteCommand = { revision: number } & (
   | { type: 'create-folder'; id: string; parentId: string | null; title: string }
@@ -125,11 +128,24 @@ function validCommand(value: unknown): value is FavoriteCommand {
     default: return false;
   }
 }
-export function createFavorites(state: RelayState, access: Access) {
+export function createFavorites(state: RelayState, access: Access,
+  successionAccess?: (snapshot: HostedRelayState, subject: string, hostId: string, native: NativeSessionRef) => boolean) {
   function snapshot(draft: HostedRelayState, subject: string): FavoritesSnapshot {
     const tree = organizeFavorites(draft, subject);
     const titles = new Map(draft.sessionTitles?.map(session => [starKey(session), session.title]));
-    return { revision: tree.revision, folders: sorted(tree.folders), stars: sorted(savedStars(draft, subject)).map(({ subject: _, ...star }) => {
+    const tenant = draft.tenants.find(item => item.subject === subject);
+    const roles = new Map<string, FavoritesSuccessionCheckpoint>();
+    const denied = new Set<string>();
+    if (successionAccess && tenant) for (const row of committedSuccessionRows(tenant.broker)) {
+      const { role, receipt } = row.projection!;
+      const key = JSON.stringify([row.hostId, role.current.controllerId, role.id]);
+      if (!successionAccess(draft, subject, row.hostId, receipt.from) || !successionAccess(draft, subject, row.hostId, role.current)) denied.add(key);
+      roles.set(key, { hostId: row.hostId, controllerId: role.current.controllerId, roleId: role.id, roleRevision: role.revision,
+        operationId: receipt.operationId, status: tenant.favoritesSuccession?.receipts.some(item => item.token === row.receipt.token && item.operationId === receipt.operationId && item.roleRevision === role.revision && item.status === 'applied') ? 'applied' : 'pending' });
+    }
+    const progress = [...roles].filter(([key]) => !denied.has(key)).map(([, value]) => value);
+    if (progress.length > 1024) fail(503, 'succession_unavailable', 'Favorites succession progress is unavailable.');
+    return { ...(successionAccess ? { successionProgress: { version: 1 as const, roles: progress } } : {}), revision: tree.revision, folders: sorted(tree.folders), stars: sorted(savedStars(draft, subject)).map(({ subject: _, ...star }) => {
       const host = access(subject, star);
       const title = host ? titles.get(starKey(star)) ?? star.title : star.title;
       return { ...star, title, available: !!host, online: host?.online ?? false, ...(host ? { hostName: host.hostName, ...(host.canRename ? { canRename: true } : {}) } : {}) };

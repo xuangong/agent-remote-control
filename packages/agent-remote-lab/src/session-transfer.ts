@@ -5,6 +5,8 @@ export interface ScannedSession {
   providerId: string;
   nativeSessionId: string;
   parentNativeSessionId?: string;
+  sessionIntent?: 'history';
+  keepOriginal?: boolean;
 }
 
 /** Scanning selects an identity on this Controller, never an arbitrary navigation target. */
@@ -18,5 +20,7 @@ export function readSessionCode(text: string, origin: string): ScannedSession {
   const value = readControllerLocation(url.searchParams);
   if (!value.hostId || !value.providerId || !value.nativeSessionId || value.previewId) throw new Error('This code does not identify a session.');
   return { hostId: value.hostId, providerId: value.providerId, nativeSessionId: value.nativeSessionId,
+    ...(value.sessionIntent ? { sessionIntent: value.sessionIntent } : {}),
+    ...(value.keepOriginal ? { keepOriginal: true } : {}),
     ...(value.parentNativeSessionId ? { parentNativeSessionId: value.parentNativeSessionId } : {}) };
 }

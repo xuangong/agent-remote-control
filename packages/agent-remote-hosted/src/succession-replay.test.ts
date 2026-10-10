@@ -10,6 +10,7 @@ import { createHostedRelay } from './gateway.js';
 import { createHostBroker, type HostBrokerOptions } from './broker.js';
 import { assertSuccessionCapacity, deriveSuccessionCapacity } from './succession-capacity.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
+import { createFavorites } from './favorites.js';
 import { codecState } from '../../agent-remote-cloudflare/test/storage-codec-fixture.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
@@ -21,6 +22,28 @@ afterEach(async () => { for (const close of closers.splice(0).reverse()) await c
 const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
 const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
 const sequenceRef = (index: number) => ref(index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index);
+
+test('Favorites progress derives latest authorized completion from the same snapshot', async () => {
+  const f = await fixture();
+  const response = await f.request('v1/favorites');
+  expect(response.status).toBe(200);
+  const value = await response.json();
+  const latest = { hostId: 'mapped-host', controllerId: 'installation', roleId: 'role', roleRevision: 3, operationId: 'op-3' };
+  expect(value.successionProgress).toEqual({ version: 1, roles: [{ ...latest, status: 'applied' }] });
+  const saved = await f.saved();
+  delete saved.tenants[0]!.favoritesSuccession;
+  const state = { read: () => structuredClone(saved) } as ReturnType<typeof createRelayState>;
+  const favorites = createFavorites(state, () => ({ online: true, hostName: 'Host' }), (_snapshot, _subject, _host, native) => native.nativeSessionId !== 'A');
+  expect(favorites.list('owner').successionProgress).toEqual({ version: 1, roles: [] });
+  const pending = createFavorites(state, () => ({ online: true, hostName: 'Host' }), () => true).list('owner');
+  expect(pending.revision).toBe(value.revision);
+  expect(pending.successionProgress).toEqual({ version: 1, roles: [{ ...latest, status: 'pending' }] });
+  await f.replaceSaved(state => { state.tenants[0]!.broker.hosts[0]!.providers = []; });
+  await f.restart();
+  expect((await (await f.request('v1/favorites')).json()).successionProgress).toEqual({ version: 1, roles: [] });
+  f.deny(); await f.restart();
+  expect((await f.request('v1/favorites')).status).toBe(401);
+}, 10000);
 async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false, accounting = false, directBroker = false) {
   const credential = 'arc_' + 'k'.repeat(43);
   let denied = false, unavailable = false;

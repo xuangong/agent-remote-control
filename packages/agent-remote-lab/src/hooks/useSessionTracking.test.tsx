@@ -1,16 +1,119 @@
-import { act, useEffect, useState } from 'react';
+import { act, useEffect, useLayoutEffect, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { render } from '../test/setup.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';
-import { readTrackedSessions, saveTrackedSessions } from '../tracking-state.js';
+import { readTrackedSessions, saveTrackedSessions, trackingEditRevision } from '../tracking-state.js';
 import { useSessionStars } from './useSessionStars.js';
 import { SessionStarsClient } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { ConversationConnections } from '../conversation-connections.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+
+it.each(['toggle', 'rename', 'reconcile'] as const)('uses only the new scope for a %s before passive effects', async operation => {
+  const transport = {} as RemoteAgentTransport;
+  const next = { ...star, nativeSessionId: 'new-scope' };
+  saveTrackedSessions('old-scope', [star]); saveTrackedSessions('new-scope', [next]);
+  let tracking!: SessionTracking, changeScope!: () => void;
+  function Fixture() {
+    const [scope, setScope] = useState('old-scope'); changeScope = () => setScope('new-scope');
+    tracking = useSessionTracking(scope, transport);
+    useLayoutEffect(() => {
+      if (scope !== 'new-scope') return;
+      if (operation === 'toggle') tracking.toggle({ ...next, nativeSessionId: 'added' });
+      if (operation === 'rename') tracking.rename({ ...next, title: 'New scope title' });
+      if (operation === 'reconcile') tracking.reconcileFavorites({ scope, ready: true, stars: [next] });
+    }, [scope]);
+    return null;
+  }
+  await render(<Fixture />); const retired = tracking;
+  await act(async () => changeScope());
+  expect(readTrackedSessions('old-scope')).toEqual([star]);
+  expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(operation === 'toggle' ? ['new-scope', 'added'] : ['new-scope']);
+  if (operation === 'rename') expect(tracking.sessions[0]!.title).toBe('New scope title');
+  expect(readTrackedSessions('new-scope')).toEqual(tracking.sessions);
+  await act(async () => { retired.toggle(star); retired.rename({ ...star, title: 'Stale title' }); retired.reconcileFavorites({ scope: 'old-scope', ready: true, stars: [] }); });
+  expect(readTrackedSessions('old-scope')).toEqual([star]);
+  expect(readTrackedSessions('new-scope')).toEqual(tracking.sessions);
+});
+
+it('retains an unsaved page edit when the same scope replaces its transport', async () => {
+  const first = {} as RemoteAgentTransport, second = {} as RemoteAgentTransport;
+  saveTrackedSessions('transport-edit', [star]);
+  let tracking!: SessionTracking, replace!: () => void;
+  function Fixture() {
+    const [transport, setTransport] = useState(first); replace = () => setTransport(second);
+    tracking = useSessionTracking('transport-edit', transport, undefined, undefined, undefined, undefined, false);
+    return null;
+  }
+  await render(<Fixture />); const retired = tracking.refresh;
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Quota'); });
+  await act(async () => tracking.toggle({ ...star, nativeSessionId: 'unsaved' }));
+  const error = tracking.error;
+  await act(async () => replace());
+  expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['native', 'unsaved']);
+  expect(tracking.error).toBe(error);
+  expect(retired(tracking.editRevision(), () => true)).toEqual({ status: 'cancelled', code: 'currentness' });
+  expect(write).toHaveBeenCalledOnce();
+});
+
+it('publishes checked Track storage without writes and rejects stale publication after an optimistic edit', async () => {
+  const scope = 'checked-track'; const transport = {} as RemoteAgentTransport;
+  saveTrackedSessions(scope, [star]);
+  let tracking!: SessionTracking;
+  function Fixture() { tracking = useSessionTracking(scope, transport, undefined, undefined, undefined, undefined, false); return null; }
+  await render(<Fixture />);
+  const next = { ...star, nativeSessionId: 'B', entryId: 'primary', title: 'Retained title' };
+  saveTrackedSessions(scope, [next]); const revision = trackingEditRevision(scope);
+  const write = vi.spyOn(Storage.prototype, 'setItem');
+  let result!: ReturnType<SessionTracking['refresh']>;
+  await act(async () => { result = tracking.refresh(revision, () => true); });
+  expect(result).toMatchObject({ status: 'ready', revision, sessions: [next] });
+  expect(tracking.sessions).toEqual([next]);
+  expect(write).not.toHaveBeenCalled(); expect(trackingEditRevision(scope)).toBe(revision);
+  if (result.status === 'ready') (result.sessions[0] as { title: string }).title = 'Foreign edit';
+  expect(tracking.sessions[0]!.title).toBe('Retained title');
+  write.mockImplementation(() => { throw new Error('Full'); });
+  await act(async () => tracking.toggle(star));
+  expect(tracking.error).toContain('could not save');
+  expect(tracking.refresh(revision, () => true)).toEqual({ status: 'cancelled', code: 'revision' });
+  expect(tracking.sessions).toHaveLength(2);
+});
+
+it('keeps Track publication and errors unchanged on denied reads or retired hook callbacks', async () => {
+  const transport = {} as RemoteAgentTransport;
+  let tracking!: SessionTracking, setScope!: (scope: string) => void;
+  saveTrackedSessions('checked-old', [star]);
+  function Fixture() { const [scope, update] = useState('checked-old'); setScope = update; tracking = useSessionTracking(scope, transport, undefined, undefined, undefined, undefined, false); return null; }
+  await render(<Fixture />);
+  const old = tracking.refresh;
+  const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Denied'); });
+  expect(tracking.refresh(tracking.editRevision(), () => true)).toMatchObject({ status: 'failed', code: 'track_read' });
+  expect(tracking.sessions).toEqual([star]);
+  read.mockRestore();
+  expect(tracking.refresh(tracking.editRevision(), () => false)).toEqual({ status: 'cancelled', code: 'currentness' });
+  await act(async () => setScope('checked-new'));
+  expect(old(trackingEditRevision('checked-old'), () => true)).toEqual({ status: 'cancelled', code: 'currentness' });
+  expect(tracking.sessions).toEqual([]);
+});
+
+it('does not let queued publication or mutation overwrite a later synchronous Track edit', async () => {
+  const scope = 'checked-order'; const transport = {} as RemoteAgentTransport;
+  saveTrackedSessions(scope, [star]); let tracking!: SessionTracking;
+  function Fixture() { tracking = useSessionTracking(scope, transport, undefined, undefined, undefined, undefined, false); return null; }
+  await render(<Fixture />);
+  const next = { ...star, nativeSessionId: 'B' };
+  await act(async () => {
+    tracking.rename({ ...star, title: 'Renamed A' });
+    saveTrackedSessions(scope, [next]);
+    expect(tracking.refresh(trackingEditRevision(scope), () => true).status).toBe('ready');
+    tracking.toggle({ ...star, nativeSessionId: 'C' });
+  });
+  expect(tracking.sessions.map(item => item.nativeSessionId)).toEqual(['B', 'C']);
+  expect(readTrackedSessions(scope)).toEqual(tracking.sessions);
+});
 
 it('retains opened tracked clients through access renewal and collects them only after untracking', async () => {
   saveTrackedSessions('alice', [star]);

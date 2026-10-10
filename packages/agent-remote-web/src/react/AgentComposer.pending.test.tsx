@@ -29,6 +29,45 @@ async function setup(props: Partial<AgentComposerProps> = {}) {
   return { container, update, send, cancel, type, click, notice };
 }
 
+it('allows draft-only text editing while stale native callbacks cannot send or enroll a queue', async () => {
+  const command = vi.fn(), configure = vi.fn();
+  const view = await setup({ state: undefined, draftOnly: true, onExecuteCommand: command, onSetSessionSetting: configure });
+  expect(view.container.querySelector('textarea')!.disabled).toBe(false);
+  await view.type('Retained draft'); await view.click(); await advance(1000);
+  expect(view.container.querySelector('textarea')!.value).toBe('Retained draft');
+  expect(view.notice()).toBeNull(); expect(view.send).not.toHaveBeenCalled();
+  await view.update({ state: running, disabled: false, recovering: false });
+  await view.click(); await advance(1000);
+  expect(view.send).not.toHaveBeenCalled(); expect(view.cancel).not.toHaveBeenCalled();
+  expect(command).not.toHaveBeenCalled(); expect(configure).not.toHaveBeenCalled(); expect(view.notice()).toBeNull();
+  await view.update({ readOnly: true });
+  expect(view.container.querySelector('textarea')!.disabled).toBe(true);
+});
+
+it('keeps the opaque image editor and focus through draft-only and confirmed native identity', async () => {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+  const upload = vi.fn(async () => ({ attachmentId: 'confirmed', sha256: 'b'.repeat(64), mediaType: 'image/png' as const, byteLength: 1 }));
+  const binding = { scope: 'draft-only-images', key: 'owner-K' };
+  const view = await setup({ state: undefined, sessionKey: 'B', draftOnly: true, imageDraftBinding: binding, onUploadImage: upload });
+  const editor = view.container.querySelector<HTMLElement>('[role="textbox"]');
+  expect(editor).not.toBeNull(); expect(editor!.getAttribute('aria-disabled')).toBe('false');
+  await act(async () => {
+    editor!.focus();
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })], getData: () => 'New local text' } });
+    editor!.dispatchEvent(event);
+  });
+  expect(view.container.querySelector('[data-image-id]')).not.toBeNull();
+  await view.click(); await advance(1000);
+  expect(upload).not.toHaveBeenCalled(); expect(view.send).not.toHaveBeenCalled(); expect(view.notice()).toBeNull();
+  await view.update({ state, sessionKey: 'C', draftOnly: false, disabled: false, recovering: false });
+  expect(view.container.querySelector('[role="textbox"]')).toBe(editor);
+  expect(document.activeElement).toBe(editor);
+  expect(view.container.querySelector('[data-image-id]')).not.toBeNull();
+  expect(upload).not.toHaveBeenCalled();
+});
+
 it('queues multiple messages, keeps editing available and drains FIFO without changing the new draft', async () => {
   const view = await setup();
   await view.type('First'); await view.click();

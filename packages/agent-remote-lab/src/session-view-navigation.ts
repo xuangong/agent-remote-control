@@ -18,7 +18,7 @@ export type SessionViewNavigationFactory = (source: OpenedSession, state?: Agent
 /** Native relationships belong to the displayed session, regardless of its container. */
 export function sessionViewNavigation({ source, state, entries, openSession, openChildSession, communication, revealEntry }: {
   source: OpenedSession; state?: AgentReplicaState; entries: readonly SessionEntry[];
-  openSession?: (target: SessionEntry) => Promise<boolean>;
+  openSession?: (target: SessionEntry, sessionIntent?: 'history') => Promise<boolean>;
   openChildSession?: (child: AgentChildSessionView) => Promise<void>;
   communication?: CommunicationNavigation; revealEntry?: TraceEntryRequest;
 }): SessionViewNavigation {
@@ -37,8 +37,8 @@ export function sessionViewNavigation({ source, state, entries, openSession, ope
       if (!openSession) return undefined;
       const target = family.get(sessionKey({ ...source, nativeSessionId }));
       if (!target || sessionRootKey(target, known) !== sessionRootKey(origin, known)) return undefined;
-      return { title: target.title, href: controllerPath({ ...target, hostId: target.hostId ?? 'local' }), open: async () => {
-        if (!await openSession(target)) throw new Error('This session could not be opened.');
+      return { title: target.title, href: controllerPath({ ...target, hostId: target.hostId ?? 'local', sessionIntent: 'history' }), open: async () => {
+        if (!await openSession(target, 'history')) throw new Error('This session could not be opened.');
       } };
     },
     onOpenChildSession: openChildSession, communication, revealEntry,

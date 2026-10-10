@@ -1262,6 +1262,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (tpm) {
       requireOwner(subject); requireAccess(tpm[1]!, subject);
       const host = requireHost(tpm[1]!);
+      const generation = host.generation, installationId = host.installationId;
+      const requireTpmLifetime = () => { assertHostCurrent(host, generation); requireOwner(principal(context)); requireAccess(host.id, principal(context)); };
       if (!host.tpmManagement) return request.method === 'GET' && !tpm[2]
         ? json(200, { supported: false, supportedProviders: [], works: [] })
         : json(409, { error: 'Update the Controller to use TPM.' });
@@ -1280,19 +1282,31 @@ export function createHostBroker(options: HostBrokerOptions) {
       } else if (url.searchParams.size) throw new BrokerError(400, 'invalid_request', 'TPM query parameters are invalid.');
       if (method === 'POST') {
         const input = await readBody(request);
+        requireTpmLifetime();
         if (action === 'create' ? !isTpmCreate(input) : !isTpmAction(input)) throw new BrokerError(400, 'invalid_request', 'The TPM request is invalid.');
         if (action === 'create' && !host.providers.some(provider => provider.providerId === input.providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
         if (action === 'action') expectedId = input.id as string;
         body = JSON.stringify(input);
       }
       const path = `/remote/tpm${action ? '/' + action : ''}${action === 'work' ? '?' + new URLSearchParams({ id: expectedId! }) : !action && url.searchParams.has('cursor') ? '?' + new URLSearchParams({ cursor: url.searchParams.get('cursor')! }) : ''}`;
+      requireTpmLifetime();
       const result = await rpc(host, method, path, undefined, body);
-      requireOwner(principal(context)); requireAccess(host.id, principal(context));
+      requireTpmLifetime();
       if (!action && result.status === 404) return json(200, { supported: false, works: [] });
       if (result.status >= 200 && result.status < 300) {
         let value: unknown;
         try { value = JSON.parse(result.body); } catch { throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM response.'); }
         if (action ? !isTpmWork(value) || (expectedId !== undefined && value.id !== expectedId) : !isTpmList(value)) throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM response.');
+        const works = isTpmWork(value) ? [value] : isTpmList(value) ? value.works : [];
+        for (const work of works) {
+          const main = work.mainSessionRef;
+          const source = work.mainBinding?.kind === 'fixed' ? work.mainBinding.source : work.mainBinding?.origin;
+          if (main && (main.controllerId !== installationId || main.nativeSessionId !== work.mainNativeSessionId)
+            || source && source.controllerId !== installationId
+            || main && work.mainBinding?.kind === 'fixed' && nativeSessionRefKey(main) !== nativeSessionRefKey(work.mainBinding.source)) {
+            throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM reference.');
+          }
+        }
       }
       return rawJson(result);
     }

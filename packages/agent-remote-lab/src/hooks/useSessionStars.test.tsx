@@ -6,8 +6,22 @@ import { SessionStarsClient } from '../session-stars-client.js';
 import { FavoritesList, FavoritesMenu } from '../components/SessionFavorites.js';
 import type { SessionTracking } from './useSessionTracking.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1, favoriteId: 's', folderId: null, order: 0, available: true, online: true };
-const tracking: SessionTracking = { project: vi.fn(() => ({ status: 'saved' as const, retention: 'local' as const, sessions: [], revision: 1 })), editRevision: vi.fn(() => 0), reorder: vi.fn(), reconcileFavorites: vi.fn(), rename: vi.fn(), replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
+const tracking: SessionTracking = { refresh: vi.fn(() => ({ status: 'ready' as const, revision: 0, sessions: [] })), project: vi.fn(() => ({ status: 'saved' as const, retention: 'local' as const, sessions: [], revision: 1 })), editRevision: vi.fn(() => 0), reorder: vi.fn(), reconcileFavorites: vi.fn(), rename: vi.fn(), replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
 afterEach(() => vi.restoreAllMocks());
+it('publishes succession progress at the same tree revision and rejects retired callbacks', async () => {
+  const progress = { hostId: 'host', controllerId: 'controller', roleId: 'role', roleRevision: 2, operationId: 'operation', status: 'pending' as const };
+  const snapshot = vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({ revision: 1, folders: [], stars: [star], successionProgress: { version: 1, roles: [progress] } });
+  const command = vi.spyOn(SessionStarsClient.prototype, 'command');
+  let favorites!: SessionStars, move!: () => void;
+  function Fixture() { const [scope, setScope] = useState('alice'); move = () => setScope('bob'); favorites = useSessionStars(scope, true); return null; }
+  await render(<Fixture />); const old = favorites;
+  snapshot.mockResolvedValue({ revision: 1, folders: [], stars: [star], successionProgress: { version: 1, roles: [{ ...progress, status: 'applied' }] } });
+  await act(async () => favorites.refresh());
+  expect(favorites.revision).toBe(1); expect(favorites.successionProgress?.roles[0]?.status).toBe('applied');
+  await act(async () => move()); const calls = snapshot.mock.calls.length;
+  await act(async () => { await old.refresh(); expect(await old.change({ type: 'remove-session', session: star })).toBe(false); });
+  expect(snapshot).toHaveBeenCalledTimes(calls); expect(command).not.toHaveBeenCalled();
+});
 it('keeps failed saves visible without pretending the favorite was saved', async () => {
   vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({revision:0,folders:[],stars:[]});
   vi.spyOn(SessionStarsClient.prototype, 'command').mockRejectedValue(new Error('Host did not confirm the favorite.'));

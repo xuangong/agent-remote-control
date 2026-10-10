@@ -19,6 +19,24 @@ it('keeps legacy Agent and Host-only links valid', () => {
   expect(controllerPath(readControllerLocation(new URLSearchParams('host=desk')))).toBe('/?host=desk');
 });
 
+it('round trips history intent independently of legacy keepOriginal', () => {
+  for (const suffix of ['keepOriginal', 'keepOriginal=0', 'keepOriginal=legacy']) {
+    const location = readControllerLocation(new URLSearchParams(`host=desk&provider=codex&session=A&intent=history&${suffix}`));
+    expect(location).toEqual({ hostId: 'desk', providerId: 'codex', nativeSessionId: 'A', sessionIntent: 'history', keepOriginal: true });
+    expect(controllerPath(location)).toBe('/?host=desk&provider=codex&session=A&intent=history&keepOriginal=1');
+    expect(validControllerPath(controllerPath(location))).toBe(true);
+  }
+  expect(controllerPath({ hostId: 'desk', providerId: 'codex', nativeSessionId: 'A' })).not.toContain('intent');
+});
+
+it.each(['intent=ordinary', 'intent=', 'intent=history&intent=history', 'keepOriginal=1&keepOriginal=1', 'keepOriginal=%00'])('rejects invalid navigation options: %s', options => {
+  expect(() => readControllerLocation(new URLSearchParams(`host=desk&provider=codex&session=A&${options}`))).toThrow();
+});
+
+it.each(['intent=history', 'keepOriginal', 'host=desk&preview=p&path=/&intent=history', 'host=desk&preview=p&path=/&keepOriginal=1'])('requires complete native identity for navigation options: %s', query => {
+  expect(() => readControllerLocation(new URLSearchParams(query))).toThrow();
+});
+
 
 it('round trips a tunnel path through the existing login return location', () => {
   const location = { hostId: 'host', previewId: 'preview', previewPath: '/docs?q=one#section' };

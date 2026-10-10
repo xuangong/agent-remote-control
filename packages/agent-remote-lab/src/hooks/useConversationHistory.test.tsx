@@ -38,6 +38,26 @@ async function setup(open?: (session: SessionEntry) => Promise<boolean>) {
 }
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); }); }
 
+it('visits ordinary and explicit history for the same native session independently', async () => {
+  const opened: Array<unknown> = [];
+  function Fixture() {
+    const [intent, setIntent] = useState<'history'>();
+    const navigation = useConversationHistory(parent, known, async (session, nextIntent, keepOriginal) => {
+      opened.push([session.nativeSessionId, nextIntent, keepOriginal]); setIntent(nextIntent); return true;
+    }, intent, true);
+    return <><button onClick={() => setIntent('history')}>History</button><button onClick={navigation.back}>Back</button><button onClick={navigation.forward}>Forward</button></>;
+  }
+  const container = await render(<Fixture />);
+  await act(async () => container.querySelector('button')!.click());
+  expect(new URLSearchParams(location.search).get('intent')).toBe('history');
+  await act(async () => container.querySelectorAll('button')[1]!.click()); await settle();
+  expect(opened).toEqual([['parent', undefined, true]]);
+  expect(new URLSearchParams(location.search).has('intent')).toBe(false);
+  expect(new URLSearchParams(location.search).get('keepOriginal')).toBe('1');
+  await act(async () => container.querySelectorAll('button')[2]!.click()); await settle();
+  expect(opened[1]).toEqual(['parent', 'history', true]);
+});
+
 it('drops the forward branch after a new visit and bounds controls to the current native family', async () => {
   const f = await setup();
   await f.click('Child');

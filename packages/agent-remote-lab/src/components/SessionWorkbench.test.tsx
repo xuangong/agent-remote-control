@@ -6,6 +6,15 @@ import { SessionWorkbench } from './SessionWorkbench.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 
+it('keeps the original composer dock editable without native state in draft-only mode', async () => {
+  const send = vi.fn();
+  const container = await render(<LabWorkbench draftOnly sessionStatus="disconnected" messageDraft="Local owner" actions={{ sendMessage: send }} />);
+  expect(container.querySelector<HTMLElement>('.lab-composer-dock')!.hidden).toBe(false);
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Local owner', disabled: false });
+  const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  expect(submit.disabled).toBe(true); await act(async () => submit.click()); expect(send).not.toHaveBeenCalled();
+});
+
 it('renders the same conversation and composer through product and standalone composition', async () => {
   const props = { state: replicaState, sessionStatus: 'ready' as const, actions: {}, messageDraft: 'Keep my draft' };
   const standalone = await render(<SessionWorkbench {...props} />);

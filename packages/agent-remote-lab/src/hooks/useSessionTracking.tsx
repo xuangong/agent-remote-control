@@ -5,9 +5,14 @@ import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/a
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionStar } from '../session-stars-client.js';
-import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessions, saveTrackedSessions, type SessionObservation, patchTrackedSessions, trackingEditRevision, type TrackedSessionPatch, type LocalTrackedSession } from '../tracking-state.js';
+import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessionsChecked, readTrackedSessions, saveTrackedSessions, type SessionObservation, patchTrackedSessions, trackingEditRevision, type TrackedSessionPatch, type LocalTrackedSession } from '../tracking-state.js';
 import { useFeedbackToast } from '../components/Toast.js';
 import { restoreSession } from '../session-restoration.js';
+
+export type TrackRefreshResult =
+  | { status: 'ready'; revision: number; sessions: readonly LocalTrackedSession[] }
+  | { status: 'cancelled'; code: 'currentness' | 'revision' }
+  | { status: 'failed'; code: 'track_read'; error: unknown };
 
 const noOpenSessions: readonly OpenedSession[] = [];
 export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string; visible: boolean }
@@ -17,7 +22,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   // Authorization gates network access; only tracking changes release retained conversations.
-  useEffect(() => { connections?.retainTracked(sessions); }, [connections, sessions]);
+  useEffect(() => { if (enabled) connections?.retainTracked(sessions); }, [connections, sessions, enabled]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
   const observations = observationState.scope === baseUrl && observationState.transport === transport ? observationState.values : {};
   const latestObservations = useRef(observations); latestObservations.current = observations;
@@ -46,7 +51,42 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     for (const { session, liveAgentId } of auxiliarySessions) union.set(sessionKey(session), { session, liveAgentId: liveAgentId ?? union.get(sessionKey(session))?.liveAgentId });
     return [...union.values()];
   }, [sessions, openSessions, auxiliarySessions]);
-  const current = useRef(sessions); current.current = sessions;
+  const current = useRef(sessions);
+  const currentScope = useRef(baseUrl);
+  const lifetime = useMemo(() => ({ mounted: true }), [baseUrl, transport]);
+  const latestLifetime = useRef(lifetime); latestLifetime.current = lifetime;
+  const publication = useRef(0);
+  if (currentScope.current !== baseUrl) {
+    currentScope.current = baseUrl;
+    current.current = readTrackedSessions(baseUrl);
+    publication.current++;
+    setSelection({ scope: baseUrl, sessions: current.current });
+  }
+  const mutationCurrent = useCallback(() => latestLifetime.current === lifetime && lifetime.mounted && currentScope.current === baseUrl, [baseUrl, lifetime]);
+  useEffect(() => { lifetime.mounted = true; return () => { lifetime.mounted = false; }; }, [lifetime]);
+  const publishSelection = useCallback((sessions: LocalTrackedSession[], guard: () => boolean = () => true) => {
+    const token = ++publication.current, before = current.current;
+    current.current = sessions;
+    setSelection(previous => {
+      if (publication.current !== token || latestLifetime.current !== lifetime || !lifetime.mounted || !guard()) {
+        if (publication.current === token && current.current === sessions) current.current = before;
+        return previous;
+      }
+      return { scope: baseUrl, sessions };
+    });
+  }, [baseUrl, lifetime]);
+  const refresh = useCallback((expectedRevision: number, isCurrent: () => boolean): TrackRefreshResult => {
+    const live = () => latestLifetime.current === lifetime && lifetime.mounted && isCurrent();
+    if (!live()) return { status: 'cancelled', code: 'currentness' };
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || trackingEditRevision(baseUrl) !== expectedRevision) return { status: 'cancelled', code: 'revision' };
+    const read = readTrackedSessionsChecked(baseUrl);
+    if (read.status !== 'ready') return { status: 'failed', code: 'track_read', error: read.error };
+    if (!live()) return { status: 'cancelled', code: 'currentness' };
+    if (read.revision !== expectedRevision || trackingEditRevision(baseUrl) !== expectedRevision) return { status: 'cancelled', code: 'revision' };
+    const sessions = structuredClone(read.sessions);
+    publishSelection(sessions, () => live() && trackingEditRevision(baseUrl) === expectedRevision);
+    return { status: 'ready', revision: expectedRevision, sessions: structuredClone(sessions) };
+  }, [baseUrl, lifetime, publishSelection]);
   const observed = useRef(observedSessions); observed.current = observedSessions;
   const visible = useRef(visibleKeys); visible.current = visibleKeys;
   // Read receipts are local to this transport and do not render on every streamed token.
@@ -111,21 +151,23 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       document.removeEventListener('visibilitychange', acknowledgeVisibleSessions);
     };
   }, [visibleKeys, connections, acknowledgeVisibleSessions]);
-  useEffect(() => { setSelection({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }); setError(undefined); }, [baseUrl]);
+  useEffect(() => { setError(undefined); }, [baseUrl]);
   function toggle(session: SessionStar) {
+    if (!mutationCurrent()) return;
     const key = sessionKey(session), previous = current.current;
     const exists = previous.some(item => sessionKey(item) === key);
     if (!exists && previous.length >= MAX_TRACKED_SESSIONS) { setError(`Track up to ${MAX_TRACKED_SESSIONS} sessions on this client. Untrack one to add another.`); return; }
     const next = exists ? previous.filter(item => sessionKey(item) !== key) : [...previous, session];
     try { saveTrackedSessions(baseUrl, next); setError(undefined); }
     catch { setError('Tracking changed for this page, but this browser could not save it for the next visit.'); }
-    current.current = next; setSelection({ scope: baseUrl, sessions: next });
+    publishSelection(next);
     if (exists && !visible.current.has(key)) {
       readCursors.delete(key);
       setObservations(values => { const next = { ...values }; delete next[key]; return next; });
     }
   }
   function reorder(key: string, targetKey: string, placement: 'before' | 'after') {
+    if (!mutationCurrent()) return;
     const previous = current.current;
     const source = previous.find(session => sessionKey(session) === key);
     if (!source || key === targetKey || !previous.some(session => sessionKey(session) === targetKey)) return;
@@ -135,17 +177,17 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     if (next.every((session, index) => session === previous[index])) return;
     try { saveTrackedSessions(baseUrl, next); setError(undefined); }
     catch { setError('Tracking order changed for this page, but this browser could not save it for the next visit.'); }
-    current.current = next; setSelection({ scope: baseUrl, sessions: next });
+    publishSelection(next);
   }
   const rename = useCallback((session: Pick<import('@orchardworks/agent-remote-protocol').SessionTitleUpdate, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'>) => {
+    if (!mutationCurrent()) return;
     const key = sessionKey(session);
-    setSelection(previous => {
-      if (previous.scope !== baseUrl || !previous.sessions.some(item => sessionKey(item) === key && item.title !== session.title)) return previous;
-      const sessions = previous.sessions.map(item => sessionKey(item) === key ? { ...item, title: session.title } : item);
-      try { saveTrackedSessions(baseUrl, sessions); } catch { /* Keep the confirmed title for this page. */ }
-      return { ...previous, sessions };
-    });
-  }, [baseUrl]);
+    const previous = current.current;
+    if (!previous.some(item => sessionKey(item) === key && item.title !== session.title)) return;
+    const sessions = previous.map(item => sessionKey(item) === key ? { ...item, title: session.title } : item);
+    try { saveTrackedSessions(baseUrl, sessions); } catch { /* Keep the confirmed title for this page. */ }
+    publishSelection(sessions);
+  }, [baseUrl, publishSelection, mutationCurrent]);
   const onObservationRef = useRef(onObservation); onObservationRef.current = onObservation;
   const update = useCallback((key: string, value: SessionObservation) => {
     const target = observed.current.find(item => sessionKey(item.session) === key);
@@ -165,14 +207,15 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const migrations = useRef({ scope: baseUrl, values: new Map<string, import('@orchardworks/agent-remote-protocol').SessionMigration>() });
   if (migrations.current.scope !== baseUrl) migrations.current = { scope: baseUrl, values: new Map() };
   function replace(migration: import('@orchardworks/agent-remote-protocol').SessionMigration) {
+    if (!mutationCurrent()) return;
     if (migrations.current.values.has(migration.id)) return;
     migrations.current.values.set(migration.id, migration);
     const replacements = new Map([...migrations.current.values.values()]
       .sort((a, b) => a.createdAt - b.createdAt).map(value => [sessionKey(value.from), value]));
-    setSelection(value => {
-      if (value.scope !== baseUrl || !value.sessions.some(item => replacements.has(sessionKey(item)))) return value;
+    const value = current.current;
+      if (!value.some(item => replacements.has(sessionKey(item)))) return;
       const next = new Map<string, LocalTrackedSession>();
-      for (const item of value.sessions) {
+      for (const item of value) {
         let updated = item;
         const visited = new Set<string>();
         for (let replacement = replacements.get(sessionKey(updated)); replacement && !visited.has(replacement.id); replacement = replacements.get(sessionKey(updated))) {
@@ -184,11 +227,10 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       }
       const sessions = [...next.values()];
       try { saveTrackedSessions(baseUrl, sessions); } catch { /* Keep the in-memory replacement when browser storage is unavailable. */ }
-      return { ...value, sessions };
-    });
+      publishSelection(sessions);
   }
   const reconcileFavorites = useCallback((favorites: { scope: string; ready: boolean; stars: readonly SessionStar[] }) => {
-    if (!enabled || !favorites.ready || favorites.scope !== baseUrl) return;
+    if (!mutationCurrent() || !enabled || !favorites.ready || favorites.scope !== baseUrl) return;
     const allowed = new Set(favorites.stars.map(sessionKey));
     // A migration can arrive before the refreshed favorites snapshot.
     const branches = new Map<string, Set<string>>();
@@ -205,14 +247,13 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
         allowed.add(target); pending.push(target);
       }
     }
-    setSelection(previous => {
-      if (previous.scope !== baseUrl) return previous;
-      const sessions = previous.sessions.filter(session => allowed.has(sessionKey(session)));
-      if (sessions.length === previous.sessions.length) return previous;
+    const previous = current.current;
+    const sessions = previous.filter(session => allowed.has(sessionKey(session)));
+    if (sessions.length !== previous.length) {
       try { saveTrackedSessions(baseUrl, sessions); }
       catch { setError('Tracking changed for this page, but this browser could not save it for the next visit.'); }
-      return { ...previous, sessions };
-    });
+      publishSelection(sessions);
+    }
     setObservations(values => {
       const next = { ...values };
       for (const key of Object.keys(next)) {
@@ -220,14 +261,14 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       }
       return next;
     });
-  }, [baseUrl, enabled, setObservations, auxiliaryKeys, readCursors]);
+  }, [baseUrl, enabled, setObservations, auxiliaryKeys, readCursors, publishSelection, mutationCurrent]);
   function project(patches: readonly TrackedSessionPatch[], expectedRevision: number, isCurrent: () => boolean, retainedDuplicates: readonly string[] = []) {
     // Projection persists navigation intent. The later explicit consumer owns attachment.
     return patchTrackedSessions(baseUrl, patches, expectedRevision, isCurrent, retainedDuplicates);
   }
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, update, retries, enabled]);
   useFeedbackToast('Session tracking', error);
-  return { project, editRevision: () => trackingEditRevision(baseUrl), reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
+  return { refresh, project, editRevision: () => trackingEditRevision(baseUrl), reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 

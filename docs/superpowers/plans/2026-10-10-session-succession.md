@@ -492,20 +492,27 @@ no production capability is enabled by these scripted fixtures.
   Root freshly passed 131 tests and complete Lab main/e2e typecheck. Transport
   replacement preserves saved input for explicit Retry; mismatched or unowned
   questions remain visible with a checked per-question Discard action.
-- [ ] Preserve complete nested attachment and draft/window state across provider
+- [x] Preserve complete nested attachment and draft/window state across provider
   change using the stable owners and recovery in Task 10C.
   The callable 10C1 layer is implemented and independently approved after one
   scoped fix round. Root freshly passed 264 Lab tests and main/e2e typechecks;
   unchanged Web retains 71 tests and its typecheck from the verified round0.
   Unknown window reads, checkpoint-completion edits and absent display defaults
-  have regressions. This item remains open until 10C2 product wiring and browser
-  acceptance verify actual complete-state replacement.
-- [ ] Introduce stable pane slots and target intent independent of attachment;
+  have regressions. Task 10C2 product wiring passed independent spec/quality review
+  after one scoped correction round. Root freshly passed 106 affected App tests,
+  main/e2e typechecks, eight desktop and five applicable mobile Chromium cases;
+  three desktop-only cases were explicitly skipped on mobile. Owned HTTP/WS
+  fixtures verify composition replacement, not native-provider certification.
+- [x] Introduce stable pane slots and target intent independent of attachment;
   attach failure keeps B as target without displaying A as B or resetting layout.
-- [ ] Complete scoped replay/Track/navigation, independent text/image conflicts,
+- [x] Complete scoped replay/Track/navigation, independent text/image conflicts,
   Favorites progress/history intent and actual desktop/mobile refresh acceptance.
   Use a bounded set of product documents rather than a generic transaction engine.
-- [ ] Keep native outbox/attention/cursors concrete; keep role resolution and
+- [x] Keep native outbox/attention/cursors concrete; keep role resolution and
   recovery in the composition layer, outside the ordinary Session View renderer.
+  First cold A-to-B-to-C recovery retains the origin owner; same-role reopening
+  preserves confirmed/failed outcomes, access suspension preserves desired B,
+  and newer Favorites progress triggers checked HTTP recovery without relying on
+  tree revision. No unresolved Important finding remains from scoped 10C2 review.
 - [ ] Complete remaining Task 5/6 acceptance and whole-branch review before any
   capability enablement. No deployment, merge or installation is authorized here.

@@ -3,6 +3,35 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Product composition and recovery checkpoint (2026-10-11)
+
+Task 10C2 passed independent spec and quality review after one scoped correction
+round. Root verified the frozen source and complete patch replay, then freshly
+passed 106 affected App tests, Lab main/e2e typechecks, eight desktop Chromium
+cases and five applicable mobile Chromium cases. Three desktop-only cases were
+explicitly skipped on mobile. The unchanged Hosted/Web boundaries retain their
+earlier scoped verification. These are owned HTTP/WebSocket and browser fixtures,
+not live-provider or WebKit certification.
+
+App now consumes recoverable composition through stable pane and Ask owners.
+Desired role targets survive failed attachment, access suspension and reload;
+native actions still require the exact confirmed binding and current authority.
+Text/image drafts, display preferences, focus, layout and independent Side/Ask
+state retain their own owners. Native outbox, interaction and image-recipient
+identities remain concrete. Explicit history navigation does not follow a role.
+
+First discovery of A-to-B-to-C keeps A's owners even when an independent B view
+exists. Reopening the current role preserves its confirmed binding or visible
+failure and Retry. Validated Favorites progress initiates authoritative HTTP
+recovery independently of the Favorites tree revision; hints never choose a
+native target or grant application/pruning authority.
+
+The next slices are D1 optional SDK/OpenCode native evidence and D2 durable
+consumption/admission, followed by remaining Task 5/6 and whole-branch acceptance.
+D1/D2 do not themselves establish production store authority, complete native
+readiness or queue settlement. Production capability, SQL effects and real native
+suppliers remain disabled. No merge, push, deployment or installation is included.
+
 ## Recoverable local composition checkpoint (2026-10-11)
 
 Task 10C1 passed independent spec and quality review after one scoped fix round.
@@ -24,10 +53,10 @@ final completion preserves current edits and an incomplete marker without rollin
 back a newer role revision. Corrective disk writes still require current authority
 and writable storage; these checks are not cross-tab CAS.
 
-Task 10C2 must consume these APIs in App, verify the actual native binding, publish
-Track changes, preserve history intent and connect authorized Favorites progress.
-Product/browser acceptance and native D1/D2 work remain open. No production
-capability, SQL effects or native supplier is enabled by this checkpoint.
+The newer Task 10C2 checkpoint above covers App consumption, native binding
+confirmation, Track publication, history intent and authorized Favorites progress.
+Native D1/D2 and complete product acceptance remain open. No production capability,
+SQL effects or native supplier is enabled by this checkpoint.
 
 ## Ask routing and retained-input checkpoint (2026-10-11)
 

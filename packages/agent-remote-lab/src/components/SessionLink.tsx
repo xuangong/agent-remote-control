@@ -7,23 +7,27 @@ import type { OpenedSession } from '../directory-client.js';
 import { readSessionCode, type ScannedSession } from '../session-transfer.js';
 import { SessionScanner } from './SessionScanner.js';
 
-export function sessionUrl(session: OpenedSession): string {
-  return window.location.origin + controllerPath({ ...session, hostId: session.hostId ?? 'local' });
+type SessionLinkTarget = Pick<OpenedSession, 'hostId' | 'providerId' | 'nativeSessionId' | 'title' | 'parentNativeSessionId'> & { agentId?: string };
+
+export function sessionUrl(session: SessionLinkTarget, sessionIntent?: 'history', keepOriginal?: boolean): string {
+  return window.location.origin + controllerPath({ ...session, hostId: session.hostId ?? 'local', sessionIntent, keepOriginal });
 }
 
-export function SessionLink({ session }: { session: OpenedSession }) {
+export function SessionLink({ session, sessionIntent, keepOriginal }: { session: SessionLinkTarget; sessionIntent?: 'history'; keepOriginal?: boolean }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   return <>
     <button ref={trigger} type="button" className="lab-session-link-trigger" aria-label="Share session link" title="Share session" onClick={() => setOpen(true)}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h3v3h-6v-6ZM12 3v3M3 12h3m3 0h6v-3m-3 6v6m6-9h3" /></svg>
     </button>
-    {open ? <SessionTransferDialog session={session} onClose={() => { setOpen(false); trigger.current?.focus({ preventScroll: true }); }} /> : null}
+    {open ? <SessionTransferDialog session={session} sessionIntent={sessionIntent} keepOriginal={keepOriginal} onClose={() => { setOpen(false); trigger.current?.focus({ preventScroll: true }); }} /> : null}
   </>;
 }
 
-export function SessionTransferDialog({ session, onOpen, onClose }: {
-  session?: OpenedSession;
+export function SessionTransferDialog({ session, sessionIntent, keepOriginal, onOpen, onClose }: {
+  session?: SessionLinkTarget;
+  sessionIntent?: 'history';
+  keepOriginal?: boolean;
   onOpen?(session: ScannedSession): Promise<boolean>;
   onClose(): void;
 }) {
@@ -37,7 +41,7 @@ export function SessionTransferDialog({ session, onOpen, onClose }: {
   const [opening, setOpening] = useState(false);
   const [pasted, setPasted] = useState('');
   const pending = useRef(false);
-  const url = session ? sessionUrl(session) : '';
+  const url = session ? sessionUrl(session, sessionIntent, keepOriginal) : '';
   const title = session ? 'Share session' : 'Scan session';
   useEffect(() => { dialog.current?.showModal(); }, []);
   useEffect(() => {

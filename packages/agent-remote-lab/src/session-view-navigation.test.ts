@@ -8,17 +8,20 @@ const source = { agentId: 'ask-agent', nativeSessionId: 'ask', providerId: 'code
 it('keeps colliding native IDs scoped to the displayed Host and Provider', async () => {
   const child = { ...source, agentId: 'child-agent', nativeSessionId: 'child', parentNativeSessionId: 'ask', title: 'Correct child' };
   const opened: SessionEntry[] = [];
+  const intents: unknown[] = [];
   const navigation = sessionViewNavigation({ source, entries: [child,
     { ...child, hostId: 'other-host', title: 'Wrong Host' },
     { ...child, providerId: 'claude', title: 'Wrong Provider' },
-  ], openSession: async target => { opened.push(target); return true; } });
+  ], openSession: async (target, intent) => { opened.push(target); intents.push(intent); return true; } });
   expect(navigation.childrenFor('ask').map(item => item.title)).toEqual(['Correct child']);
   const target = navigation.resolveSessionLink('child')!;
   const url = new URL(target.href, 'https://controller.example');
   expect(url.searchParams.get('host')).toBe('source-host');
   expect(url.searchParams.get('provider')).toBe('codex');
+  expect(url.searchParams.get('intent')).toBe('history');
   await target.open();
   expect(opened).toEqual([child]);
+  expect(intents).toEqual(['history']);
 });
 
 it('combines live child descriptors with saved descendants without linking unrelated sessions', () => {

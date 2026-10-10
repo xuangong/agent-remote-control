@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import { sessionKey, sessionRootKey, type SessionEntry } from '../session-tree.js';
 
-interface Visit { id: string; session: SessionEntry; root: string }
+interface Visit { id: string; session: SessionEntry; root: string; sessionIntent?: 'history'; keepOriginal?: boolean }
 const storageKey = 'agent-remote-conversation-history';
 function restoreVisits(): Visit[] {
   try {
@@ -11,13 +11,14 @@ function restoreVisits(): Visit[] {
     if (!Array.isArray(visits) || !visits.some(visit => visit.id === window.history.state?.agentRemoteVisit)) return [];
     for (const visit of visits) {
       if (typeof visit.id !== 'string' || typeof visit.root !== 'string' || typeof visit.session?.title !== 'string' || typeof visit.session?.nativeSessionId !== 'string' || typeof visit.session?.providerId !== 'string') return [];
-      controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local' });
+      if (visit.sessionIntent !== undefined && visit.sessionIntent !== 'history' || visit.keepOriginal !== undefined && typeof visit.keepOriginal !== 'boolean') return [];
+      controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal });
     }
     return visits;
   } catch { return []; }
 }
 
-export function useConversationHistory(current: SessionEntry | undefined, known: readonly SessionEntry[], open: (session: SessionEntry) => Promise<boolean>) {
+export function useConversationHistory(current: SessionEntry | undefined, known: readonly SessionEntry[], open: (session: SessionEntry, sessionIntent?: 'history', keepOriginal?: boolean) => Promise<boolean>, sessionIntent?: 'history', keepOriginal?: boolean) {
   const [restored] = useState(restoreVisits);
   const visits = useRef<Visit[]>(restored);
   const position = useRef(restored.findIndex(visit => visit.id === window.history.state?.agentRemoteVisit));
@@ -34,7 +35,7 @@ export function useConversationHistory(current: SessionEntry | undefined, known:
   function write(visit: Visit, push: boolean): void {
     try { conversationSessionStorage.setItem(storageKey, JSON.stringify(visits.current)); } catch { /* Navigation still works when browser storage is unavailable. */ }
     const state = { ...window.history.state, agentRemoteVisit: visit.id };
-    const path = controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local' });
+    const path = controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal });
     if (push) window.history.pushState(state, '', path);
     else window.history.replaceState(state, '', path);
   }
@@ -42,18 +43,18 @@ export function useConversationHistory(current: SessionEntry | undefined, known:
   useEffect(() => {
     if (!current || !root || traveling.current) return;
     const previous = visits.current[position.current];
-    if (previous && sessionKey(previous.session) === identity) {
+    if (previous && sessionKey(previous.session) === identity && previous.sessionIntent === sessionIntent && !!previous.keepOriginal === !!keepOriginal) {
       previous.session = current;
       previous.root = root;
       write(previous, false);
       return;
     }
-    const visit = { id: crypto.randomUUID(), session: current, root };
+    const visit = { id: crypto.randomUUID(), session: current, root, sessionIntent, keepOriginal };
     visits.current = [...visits.current.slice(0, position.current + 1), visit];
     position.current = visits.current.length - 1;
     write(visit, previous !== undefined);
     refresh(value => value + 1);
-  }, [identity, root, current?.agentId, current?.title, current?.parentNativeSessionId]);
+  }, [identity, root, sessionIntent, keepOriginal, current?.agentId, current?.title, current?.parentNativeSessionId]);
 
   useEffect(() => {
     mounted.current = true;
@@ -66,7 +67,7 @@ export function useConversationHistory(current: SessionEntry | undefined, known:
         queued.current = undefined;
         const visit = visits.current[index]!;
         let opened = false;
-        try { opened = await openRef.current(visit.session); } catch { /* The session opener presents its own failure. */ }
+        try { opened = await openRef.current(visit.session, visit.sessionIntent, visit.keepOriginal); } catch { /* The session opener presents its own failure. */ }
         if (!mounted.current) return;
         if (opened) position.current = index;
         if (queued.current !== undefined) continue;

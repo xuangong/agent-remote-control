@@ -76,16 +76,17 @@ export function createHostedRelay(options: HostedRelayOptions) {
     return host ? { online: host.online, hostName: host.name, canRename: host.providers.some(provider => provider.providerId === item.providerId && provider.sessionRename === true) } : undefined;
   };
   const stars = createSessionStars(state, starAccess);
-  const favorites = createFavorites(state, starAccess);
-  const sessionTitles = createSessionTitles(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
-  const successions = createSuccessionReplay(() => state.read(), (subject, hostId, source) => {
-    const saved = state.read().tenants.find(tenant => tenant.subject === subject);
+  const successionLocator = (snapshot: import('./state.js').HostedRelayState, subject: string, hostId: string, source: import('@orchardworks/agent-remote-protocol').NativeSessionRef) => {
+    const saved = snapshot.tenants.find(tenant => tenant.subject === subject);
     const owned = saved && tenants.get(saved.namespace);
     const host = saved?.broker.hosts.find(host => host.id === hostId);
     if (!owned || owned.subject !== subject || !owned.broker.canAccessHost(hostId, subject) || host?.installationId !== source.controllerId
       || !host.providers.some(provider => provider.providerId === source.providerId)) return undefined;
     return { hostId: host.id, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
-  });
+  };
+  const favorites = createFavorites(state, starAccess, (snapshot, subject, hostId, source) => !!successionLocator(snapshot, subject, hostId, source));
+  const sessionTitles = createSessionTitles(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
+  const successions = createSuccessionReplay(() => state.read(), (subject, hostId, source) => successionLocator(state.read(), subject, hostId, source));
   const migrations = createSessionMigrations(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
   let successionPublishing: Promise<void> = Promise.resolve();
   function publishSuccessions(socket: RelaySocket, channel: { subject: string; expiresAt(): number; successions?: Set<string> }) {

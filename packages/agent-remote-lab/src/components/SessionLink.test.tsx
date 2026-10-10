@@ -14,6 +14,19 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 
+it('copies and encodes the explicit history selection without changing native identity', async () => {
+  toDataURL.mockResolvedValue('data:image/png;base64,test');
+  await render(<SessionTransferDialog session={session} sessionIntent="history" keepOriginal onClose={() => {}} />);
+  const dialog = document.querySelector('dialog')!;
+  const value = dialog.querySelector('input')!.value;
+  const url = new URL(value);
+  expect(url.searchParams.get('session')).toBe('session');
+  expect(url.searchParams.get('intent')).toBe('history');
+  expect(url.searchParams.get('keepOriginal')).toBe('1');
+  await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === 'Copy link')!.click());
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(value);
+});
+
 async function showFailedQR() {
   toDataURL.mockRejectedValue(new Error('Rendering unavailable'));
   await render(<SessionTransferDialog session={session} onClose={() => {}} />);

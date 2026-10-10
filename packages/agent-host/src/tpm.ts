@@ -36,6 +36,15 @@ export interface TpmSessionAccess {
 }
 interface Attachment { mainResolution?: TpmMainResolution; main: RemoteHostSessionLease; tpm: RemoteHostSessionLease; release(): void }
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function executionOperationId(intentId: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intentId)) return intentId;
+  // Keep durable tool receipts intact while giving the executor a scoped UUID.
+  const bytes = createHash('sha256').update(JSON.stringify(['host:tpm', intentId])).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 const active = (work: TpmWork) => !work.paused && work.phase !== 'completed';
 const unknown = (record: TpmRecord) => record.creation === 'unknown' || record.work.outbox?.some(intent => intent.status === 'unknown');
 const shortError = (error: unknown) => (error instanceof Error ? error.message : 'TPM operation failed.').slice(0, 2048);
@@ -123,11 +132,13 @@ export class TpmCoordinator {
         try {
           this.admit(input.providerId);
           const nativeId = await this.access.create(input.providerId, main.agent.snapshot().payload.runtimeInfo.cwd, this.boundExtensions(id));
-          await this.store.update(id, undefined, record => { record.creation = 'accepted'; record.work.tpmNativeSessionId = nativeId; });
           const introduction = input.requirement
             ? `User requirement:\n${input.requirement}\n\nBegin by understanding the user's need and discussing the plan.`
             : 'No requirement has been provided yet. Briefly ask the user what they want to accomplish, then wait for their reply. Do not infer a task from the main session or contact it before the user explains their need.';
-          await this.enqueue(id, 'tpm', 'initial', `${introduction}\n\nRead read_work and call update_work to persist your assessment.`);
+          await this.store.update(id, undefined, record => {
+            record.creation = 'accepted'; record.work.tpmNativeSessionId = nativeId;
+            this.enqueueRecord(record, 'tpm', 'initial', `${introduction}\n\nRead read_work and call update_work to persist your assessment.`, randomUUID());
+          });
         } catch (error) {
           await this.store.update(id, undefined, record => { if (record.creation !== 'accepted') record.creation = 'unknown'; record.work.health = shortError(error); });
         }
@@ -444,7 +455,7 @@ export class TpmCoordinator {
       if (!claimed) return;
       try {
         const options = queue ? { delivery: 'next_turn' as const } : undefined;
-        const result = await this.access.execute(target.agent, { operationId: candidate.id, kind: 'send_message', parameters: { text: candidate.text, ...(options ? { options } : {}) }, maximumResultBytes: 4096 }, {
+        const result = await this.access.execute(target.agent, { operationId: executionOperationId(candidate.id), kind: 'send_message', parameters: { text: candidate.text, ...(options ? { options } : {}) }, maximumResultBytes: 4096 }, {
           beforeDispatch: () => {
             const record = this.store.get(id); this.admit(record.work.providerId);
             if (candidate.target === 'main') {
@@ -475,15 +486,19 @@ export class TpmCoordinator {
   private async enqueue(id: string, target: 'main' | 'tpm', purpose: string, text: string, operationId: string = randomUUID(), todo?: Pick<TpmIntent, 'todoStepId' | 'todoPlanRevision'>): Promise<TpmIntent> {
     let result: TpmIntent | undefined;
     await this.store.update(id, undefined, record => {
-      if (!active(record.work) || unknown(record)) throw new Error('TPM work is paused, completed, or awaiting operation resolution.');
-      if (target === 'main') this.assertTodoDispatch(record, todo?.todoStepId, todo?.todoPlanRevision, purpose.split(':')[0]!);
-      const outbox = record.work.outbox ??= [];
-      const existing = outbox.find(intent => intent.id === operationId);
-      if (existing) { if (existing.target !== target || existing.text !== text || existing.purpose !== purpose) throw new Error('Message operation identity was reused with different input.'); result = existing; return; }
-      while (outbox.length >= 200) { const index = outbox.findIndex(intent => isTpmIntentSettled(intent) && intent.id !== record.reviewIntentId); if (index < 0) throw new Error('Too many pending messages. Resolve them before adding more.'); outbox.splice(index, 1); }
-      result = { ...todo, id: operationId, target, purpose, text, status: 'prepared', createdAt: new Date(this.now()).toISOString() }; outbox.push(result);
+      result = this.enqueueRecord(record, target, purpose, text, operationId, todo);
     });
     return result!;
+  }
+  private enqueueRecord(record: TpmRecord, target: 'main' | 'tpm', purpose: string, text: string, operationId: string, todo?: Pick<TpmIntent, 'todoStepId' | 'todoPlanRevision'>): TpmIntent {
+    if (!active(record.work) || unknown(record)) throw new Error('TPM work is paused, completed, or awaiting operation resolution.');
+    if (target === 'main') this.assertTodoDispatch(record, todo?.todoStepId, todo?.todoPlanRevision, purpose.split(':')[0]!);
+    const outbox = record.work.outbox ??= [];
+    const existing = outbox.find(intent => intent.id === operationId);
+    if (existing) { if (existing.target !== target || existing.text !== text || existing.purpose !== purpose) throw new Error('Message operation identity was reused with different input.'); return existing; }
+    while (outbox.length >= 200) { const index = outbox.findIndex(intent => isTpmIntentSettled(intent) && intent.id !== record.reviewIntentId); if (index < 0) throw new Error('Too many pending messages. Resolve them before adding more.'); outbox.splice(index, 1); }
+    const result: TpmIntent = { ...todo, id: operationId, target, purpose, text, status: 'prepared', createdAt: new Date(this.now()).toISOString() }; outbox.push(result);
+    return result;
   }
   private assertTodoDispatch(record: TpmRecord, stepId: string | undefined, planRevision: number | undefined, purpose: string): void {
     if (!active(record.work)) throw new AgentOperationRejectedError('tpm_paused', 'TPM work is paused or completed.');

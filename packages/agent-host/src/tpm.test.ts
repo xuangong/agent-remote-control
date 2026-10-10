@@ -473,7 +473,7 @@ it('rejects a claimed intent when succession commits before final native dispatc
   const original = f.access.execute;
   f.access.execute = async (agent, operation, execution) => {
     if (agent.agentId === 'main') {
-      const persisted = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === operation.operationId)!;
+      const persisted = (await f.coordinator.get(work.id)).outbox!.find(item => item.target === 'main' && item.status === 'dispatching')!;
       expect(persisted).toMatchObject({ status: 'dispatching', resolvedTarget: route.origin, roleRevision: 1 });
       route.commit('successor');
     }
@@ -599,4 +599,51 @@ it('surfaces background scheduler rejection and recovers on a later timer tick',
   await expect.poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toContain('Background TPM scheduling failed: Availability probe failed');
   failure = false;
   await expect.poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toBeUndefined();
+}, 10000);
+
+it('uses stable UUID execution identities while retaining tool receipts across work scope and restart', async () => {
+  const f = await fixture(true); const operations: Array<{agentId:string;operationId:string}> = [];
+  const execute = f.access.execute;
+  f.access.execute = async (agent, operation, work) => { operations.push({agentId:agent.agentId,operationId:operation.operationId}); return execute(agent, operation, work); };
+  const one = await f.create(); const two = await f.create('second-work');
+  expect(operations.find(operation => operation.agentId === one.tpmNativeSessionId)?.operationId).toBe(one.outbox![0]!.id);
+  const input = { operationId: 'same-tool-id', purpose: 'consultation', text: 'Assess this scope' };
+  const first = await f.call(one, 'send_main_message', input);
+  await waitMessages(f.sessions.get('main')!, 1);
+  const second = await f.call(two, 'send_main_message', input);
+  await waitMessages(f.sessions.get('main')!, 2);
+  const third = await f.call(one, 'send_main_message', { ...input, operationId: 'another-tool-id' });
+  await waitMessages(f.sessions.get('main')!, 3);
+  const executionIds = operations.filter(operation => operation.agentId === 'main').map(operation => operation.operationId);
+  expect(executionIds).toHaveLength(3);
+  for (const id of executionIds) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(new Set(executionIds).size).toBe(3);
+  expect(new Set([first.id,second.id,third.id]).size).toBe(3);
+  await expect(f.call(one, 'send_main_message', { ...input, text: 'Conflicting content' })).rejects.toThrow(/different content/);
+  await f.restart();
+  expect(await f.call(one, 'send_main_message', input)).toMatchObject({id:first.id,status:'accepted'});
+  expect(await f.call(two, 'send_main_message', input)).toMatchObject({id:second.id,status:'accepted'});
+  expect(operations.filter(operation => operation.agentId === 'main').map(operation => operation.operationId)).toEqual(executionIds);
+  expect(f.sessions.get('main')!.messages).toHaveLength(3);
+}, 10000);
+
+it.each([true, false])('publishes the initial intent with native creation before a scheduler tick (requirement=%s)', async (hasRequirement) => {
+  const f = await fixture(); const update = f.coordinator.store.update.bind(f.coordinator.store);
+  let scheduled = false;
+  f.coordinator.store.update = async (...args) => {
+    const record = await update(...args);
+    if (!scheduled && record.creation === 'accepted' && record.work.tpmNativeSessionId) {
+      scheduled = true;
+      await f.coordinator.tick();
+    }
+    return record;
+  };
+  const work = await f.coordinator.create({ ...f.input, requirement: hasRequirement ? f.input.requirement : undefined }, 'browser-scope');
+  const messages = f.sessions.get(work.tpmNativeSessionId!)!.messages;
+  expect(scheduled).toBe(true);
+  expect(messages).toHaveLength(1);
+  expect(messages[0]!.text).toContain(hasRequirement ? f.input.requirement : 'No requirement has been provided yet.');
+  const current = await f.coordinator.get(work.id);
+  expect(current.outbox).toEqual([expect.objectContaining({ purpose: 'initial', status: 'accepted' })]);
+  expect(f.sessions.get('main')!.messages).toEqual([]);
 }, 10000);

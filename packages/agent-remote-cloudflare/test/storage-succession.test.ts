@@ -1,24 +1,44 @@
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
-import { emptyRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
-import { SqliteRelayStore } from '../src/storage.js';
+import { createHash } from 'node:crypto';
+import { createRelayState } from '../../agent-remote-hosted/src/state.js';
+import { createHostBroker, emptyRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
+import { SqliteRelayStore, TEST_ONLY_COMPLETE_SQL_CODEC } from '../src/storage.js';
+import { decodeSqlSnapshot, encodeSqlSnapshot, SQL_CHUNK_BYTES, type SqlChunk, type SqlManifest } from '../src/storage-codec.js';
+import { codecState } from './storage-codec-fixture.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 's'.repeat(32) };
 const databases: DatabaseSync[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); }, 10000);
-function fixture() {
+function fixture(complete = false) {
   const db = new DatabaseSync(':memory:'); databases.push(db);
+  let reverse = false;
   const storage = {
     sql: { exec(query: string, ...bindings: any[]) { const statement = db.prepare(query);
+      bindings = bindings.map(value => value instanceof ArrayBuffer ? new Uint8Array(value) : value);
       const rows = statement.columns().length ? statement.all(...bindings) : (statement.run(...bindings), []);
-      return { toArray: () => rows }; } },
+      return { toArray: () => reverse ? [...rows].reverse() : rows }; } },
     transactionSync<T>(change: () => T) { db.exec('BEGIN'); try { const result = change(); db.exec('COMMIT'); return result; } catch (error) { db.exec('ROLLBACK'); throw error; } },
     async sync() {},
   } as unknown as DurableObjectStorage;
-  const store = new SqliteRelayStore(storage, auth);
+  const store = new SqliteRelayStore(storage, auth, complete ? TEST_ONLY_COMPLETE_SQL_CODEC : undefined);
   const snapshot = () => JSON.stringify(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
     .map(row => [row.name, db.prepare(`SELECT * FROM ${row.name} ORDER BY rowid`).all()]));
-  return { store, storage, snapshot };
+  return { store, storage, snapshot, db, shuffle() { reverse = true; } };
+}
+const reopen = (storage: DurableObjectStorage) => new SqliteRelayStore(storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC);
+function physical(db: DatabaseSync) {
+  return { manifests: db.prepare('SELECT * FROM relay_snapshot_manifests').all() as unknown as SqlManifest[],
+    chunks: db.prepare('SELECT * FROM relay_snapshot_chunks').all() as unknown as SqlChunk[] };
+}
+function rewrite(db: DatabaseSync, kind: string, change: (record: any) => void) {
+  const row = db.prepare('SELECT * FROM relay_snapshot_manifests WHERE kind = ? LIMIT 1').get(kind) as any;
+  const chunks = db.prepare('SELECT bytes FROM relay_snapshot_chunks WHERE kind = ? AND identity = ? ORDER BY ordinal').all(kind, row.identity);
+  const record = JSON.parse(Buffer.concat(chunks.map(chunk => chunk.bytes as Uint8Array)).toString()); change(record);
+  const bytes = Buffer.from(JSON.stringify(record));
+  db.prepare('UPDATE relay_snapshot_manifests SET byte_length = ?, chunk_count = ?, digest = ? WHERE kind = ? AND identity = ?').run(bytes.length, Math.ceil(bytes.length / SQL_CHUNK_BYTES), createHash('sha256').update(bytes).digest('hex'), kind, row.identity);
+  db.prepare('DELETE FROM relay_snapshot_chunks WHERE kind = ? AND identity = ?').run(kind, row.identity);
+  for (let ordinal = 0; ordinal < Math.ceil(bytes.length / SQL_CHUNK_BYTES); ordinal++) db.prepare('INSERT INTO relay_snapshot_chunks VALUES (?, ?, ?, ?)').run(kind, row.identity, ordinal, bytes.subarray(ordinal * SQL_CHUNK_BYTES, (ordinal + 1) * SQL_CHUNK_BYTES));
 }
 test('refuses unsupported succession formats before changing any SQLite rows and retains normal Relay2 writes', async () => {
   const f = fixture(); const normal = emptyRelayState(auth);
@@ -39,4 +59,209 @@ test('refuses unsupported succession formats before changing any SQLite rows and
     expect(f.snapshot()).toBe(before);
   }
   expect(new SqliteRelayStore(f.storage, auth).initial.favoritesTrees).toEqual(normal.favoritesTrees);
+}, 10000);
+
+test('roundtrips the complete frozen inventory, actual versions and nested receipt bytes independently of SQL order', async () => {
+  const f = fixture(true); const state = codecState(auth);
+  await f.store.commit(state); f.shuffle();
+  expect(reopen(f.storage).initial).toEqual(state);
+  expect(JSON.stringify(reopen(f.storage).initial.tenants[0]!.broker.associations!.freezes)).toBe(JSON.stringify(state.tenants[0]!.broker.associations!.freezes));
+  expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/succession/);
+  const next = structuredClone(state); next.tenants.reverse(); next.securityEvents!.reverse();
+  next.tenants[1]!.broker.pairings!.reverse(); next.tenants[1]!.broker.creations = [];
+  await f.store.commit(next); expect(reopen(f.storage).initial).toEqual(next);
+  next.tenants[1]!.broker.creations = structuredClone(state.tenants[0]!.broker.creations);
+  await f.store.commit(next); expect(reopen(f.storage).initial).toEqual(next);
+  const legacy = structuredClone(state) as any; legacy.version = 8; legacy.tenants[0].broker.associations.version = 4;
+  for (const freeze of legacy.tenants[0].broker.associations.freezes) { freeze.receipt.version = 1; delete freeze.receipt.maxProjectionBytes; }
+  // Receipt identity changed, so these historic fixtures carry no invented progress hash.
+  delete legacy.tenants[0].favoritesSuccession;
+  await f.store.commit(legacy); expect(reopen(f.storage).initial).toEqual(legacy);
+}, 10000);
+
+test('migrates real format2 rows atomically, fences old readers and rejects unmarked or retained legacy rows', async () => {
+  const f = fixture(); const owner = createHash('sha256').update(JSON.stringify([auth.issuer, 'owner'])).digest('hex');
+  const viewer = createHash('sha256').update(JSON.stringify([auth.issuer, 'viewer'])).digest('hex');
+  const insert = f.db.prepare('INSERT INTO relay_records VALUES (?, ?, ?, 1, ?)');
+  for (const [namespace, subject] of [[owner, 'owner'], [viewer, 'viewer']]) {
+    insert.run('tenant', '', namespace!, JSON.stringify({ subject, sharing: true }));
+    insert.run('deviceKey', namespace!, 'a'.repeat(64), JSON.stringify({ expires: 1 }));
+  }
+  f.db.prepare('INSERT INTO relay_security_events VALUES (?, ?, ?, 1, ?)').run('securityEvent', '', 'old', JSON.stringify({ id: 'old', at: 1, subject: 'owner', action: 'login', outcome: 'allowed' }));
+  const legacy = new SqliteRelayStore(f.storage, auth);
+  expect(legacy.initial.version).toBe(2); expect(legacy.initial.tenants).toHaveLength(2);
+  expect(legacy.initial.tenants[0]!.broker).not.toHaveProperty('pairings');
+  const before = f.snapshot();
+  f.db.exec("CREATE TRIGGER fail_upgrade BEFORE UPDATE ON relay_metadata BEGIN SELECT RAISE(ABORT, 'upgrade failure'); END");
+  await expect(legacy.commit(legacy.initial)).rejects.toThrow(/upgrade failure/); expect(f.snapshot()).toBe(before);
+  f.db.exec('DROP TRIGGER fail_upgrade'); await legacy.commit(legacy.initial);
+  expect(f.db.prepare('SELECT version FROM relay_metadata').get()!.version).toBe(3);
+  expect(f.db.prepare('SELECT count(*) AS n FROM relay_records').get()!.n).toBe(0);
+  // The released format2 reader checks this exact marker before reading any state.
+  expect(f.db.prepare('SELECT version FROM relay_metadata').get()!.version === 2).toBe(false);
+  expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(legacy.initial);
+  f.db.exec('UPDATE relay_metadata SET version = 2'); expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/mixed/);
+  f.db.exec('UPDATE relay_metadata SET version = 3'); insert.run('tenant', '', owner, JSON.stringify({ subject: 'owner', sharing: false }));
+  expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/Legacy records remain/);
+}, 10000);
+
+test('rejects configuration, legacy kinds, versions, identity conflicts and missing metadata before restore', () => {
+  const f = fixture();
+  expect(() => new SqliteRelayStore(f.storage, { ...auth, origin: 'https://other.example' })).toThrow(/configuration/);
+  expect(() => new SqliteRelayStore(f.storage, { ...auth, secret: 'other'.repeat(10) })).toThrow(/configuration/);
+  f.db.exec('PRAGMA ignore_check_constraints = ON');
+  f.db.prepare('INSERT INTO relay_records VALUES (?, ?, ?, ?, ?)').run('unknown', '', 'bad', 1, '{}');
+  expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/kind/);
+  f.db.exec('DELETE FROM relay_records');
+  f.db.prepare('INSERT INTO relay_records VALUES (?, ?, ?, ?, ?)').run('consumedProof', '', 'proof-proof-proof', 9, '1');
+  expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/version/);
+  f.db.exec('DELETE FROM relay_records');
+  f.db.prepare('INSERT INTO relay_records VALUES (?, ?, ?, ?, ?)').run('consumedProof', '', 'proof-proof-proof', 1, '1');
+  f.db.exec('DELETE FROM relay_metadata'); expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/metadata/);
+}, 10000);
+
+test('splits exact 256KiB and next-byte records, multibyte JSON, long logical keys and ordered headers with exact costs', async () => {
+  const f = fixture(true); const state: any = emptyRelayState(auth); state.padding = '';
+  const overhead = encodeSqlSnapshot(state, auth).costs[0]!.byteLength;
+  for (const length of [SQL_CHUNK_BYTES, SQL_CHUNK_BYTES + 1]) {
+    state.padding = 'x'.repeat(length - overhead);
+    const encoded = encodeSqlSnapshot(state, auth); expect(encoded.costs[0]!.byteLength).toBe(length);
+    expect(encoded.costs[0]!.chunkCount).toBe(length === SQL_CHUNK_BYTES ? 1 : 2);
+    await f.store.commit(state); expect(reopen(f.storage).initial).toEqual(state);
+  }
+  state.padding = 'x'.repeat(SQL_CHUNK_BYTES - overhead - 1) + '😀\ud800';
+  await f.store.commit(state); expect(reopen(f.storage).initial).toEqual(state);
+  const full = codecState(auth); full.tenants[0]!.broker.bindings = Array.from({ length: 80 }, (_, index) => ({ agentId: 'a'.repeat(4090) + index, hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'native-' + index }));
+  full.tenants[0]!.broker.creations = [];
+  full.tenants[0]!.broker.sharing!.reservations[0]!.key = '\ud800'.repeat(65536);
+  const encoded = encodeSqlSnapshot(full, auth);
+  expect(encoded.costs.find(row => row.kind === 'brokerHeader')!.chunkCount).toBeGreaterThan(1);
+  expect(encoded.costs.find(row => row.kind === 'reservation')!.chunkCount).toBeGreaterThan(1);
+  expect(encoded.costs.reduce((sum, row) => sum + row.chunkCount, 0)).toBe([...encoded.records.values()].reduce((sum, row) => sum + row.chunks.length, 0));
+  await f.store.commit(full); expect(reopen(f.storage).initial).toEqual(full);
+  expect(f.db.prepare('SELECT max(length(bytes)) AS n FROM relay_snapshot_chunks').get()!.n).toBeLessThanOrEqual(SQL_CHUNK_BYTES);
+  expect(f.db.prepare('SELECT max(length(identity)) AS n FROM relay_snapshot_manifests').get()!.n).toBe(64);
+}, 15000);
+
+test.each([
+  ['future manifest', (f: ReturnType<typeof fixture>) => f.db.exec('UPDATE relay_snapshot_manifests SET format = 9')],
+  ['unknown kind', (f: ReturnType<typeof fixture>) => f.db.exec("UPDATE relay_snapshot_manifests SET kind = 'unknown'")],
+  ['digest', (f: ReturnType<typeof fixture>) => f.db.exec("UPDATE relay_snapshot_manifests SET digest = '" + '0'.repeat(64) + "'")],
+  ['count', (f: ReturnType<typeof fixture>) => f.db.exec('UPDATE relay_snapshot_manifests SET chunk_count = chunk_count + 1')],
+  ['missing chunk', (f: ReturnType<typeof fixture>) => f.db.exec('DELETE FROM relay_snapshot_chunks WHERE rowid = (SELECT min(rowid) FROM relay_snapshot_chunks)')],
+  ['ordinal gap', (f: ReturnType<typeof fixture>) => f.db.exec('UPDATE relay_snapshot_chunks SET ordinal = ordinal + 1')],
+  ['missing header', (f: ReturnType<typeof fixture>) => f.db.exec("DELETE FROM relay_snapshot_manifests WHERE kind = 'brokerHeader'")],
+  ['child identity', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'host', row => { row.payload.id = 'different'; })],
+  ['owner identity', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'host', row => { row.owner = 'different'; })],
+  ['unlisted child', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'brokerHeader', row => { row.payload.hosts = []; })],
+  ['duplicate child', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'brokerHeader', row => { row.payload.hosts.push(row.payload.hosts[0]); })],
+  ['future parent', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'associationHeader', row => { row.payload.version = 99; })],
+  ['presence contradiction', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'brokerHeader', row => { row.payload.pairings = null; })],
+  ['authority', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'freeze', row => { row.payload.receipt.authority.ownerSubject = 'different'; })],
+  ['receipt hash', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'favoritesReceipt', row => { row.payload.receiptHash = '0'.repeat(64); })],
+])('rejects %s before publishing a reconstructed snapshot', async (_name, corrupt) => {
+  const f = fixture(true); await f.store.commit(codecState(auth)); corrupt(f);
+  const before = f.snapshot(); expect(() => reopen(f.storage)).toThrow(); expect(f.snapshot()).toBe(before);
+}, 10000);
+
+test('rejects duplicate manifests/chunks, orphan chunks and invalid strict UTF8 without SQL scan assumptions', async () => {
+  const f = fixture(true); await f.store.commit(codecState(auth)); const { manifests, chunks } = physical(f.db);
+  expect(() => decodeSqlSnapshot([...manifests, manifests[0]!], chunks, auth)).toThrow(/duplicate/);
+  expect(() => decodeSqlSnapshot(manifests, [...chunks, chunks[0]!], auth)).toThrow(/duplicate/);
+  expect(() => decodeSqlSnapshot(manifests, [...chunks, { ...chunks[0]!, identity: '0'.repeat(64) }], auth)).toThrow(/orphan/);
+  const bytes = new Uint8Array([255]); const manifest = { ...manifests[0]!, byte_length: 1, chunk_count: 1, digest: createHash('sha256').update(bytes).digest('hex') };
+  expect(() => decodeSqlSnapshot([manifest], [{ ...chunks[0]!, bytes }], auth)).toThrow(/UTF-8/);
+}, 10000);
+
+test('whole-snapshot preflight rejects duplicate logical tuples or invalid complete evidence without writing', async () => {
+  const f = fixture(true); const state = codecState(auth); await f.store.commit(state); const before = f.snapshot();
+  state.securityEvents!.push(state.securityEvents![0]!);
+  await expect(f.store.commit(state)).rejects.toThrow(/duplicate/); expect(f.snapshot()).toBe(before);
+  state.securityEvents!.pop(); state.tenants[0]!.favoritesSuccession!.receipts[0]!.receiptHash = '0'.repeat(64);
+  await expect(f.store.commit(state)).rejects.toThrow(/Invalid/); expect(f.snapshot()).toBe(before);
+}, 10000);
+
+test('retains large actual freeze relations and repeated relation receipt bytes; rejects a missing lineage link', async () => {
+  const f = fixture(true); const state = codecState(auth); const associations = state.tenants[0]!.broker.associations!;
+  const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
+  const relations = Array.from({ length: 700 }, (_, index) => ({ relationId: 'large-' + index, kind: 'side' as const,
+    readerRef: ref('x'.repeat(400) + index), sourceRef: ref('A'), linked: true, revision: 0 }));
+  associations.freezes[0]!.receipt.relations.push(...relations);
+  const change = associations.relationChanges[1]!; change.reservation.relations.push(...relations);
+  change.hostReceipt!.reservation = structuredClone(change.reservation);
+  // Full freeze relations participate in Favorites identity, so update the owning hash in this fixture.
+  const { successionFreezeKey } = await import('../../agent-remote-protocol/src/index.js');
+  const freeze = associations.freezes[0]!;
+  state.tenants[0]!.favoritesSuccession!.receipts[0]!.receiptHash = createHash('sha256').update(JSON.stringify([successionFreezeKey(freeze.receipt), freeze.projection])).digest('hex');
+  const encoded = encodeSqlSnapshot(state, auth);
+  expect(encoded.costs.some(row => row.kind === 'freeze' && row.chunkCount > 1)).toBe(true);
+  expect(encoded.costs.some(row => row.kind === 'relationChange' && row.chunkCount > 2)).toBe(true);
+  await f.store.commit(state); const restored = reopen(f.storage).initial;
+  expect(JSON.stringify(restored.tenants[0]!.broker.associations!.relationChanges)).toBe(JSON.stringify(associations.relationChanges));
+  const before = f.snapshot(); associations.freezes.splice(0, 1); state.tenants[0]!.favoritesSuccession!.receipts.splice(0, 1);
+  await expect(f.store.commit(state)).rejects.toThrow(/Invalid/); expect(f.snapshot()).toBe(before);
+}, 15000);
+
+test.each([
+  ['DELETE', 'relay_snapshot_chunks', ''], ['INSERT', 'relay_snapshot_chunks', " WHEN NEW.kind = 'favoritesReceipt'"],
+  ['INSERT', 'relay_snapshot_manifests', " WHEN NEW.kind = 'relayHeader'"],
+  ['UPDATE', 'relay_snapshot_manifests', " WHEN NEW.kind = 'favoritesReceipt'"],
+  ['INSERT', 'relay_snapshot_manifests', " WHEN NEW.kind = 'deviceKey'"],
+])('rolls back every table after %s on %s%s', async (operation, table, condition) => {
+  const f = fixture(true); const state = codecState(auth); await f.store.commit(state); const before = f.snapshot();
+  f.db.exec(`CREATE TRIGGER fail_snapshot BEFORE ${operation} ON ${table}${condition} BEGIN SELECT RAISE(ABORT, 'late codec failure'); END`);
+  const next: any = structuredClone(state); next.extraRelay.changed = true;
+  next.tenants[0].broker.associations.freezes[0].extraEvidence = 'new';
+  next.tenants[0].favoritesSuccession.receipts[1].status = 'applied';
+  next.sessionStars[0].title = 'new'; next.favoritesTrees[0].folders[0].title = 'new';
+  next.tenants[0].broker.keys[0][1].expires++;
+  await expect(f.store.commit(next)).rejects.toThrow(/late codec failure/); expect(f.snapshot()).toBe(before);
+  f.db.exec('DROP TRIGGER fail_snapshot'); expect(reopen(f.storage).initial).toEqual(state);
+}, 10000);
+
+test('awaits sync before Relay current/replies and cache, rejects unknown durability without asserting rollback', async () => {
+  const f = fixture(true); await f.store.commit(codecState(auth));
+  let release!: () => void; let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
+  f.storage.sync = () => { entered(); return new Promise<void>(resolve => { release = resolve; }); };
+  let publications = 0, failures = 0, replied = false;
+  const relay = createRelayState(auth, { initial: reopen(f.storage).initial, commit: state => f.store.commit(state) }, () => { failures++; }, () => { publications++; });
+  const before = structuredClone(relay.read());
+  const pending = relay.mutate(state => { state.sessionStars![0]!.title = 'durable'; return 'reply'; }).then(() => { replied = true; });
+  await started; expect(relay.read()).toEqual(before); expect(publications).toBe(0); expect(replied).toBe(false);
+  expect(reopen(f.storage).initial.sessionStars![0]!.title).toBe('durable');
+  release(); await pending; expect(publications).toBe(1); expect(replied).toBe(true);
+  f.storage.sync = async () => { throw new Error('sync rejected'); };
+  await expect(relay.mutate(state => { state.sessionStars![0]!.title = 'unknown'; })).rejects.toThrow(/sync rejected/);
+  expect(failures).toBe(1); expect(relay.read().sessionStars![0]!.title).toBe('durable');
+  expect(() => relay.assertAvailable()).toThrow(/unavailable/);
+  expect(reopen(f.storage).initial.sessionStars![0]!.title).toBe('unknown');
+  await expect(f.store.commit(before)).rejects.toThrow(/durability is unknown/);
+}, 10000);
+
+test('Broker pairing draft, Relay current and successful reply wait together for SQL sync', async () => {
+  const f = fixture(); const state = emptyRelayState(auth);
+  state.tenants = [{ subject: 'owner', namespace: createHash('sha256').update(JSON.stringify([auth.issuer, 'owner'])).digest('hex'), broker: { keys: [], hosts: [], bindings: [], creations: [], pairings: [] } }];
+  await f.store.commit(state);
+  const relay = createRelayState(auth, { initial: state, commit: value => f.store.commit(value) }, () => {}, () => {});
+  const broker = createHostBroker({ origin: auth.origin, ownerSubject: 'owner', durable: true, initialState: state.tenants[0]!.broker,
+    onStateChange: value => relay.mutate(draft => { draft.tenants[0]!.broker = value; }) });
+  let release!: () => void; let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; }); let replied = false;
+  f.storage.sync = () => { entered(); return new Promise<void>(resolve => { release = resolve; }); };
+  try {
+    const pending = broker.handleRequest(new Request(auth.origin + '/v1/remote/pairings', { method: 'POST', body: '{}' }), { principalSubject: () => 'owner' }).then(response => { replied = true; return response; });
+    await Promise.race([started, pending.then(async response => { throw new Error('Pairing replied before sync: ' + await response?.text()); })]);
+    expect(broker.snapshot().pairings).toEqual([]); expect(relay.read().tenants[0]!.broker.pairings).toEqual([]); expect(replied).toBe(false);
+    release(); expect((await pending)!.status).toBe(201);
+    expect(broker.snapshot().pairings).toHaveLength(1); expect(relay.read().tenants[0]!.broker.pairings).toHaveLength(1);
+    expect(new SqliteRelayStore(f.storage, auth).initial.tenants[0]!.broker.pairings).toHaveLength(1);
+  } finally { release?.(); broker.close(); await relay.close(); }
+}, 10000);
+
+test('preserves empty optional collections and complete ordinary metadata through reopen', async () => {
+  const f = fixture(); const state = emptyRelayState(auth);
+  state.securityEvents = []; state.sessionStars = []; state.sessionTitles = [];
+  state.sessionTitleRevision = 0;
+  (state as any).extension = { retained: 'complete' };
+  await f.store.commit(state);
+  expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(state);
 }, 10000);

@@ -11,7 +11,7 @@ export const previewOrigin = origin;
 export const issuer = 'https://gateway.example';
 export const secret = 'workers-fixture-secret-01234567890123456789';
 const closers: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
+afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); }, 30000);
 export function sign(type: string, claims: Record<string, unknown>) {
   const input = [{ alg: 'HS256', typ: type }, claims].map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
   return input + '.' + createHmac('sha256', secret).update(input).digest('base64url');
@@ -25,27 +25,70 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
+export async function fixture(options: { completeCodec?: true; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: `
+      import { createHash } from 'node:crypto';
       import worker, { RelayObject } from './src/worker.ts';
+      import { SqliteRelayStore, TEST_ONLY_COMPLETE_SQL_CODEC } from './src/storage.ts';
+      import { createHostedRelay } from '@orchardworks/agent-remote-hosted';
+      import { WorkerRelaySocket } from './src/socket.ts';
       export class TestRelayObject extends RelayObject {
-        constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; }
+        constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; this.fixtureEnv = env;
+          this.completeCodec = ${options.completeCodec === true};
+          if (this.completeCodec) this.fixtureReady = ctx.blockConcurrencyWhile(async () => this.reopenCodec());
+        }
+        reopenCodec() {
+          const auth = { origin: this.fixtureEnv.AGENT_REMOTE_RELAY_URL, issuer: this.fixtureEnv.AGENT_REMOTE_ISSUER, secret: this.fixtureEnv.AGENT_REMOTE_SIGNING_SECRET };
+          this.fixtureCodec = new SqliteRelayStore(this.fixtureContext.storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC);
+          this.fixtureCore = createHostedRelay({ ...auth, storage: this.fixtureCodec, successionEnrollment: true, scheduler: { schedule() {}, cancel() {} } });
+        }
         async fetch(request) {
+          await this.fixtureReady;
           const path = new URL(request.url).pathname;
+          if (this.completeCodec && path === '/_fixture/codec/seed') {
+            try { await this.fixtureCodec.commit(await request.json()); await this.fixtureCore.close(); this.reopenCodec(); return new Response('ok'); }
+            catch (error) { return new Response(String(error), { status: 500 }); }
+          }
+          if (this.completeCodec && path === '/_fixture/codec/snapshot') {
+            const auth = { origin: this.fixtureEnv.AGENT_REMOTE_RELAY_URL, issuer: this.fixtureEnv.AGENT_REMOTE_ISSUER, secret: this.fixtureEnv.AGENT_REMOTE_SIGNING_SECRET };
+            return Response.json(new SqliteRelayStore(this.fixtureContext.storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC).initial);
+          }
+          if (path === '/_fixture/codec/physical') return Response.json({
+            metadata: this.fixtureContext.storage.sql.exec('SELECT * FROM relay_metadata').toArray(),
+            manifests: this.fixtureContext.storage.sql.exec('SELECT * FROM relay_snapshot_manifests ORDER BY kind, identity').toArray(),
+            chunks: this.fixtureContext.storage.sql.exec('SELECT kind, identity, ordinal, typeof(bytes) AS type, length(bytes) AS size FROM relay_snapshot_chunks ORDER BY kind, identity, ordinal').toArray(),
+            chunkDigests: this.fixtureContext.storage.sql.exec('SELECT kind, identity, ordinal, bytes FROM relay_snapshot_chunks ORDER BY kind, identity, ordinal').toArray()
+              .map(row => ({ kind: row.kind, identity: row.identity, ordinal: row.ordinal, digest: createHash('sha256').update(new Uint8Array(row.bytes)).digest('hex') })),
+            blob: this.fixtureContext.storage.sql.exec('SELECT bytes FROM relay_snapshot_chunks LIMIT 1').toArray().map(row => ({ arrayBuffer: row.bytes instanceof ArrayBuffer, size: row.bytes.byteLength, prefix: Array.from(new Uint8Array(row.bytes).slice(0, 16)) }))
+          });
           if (path === '/_fixture/alarm') { await this.alarm(); return new Response('ok'); }
           if (path === '/_fixture/storage') return Response.json({ alarm: await this.fixtureContext.storage.getAlarm(),
-            rows: this.fixtureContext.storage.sql.exec('SELECT kind, count(*) AS count FROM relay_records GROUP BY kind').toArray() });
+            rows: this.fixtureContext.storage.sql.exec('SELECT kind, count(*) AS count FROM (SELECT kind FROM relay_records UNION ALL SELECT kind FROM relay_snapshot_manifests) GROUP BY kind ORDER BY kind').toArray() });
           if (path === '/_fixture/alarm-set') { await this.fixtureContext.storage.setAlarm(Number(new URL(request.url).searchParams.get('at'))); return new Response('ok'); }
-          if (path === '/_fixture/fail-commit') { const kind = new URL(request.url).searchParams.get("kind"); const table = kind === "favorites" ? "relay_favorites_trees" : "relay_records"; const condition = kind === "host" ? " WHEN NEW.kind = 'host'" : ""; this.fixtureContext.storage.sql.exec("CREATE TRIGGER fail_records BEFORE INSERT ON " + table + condition + " BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END"); return new Response('ok'); }
+          if (path === '/_fixture/fail-commit') { const kind = new URL(request.url).searchParams.get("kind");
+            const condition = kind === 'favorites' ? " WHEN NEW.kind = 'favoritesTree'" : kind === 'host' ? " WHEN NEW.kind = 'host'" : kind === 'progress' ? " WHEN NEW.kind = 'favoritesReceipt'" : '';
+            this.fixtureContext.storage.sql.exec("CREATE TRIGGER fail_records BEFORE INSERT ON relay_snapshot_manifests" + condition + " BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END"); return new Response('ok'); }
           if (path === '/_fixture/restore-commit') { this.fixtureContext.storage.sql.exec('DROP TRIGGER IF EXISTS fail_records'); return new Response('ok'); }
+          if (this.completeCodec) {
+            if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+              const prepared = await this.fixtureCore.prepareUpgrade(request);
+              if (prepared instanceof Response) return prepared;
+              if (!prepared) return new Response(null, { status: 404 });
+              const pair = new WebSocketPair(); pair[1].accept(); prepared.accept(new WorkerRelaySocket(pair[1], this.fixtureContext));
+              return new Response(null, { status: 101, webSocket: pair[0] });
+            }
+            return await this.fixtureCore.fetch(request) ?? new Response(null, { status: 404 });
+          }
           return super.fetch(request);
         }
       }
       export default worker;
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
-      conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: { '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
+      conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
+        '@orchardworks/agent-remote-hosted/host-recovery': resolve('../agent-remote-hosted/src/host-recovery.ts'),
+        '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
   const script = result.outputFiles[0]!.text;
   let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   let ownerFailures = 0;
@@ -152,7 +195,7 @@ export async function fixture(options: { previewOrigin?: string; previewDomain?:
     get authorityOperations() { return [...authorityOperations]; },
     setAuthenticatedAt(value: number) { authenticatedAt = value; },
     get authorityCalls() { return authorityCalls; },
-    async inspect(path: string) { const namespace = await mf.getDurableObjectNamespace('RELAY'); return namespace.getByName('primary').fetch(origin + '/_fixture/' + path); },
+    async inspect(path: string, init?: RequestInit) { const namespace = await mf.getDurableObjectNamespace('RELAY'); return namespace.getByName('primary').fetch(origin + '/_fixture/' + path, { ...init, signal: AbortSignal.timeout(10000) } as any); },
     async restart(replacementSecret = secret) { await mf.dispose(); envSecret = replacementSecret; await start(); },
   };
 }

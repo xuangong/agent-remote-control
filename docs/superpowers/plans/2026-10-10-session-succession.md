@@ -423,11 +423,21 @@ no production capability is enabled by these scripted fixtures.
 - [x] Establish negotiated freeze-v2 projection ceilings, exact legacy recovery,
   bounded Host pre-effect checks and explicit old-writer fences. Task9A keeps
   aggregate admission, complete SQL storage and real provider enablement gated.
-- [ ] Implement complete versioned Cloudflare SQL encode/decode for Broker
+- [x] Implement complete versioned Cloudflare SQL encode/decode for Broker
   associations, relation changes/resets, exact freeze evidence and Favorites
   progress, preserving the existing outer transaction and durability boundary.
-- [ ] Test old-format migration, exact roundtrip, restart, rollback on failed
-  write and authorization removal without deleting historic evidence.
+  Task9B uses SQL format 3 and record format 1 with 262144-byte BLOB chunks;
+  headers retain complete identities/order and use the same bounded encoding.
+- [x] Test old-format migration, exact roundtrip, restart, rollback on failed
+  write and authorization removal without deleting historic evidence. Root
+  freshly passed all 102 Cloudflare tests, both affected typechecks and actual
+  baseline-reader rejection. Independent spec/quality review approved the slice.
+  Sync failure remains unknown durability, not rollback. Production effect guards
+  remain closed; isolated codec success is not admission or native certification.
+- [ ] Reserve complete Host source-result witnesses before qualified creation,
+  bind the producer certificate to the actual directory and preserve exact recovery.
+- [ ] Integrate the Relay feature envelope, exact codec costs, outcome/slot/revision
+  allowances and atomic source completion before allowing effectful SQL succession.
 - [ ] Review role/context durable-file write consistency and record the actual
   process-crash versus power-loss guarantees without unsupported claims.
 

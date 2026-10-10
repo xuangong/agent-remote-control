@@ -47,7 +47,9 @@ async function fixture() {
     export default { fetch(request, env) { return env.RELAY.get(env.RELAY.idFromName('diagnostics')).fetch(request); } };
   `, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'import'], external: ['node:*', 'cloudflare:*'],
-    alias: { '@orchardworks/agent-remote-hosted/relay-diagnostics': resolve('../agent-remote-hosted/src/relay-diagnostics.ts'), '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
+    alias: { '@orchardworks/agent-remote-hosted/relay-diagnostics': resolve('../agent-remote-hosted/src/relay-diagnostics.ts'),
+      '@orchardworks/agent-remote-hosted/host-recovery': resolve('../agent-remote-hosted/src/host-recovery.ts'),
+      '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
   let mf: Miniflare;
   const start = () => { mf = new Miniflare({ modules: true, script: result.outputFiles[0]!.text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { RELAY: { className: 'DiagnosticObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state') }); };

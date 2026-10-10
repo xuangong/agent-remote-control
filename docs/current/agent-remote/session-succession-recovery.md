@@ -31,6 +31,7 @@ succession state does not copy a workspace, process, credentials or native sessi
 | Controller role state | Version 5 | Versions 1 through 4 retain explicit migration rules; legacy receipts gain no invented projection budget or creation evidence |
 | Pending context | Version 2 | Reads version 1 attachments; new target-independent preparations share attachment capacity, and delivery-state recovery remains independent of role state |
 | Relay outer state | Version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Legacy outer versions 2 through 8 retain explicit inner-format rules and complete-lineage validation; no applied progress, budget or native result is fabricated |
+| Cloudflare SQL snapshot | Metadata format 3; record/envelope/manifest format 1 | Format 2 migrates atomically on the first complete commit; old readers reject 3. This physical format does not enable effectful succession |
 | Broker association state | Version 5 | Versions 1 through 4 retain explicit migrations and valid complete committed lineage; saved freeze-v1 identities remain unchanged |
 | Enrollment freeze | Version 2 for new preparation | Requires an immutable positive safe-integer `maxProjectionBytes`; exact saved version-1 recovery remains supported without retrofitting a budget |
 | Favorites succession progress | Version 1, requiring Relay7 or later | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
@@ -68,7 +69,7 @@ An output invariant violation after commit reports
 and receipt. Saved prepare/status/reconcile/commit/release cannot conceal that
 defect as success. Recovery never creates another candidate to fit a ceiling.
 No production allowance supplier or native producer certificate is enabled by
-this contract; aggregate SQL admission and complete persistence remain pending.
+this contract; aggregate SQL admission and real producer certification remain pending.
 
 ## Recover from facts, not elapsed time
 
@@ -152,7 +153,7 @@ Ordinary immediate takeover can interrupt working; it does not inherit successio
 idle requirement. Read attachment and security cleanup retain their existing paths.
 
 These reviewed slices cover the Host entry points, but do not certify complete
-native readiness or independent writers. Native evidence, SQL persistence and
+native readiness or independent writers. Native evidence, SQL admission and
 product recovery remain separate gates; production succession stays disabled.
 
 ## Native evidence checkpoint
@@ -319,10 +320,26 @@ acquires no B identity or access. Historical favorite schema and its navigation 
 must be implemented together in the client slice. Other explicit historical
 addresses remain concrete.
 
-The current Cloudflare SQL codec supports ordinary Relay2 only. It rejects newer
-outer formats, Broker associations and Favorites progress before SQL writes.
-This prevents silent loss; it is not SQL succession support. Complete durable SQL
-encoding/decoding and restart acceptance are mandatory before enabling that backend.
+The complete Cloudflare SQL codec retains validated Relay/domain versions,
+ordered complete identities, optional presence, recovery credentials/history and
+hash-sensitive freeze/Favorites evidence. Both records and order headers use
+BLOB chunks of at most 262144 bytes. Restore verifies exact bytes, identity,
+coverage and original domain validators; it never reconstructs evidence from
+current bindings. Format-2 migration cannot recover data that the old codec had
+already omitted.
+
+All rows, legacy removal and the format marker share one `transactionSync`.
+Awaited `sync()` precedes cache/current/Broker/reply publication. Transaction
+failure rolls back the SQL changes; sync rejection instead fences further writes
+until validated reopen of the complete snapshot actually exposed by storage.
+Neither outcome authorizes repeated native creation or input.
+
+The production store still accepts ordinary Relay2 state only and rejects
+succession/recovery state on restore and commit. An explicit constructor-only
+symbol permits isolated complete-codec fixtures; requests, stored state and
+production configuration cannot select it. The codec and Worker restart tests
+are complete, but feature-envelope admission, Host witness reservations, producer
+certification and combined acceptance remain required before enabling effects.
 
 ## Ordinary relationship changes
 

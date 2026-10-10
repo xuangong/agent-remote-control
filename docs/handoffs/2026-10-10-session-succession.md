@@ -3,6 +3,31 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Complete SQL codec checkpoint (2026-10-10)
+
+Task9B passed independent spec/quality review without findings. SQL metadata
+format 3 and record format 1 retain complete domain evidence and collection order,
+including chunked headers, recovery history and Favorites. Exact UTF-8 records
+use BLOB chunks of at most 262144 bytes. Format-2 migration, legacy writer fencing,
+full integrity/coverage validation and per-record cost reporting are implemented.
+
+One existing transaction owns all rows and the format marker. Cache and runtime
+publication await `sync()`; sync rejection remains unknown durability and fences
+writes until reopening. The production effect guard remains closed on both
+restore and commit. The isolated constructor token has no production supplier.
+
+Root verified all seven frozen sources and freshly passed the complete Cloudflare
+suite (20 files / 102 tests), Cloudflare/Hosted typechecks and the actual baseline
+format-2 reader rejection test. Evidence is in the plan workspace and
+`.tmp/root-task9b-*.log`. The implementer's earlier diagnostic alias build failure
+is retained separately; the final Root run passed all collections.
+
+Continue with Host source-witness capacity/certification routing (9C0), Relay
+feature-envelope admission and atomic source completion (9C), then the durable
+grant boundary (9D) and product composition. These remaining gates and real
+provider certification still prevent end-to-end enablement. No merge, push,
+deployment, install or user-service change is authorized by this checkpoint.
+
 ## Bounded projection checkpoint (2026-10-10)
 
 Task9A passed independent spec/quality review with no findings. New enrollment

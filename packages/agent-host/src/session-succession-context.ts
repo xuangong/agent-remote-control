@@ -1,3 +1,4 @@
+import { AgentOperationRejectedError, type AgentInputAcceptance } from '@orchardworks/agent-provider-sdk';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +32,8 @@ export interface SuccessionContextDelivery extends SuccessionInput {
   state: SuccessionDeliveryState;
   includesContext: boolean;
   nativeEvidence?: string;
+  /** The actual native return receipt; absent means the adapter returned void. */
+  inputAcceptance?: AgentInputAcceptance;
 }
 export interface SuccessionContextRecord extends SuccessionContextAttachment {
   version: 1;
@@ -114,7 +117,7 @@ export class SessionSuccessionContextStore {
         if (inputIdentity(prior) !== inputIdentity(admitted)) throw new Error('Succession input identity conflict.');
         return prior;
       }
-      if (record.deliveries.some(item => ['dispatching', 'accepted', 'unknown'].includes(item.state))) throw new Error('Succession input delivery is unresolved.');
+      if (record.deliveries.some(item => ['dispatching', 'accepted', 'unknown'].includes(item.state))) throw new AgentOperationRejectedError('succession_delivery_unresolved', 'Succession input delivery is unresolved.');
       if (record.deliveries.length >= 512) throw new Error('Succession input receipt limit exceeded.');
       const delivery: SuccessionContextDelivery = { ...admitted, state: 'dispatching', includesContext: record.state !== 'materialized' };
       record.deliveries.push(delivery);
@@ -122,11 +125,15 @@ export class SessionSuccessionContextStore {
       return delivery;
     });
   }
-  settle(attachmentId: string, operationId: string, outcome: 'accepted' | 'rejected' | 'unknown'): Promise<SuccessionContextDelivery> {
+  settle(attachmentId: string, operationId: string, outcome: 'accepted' | 'rejected' | 'unknown', inputAcceptance?: AgentInputAcceptance): Promise<SuccessionContextDelivery> {
     return this.mutate(state => {
       const record = this.find(state, attachmentId), delivery = record.deliveries.find(item => item.operationId === operationId);
       if (!delivery || delivery.state !== 'dispatching') throw new Error('Succession input dispatch state changed.');
       delivery.state = outcome;
+      if (inputAcceptance !== undefined) {
+        if (outcome !== 'accepted' || !['started', 'queued', 'handled'].includes(inputAcceptance.disposition)) throw new Error('Invalid native input acceptance receipt.');
+        delivery.inputAcceptance = structuredClone(inputAcceptance);
+      }
       if (delivery.includesContext) record.state = outcome === 'rejected' ? 'pending' : outcome;
       return delivery;
     });
@@ -182,7 +189,8 @@ export class SessionSuccessionContextStore {
         this.validateInput(delivery);
         if (deliveries.has(delivery.operationId) || !sameRef(record.target, delivery.target) || record.roleId !== delivery.roleId || record.roleRevision !== delivery.roleRevision
           || typeof delivery.includesContext !== 'boolean' || !['dispatching', 'accepted', 'unknown', 'rejected', 'materialized'].includes(delivery.state)
-          || delivery.nativeEvidence !== undefined && !nonempty(delivery.nativeEvidence)) throw new Error('Invalid succession delivery record.');
+          || delivery.nativeEvidence !== undefined && !nonempty(delivery.nativeEvidence)
+          || delivery.inputAcceptance !== undefined && (!['accepted', 'materialized', 'rejected'].includes(delivery.state) || !['started', 'queued', 'handled'].includes(delivery.inputAcceptance.disposition))) throw new Error('Invalid succession delivery record.');
         deliveries.add(delivery.operationId);
         if (['dispatching', 'accepted', 'unknown'].includes(delivery.state)) unresolved++;
         if (delivery.includesContext) {
@@ -236,7 +244,7 @@ export class SessionSuccessionContextStore {
   }
 }
 
-export interface SuccessionNativeDispatchResult { outcome: 'accepted' | 'rejected' | 'unknown' }
+export interface SuccessionNativeDispatchResult { outcome: 'accepted' | 'rejected' | 'unknown'; inputAcceptance?: AgentInputAcceptance }
 /** Own this once per Controller and route execution-capable inputs through it at the last native boundary. */
 export class SessionSuccessionInputDispatcher {
   constructor(private readonly store: SessionSuccessionContextStore) {}
@@ -270,7 +278,7 @@ export class SessionSuccessionInputDispatcher {
         await this.store.settle(attachment.operationId, admitted.operationId, 'unknown');
         throw new Error('Invalid native succession dispatch outcome.');
       }
-      return this.store.settle(attachment.operationId, admitted.operationId, result.outcome);
+      return this.store.settle(attachment.operationId, admitted.operationId, result.outcome, result.inputAcceptance);
     });
   }
 }

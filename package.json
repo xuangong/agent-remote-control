@@ -24,6 +24,7 @@
     "test:claude:succession-evidence": "node scripts/run-tests.mjs claude-succession-evidence",
     "test:opencode": "node scripts/run-tests.mjs opencode",
     "test:opencode:native": "node scripts/run-tests.mjs opencode-native",
+    "test:opencode:succession-evidence": "node scripts/run-tests.mjs opencode-succession-evidence",
     "test:copilot": "node scripts/run-tests.mjs copilot",
     "start:gateway-relay": "pnpm --filter @orchardworks/agent-remote-lab exec tsx src/server/gateway.ts",
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",

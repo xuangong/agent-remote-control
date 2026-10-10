@@ -22,10 +22,19 @@ independent review is the plan workspace's `task-8a-fix1-review.md`.
 Compatibility update/check passed with
 `b4b43a629a5dfbde13afb4adc84892f80b71a9fd3bd26e94090a2e4df17eadde`.
 
-Next run the minimal existing OpenCode `/session` API crash experiment from
-`task-8c-implementation-brief.md` and its read-only preflight. Do not convert to
-the separate `/api/session` execution stack. Then apply the prepared common
-admission slice `task-8b1-implementation-brief.md`, followed by 8B2's settings,
+Task8C is also complete: isolated OpenCode 1.18.18 / SDK 1.18.31, using the
+existing `/session` API, passed empty committed-B crash recovery and exact
+first-U materialization after response loss and crash. Independent spec/quality
+review found no issues. Root freshly ran both cases in 3.15 seconds (Node reports
+three passes including the parent), verified ordinary collection skips without
+creating output, and checked syntax/source/artifact hashes. Root's separate
+evidence is `.tmp/root-task8c-native-observations.json`; retained implementation
+evidence and review live in the plan workspace. There was one create and one
+input, U appeared once, and reconciliation issued zero model requests.
+No callback-enabled production profile or complete readiness was certified.
+
+Next apply the prepared common admission slice
+`task-8b1-implementation-brief.md`, followed by 8B2's settings,
 directory/provenance and ownership wiring. Native readiness/evidence integration,
 complete SQL persistence and client composition still block release. No merge,
 push, deployment, package publication, global install or user-service changes

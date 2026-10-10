@@ -4,6 +4,12 @@ import { packageManager } from './lib/package-manager.mjs';
 
 const mode = process.argv[2] ?? 'unit';
 const successionEvidence = mode === 'claude-succession-evidence';
+const opencodeSuccessionEvidence = mode === 'opencode-succession-evidence';
+if (opencodeSuccessionEvidence) {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('The OpenCode succession evidence experiment requires macOS arm64.');
+  if (!isAbsolute(process.env.AGENT_OPENCODE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_OPENCODE_TEST_EXECUTABLE for the installed OpenCode 1.18.18.');
+  if (process.env.AGENT_OPENCODE_SUCCESSION_EVIDENCE_OUTPUT !== undefined && !isAbsolute(process.env.AGENT_OPENCODE_SUCCESSION_EVIDENCE_OUTPUT)) throw new Error('Set AGENT_OPENCODE_SUCCESSION_EVIDENCE_OUTPUT to a new absolute JSON output path, or omit it.');
+}
 if (successionEvidence) {
   if (process.platform !== 'darwin' || process.arch !== 'arm64' || Number(process.versions.node.split('.')[0]) !== 26) {
     throw new Error('The Claude succession evidence experiment requires macOS arm64 and Node 26.');
@@ -14,6 +20,7 @@ if (successionEvidence) {
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
+  'opencode-succession-evidence': ['exec', 'node', '--test', '--test-timeout=100000', '--test-concurrency=1', 'scripts/opencode-native-succession-evidence.test.mjs'],
   'opencode-native': ['exec', 'node', '--test', '--test-timeout=150000', '--test-concurrency=1', 'scripts/opencode-native.test.mjs', 'scripts/opencode-native-boundaries.test.mjs', 'scripts/opencode-native-steer.test.mjs', 'scripts/opencode-native-callbacks.test.mjs'],
   opencode: ['--filter', '@orchardworks/agent-provider-opencode', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
   'image-input': ['--filter', '@orchardworks/agent-remote-relay', 'exec', 'vitest', 'run', 'src/resources/input-image-store.test.ts', 'src/transport/image-input.test.ts', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
@@ -38,7 +45,7 @@ const commands = {
 };
 if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);
 const child = spawn(...packageManager('pnpm', commands[mode]), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
-  env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined } });
+  env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined, AGENT_OPENCODE_SUCCESSION_EVIDENCE: opencodeSuccessionEvidence ? '1' : undefined } });
 function stop(signal) {
   try {
     if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill(signal));
@@ -47,7 +54,7 @@ function stop(signal) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
-const outerDeadlineMs = successionEvidence ? 120_000 : 540_000;
+const outerDeadlineMs = successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
   process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');

@@ -86,6 +86,23 @@ platform/runtime and fixed versions are checked before native startup. Each run
 keeps separate evidence. Full Host admission, native readiness integration,
 deployed storage and product acceptance remain release gates.
 
+A separate isolated experiment used OpenCode 1.18.18 with SDK 1.18.31's
+`client.session` API (`/session`, not `/api/session`). After one empty create,
+the saved exact B survived SIGKILL and a fresh same-profile server returned its
+identity, canonical cwd and empty history without model requests. After one
+caller-identified U, a proxy withheld the native response and the fixture held
+the substantive model stream incomplete. Following another SIGKILL, exact public
+GET B/U returned the original user identity and ordered text parts; bounded
+history contained U once, and reconciliation produced no new model requests.
+
+Both cuts passed independent review and a fresh Root run. The opt-in
+`test:opencode:succession-evidence` entry uses an explicit reviewed executable,
+isolated profile, restricted loopback sandbox and a 120-second outer deadline;
+an optional evidence output must be a new absolute path. Ordinary collection
+skips it. These results do not certify queue/work coverage, callback-enabled
+production configuration, multipart input, native completion, Host integration
+or power-loss durability. Capability remains disabled.
+
 ## Local preparation and cancellation
 
 Preparation saves bounded normalized history before calling native create. The

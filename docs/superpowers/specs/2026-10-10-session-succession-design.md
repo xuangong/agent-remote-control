@@ -62,7 +62,7 @@ type PrimaryRole = {
   revision: number;
   origin: NativeSessionRef;
   current: NativeSessionRef;
-  canonicalCwd: string;
+  workspace: { controllerId: string; canonicalCwd: string };
 };
 type SourceBinding =
   | { kind: 'fixed'; source: NativeSessionRef }
@@ -70,8 +70,12 @@ type SourceBinding =
 ```
 
 Relay host IDs and agent IDs are resolved transport addresses, not durable native
-identities. Role IDs are scoped by Controller and existing authority; no new
-account system is introduced for standalone operation.
+identities. Role IDs use an immutable issuing Controller namespace and existing
+authority; that namespace is not a requirement that the executor remain there
+forever. V1 still stores and resolves the role on its one local Controller.
+No new account system is introduced for standalone operation. Workspace placement
+is separate from role identity; equal path strings on different machines do not
+identify the same workspace.
 
 `origin` is immutable provenance. Role resolution changes the current read or
 dispatch target, never historical attribution. Each committed transition records
@@ -85,6 +89,65 @@ source grants, not just the browser's mounted windows. Unlinked relations and
 unrelated conversations remain fixed. Subsequent children of the role's current
 executor inherit the role binding. An Ask attached to a Side stays attached to
 that Side; nested associations are not flattened.
+
+## Extension boundary: preparation, succession and projection
+
+The current scope is deliberately the simplified local mode. Conditions for
+designing a cross-machine migration are not established. Preserve these seams
+without implementing a migration service, cross-host transport or plugin registry:
+
+1. **Prepare the successor.** Local preparation reuses the workspace and creates
+   and primes a session. Keep same-Controller/provider/cwd checks in this local
+   preparation policy, rather than in the generic role identity or UI projection.
+   A future migration would have additional preparation work before a target is
+   ready. Its file, environment, authority and recovery rules are not defined here.
+2. **Commit succession.** Consume a checked preparation result and the expected
+   role/association revisions. V1 has one local durable decision. The contract
+   exposes actual before/after session references, not an assumption that only a
+   native session ID can change. Cross-machine decision ownership, fencing and
+   failure recovery require a separate design; the local atomic write is not
+   claimed to solve those problems.
+3. **Project associations.** Reconcile stable relationship identities and actual
+   bindings into source reads, TPM communication, Favourites, Track, Side and Ask.
+   Keep this separate from creating or copying native sessions. Preparation must
+   account for persisted participants, not only currently visible panes.
+
+Use a small internal result at the preparation/commit boundary:
+
+```ts
+type PreparedSuccession = {
+  operationId: string;
+  roleId: string;
+  expectedRevision: number;
+  associationRevision: number;
+  from: NativeSessionRef;
+  to: NativeSessionRef;
+  workspace: PrimaryRole['workspace'];
+  participants: Array<{
+    relationId: string;
+    kind: 'side' | 'ask' | 'tpm';
+    before: NativeSessionRef;
+    after: NativeSessionRef;
+  }>;
+};
+```
+
+This result is Controller-owned checked state, not a browser assertion of readiness
+or a transferable authorization token. For V1 each participant's `before` equals
+`after`: its own native session stays put while its primary-role reference follows
+the successor. The association revision makes concurrent enrollment changes visible.
+Do not create replacement Side/Ask/TPM sessions in the local mode.
+
+Future cross-host work must decide how every Side, Ask and TPM participant remains
+usable: migrating/recreating a participant versus authorized access to a remote
+one cannot be decided from a UI relink. It may change participant bindings and TPM
+coordinator ownership as well as the primary executor. Keep that distinction in
+the relationship model, but implement none of those policies now. Always preserve
+participant provenance and historical message destinations when bindings change.
+
+Implement one concrete local preparation module and its result type. No alternative
+mode, remote endpoint, empty migration implementation or configurable migration
+framework is needed for this release.
 
 ## Context transfer
 

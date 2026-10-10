@@ -20,11 +20,13 @@
 - New behavior remains unavailable until the full source, dispatch and projection contract is supported.
 - No automatic replay after unknown creation/delivery outcomes. No automatic deletion of native sessions.
 - No publish, push or deployment in this implementation plan.
+- Keep local preparation separate from succession commitment and association projection. Reserve data boundaries for future cross-host migration; implement no cross-host migration policy or service.
 
 ## Status and verification setup
 
 - [x] Inspect source ownership, relation persistence, favourites, Track and Ask storage.
 - [x] Record the approved design and the same-machine simplification.
+- [x] Document future migration seams without expanding the local implementation scope.
 - [ ] Implement Tasks 1–6, marking each complete only with recorded evidence.
 
 Base: `cc3f359`; worktree: `.worktrees/session-succession`; branch: `feat/session-succession`.
@@ -57,7 +59,8 @@ to obtain a passing test.
 **Modify:** protocol `src/index.ts` to export the new validated contracts.
 
 **Interfaces:** Implement `NativeSessionRef`, `PrimaryRole` and `SourceBinding`
-from the spec. Define `SuccessionRequest` with `operationId`, `roleId`,
+from the spec, including workspace placement separate from immutable role identity.
+Define `SuccessionRequest` with `operationId`, `roleId`,
 `expectedRevision` and `from`; `SuccessionRecord` carries the request, optional
 `to`, `phase`, `resumePhase` for unknown outcomes, capture metadata and public
 failure code. Define `SessionSuccessionStore.read(roleId)`,
@@ -67,6 +70,8 @@ record, rejects conflicting reuse and reserves the expected role revision.
 - [ ] Write store tests for same-ID retries, conflicting fingerprints, concurrent
   begins, stale revisions, A -> B -> C and reopening persisted committed state.
 - [ ] Run the new tests and confirm the missing behavior fails.
+- [ ] Keep complete Controller/provider/native references in before/after records;
+  role identity must not be derived from cwd or the current executor.
 - [ ] Implement validated versioned records, a single-writer serialized mutation
   path and atomic replacement of the role plus operation receipt. Keep indexes
   in memory and preserve recovery records across restart.
@@ -119,7 +124,8 @@ expect((await fixture.readSource({ cursor: pageA.nextCursor })).sourceSessionId)
 
 ## Task 3: Local handoff coordinator and admission boundary
 
-**Create:** `packages/agent-host/src/session-succession.ts` and `.test.ts`.
+**Create:** `packages/agent-host/src/session-succession.ts` and `.test.ts`;
+`packages/agent-host/src/local-succession-preparation.ts` and `.test.ts`.
 **Modify:** `packages/agent-host/src/host.ts`, `directory.ts`,
 `execution-policy.ts`; extract the existing normalized history capture/formatting
 from Lab `src/session-forks.ts` into an appropriately shared module while keeping
@@ -130,6 +136,10 @@ the current `/fork` behavior and tests unchanged.
 `cancel(operationId)`. Mutating methods return the persisted `SuccessionRecord`.
 An adapter reports authoritative readiness and a supported context-preparation
 path; unsupported or unknown readiness is not success.
+`PreparedSuccession` has the exact shape defined in the spec. The concrete local
+preparation module produces it after validating the target and participant set;
+the coordinator revalidates its role/association revisions at commit. It is internal
+state, never a browser-supplied readiness assertion. No strategy registry is needed.
 
 - [ ] Test a complete same-cwd A -> B transition, wrong cwd/Host/provider rejection,
   creation success followed by attachment failure and a lost creation response.
@@ -137,6 +147,9 @@ path; unsupported or unknown readiness is not success.
   child work and an independently owned writer. Reserve before capturing context.
 - [ ] Persist phase and operation receipts; create a candidate without launching
   implementation work; transfer bounded context at the frozen source boundary.
+- [ ] Isolate same-Host/provider/cwd checks and workspace reuse in local preparation.
+  Populate Side/Ask/TPM participants with unchanged own native identities and check
+  their relation revision. Do not create auxiliary successors in this mode.
 - [ ] Verify candidate context delivery and readiness before the atomic commit.
   Never reuse the context-copy path as proof of full native context inheritance.
 - [ ] Add restart/cancellation cases at every phase. Retain unknown effects and
@@ -179,6 +192,9 @@ and offers revision-based snapshot/replay. The product's
 `applySuccession(projection, currentState)` returns one coherent next in-memory
 state plus idempotent persistence operations. The hook owns recovery, not the
 renderer. Keep prompt-edit `session_migrated` behavior separate.
+Reconcile full before/after bindings; do not infer that every replacement must have
+the same host ID or that an auxiliary relation ID is its native session ID. The
+local preparation policy remains responsible for enforcing the V1 restriction.
 
 - [ ] Add replacement tests that preserve favourite ID/folder/order, Track order,
   Side selections, Ask native ID, preference state, geometry and drafts.
@@ -224,3 +240,6 @@ source semantics and access. Task 4 owns all TPM works and settled destinations.
 Task 5 owns every visible reference and device-local preservation. Task 6 verifies
 the complete user path, compatibility and native behavior. No task adds file or
 environment migration. Do not mark the feature complete with only UI replacement.
+The extension review checks that workspace placement, participant bindings and
+local preparation are separate from stable relationship identity. It does not
+certify cross-host readiness, execution authority transfer or migration recovery.

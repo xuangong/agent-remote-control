@@ -30,9 +30,10 @@ succession state does not copy a workspace, process, credentials or native sessi
 | --- | --- | --- |
 | Controller role state | Version 3 | Committed versions 1 and 2 migrate with empty relation-change arrays; version 1 also receives empty admission/result arrays; ambiguous legacy association fields reject |
 | Pending context | Independently versioned context store | Use its validator and delivery-state recovery; never derive it from role state |
-| Relay outer state | Version 7 when Favorites succession progress exists; otherwise version 6 with associations | Legacy outer versions 2 through 6 retain explicit inner-format rules and complete-lineage validation; no applied Favorites progress is fabricated |
+| Relay outer state | Version 8 with Host recovery metadata; version 7 with Favorites succession progress; otherwise version 6 with associations | Legacy outer versions 2 through 7 retain explicit inner-format rules and complete-lineage validation; no applied Favorites progress or native result is fabricated |
 | Broker association state | Version 4 | Versions 1 through 3 migrate only with valid complete committed lineage; earlier additive relation-change/reset migrations remain explicit |
-| Favorites succession progress | Version 1, requiring Relay7 | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
+| Favorites succession progress | Version 1, requiring Relay7 or later | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
+| Host recovery metadata | Revoked Host mappings and targeted invitations, requiring Relay8 | Owner recovery binds Host ID, installation ID and revocation ID; previous credentials, bindings and sharing grants are not restored |
 
 An unpublished experimental Controller version-2 file without
 `associationResults` is rejected, not migrated. Future or malformed versions also
@@ -66,7 +67,7 @@ The tenant Broker freeze projection is the sole Relay commit authority. A legacy
 top-level `sessionSuccessions` mirror migrates only if every full saved projection
 exactly matches an authenticated committed freeze for that owner. Missing chain
 prefixes, unmatched mirrors and contradictory surviving identities fail closed;
-outer versions 6 and 7 forbid that duplicate field. Never synthesize a freeze from
+outer versions 6 and later forbid that duplicate field. Never synthesize a freeze from
 browser state or remove recovery evidence to make an older writer accept it.
 
 Replay uses a version-1 envelope containing the immutable committed projection
@@ -95,6 +96,31 @@ recheck current access; a failed outer write cannot publish a new projection.
 The transport cache is not durable authority or proof that every product store
 has applied a revision. Server Favorites progress is described below; client
 Track/Ask/draft replacement and browser acceptance remain separate work.
+
+## Host access revocation and explicit recovery
+
+Revoking a Host removes its credentials, connections, bindings and previews and
+revokes its sharing grants. It retains succession freezes, relation history,
+pending admissions and quota evidence. Revocation does not classify pending
+operations as cancelled or erase a committed role decision. Old callbacks check
+their original Host object, connection generation and relevant binding inside
+the durable publication stage; equal string IDs do not restore old authority.
+
+For a retained succession identity, the authenticated owner can create a targeted
+invitation with `POST /v1/remote/pairings` and
+`{ "purpose": "host-only", "recoverHostId": "..." }`. It binds the current
+revocation ID and stored installation identity. Recovery reuses the logical Host
+ID with a fresh credential and runtime Host object. It restores no old sharing
+grants or native bindings and provides no proof of native session existence or
+operation outcome. Pending native recovery still requires its own evidence.
+
+Ordinary Hosts without retained succession authority keep ordinary revoke and
+re-pair behavior. A historical `pre_effect` relation reset is an exact-intent
+denial record, not recovery authority: preserve its original Host ID while
+allowing a later ordinary pairing of that installation. It cannot authorize
+recovery of that historical Host. Recovery identity capacity is reserved when
+admitting new succession authority so access revocation does not need a new slot.
+Do not delete historical records to free capacity.
 
 ## Client text persistence boundary
 

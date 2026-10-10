@@ -1,7 +1,86 @@
 # Same-host session succession
 
 Status: Implementation in progress. Durable roles and source binding primitives
-are implemented; production coordination, TPM and product integration are pending.
+and scoped Host/Relay/TPM integrations are implemented. Recovery and native evidence
+remain incomplete; production storage and product integration are still pending.
+
+## Approved architecture review adjustments
+
+At `c55661e` the user approved recovery/access corrections first, then native
+evidence with one verified provider mode, complete SQL persistence, and product
+identity/recovery integration. Existing scope and authority boundaries stay intact.
+
+Unknown native effects are never blindly replayed. Unknown input delivery and
+unknown role-commit persistence remain fenced until reconciled. A strictly
+zero-input, zero-task candidate creation may instead be explicitly abandoned:
+persist the operation's terminal cancellation fence before reopening the source,
+retain its request/witness and any known candidate, and accept a late creation
+result only as additional orphan evidence. That operation can never commit,
+recreate a candidate, dispatch context or silently delete the native candidate.
+Keep candidate existence uncertainty visible; cancellation settles the role
+transition intent, not the native creation outcome. Distinguish these cases
+from a known candidate followed by a failed read, serialization or predictable
+capacity check: these local phases need a safe terminal or forward-recovery path
+without creating another candidate. Reserve capacity for durable context and
+recovery outcomes before native creation. Do not discard retained evidence to
+unlock a source. Exact native creation/input reconciliation is a provider evidence
+capability, not inference from message text or a later idle snapshot.
+
+Capacity admission follows those separate effects: preparation reserves its
+captured context and finite handoff completion/recovery records before native
+creation; the first postcommit input reserves its actual serialized content and
+finite settlement before native dispatch. Do not reserve a hypothetical maximum
+future input per candidate. Insufficient later input capacity rejects before
+dispatch and leaves context pending. Arbitrary native reconciliation proof is
+size-checked before receipt mutation, preserving existing uncertainty on failure.
+
+Access revocation is independent of retained succession history. Removing Host
+credentials and connections must remain possible without deleting committed
+receipts or rolling back roles. Late work must not restore the revoked authority.
+Recovery can remain pending until explicit authorized access is available again.
+For retained succession identities, an owner-targeted recovery invitation may
+restore the historical Host mapping with fresh credentials and runtime ownership.
+It must not restore old sharing grants or bindings, and does not certify native
+session existence or execution outcomes. Ordinary Hosts without retained
+succession identity keep the existing revocation and pairing behavior.
+
+Static provider support differs from instance readiness. Optional native evidence
+extensions describe input identity/settlement and the coverage and validity of
+quiescence through commit, while preserving the current public execution state.
+Host role identities do not belong in provider SDK input contracts. Unspecified
+acceptance disposition does not prove an input has left the native queue.
+
+The user explicitly narrowed admission to a confirmed idle session with no queued
+inputs, pending approvals or active child work. Disconnected, unknown and working
+states reject handoff immediately. Do not implement drain-and-wait, native pause,
+or automatically start a handoff after work completes. Gate new inputs during
+preparation and revalidate before commit; a state change prevents commit. This
+restriction does not make a lost native create/input response a definite failure,
+nor does it establish exclusive control over an independently shared runtime.
+
+The user approved scoping exclusivity to ARC admission, not a global native-client lock. A shared
+native session can qualify for the ARC role transition without promising to stop
+independent native clients. Authoritative observed busy, pending or disconnected
+state still rejects preparation/commit. The adapter must describe the scope of
+its evidence; do not require a cross-process lease merely to certify ARC admission.
+External writes outside ARC are outside this exclusion guarantee and may continue
+using the concrete predecessor; they never change the ARC role by themselves.
+
+Handoff is an exclusive mutation phase for both source and candidate. All ordinary
+ARC session writes, including input, settings, interaction responses, prompt edits,
+fork/create-from-source, rename and relationship changes, must enter the same Host
+admission boundary. Existing unsettled writes prevent entering handoff; do not
+wait for them to drain. Read-only inspection and handoff cancellation/reconciliation
+remain available, as do unrelated sessions and security revocation. UI disabling
+is only a reflection of the Host gate. Do not claim this gate controls independent
+native writers outside ARC.
+
+Product composition separates stable pane identity, ordinary/history target
+intent and actual native attachment. Immutable creation/delivery provenance must
+not be replaced by a navigation projection. Existing Ask/Side targets keep their
+own full native locator even when their main source changes provider. Recovery
+belongs to a bounded set of product documents, not to the shared Session View
+renderer or a new generic transaction/workflow system.
 
 ## Outcome and scope
 
@@ -210,8 +289,10 @@ Keep ordinary `/fork` behavior unchanged while sharing its history representatio
 Generic handoff does not depend on an adapter exposing native fork. No provider
 is advertised until preparation, deferred delivery, source reads, TPM and product
 projection pass the complete contract. A creation timeout remains unknown and
-does not authorize another candidate. Cancellation retains the unused candidate
-and receipt; it does not automatically send its pending context.
+does not authorize another candidate under that operation. Explicit abandonment
+may end a certified zero-task creation attempt without resolving candidate
+existence, under the durable terminal fence described above. Cancellation retains
+the unused candidate and receipt; it does not automatically send pending context.
 
 ## Coordinator and commit
 
@@ -228,6 +309,14 @@ observe the same operation; conflicting reuse is rejected. `unknown` retains its
 last attempted phase and admitted effects. Recovery reconciles those effects and
 does not blindly recreate sessions or replay messages.
 
+One attempt has one fresh candidate and one fixed settings/target selection.
+Changing the selection requires ending the attempt and making a new explicit
+request. Do not schedule a handoff for later, wait until the source becomes idle,
+or automatically retry a failed attempt. Transport retry with the same operation
+identity may observe the saved decision; it must not start another native effect.
+Role commitment ends handoff independently of later first-input settlement and
+device-local projection recovery.
+
 Implement this as one local Controller coordinator and a durable role record.
 The existing Relay transports its decision and the existing product applies it.
 Do not introduce distributed consensus, a workflow engine, a new service or a
@@ -236,10 +325,11 @@ local committed decision, not participation in its transaction.
 
 1. Validate authority, provider capability, source role revision and canonical cwd.
    Persist intent and reserve one succession for the role before native creation.
-2. Gate new source input at Controller admission, including TPM and stale-browser
-   requests. Wait for active turns, pending interactions, native queued input and
-   owned child work to settle. Do not force-cancel work or assume idle proves this.
-   Adapters must report the required facts; unknown state blocks commitment.
+2. Acquire exclusive mutation admission for the source, including TPM and stale
+   browsers. Reject if active turns, pending interactions, queued input, owned
+   child work or unsettled writes exist; do not wait for them to settle or cancel
+   them. Adapters report the required facts; unknown state rejects the attempt.
+   Extend the same gate to the new candidate before ordinary access is possible.
 3. Freeze the association set against new source-bound creation/unlink races;
    concurrent changes receive a retryable conflict. Create the idle candidate and
    retain its native identity before attaching it. Verify the durable context attachment,
@@ -255,14 +345,16 @@ local committed decision, not participation in its transaction.
 
 Persisted source gates survive Controller restart. Before commit, cancellation or
 definite failure restores source admission and retains a created candidate for
-inspection; do not delete native sessions automatically. Unknown creation or
-delivery remains visible and requires reconciliation. After commit, transport
+inspection; do not delete native sessions automatically. Creation uncertainty
+remains visible after explicit zero-task abandonment; unknown input delivery and
+commit persistence still require reconciliation. After commit, transport
 failure is projection recovery, not a failed succession or an automatic rollback.
 
 Old direct Controller mutation requests to A are rejected as superseded with the
 current role revision. Explicit historical viewing stays available. Independent
-native writers cannot be fenced by UI logic; an unmanaged writer or unverifiable
-ownership makes this capability unavailable until ownership is reconciled.
+native writers are outside ARC exclusion; observed native activity still prevents
+commit. Missing authoritative session facts make capability unavailable, while
+absence of a global native writer lock alone does not.
 
 ## Source reading and permissions
 
@@ -365,7 +457,8 @@ existing subscriptions. Persist at operation/transition boundaries.
 - Existing and newly created Side/Ask sources resolve B; A cursors remain pinned.
 - Nested Side/Ask relationships and unlinked sessions remain correctly scoped.
 - All TPM works follow B; accepted/unknown operations never change recipient.
-- Pending approvals, child work, native queues and unmanaged writers block unsafe commit.
+- Observed pending approvals, child work, native queues and unknown session state
+  block commit; ARC admission does not promise to lock external native clients.
 - Favourite/Track duplicates, multiple drafts and stale projections lose no state.
 - Unauthorized and shared-only access cannot obtain new successor privileges.
 - Legacy prompt editing still creates siblings and native takeover keeps its semantics.

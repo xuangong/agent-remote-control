@@ -1,8 +1,10 @@
 import { isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
+import { validHostRecovery, type HostRecoverySelection } from './host-recovery.js';
 
 export interface SavedPairingKey {
   id: string; purpose: PairingPurpose; createdAt: number; expiresAt: number;
   usedAt?: number; revokedAt?: number; hostId?: string; hostName?: string;
+  recovery?: HostRecoverySelection;
 }
 export const MAX_PAIRING_HISTORY = 512;
 export function pairingStatus(item: SavedPairingKey, now: number): 'unused' | 'used' | 'obsolete' | 'revoked' {
@@ -10,6 +12,7 @@ export function pairingStatus(item: SavedPairingKey, now: number): 'unused' | 'u
 }
 export function visiblePairing(item: SavedPairingKey, now: number) {
   return { id: item.id, purpose: item.purpose, createdAt: new Date(item.createdAt).toISOString(), expiresAt: new Date(item.expiresAt).toISOString(),
+    ...(item.recovery ? { recovery: structuredClone(item.recovery) } : {}),
     status: pairingStatus(item, now), ...(item.usedAt === undefined ? {} : { usedAt: new Date(item.usedAt).toISOString(), hostId: item.hostId, hostName: item.hostName }),
     ...(item.revokedAt === undefined ? {} : { revokedAt: new Date(item.revokedAt).toISOString() }) };
 }
@@ -18,6 +21,7 @@ const text = (value: unknown, max: number): value is string => typeof value === 
 export function validPairingHistory(value: unknown): value is SavedPairingKey[] {
   return Array.isArray(value) && value.length <= MAX_PAIRING_HISTORY && value.every(item => item && typeof item === 'object'
     && text(item.id, 128) && isPairingPurpose(item.purpose) && time(item.createdAt) && time(item.expiresAt) && item.expiresAt >= item.createdAt
+    && (item.recovery === undefined || item.purpose === 'host-only' && validHostRecovery(item.recovery) && (item.hostId === undefined || item.hostId === item.recovery.hostId))
     && (item.usedAt === undefined ? item.hostId === undefined && item.hostName === undefined : time(item.usedAt) && item.usedAt >= item.createdAt && text(item.hostId, 512) && text(item.hostName, 512))
     && (item.revokedAt === undefined || item.usedAt === undefined && time(item.revokedAt) && item.revokedAt >= item.createdAt))
     && new Set(value.map(item => item.id)).size === value.length;

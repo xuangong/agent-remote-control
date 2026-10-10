@@ -3,6 +3,71 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Host revocation checkpoint (2026-10-10)
+
+Task7A passed independent scoped review after correcting legacy pre-effect
+relation-reset/re-pair compatibility. Revocation removes access while retaining
+history; owner-targeted recovery restores the logical Host with fresh credentials
+and no previous bindings/shares. Relay8 gates the recovery metadata. Ordinary
+and reset-only Hosts keep ordinary revoke/re-pair behavior. Late RPC publication
+checks the captured Host object, generation and relevant binding.
+
+Root verified the frozen source manifest, ran 139 tests across 10 files before
+the compatibility fix, then reran the 40 tests across 3 files covering that fix.
+Affected-package typechecks and compatibility update/check passed. The final
+compatibility hash is `ec8161d6b15e89132fbebc960940a34137e39ad26d13bec01d10be4a1c9a01fd`.
+These are scripted native ports over real HTTP/WS and durable file restart, not
+native provider certification. Root logs are `.tmp/root-task7a-*.log`.
+
+Next source slice is Task7B, governed by its exact brief and the plan ledger:
+capture/reserve before create, justified local failure recovery, and explicit
+zero-task unknown-create abandonment. Task7 overall remains in progress.
+
+## Architecture review adjustment in progress (2026-10-10)
+
+The user approved the review's order after `c55661e`. Tasks 7–10 in the existing
+plan supersede the older immediate-next recommendation to implement cold App
+composition first. Do not restart completed slices.
+
+1. Correct local recovery/capacity and Host revocation boundaries. Known read-only
+   failures must not become permanently fenced native uncertainty; revoke access
+   while retaining history and preventing late authority resurrection.
+2. Add minimal optional provider evidence and exact native input reconciliation,
+   certify zero-task creation, fix TPM unspecified/queued settlement, and verify
+   one native mode. Exact candidate lookup is optional when certified creation
+   can be explicitly abandoned under the durable cancellation fence.
+3. Implement complete Cloudflare SQL persistence and clarify durable-file semantics.
+4. Separate ForkStore ledger/navigation, existing Ask target routing and stable
+   pane intent; finish the outstanding client/desktop/mobile acceptance.
+
+Task7's sole source implementer is assigned via the existing plan ledger. A
+separate read-only Task8 feasibility preflight may run concurrently; it may not
+modify source or start native services. Keep all capability/UI off. No merge,
+push, publication, deployment, installation or user-service replacement is included.
+
+The user further simplified handoff admission: only confirmed idle, no queued
+inputs/approvals/active child work/unsettled ARC writes; no drain/wait or automatic
+handoff. Source and candidate are exclusive to ordinary ARC mutations until the
+decision settles. Read-only inspection, handoff recovery/cancel, unrelated sessions
+and security revocation remain available. The user approved ARC-only exclusion:
+shared native providers do not require
+a global external-client lock, but observed native activity or lost evidence still
+prevents commit. See the latest spec and ledger rulings rather than older preflight
+reports which required native global exclusion. The user also approved explicit
+abandonment of a certified zero-task creation: terminal cancellation must persist
+before releasing A, preserve known/unknown/late orphan evidence, and prevent every
+late commit or dispatch by that operation. This is Task7B implementation work,
+not an implemented recovery path yet. Unknown input and role commit/persistence
+cannot use it. Each attempt fixes its new candidate and settings; no automatic
+waiting/retry, rollback after commit, or delayed continuation is introduced.
+
+Capacity follows the same two-effect boundary: reserve actual captured context
+and finite handoff completion/recovery before creating the candidate; reserve
+the actual first input and finite settlement before dispatching it. A future
+input may reject for capacity while leaving context pending. Do not reserve a
+hypothetical maximum-size message for every candidate or claim arbitrary native
+proof capacity. The exact Task7B execution brief is in the existing plan ledger.
+
 ## Client text persistence checkpoint (2026-10-10)
 
 The first client prerequisite passed independent scoped spec/quality review.

@@ -24,6 +24,12 @@
 
 ## Status and verification setup
 
+The user approved the architecture-review adjustments at `c55661e`. Execute
+Tasks 7–10 below before resuming the remaining Task 5/6 work. Earlier scoped
+checkpoints remain valid within their scope; they do not certify complete backend
+recovery or a production provider. Keep one source implementer and independent
+scoped review per slice; read-only preflight may run independently.
+
 - [x] Inspect source ownership, relation persistence, favourites, Track and Ask storage.
 - [x] Record the approved design and the same-machine simplification.
 - [x] Document future migration seams without expanding the local implementation scope.
@@ -335,3 +341,72 @@ environment migration. Do not mark the feature complete with only UI replacement
 The extension review checks that workspace placement, participant bindings and
 local preparation are separate from stable relationship identity. It does not
 certify cross-host readiness, execution authority transfer or migration recovery.
+
+## Task 7: Recovery and access-revocation boundaries
+
+Status: In progress after the user-approved review of `c55661e`.
+
+- [x] Keep Host access revocation independent of immutable succession history.
+  Revoke credentials/connections without deleting committed evidence or restoring
+  predecessor authority. Define pending-operation and late-response behavior;
+  no old credential may publish or recover new access after revocation.
+- [ ] Distinguish definite preparation failures from unknown native effects.
+  A known candidate followed by failed bounded read/serialization must not leave
+  the source permanently reserved. Retain candidates and original operation IDs.
+- [ ] Preflight/reserve bounded context and recovery capacity before native create.
+  Keep committed/unknown evidence intact; never remove records merely to unlock.
+- [ ] Support safe cancellation/forward recovery at justified local phases,
+  including restart. For certified zero-task creation, allow explicit durable
+  abandonment retaining native uncertainty and late orphan evidence; fence the
+  cancelled operation permanently from commit or replay. Unknown input and commit
+  persistence still require reconciliation, never a blind retry.
+- [ ] Run affected real-transport, capacity and recovery tests with both deadlines,
+  obtain scoped review, update compatibility and commit locally.
+
+## Task 8: Native evidence and one real provider mode
+
+- [ ] Enforce idle-only admission: reject working, queued, approval, active-child,
+  disconnected and unknown states immediately. No draining, native pause or
+  automatic waiting handoff; revalidate under the input gate before commit.
+- [ ] Make source and candidate exclusive for ordinary session/association writes
+  through one Host admission boundary. Existing unsettled writes reject admission;
+  allow read-only inspection, handoff recovery/cancel and security revocation.
+  Verify multiple clients/TPM cannot bypass it and unrelated sessions remain usable.
+- [ ] Define minimal optional provider-neutral input witness/reconciliation and
+  readiness evidence contracts. Keep Host role identities out of the SDK.
+- [ ] Treat unspecified acceptance as unknown disposition in TPM; settle native
+  queued inputs from authoritative evidence, not later idle or text matching.
+- [ ] Preserve operation/candidate/input evidence across lost responses and restart.
+  Verify zero-task creation for Task7 abandonment; exact input materialization
+  and unknown commit recovery remain mandatory. Native create-result lookup can
+  be optional when explicit abandonment is the supported recovery path.
+- [ ] Verify a concrete provider/runtime mode using isolated profiles/services.
+  Evidence must cover zero-turn preparation, first input, queued work and the
+  validity of readiness through commit. Record unsupported facts explicitly.
+- [ ] Keep production capability off until complete product and durable gates pass.
+
+## Task 9: Complete deployed storage support
+
+- [ ] Implement complete versioned Cloudflare SQL encode/decode for Broker
+  associations, relation changes/resets, exact freeze evidence and Favorites
+  progress, preserving the existing outer transaction and durability boundary.
+- [ ] Test old-format migration, exact roundtrip, restart, rollback on failed
+  write and authorization removal without deleting historic evidence.
+- [ ] Review role/context durable-file write consistency and record the actual
+  process-crash versus power-loss guarantees without unsupported claims.
+
+## Task 10: Product identities and recoverable composition
+
+- [ ] Split immutable ForkStore delivery source from projected navigation source;
+  mutations must read raw delivery records, not projected view records.
+- [ ] Route existing Ask targets by their own complete native locator; preserve
+  native identity, nested attachment and draft/window state across provider change.
+- [ ] Introduce stable pane slots and target intent independent of attachment;
+  attach failure keeps B as target without displaying A as B or resetting layout.
+- [ ] Complete scoped replay/Track/navigation, independent text/image conflicts,
+  Favorites progress/history intent and actual desktop/mobile refresh acceptance.
+  Use a bounded set of product documents rather than a generic transaction engine.
+- [ ] Keep native outbox/attention/cursors concrete; keep role resolution and
+  recovery in the composition layer, outside the ordinary Session View renderer.
+- [ ] Complete remaining Task 5/6 acceptance and whole-branch review before any
+  capability enablement. No deployment, merge or installation is authorized here.

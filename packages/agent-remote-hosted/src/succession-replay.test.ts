@@ -16,14 +16,14 @@ afterEach(async () => { for (const close of closers.splice(0).reverse()) await c
 const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
 const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
 const sequenceRef = (index: number) => ref(index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index);
-async function fixture(configure?: (state: HostedRelayState) => void) {
+async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false) {
   const credential = 'arc_' + 'k'.repeat(43);
   let denied = false, unavailable = false;
   const authority = createServer(async (request, response) => {
     let text = ''; for await (const chunk of request) text += chunk;
     const input = JSON.parse(text); const subject = input.subject ?? input.continuation;
     response.writeHead(unavailable ? 503 : denied ? 403 : 200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ active: true, subject, validUntil: Date.now() + 60000, expiresAt: Date.now() + 600000 }));
+    response.end(JSON.stringify({ active: true, subject, validUntil: Date.now() + 60000, expiresAt: Date.now() + 600000, ...(recentAuthentication ? { authenticatedAt: Date.now() } : {}) }));
   });
   authority.listen(0, '127.0.0.1'); await once(authority, 'listening');
   const server = createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -102,6 +102,25 @@ test('does not expose owner successors to another authenticated namespace', asyn
   const f = await fixture(); const response = await f.request('v1/session-successions', 'viewer'); expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ version: 1, successions: [], nextCursor: null });
   expect((await f.request('v1/session-successions/operation?roleId=role&operationId=op-2', 'viewer')).status).toBe(403);
+}, 10000);
+test('authorizes historical recovery only in the owning namespace and retains Relay8 favorite progress', async () => {
+  const f = await fixture(undefined, true);
+  expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(200);
+  const revoked = await f.saved();
+  expect(revoked.version).toBe(8);
+  expect(revoked.tenants[0]!.broker.associations!.freezes).toHaveLength(2);
+  expect(revoked.tenants[0]!.broker.hosts).toEqual([]);
+  expect(revoked.tenants[0]!.favoritesSuccession!.receipts.every(receipt => receipt.status === 'pending')).toBe(true);
+  expect((await f.request('v1/remote/pairings', 'viewer', { recoverHostId: 'mapped-host' })).status).toBe(409);
+  const foreign = await fetch(`${f.origin}/u/${f.namespace('owner')}/v1/remote/pairings`, { method: 'POST', body: JSON.stringify({ recoverHostId: 'mapped-host' }),
+    headers: { cookie: await f.cookie('viewer'), origin: f.origin, 'content-type': 'application/json' }, signal: AbortSignal.timeout(3000) });
+  expect(foreign.status).toBe(403);
+  const pairing = await f.request('v1/remote/pairings', 'owner', { recoverHostId: 'mapped-host' });
+  expect(pairing.status).toBe(201); expect((await pairing.json()).recovery.hostId).toBe('mapped-host');
+  const saved = await f.saved(); expect(saved.version).toBe(8); expect(validateRelayState(saved, f.auth)).toEqual(saved);
+  await f.restart();
+  expect((await f.request('v1/remote/pairings')).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(revoked.tenants[0]!.broker.associations);
 }, 10000);
 test('negotiates succession frames only for opted in channels and replays after reconnect', async () => {
   const f = await fixture(); const legacy = await f.channel(false); const modern = await f.channel();

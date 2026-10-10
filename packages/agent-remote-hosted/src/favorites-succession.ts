@@ -30,7 +30,7 @@ export function validFavoritesSuccession(state: HostedRelayState): boolean {
   return state.tenants.every(tenant => {
     const progress = tenant.favoritesSuccession;
     if (progress === undefined) return true;
-    if (state.version !== 7 || !progress || progress.version !== 1 || Object.keys(progress).some(key => !['version', 'receipts'].includes(key))
+    if (state.version < 7 || !progress || progress.version !== 1 || Object.keys(progress).some(key => !['version', 'receipts'].includes(key))
       || !Array.isArray(progress.receipts) || progress.receipts.length > 1024) return false;
     const rows = committedSuccessionRows(tenant.broker);
     const seen = new Set<string>();
@@ -96,7 +96,8 @@ export function projectSuccessionFavorites(draft: HostedRelayState, subject: str
   const updated = changed || !isDeepStrictEqual(tenant.favoritesSuccession, progress);
   if (updated) {
     if (changed) { draft.sessionStars = scratch.sessionStars; draft.favoritesTrees = scratch.favoritesTrees; }
-    tenant.favoritesSuccession = progress; draft.version = 7;
+    tenant.favoritesSuccession = progress;
+    if (draft.version < 7) draft.version = 7;
   }
   return updated;
 }

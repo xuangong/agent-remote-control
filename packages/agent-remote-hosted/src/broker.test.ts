@@ -530,6 +530,20 @@ it('purges durable previews atomically when their Host is revoked', async () => 
   expect((await runtime.fetch(new Request(auth.origin + '/health')))?.status).toBe(200);
 }, 10000);
 
+it('rejects a queued share after revocation instead of restoring access', async () => {
+  const entered = deferred<void>(); const held = deferred<void>();
+  const { broker } = await restoredFixture({ ownerSubject: 'alice', durable: true, onStateChange: state => {
+    if (state.hosts.length === 0) { entered.resolve(); return held.promise; }
+  } });
+  const revoking = broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/revoke', { method: 'POST', body: '{}' }), { principalSubject: () => 'alice' });
+  await entered.promise;
+  const sharing = broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1).catch(error => error);
+  held.resolve();
+  expect((await revoking)?.status).toBe(200);
+  expect(await sharing).toBeInstanceOf(Error);
+  expect(broker.snapshot().sharing?.grants).toEqual([]);
+});
+
 it('binds a temporary credential to only one installation during concurrent registration', async () => {
   const held = deferred<void>(); const entered = deferred<void>(); let commits = 0;
   const initialState = { ...restoredState, hosts: [], bindings: [], keys: restoredState.keys.map(([hash, value]) => [hash, { expires: value.expires }] as RemoteHostBrokerState['keys'][number]) };

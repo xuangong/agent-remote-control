@@ -27,6 +27,10 @@ test('refuses unsupported succession formats before changing any SQLite rows and
   for (const change of [
     (state: any) => { state.version = 6; },
     (state: any) => { state.version = 7; },
+    (state: any) => { state.version = 8; },
+    (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', broker: { revokedHosts: [] } }]; },
+    (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', broker: { keys: [['key', { recovery: {} }]] } }]; },
+    (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', broker: { pairings: [{ recovery: {} }] } }]; },
     (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', broker: { associations: { version: 4 } } }]; },
     (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', favoritesSuccession: { version: 1, receipts: [] }, broker: {} }]; },
   ]) {

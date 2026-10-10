@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
+import { hasHostRecoveryMetadata } from '@orchardworks/agent-remote-hosted/host-recovery';
 
 type RecordKind = 'sessionTitle' | 'sessionTitleRevision' | 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
 type StoredRecord = { kind: RecordKind; owner: string; key: string; version: number; value: string };
@@ -43,7 +44,7 @@ export class SqliteRelayStore implements RelayStateStore {
   }
   async commit(state: HostedRelayState): Promise<void> {
     // This codec cannot retain succession authority or its outer recovery progress.
-    if (state.version !== 2 || state.tenants.some(tenant => tenant.broker.associations !== undefined || tenant.favoritesSuccession !== undefined)) {
+    if (state.version !== 2 || state.tenants.some(tenant => tenant.broker.associations !== undefined || tenant.favoritesSuccession !== undefined || hasHostRecoveryMetadata(tenant.broker))) {
       throw new Error('Unsupported Relay succession state for SQLite storage.');
     }
     const next = encode(state);

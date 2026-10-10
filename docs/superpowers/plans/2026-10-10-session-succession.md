@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- V1 requires the same Controller, provider and canonical working directory.
+- V1 requires the same Controller and canonical working directory; switching agent/provider is allowed only when both adapters satisfy the full contract. Native fork is not required.
 - No workspace copy, remote file synchronization, machine migration, credential transfer, deployment or distributed execution coordinator.
 - Keep native execution in adapters, role coordination in Controller, authorized projections in Relay and presentation in the product.
 - Use `SessionSuccession`; do not repurpose native ownership `SessionHandoff` or prompt-edit sibling events.
@@ -135,9 +135,11 @@ expect((await fixture.readSource({ cursor: pageA.nextCursor })).sourceSessionId)
 
 ## Task 3: Local handoff coordinator and admission boundary
 
-Status: In progress. Local coordinator and readiness policy have fixture coverage;
-Codex native history fork passed an isolated native test with a loopback model
-service and no new model request during fork. Production admission, binding-reader
+Status: In progress. The approved direction now uses normalized history with
+Host-owned deferred first-input injection. Earlier same-provider readiness and
+source-binding code need revision; their existing tests do not certify provider
+switching. Codex native history fork was experimentally verified but is no longer
+the generic handoff preparation path. Production admission, binding-reader
 installation, durable cursor-key provisioning and recovery endpoints remain open.
 Do not mark this task complete or expose a product capability yet.
 Checkpoint verification: seven affected Host suites passed 50 tests; the Codex
@@ -150,10 +152,33 @@ no active user daemon or deployed environment was replaced.
 `packages/agent-host/src/local-succession-preparation.ts` and `.test.ts`.
 **Modify:** `packages/agent-host/src/host.ts`, `directory.ts`,
 `execution-policy.ts`; Codex `src/provider.ts` and `src/session.ts`.
-**Create:** Codex `src/session-fork.ts`, `src/session-fork.test.ts` and
-`src/session-fork.local.test.ts`. Keep the existing normalized `/fork` unchanged.
-The shared API cannot guarantee a tools-disabled context preload, so use the
-verified native fork preparation path first; no silent message-copy fallback.
+Keep existing normalized `/fork` behavior unchanged and extract its shared history
+representation for Host use. Native-fork experiments already exist but are not a
+prerequisite or a fallback; review their public exposure before final integration.
+Do not send a context-only preparation prompt. `ready` certifies a durable pending
+attachment and idle candidate, not model acknowledgement or native materialization.
+
+### Approved direction follow-up
+
+- [ ] Extract shared normalized history serialization, byte/entry limits and
+  truncation/provenance metadata without a Host dependency on browser modules.
+- [ ] Persist pending context and first-input delivery state on the Controller;
+  retain receipt/attachment consistency across crash and storage failure.
+- [ ] Compose context at one serialized dispatch boundary for user, multi-device,
+  TPM and execution-capable command input. Fence bypass paths and uncertain sends.
+- [ ] Certify zero preparation model turns and zero task execution using a real
+  adapter/transport; do not rely on prompts, read-only mode or approval settings.
+- [ ] Replace same-provider assumptions in readiness, source binding enrollment,
+  history readers and TPM with full session references and capability checks.
+  Reject unsupported provider pairs before creation. Preserve native namespaces.
+- [ ] Map supported settings with explicit semantics; do not copy opaque provider
+  values or silently broaden permissions. Keep auxiliary sessions unchanged.
+- [ ] Define pending-attachment reads and cursors; preserve context across A -> B
+  -> C before B's first input, without duplicate or nested context injection.
+- [ ] Test concurrent first inputs, definite rejection, unknown acceptance,
+  disconnect, restart and TPM first dispatch. Never automatically replay unknown.
+- [ ] Validate same-provider and cross-provider paths separately; do not advertise
+  a provider pair on the strength of normalized text serialization alone.
 
 **Interfaces:** `SessionSuccessionCoordinator.prepare(request)`,
 `status(operationId)`, `commit(operationId, expectedRevision)` and
@@ -165,20 +190,20 @@ preparation module produces it after validating the target and participant set;
 the coordinator revalidates its role/association revisions at commit. It is internal
 state, never a browser-supplied readiness assertion. No strategy registry is needed.
 
-- [ ] Test a complete same-cwd A -> B transition, wrong cwd/Host/provider rejection,
+- [ ] Test a complete same-cwd A -> B transition, wrong cwd/Host and unsupported provider rejection,
   creation success followed by attachment failure and a lost creation response.
 - [ ] Test source admission against a racing direct send, native queue, approval,
   child work and an independently owned writer. Reserve before capturing context.
 - [ ] Persist phase and operation receipts; create a candidate without launching
-  implementation work; transfer bounded context at the frozen source boundary.
-- [ ] Isolate same-Host/provider/cwd checks and workspace reuse in local preparation.
+  implementation work; persist bounded pending context at the frozen source boundary.
+- [ ] Isolate same-Host/cwd and provider capability checks and workspace reuse in local preparation.
   Populate Side/Ask/TPM participants with unchanged own native identities and check
   their relation revision. Do not create auxiliary successors in this mode.
-- [ ] Verify candidate context delivery and readiness before the atomic commit.
+- [ ] Verify the durable pending context attachment and candidate readiness before commit.
   Never reuse the context-copy path as proof of full native context inheritance.
-- [x] Implement native Codex fork without a model turn; validate its new identity,
+- [x] Earlier optional experiment: implement native Codex fork without a model turn; validate its new identity,
   cwd and inherited boundary. Scripted fork/prompt-edit regressions: 22 passed.
-- [x] Run an isolated native fork test with the installed Codex binary and loopback
+- [x] Earlier optional experiment: run an isolated native fork test with the installed Codex binary and loopback
   Responses service: one test passed; three source prompts were retained, model
   request count stayed at three and predecessor history remained unchanged.
 - [x] Implement local coordinator recovery tests for unknown creation/transfer,

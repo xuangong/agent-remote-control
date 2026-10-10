@@ -16,16 +16,19 @@ directory. Existing files, Git state, dependencies and local environment stay in
 place. There is no workspace copy, remote file synchronization, machine migration,
 credential transfer, deployment or distributed execution coordinator.
 
-V1 requires the same Controller, provider and canonical working directory.
+V1 requires the same Controller and canonical working directory. The successor
+may use a different agent/provider when both adapters satisfy the complete local
+succession contract. Provider identity is a routing address, not role identity.
 The first session establishes a stable primary role; it is not permanently the
 executor. A role can have several TPM works and does not require TPM to exist.
 Only providers advertising the complete required capability can perform succession.
 Same-directory reuse does not transfer processes, approvals or native child ownership.
-The same-provider restriction keeps the initial context-transfer path bounded;
-it does not imply that future handoff must move machines or workspaces.
+Cross-provider succession transfers normalized conversation context, not native
+provider state, credentials, pending approvals or child ownership. Unsupported
+targets must be rejected before creation; provider switching is capability-gated.
 
 The confirmed scope is product-level succession, with a Session View action and
-progress surface. It is not deployment, generic workflow scheduling, cross-provider
+progress surface. It is not deployment, generic workflow scheduling, machine
 migration or takeover of an independently running CLI.
 
 ## Current source and boundaries
@@ -98,8 +101,9 @@ designing a cross-machine migration are not established. Preserve these seams
 without implementing a migration service, cross-host transport or plugin registry:
 
 1. **Prepare the successor.** Local preparation reuses the workspace and creates
-   and primes a session. Keep same-Controller/provider/cwd checks in this local
-   preparation policy, rather than in the generic role identity or UI projection.
+   a candidate plus a durable context attachment without a model turn. Keep
+   same-Controller/cwd and source/target capability checks in this local preparation
+   policy, rather than in the generic role identity or UI projection.
    A future migration would have additional preparation work before a target is
    ready. Its file, environment, authority and recovery rules are not defined here.
 2. **Commit succession.** Consume a checked preparation result and the expected
@@ -153,25 +157,61 @@ framework is needed for this release.
 
 ## Context preparation
 
-Implementation inspection found that the shared provider API cannot preload a
-normalized-history message while guaranteeing that tools will not start work.
-The implementation therefore prioritizes a verified native history fork for Codex.
-This working choice was disclosed during implementation; no provider is enabled
-in the product until the complete handoff contract is wired and verified.
+The approved generic path uses the project's normalized `/fork` history-copy
+semantics with deferred first-input injection. Native provider fork is not a
+prerequisite, default strategy or silent fallback for this feature. Existing
+experimental native-fork code is not evidence of generic handoff readiness.
 
-Fork only after source admission is gated and execution is quiescent. Verify a new
-native identity in the same cwd and the inherited latest settled turn boundary.
-The native fork must not send `turn/start`, modify the predecessor or claim to
-transfer native children, callbacks or running work. Preserve native settings and
-recheck the actual successor's readiness. A creation timeout remains unknown and
-does not authorize another fork. Preparing a native fork includes copying history;
-the following transfer stage verifies it rather than sending that history again.
+After source admission is gated and execution is quiescent, capture a bounded,
+normalized history snapshot with its source reference and timeline boundary.
+Create a new, idle session on the selected provider in the same canonical cwd.
+Persist the snapshot, target identity and effective supported settings before
+reporting `ready`. Preparation starts no model turn and sends no synthetic
+"understand this history" input. Session creation itself must be certified not
+to launch task execution. Readiness means the context is durably available for
+delivery; it does not mean the native session already contains that context.
 
-The existing `/fork` command retains its normalized-history copy behavior. A
-normalized-copy handoff fallback remains unavailable until its preparation can
-be guaranteed not to start implementation work. Other providers and authored
-handover summaries need their own validated preparation strategies. Neither native
-forking nor normalized copying promises reduced context size.
+Reuse the existing normalized history format, quoted-context semantics and
+explicit truncation metadata. Extract shared serialization instead of importing
+browser code into Host. This representation is not a full native context export:
+non-text content and hidden provider state are not implicitly preserved. Bound
+snapshot bytes as well as entry counts and reject unsupported captures explicitly.
+Do not claim guaranteed context reduction or target-model fit. Settings are
+mapped only when supported and semantically equivalent; never copy opaque model,
+permission or reasoning identifiers across providers or silently elevate access.
+
+The Controller owns a durable pending context attachment, separate from browser
+navigation and the role commit receipt. The first admitted substantive input from
+any supported path (user, another device or TPM) is composed with this attachment
+at the unified Host dispatch boundary. Preparation and commitment send neither
+history nor a continuation prompt to the model. If an explicit continuation is
+requested, it is a normal postcommit input with the same delivery contract.
+
+Serialize competing first inputs and persist the composed input identity, actual
+recipient and role revision before native dispatch. A definite pre-dispatch
+rejection leaves the attachment pending. An accepted or uncertain dispatch is
+never automatically resent, rebound or reconstructed from a newer source.
+Reconcile against authoritative native evidence; transport acceptance alone is
+not proof of durable history. Until resolved, block later inputs from bypassing
+context delivery. Commands that can execute work must use this boundary or be
+explicitly rejected while context is pending. Ordinary read-only inspection must
+not consume the attachment. Restart and browser loss must preserve these rules.
+
+Before native materialization, source-history reads must expose the captured
+context with explicit provenance and a stable cursor namespace, not an apparently
+empty history or a claim that the entries belong to native B. Reading must not
+trigger a model turn. Once materialized, avoid returning the attachment twice;
+pinned reads must retain their original representation. A B -> C succession while
+B still has pending context must preserve that attachment without nesting or
+silently omitting history. Uncertain B delivery blocks that next succession.
+Define and test this read/capture contract before enabling successive handoffs.
+
+Keep ordinary `/fork` behavior unchanged while sharing its history representation.
+Generic handoff does not depend on an adapter exposing native fork. No provider
+is advertised until preparation, deferred delivery, source reads, TPM and product
+projection pass the complete contract. A creation timeout remains unknown and
+does not authorize another candidate. Cancellation retains the unused candidate
+and receipt; it does not automatically send its pending context.
 
 ## Coordinator and commit
 
@@ -201,8 +241,8 @@ local committed decision, not participation in its transaction.
    owned child work to settle. Do not force-cancel work or assume idle proves this.
    Adapters must report the required facts; unknown state blocks commitment.
 3. Freeze the association set against new source-bound creation/unlink races;
-   concurrent changes receive a retryable conflict. Create the native fork and
-   retain its native identity before attaching it. Verify the copied context,
+   concurrent changes receive a retryable conflict. Create the idle candidate and
+   retain its native identity before attaching it. Verify the durable context attachment,
    verify target readiness and recheck the source generation and role revision.
 4. Atomically persist the new `current`, revision and committed receipt in one
    Controller record. Durable prepared overlays allow enrolled grants and TPM
@@ -316,7 +356,12 @@ existing subscriptions. Persist at operation/transition boundaries.
 - A -> B -> C updates every listed surface while retaining auxiliary identities.
 - Two devices racing at the same revision commit at most one successor.
 - Disconnect/restart at every phase restores the correct gate and decision.
-- Lost creation, context-delivery and commit responses do not duplicate effects.
+- Lost creation, first-input delivery and commit responses do not duplicate effects.
+- Preparation and commit produce zero model turns or task execution.
+- First user/TPM/device input receives context through one durable dispatch boundary.
+- Pending context survives restart, source reads and B -> C succession without loss.
+- Same-Host/cwd provider switching uses full session references for reads and sends;
+  unsupported capabilities/settings fail before creation without privilege changes.
 - Existing and newly created Side/Ask sources resolve B; A cursors remain pinned.
 - Nested Side/Ask relationships and unlinked sessions remain correctly scoped.
 - All TPM works follow B; accepted/unknown operations never change recipient.

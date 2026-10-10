@@ -5,6 +5,7 @@ import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { expect, test } from 'vitest';
 import { codecState } from './storage-codec-fixture.js';
+import { sourceCompletionState, relationCompletionState } from './source-completion-fixture.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 's'.repeat(32) };
 /** An isolated state/store boundary; this test object has no Host or native-effect supplier. */
@@ -13,6 +14,7 @@ async function accountingWorker() {
   const result = await build({ stdin: { contents: `
     import { createHash } from 'node:crypto';
     import { createRelayState } from '../agent-remote-hosted/src/state.ts';
+    import { sourceCompletionBroker } from './test/source-completion-fixture.ts';
     import { SqliteRelayStore, TEST_ONLY_COMPLETE_SQL_CODEC } from './src/storage.ts';
     import { encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES } from './src/storage-codec.ts';
     const auth = ${JSON.stringify(auth)};
@@ -34,6 +36,15 @@ async function accountingWorker() {
       }
       async fetch(request) {
         const url = new URL(request.url), path = url.pathname;
+        if (path === '/source/connect') { this.source?.broker.close(); this.source = await sourceCompletionBroker(this.relay, auth, () => {
+          if (this.sourceMode === 'rollback' && this.sourceTarget === 'relation') this.ctx.storage.sql.exec("CREATE TRIGGER fail_source BEFORE UPDATE ON relay_snapshot_manifests WHEN NEW.kind = 'relationChange' BEGIN SELECT RAISE(ABORT, 'relation rollback'); END");
+          else if (this.sourceMode === 'rollback') this.ctx.storage.sql.exec("CREATE TRIGGER fail_source BEFORE DELETE ON relay_snapshot_manifests WHEN OLD.kind = 'admission' BEGIN SELECT RAISE(ABORT, 'source rollback'); END");
+          else this.mode = this.sourceMode ?? 'normal';
+        }); return new Response('ok'); }
+        if (path === '/source/reconcile') { this.sourceTarget = 'relation'; this.sourceMode = url.searchParams.get('mode'); try { return Response.json(await this.source.reconcile()); } catch (error) { return new Response(String(error), { status: 503 }); } }
+        if (path === '/source/create') { this.sourceMode = url.searchParams.get('mode'); return await this.source.create(); }
+        if (path === '/source/status') return Response.json({ broker: this.source.broker.snapshot(), counts: this.source.counts() });
+        if (path === '/source/clear-fault') { this.ctx.storage.sql.exec('DROP TRIGGER IF EXISTS fail_source'); return new Response('ok'); }
         if (path === '/mode') { this.mode = url.searchParams.get('value'); this.entered = false; return new Response('ok'); }
         if (path === '/release') { this.mode = 'normal'; this.release?.(); return new Response('ok'); }
         if (path === '/status') return Response.json({ entered: this.entered, publications: this.publications, failures: this.failures, current: this.relay.read() });
@@ -41,7 +52,7 @@ async function accountingWorker() {
           manifests: this.ctx.storage.sql.exec('SELECT * FROM relay_snapshot_manifests ORDER BY kind, identity').toArray(),
           chunks: this.ctx.storage.sql.exec('SELECT * FROM relay_snapshot_chunks ORDER BY kind, identity, ordinal').toArray().map(row => ({ ...row, bytes: createHash('sha256').update(new Uint8Array(row.bytes)).digest('hex') })) });
         if (path === '/restore') return Response.json(new SqliteRelayStore(this.storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC).initial);
-        if (path === '/recover') { this.mode = 'normal'; await this.relay.close(); this.open(); return new Response('ok'); }
+        if (path === '/recover') { this.source?.broker.close(); this.source = undefined; this.mode = 'normal'; await this.relay.close(); this.open(); return new Response('ok'); }
         if (path === '/fault') {
           if (url.searchParams.get('on') === '1') this.ctx.storage.sql.exec("CREATE TRIGGER fail_accounting BEFORE UPDATE ON relay_snapshot_manifests WHEN NEW.kind = 'relayHeader' BEGIN SELECT RAISE(ABORT, 'fixture accounting rollback'); END");
           else this.ctx.storage.sql.exec('DROP TRIGGER IF EXISTS fail_accounting');
@@ -106,5 +117,52 @@ test('real Worker accounting holds sync, rolls back transaction faults and reope
     const reopened = await f.json('/status');
     expect(reopened.current.version).toBe(10); expect(reopened.current.extraRelay).toBe('unknown complete evidence');
     expect(reopened.current.tenants[0].broker.associations).toEqual(initial.tenants[0]!.broker.associations);
+  } finally { await f.close(); }
+}, 30000);
+
+for (const mode of ['hold', 'rollback', 'reject']) test(`real Worker source completion keeps its atomic snapshot through ${mode}`, async () => {
+  const f = await accountingWorker();
+  try {
+    expect((await f.request('/mutate', sourceCompletionState(auth))).status).toBe(200);
+    expect((await f.request('/source/connect')).status).toBe(200);
+    let replied = false; const pending = f.request('/source/create?mode=' + mode).then(response => { replied = true; return response; });
+    if (mode === 'hold') {
+      const deadline = Date.now() + 3000; let status;
+      do { status = await f.json('/status'); if (Date.now() > deadline) throw new Error('Source Worker sync deadline'); } while (!status.entered);
+      expect(replied).toBe(false); expect(status.current.tenants[0].broker.associations.admissions).toHaveLength(1);
+      expect((await f.json('/source/status')).broker).toEqual(status.current.tenants[0].broker);
+      const local = (await f.json('/restore')).tenants[0].broker;
+      expect(local.bindings).toHaveLength(2); expect(local.creations).toHaveLength(1); expect(local.sharing.reservations[0].agentId).toBe('reader-agent'); expect(local.associations.admissions).toHaveLength(0);
+      await f.request('/release'); expect((await pending).status).toBe(200);
+    } else {
+      expect((await pending).status).toBe(503);
+      const status = await f.json('/status'), source = await f.json('/source/status');
+      expect(source.broker).toEqual(status.current.tenants[0].broker); expect(source.broker.associations.admissions).toHaveLength(1);
+      const local = (await f.json('/restore')).tenants[0].broker;
+      expect(local.associations.admissions).toHaveLength(mode === 'rollback' ? 1 : 0);
+      expect(local.bindings).toHaveLength(mode === 'rollback' ? 1 : 2); expect(local.creations).toHaveLength(mode === 'rollback' ? 0 : 1);
+      if (mode === 'rollback') await f.request('/source/clear-fault');
+    }
+    expect((await f.json('/source/status')).counts.creates).toBe(1);
+    await f.restart(); await f.request('/source/connect'); expect((await f.request('/source/create')).status).toBe(200);
+    const recovered = await f.json('/source/status'); expect(recovered.counts.creates).toBe(0); expect(recovered.counts.readbacks).toBe(mode === 'rollback' ? 1 : 0);
+    expect(recovered.broker.associations.admissions).toHaveLength(0); expect(recovered.broker.associations.revision).toBe(2);
+  } finally { await f.close(); }
+}, 30000);
+
+for (const mode of ['rollback', 'reject']) test(`real Worker relation recovery retains complete phase evidence after ${mode}`, async () => {
+  const f = await accountingWorker();
+  try {
+    expect((await f.request('/mutate', relationCompletionState(auth))).status).toBe(200); await f.request('/source/connect');
+    const before = await f.json('/source/status'), physical = await f.json('/physical');
+    expect((await f.request('/source/reconcile?mode=' + mode)).status).toBe(503);
+    expect((await f.json('/source/status')).broker).toEqual(before.broker);
+    expect((await f.json('/status')).current.tenants[0].broker).toEqual(before.broker);
+    const local = (await f.json('/restore')).tenants[0].broker.associations;
+    expect(local.relationChanges[0].phase).toBe(mode === 'rollback' ? 'overlay_applied' : 'committed'); expect(local.revision).toBe(mode === 'rollback' ? 10 : 11);
+    if (mode === 'rollback') { expect(await f.json('/physical')).toEqual(physical); await f.request('/source/clear-fault'); }
+    await f.restart(); await f.request('/source/connect'); expect((await f.request('/source/reconcile')).status).toBe(200);
+    const recovered = (await f.json('/source/status')).broker.associations;
+    expect(recovered.relationChanges[0].phase).toBe('committed'); expect(recovered.revision).toBe(11);
   } finally { await f.close(); }
 }, 30000);

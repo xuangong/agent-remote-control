@@ -95,8 +95,32 @@ ordinary-only changes, write outer10 without downgrading. Restore10 without both
 cost methods refuses before runtime availability; prior readers reject10 on
 restore/reload. No cross-version live-writer CAS is promised. No-cost outer<=9
 ordinary and exact legacy recovery remain supported, without fresh Hosted
-preparation. Accounting arithmetic does not yet authorize source/relation terminal,
-Favorites or recovery consumers; their atomic integration remains required.
+preparation. Source/relation consumers now use the atomic boundary below;
+terminal succession/Favorites and recovery consumption still need their separate
+integration and acceptance before production enablement.
+
+## Atomic Relay source completion
+
+A participating source creation saves its complete admission and applicable
+shared reservation before native dispatch. Its terminal mutation retains the
+complete binding and creation tuple, completes the exact shared receipt, removes
+the admission and increments the association revision once. Broker maps and
+successful replies wait for that same outer mutation and required storage sync.
+Source completion releases only its future growth allowance; complete ordinary
+binding, creation and quota records remain saved.
+
+Exact unresolved recovery reads the saved source-result and attaches the proven
+native identity without another create. Missing or contradictory evidence stays
+unresolved. Only an explicit fresh Host rejection can enter the safe terminal
+release path; access revocation, transport failure and uncertain storage do not
+provide that proof. Caller and source access are rechecked after queued work and
+immediately before native dispatch, including after source-result readback.
+
+Durable admissions and owned in-flight claims protect collection/revision
+capacity before ordinary create or attach. Exact relation replay leaves order
+and revision unchanged; a lost release response advances only the remaining
+terminal phase. A successful attach with an identical durable record still
+confirms its current runtime generation, without another write or attach.
 
 ## Source-witness admission
 
@@ -119,8 +143,9 @@ The binding owner checks the actual canonical result for fresh qualified output,
 preserving legal aliases. This post-effect check does not guarantee successful
 projection: a wider existing canonical identity leaves the witness retained and
 the operation unresolved. Exact recovery never silently rewrites its identity.
-Source-grant sync and atomic Relay completion are separate pending contracts;
-matching visible grant data does not prove power-loss durability.
+Atomic Relay source completion does not establish source-grant sync durability.
+That Host-file contract remains pending; matching visible grant data does not
+prove power-loss durability.
 
 ## Recover from facts, not elapsed time
 

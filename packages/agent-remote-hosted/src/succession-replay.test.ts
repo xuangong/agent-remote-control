@@ -7,10 +7,10 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { afterEach, expect, test } from 'vitest';
 import { createHostedRelay } from './gateway.js';
-import type { HostBrokerOptions } from './broker.js';
+import { createHostBroker, type HostBrokerOptions } from './broker.js';
 import { deriveSuccessionCapacity } from './succession-capacity.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
-import { emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
+import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { RelaySocket } from './transport.js';
 const { WebSocket, WebSocketServer } = createRequire(new URL('../../agent-remote-relay/package.json', import.meta.url))('ws');
@@ -19,7 +19,7 @@ afterEach(async () => { for (const close of closers.splice(0).reverse()) await c
 const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
 const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
 const sequenceRef = (index: number) => ref(index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index);
-async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false, accounting = false) {
+async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false, accounting = false, directBroker = false) {
   const credential = 'arc_' + 'k'.repeat(43);
   let denied = false, unavailable = false;
   const authority = createServer(async (request, response) => {
@@ -50,14 +50,33 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
     providers: [{ providerId: 'fixture', displayName: 'Fixture' }] }], bindings: [], creations: [], associations: { version: 3, revision: 2, admissions: [], relationChanges: [], relationResets: [], freezes: [row(), row(3)] } } });
   initial.tenants[0]!.broker.keys = [[createHash('sha256').update(credential).digest('hex'), { expires: Date.now() + 600000, installationId: 'installation', kind: 'device' }]];
   configure?.(initial);
-  let relay: ReturnType<typeof createHostedRelay>;
+  let relay: Pick<ReturnType<typeof createHostedRelay>, 'fetch' | 'prepareUpgrade' | 'close'>;
   let failSave = false, failAfterSave = false, writes = 0;
   let select: HostBrokerOptions['successionProjectionAllowance'];
   let beforeCommit = async (_value: HostedRelayState) => {};
-  const start = (initial: unknown) => createHostedRelay({ ...auth, ...(accounting ? { successionEncodingCosts: {
+  let queuedControls = 0;
+  const encodingCosts = accounting ? {
     measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord,
-  } } : {}), successionEnrollment: true, successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage: { initial,
-    async commit(value) { await beforeCommit(value); writes++; if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } } });
+  } : undefined;
+  const start = (initial: unknown) => {
+    const storage = { initial, async commit(value: HostedRelayState) { await beforeCommit(value); writes++; if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } };
+    if (!directBroker) return createHostedRelay({ ...auth, successionEncodingCosts: encodingCosts, successionEnrollment: true, successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage });
+    // Isolated Broker consumer: explicit fixture principals, without Gateway proof-queue ordering.
+    const state = createRelayState(auth, storage, () => {}, () => {}, encodingCosts);
+    const broker = createHostBroker({ origin, ownerSubject: 'owner', durable: true, initialState: state.read().tenants[0]!.broker,
+      successionEnrollment: { version: 1, origin, issuer: auth.issuer, namespace: namespace('owner'), ownerSubject: 'owner' },
+      onStateChange: value => state.mutate(draft => { draft.tenants[0]!.broker = value; }) });
+    return { prepareUpgrade: broker.prepareUpgrade, async close() { broker.close(); await broker.settled(); await state.close(); }, async fetch(request: Request) {
+      const url = new URL(request.url); url.pathname = url.pathname.replace(/^\/u\/[^/]+/, '');
+      const subject = /=(owner|viewer)$/.exec(request.headers.get('cookie') ?? '')?.[1];
+      if (!subject) return new Response(null, { status: 401 });
+      if (url.pathname === '/fixture/revoke-share') {
+        const input = await request.json(); const revoking = broker.manageShares(subject, 'mapped-host', 'revoke-share', input.targetSubject); queuedControls++;
+        try { return Response.json(await revoking); } catch (error) { return new Response(String(error), { status: 403 }); }
+      }
+      return broker.handleRequest(new Request(url, request), { principalSubject: () => subject });
+    } };
+  };
   relay = start(initial); await writeFile(path, JSON.stringify(initial));
   const websockets = new WebSocketServer({ noServer: true });
   server.on('request', (incoming, outgoing) => { void (async () => {
@@ -82,6 +101,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
   closers.push(async () => { for (const ws of websockets.clients) ws.terminate(); await relay.close(); await new Promise<void>(resolve => server.close(() => resolve()));
     await new Promise<void>(resolve => authority.close(() => resolve())); await rm(root, { recursive: true, force: true }); });
   return { auth, namespace, row, request, channel, cookie, origin, credential,
+    queuedControls: () => queuedControls,
     select: (selector: NonNullable<HostBrokerOptions['successionProjectionAllowance']>) => { select = selector; },
     writes: () => writes,
     hold: (matches: (value: HostedRelayState) => boolean) => {
@@ -633,4 +653,382 @@ test('maps ordinary star capacity refusal without losing the admitted freeze or 
   expect((await f.request('v1/remote/hosts')).status).toBe(200);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
   expect(native.effects.prepare).toBe(1);
+}, 10000);
+
+function sourceState(state: HostedRelayState, shared = false) {
+  state.version = 9;
+  const broker = state.tenants[0]!.broker;
+  broker.associations = { version: 5, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] };
+  broker.bindings = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', agentId: 'source-agent', ...(shared ? { creatorSubject: 'viewer' } : {}) }];
+  if (shared) broker.sharing = { grants: [{ hostId: 'mapped-host', subject: 'viewer', label: 'Viewer', sessionLimit: 10, revoked: false }], reservations: [] };
+}
+const sourceRequest = { providerId: 'fixture', operationId: 'source-operation', sourceNativeSessionId: 'A', conversationKind: 'side', cwd: '/escaped/"\\\n' };
+async function sourceController(f: Awaited<ReturnType<typeof fixture>>, respond?: (message: any, input: any) => Promise<{ status?: number; body?: any }> | { status?: number; body?: any }) {
+  const effects = { create: 0, attach: 0, readback: 0 };
+  const witness = new Map<string, string>();
+  const nativeId = 'reader-"\\', agentId = 'agent-"\\\n';
+  async function connect() {
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?successionEnrollment=2', { headers: { authorization: 'Bearer ' + f.credential } });
+    const registered = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Source Controller registration deadline')), 3000);
+      socket.on('message', async (data: { toString(): string }) => {
+        const message = JSON.parse(data.toString());
+        if (message.type === 'registered') { clearTimeout(timer); resolve(); return; }
+        if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
+        if (message.type !== 'rpc_request') return;
+        const input = JSON.parse(message.body ?? '{}');
+        let body: any = {}, status = 200;
+        if (message.path === '/remote/create') { effects.create++; witness.set(input.operationId, nativeId); body = { agentId, nativeSessionId: nativeId }; }
+        if (message.path === '/remote/attach') { effects.attach++; body = { agentId: input.nativeSessionId === 'A' ? 'source-agent' : agentId, nativeSessionId: input.nativeSessionId }; }
+        if (message.path === '/remote/succession/enrollment' && input.action === 'source-result') {
+          effects.readback++; body = { operationId: input.operationId, source: ref(input.sourceNativeSessionId), reader: ref(witness.get(input.operationId) ?? nativeId) };
+        }
+        const overridden = await respond?.(message, input); status = overridden?.status ?? status; body = overridden?.body ?? body;
+        if (socket.readyState === 1) socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status, body: JSON.stringify(body) }));
+      });
+    });
+    await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
+    socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', providers: [{ providerId: 'fixture', displayName: 'Fixture' }] }));
+    await registered;
+  }
+  await connect(); return { effects, connect, nativeId, agentId };
+}
+for (const shared of [false, true]) test(`source completion publishes one complete durable tuple for ${shared ? 'shared Ask' : 'owner Side'}`, async () => {
+  const f = await fixture(state => sourceState(state, shared), false, true);
+  const host = await sourceController(f);
+  const subject = shared ? 'viewer' : 'owner';
+  const route = 'v1/remote/hosts/mapped-host/create';
+  const request = { ...sourceRequest, conversationKind: shared ? 'ask' : 'side' };
+  let terminal: HostedRelayState | undefined;
+  const held = f.hold(state => { const broker = state.tenants[0]!.broker; if (broker.bindings.length !== 2) return false; terminal = structuredClone(state); return true; });
+  let replied = false;
+  const pending = f.request(route, subject, request).then(response => { replied = true; return response; });
+  await held.entered;
+  const before = await f.saved(), broker = before.tenants[0]!.broker;
+  expect(broker.bindings).toHaveLength(1); expect(broker.creations).toHaveLength(0); expect(broker.associations!.admissions).toHaveLength(1);
+  expect(broker.associations!.revision).toBe(1); expect(replied).toBe(false);
+  const done = terminal!.tenants[0]!.broker;
+  expect(done.creations).toEqual([[JSON.stringify(['mapped-host', 'fixture', shared ? done.sharing!.reservations[0]!.nativeRequestId : request.operationId]), { fingerprint: JSON.stringify({ providerId: 'fixture', cwd: request.cwd, workspaceId: null, model: null, reasoningEffort: null, planning: null, conversationKind: request.conversationKind, sourceNativeSessionId: 'A' }), agentId: host.agentId }]]); expect(done.associations!.admissions).toHaveLength(0); expect(done.associations!.revision).toBe(2);
+  expect(done.bindings[1]).toMatchObject({ nativeSessionId: host.nativeId, agentId: host.agentId, sourceRelation: { kind: request.conversationKind, nativeSourceRef: ref('A') } });
+  if (shared) { expect(broker.sharing!.reservations[0]!.agentId).toBeUndefined(); expect(done.sharing!.reservations[0]!.agentId).toBe(host.agentId); }
+  const costs = { measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, f.auth).costs }; }, quoteRecord: quoteSqlRecord };
+  expect(deriveSuccessionCapacity(before, costs).tenants[0]!.bindingSlots).toBe(1);
+  expect(deriveSuccessionCapacity(terminal!, costs).tenants[0]!.bindingSlots).toBe(0);
+  expect(deriveSuccessionCapacity(terminal!, costs).remainingBytes).toBeLessThan(deriveSuccessionCapacity(before, costs).remainingBytes);
+  held.release(); expect((await pending).status).toBe(200);
+  const saved = await f.saved(), writes = f.writes();
+  expect((await f.request(route, subject, request)).status).toBe(200); expect(f.writes()).toBe(writes); expect(await f.saved()).toEqual(saved);
+  await f.restart(); await host.connect();
+  const reopened = await f.saved(); expect((await f.request(route, subject, request)).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker).toEqual(reopened.tenants[0]!.broker); expect(host.effects.create).toBe(1);
+}, 10000);
+
+for (const initialRevision of [10, Number.MAX_SAFE_INTEGER - 4]) test(`relation recovery consumes only the remaining terminal revision after a lost release reply from ${initialRevision}`, async () => {
+  const f = await fixture(state => {
+    state.version = 9;
+    const broker = state.tenants[0]!.broker; broker.associations!.freezes.splice(1); broker.associations!.revision = initialRevision;
+    broker.bindings = ['A', 'B', 'S'].map(nativeSessionId => ({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId, agentId: nativeSessionId,
+      ...(nativeSessionId === 'S' ? { sourceRelation: { id: 'side', kind: 'side' as const, sourceNativeSessionId: 'A', nativeSourceRef: ref('A'), createdAt: '2026-10-10T00:00:00.000Z' } } : {}) }));
+  }, false, true);
+  let receipt: any, lost = false;
+  await sourceController(f, (_message, input) => {
+    if (input.action === 'describe') return { body: { role: f.row().projection.role, lineage: [ref('A'), ref('B')], associationRevision: 7, relationUpdates: 1, sourceParticipants: [{ readerRef: ref('S') }] } };
+    if (input.action === 'relation_reserve') receipt = { reservation: input.reservation, phase: 'reserved', associationRevision: 7 };
+    if (input.action === 'relation_apply') receipt = { ...receipt, phase: 'applied', associationRevision: 8 };
+    if (input.action === 'relation_release') { receipt = { ...receipt, phase: 'released' }; if (!lost) { lost = true; return { status: 503, body: { error: 'Lost release response' } }; } }
+    return { body: { receipt: receipt ?? null } };
+  });
+  const request = { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'S', id: 'side', sourceNativeSessionId: 'A', linked: false, expectedRevision: 0, expectedRoleRevision: 2, operationId: 'relation-edit' };
+  expect((await f.request('v1/session-relations', 'owner', request, 'PATCH')).status).not.toBe(200);
+  const pending = (await f.saved()).tenants[0]!.broker.associations!;
+  expect(pending.relationChanges[0]!.phase).toBe('overlay_applied'); expect(pending.revision).toBe(initialRevision + 3);
+  expect((await f.request('v1/session-relations/reconcile', 'owner', { hostId: 'mapped-host', operationId: 'relation-edit' })).status).toBe(200);
+  const terminal = (await f.saved()).tenants[0]!.broker.associations!;
+  expect(terminal.revision).toBe(initialRevision + 4); expect(terminal.relationChanges[0]!.phase).toBe('committed'); expect(terminal.relationChanges[0]!.hostReceipt).toEqual(receipt);
+  const writes = f.writes(); expect((await f.request('v1/session-relations', 'owner', request, 'PATCH')).status).toBe(200);
+  expect(f.writes()).toBe(writes); expect((await f.saved()).tenants[0]!.broker.associations).toEqual(terminal);
+}, 10000);
+
+function seedSourceAdmission(state: HostedRelayState, request = sourceRequest) {
+  const body = { ...request, conversationId: request.operationId, creationSource: { providerId: request.providerId, nativeSessionId: request.sourceNativeSessionId } };
+  state.tenants[0]!.broker.associations!.admissions.push({
+    id: createHash('sha256').update(JSON.stringify(['mapped-host', request.providerId, request.operationId])).digest('hex'),
+    fingerprint: createHash('sha256').update(JSON.stringify([request.providerId, Object.entries(body).filter(([name]) => name !== 'creationSource').sort(([a], [b]) => a.localeCompare(b))])).digest('hex'), source: ref(request.sourceNativeSessionId),
+  });
+}
+for (const collection of ['bindings', 'creations'] as const) test(`durable source claims protect ${collection} from ordinary dispatch and exclude their own exact retry once`, async () => {
+  const f = await fixture(state => {
+    sourceState(state); const broker = state.tenants[0]!.broker;
+    seedSourceAdmission(state); seedSourceAdmission(state, { ...sourceRequest, operationId: 'other-pending' });
+    if (collection === 'bindings') for (let index = 1; index < 4094; index++) broker.bindings.push({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'saved-' + index, agentId: 'saved-' + index });
+    else for (let index = 0; index < 4094; index++) broker.creations.push(['saved-' + index, { fingerprint: 'saved', agentId: 'source-agent' }]);
+  }, false, true);
+  const host = await sourceController(f);
+  const ordinary = await f.request('v1/remote/hosts/mapped-host/create', 'owner', { providerId: 'fixture', operationId: 'ordinary' });
+  expect(ordinary.status).toBe(429); expect(host.effects.create).toBe(0);
+  if (collection === 'bindings') {
+    expect((await f.request('v1/remote/hosts/mapped-host/attach', 'owner', { providerId: 'fixture', nativeSessionId: 'unrelated' })).status).toBe(429); expect(host.effects.attach).toBe(0);
+    const before = (await f.saved()).tenants[0]!.broker.bindings;
+    expect((await f.request('v1/remote/hosts/mapped-host/attach', 'owner', { providerId: 'fixture', nativeSessionId: 'A' })).status).toBe(200);
+    expect((await f.saved()).tenants[0]!.broker.bindings).toEqual(before);
+  }
+  expect((await f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest)).status).toBe(200);
+  expect(host.effects.create).toBe(0); expect(host.effects.readback).toBe(1);
+  expect((await f.saved()).tenants[0]!.broker.associations!.admissions).toHaveLength(1);
+}, 15000);
+
+test('unknown source result retains its admission and exact retry reads back without another create', async () => {
+  const f = await fixture(state => sourceState(state, true), false, true);
+  const host = await sourceController(f, message => message.path === '/remote/create' ? { body: { agentId: 'x'.repeat(513), nativeSessionId: 'reader-"\\' } } : {});
+  const request = () => f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest);
+  expect((await request()).status).not.toBe(200);
+  const pending = (await f.saved()).tenants[0]!.broker;
+  expect(pending.associations!.admissions).toHaveLength(1); expect(pending.associations!.revision).toBe(1); expect(pending.sharing!.reservations[0]!.agentId).toBeUndefined();
+  await f.restart(); await host.connect();
+  const retried = await request(); expect({ status: retried.status, body: await retried.json() }).toEqual({ status: 200, body: { agentId: host.agentId, nativeSessionId: host.nativeId } }); expect(host.effects).toEqual({ create: 1, attach: 1, readback: 1 });
+  expect((await f.saved()).tenants[0]!.broker.associations!.revision).toBe(2);
+}, 10000);
+
+for (const rejected of [false, true]) test(`concurrent exact source retries share one ${rejected ? 'safe rejection' : 'native effect'} and one terminal mutation`, async () => {
+  const f = await fixture(state => sourceState(state, true), false, true);
+  let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; }); closers.push(async () => release());
+  const host = await sourceController(f, async message => {
+    if (message.path !== '/remote/create') return {};
+    await waiting; return rejected ? { status: 409, body: { code: 'succession_admission_closed', error: 'Authoritative pre-effect rejection' } } : {};
+  });
+  const request = () => f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest);
+  const first = request(); await until(() => host.effects.create === 1);
+  const writes = f.writes(); const second = request();
+  const conflict = await f.request('v1/remote/hosts/mapped-host/create', 'viewer', { ...sourceRequest, cwd: '/changed' }); expect(conflict.status).toBe(409);
+  expect(host.effects.create).toBe(1); expect(f.writes()).toBe(writes);
+  release(); const replies = await Promise.all([first, second]); expect(replies.map(row => row.status)).toEqual(rejected ? [409, 409] : [200, 200]);
+  const saved = (await f.saved()).tenants[0]!.broker;
+  expect(saved.associations!.revision).toBe(2); expect(saved.associations!.admissions).toHaveLength(0); expect(f.writes()).toBe(writes + 1);
+  expect(saved.creations).toHaveLength(rejected ? 0 : 1); expect(saved.sharing!.reservations).toHaveLength(rejected ? 0 : 1);
+}, 10000);
+
+test('in-flight source and ordinary claims cannot both spend the last binding slot', async () => {
+  const f = await fixture(state => {
+    sourceState(state); const broker = state.tenants[0]!.broker;
+    for (let index = 1; index < 4095; index++) broker.bindings.push({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'saved-' + index, agentId: 'saved-' + index });
+  }, false, true);
+  let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; }); closers.push(async () => release());
+  const host = await sourceController(f, async message => { if (message.path === '/remote/create') await waiting; return {}; });
+  const first = f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest); await until(() => host.effects.create === 1);
+  const second = f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest);
+  const ordinary = await f.request('v1/remote/hosts/mapped-host/create', 'owner', { providerId: 'fixture', operationId: 'ordinary' }); expect(ordinary.status).toBe(429);
+  expect(host.effects.create).toBe(1); release(); expect((await first).status).toBe(200); expect((await second).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.bindings).toHaveLength(4096);
+}, 15000);
+
+test('fresh source policy refusal writes no admission or quota and leaves ordinary requests available', async () => {
+  const f = await fixture(state => {
+    sourceState(state, true); const broker = state.tenants[0]!.broker;
+    const authority = { version: 1 as const, origin: state.config.origin, issuer: state.config.issuer, namespace: state.tenants[0]!.namespace, ownerSubject: 'owner' };
+    broker.associations!.freezes.push({ hostId: 'mapped-host', receipt: { version: 2, token: 'unrelated-freeze', maxProjectionBytes: 7_800_000, authority,
+      controllerId: 'installation', request: { operationId: 'unrelated-freeze', roleId: 'other-role', expectedRevision: 1, from: ref('unrelated') }, associationRevision: 0, lineage: [ref('unrelated')], relations: [] } });
+  }, false, true);
+  const host = await sourceController(f); await f.request('v1/remote/hosts', 'viewer'); const before = await f.saved(), writes = f.writes();
+  const refused = await f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest);
+  expect(refused.status).toBe(409); expect((await refused.json()).code).toBe('succession_projection_capacity_exceeded'); expect(host.effects.create).toBe(0);
+  expect(f.writes()).toBe(writes); expect(await f.saved()).toEqual(before);
+  expect((await f.request('v1/remote/hosts/mapped-host/create', 'owner', { providerId: 'fixture', operationId: 'ordinary' })).status).toBe(200);
+}, 10000);
+
+test('source projection cannot complete into a binding with contradictory Side metadata', async () => {
+  const f = await fixture(state => {
+    sourceState(state); state.tenants[0]!.broker.bindings.push({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'reader-"\\', agentId: 'agent-"\\\n',
+      sourceRelation: { id: 'different-operation', kind: 'side', sourceNativeSessionId: 'A', createdAt: '2026-10-10T00:00:00.000Z' } });
+  }, false, true);
+  const host = await sourceController(f); const response = await f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest);
+  expect(response.status).toBe(409); expect(host.effects.create).toBe(1);
+  const saved = (await f.saved()).tenants[0]!.broker; expect(saved.associations!.admissions).toHaveLength(1); expect(saved.creations).toHaveLength(0); expect(saved.bindings[1]!.sourceRelation!.id).toBe('different-operation');
+}, 10000);
+
+test('an existing admission blocked by a freeze is not a safe no-effect source rejection', async () => {
+  const f = await fixture(state => {
+    sourceState(state); seedSourceAdmission(state); const broker = state.tenants[0]!.broker;
+    broker.associations!.freezes.push({ hostId: 'mapped-host', receipt: { version: 2, token: 'freeze', maxProjectionBytes: 65536,
+      authority: { version: 1, ...state.config, namespace: state.tenants[0]!.namespace, ownerSubject: 'owner' }, controllerId: 'installation',
+      request: { operationId: 'freeze', roleId: 'role', expectedRevision: 1, from: ref('A') }, associationRevision: 0, lineage: [ref('A')], relations: [] } });
+  }, false, true);
+  const host = await sourceController(f); const before = (await f.saved()).tenants[0]!.broker.associations;
+  expect((await f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest)).status).toBe(409);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before); expect(host.effects.create).toBe(0);
+}, 10000);
+
+test('a conflicting attach cannot release the first operation claim while its Host response is held', async () => {
+  const f = await fixture(state => {
+    sourceState(state); const broker = state.tenants[0]!.broker;
+    for (let index = 1; index < 4095; index++) broker.bindings.push({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'saved-' + index, agentId: 'saved-' + index });
+  }, false, true);
+  let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; }); closers.push(async () => release());
+  const host = await sourceController(f, async (message, input) => { if (message.path === '/remote/attach' && input.nativeSessionId === 'first') await waiting; return {}; });
+  const route = 'v1/remote/hosts/mapped-host/attach';
+  const first = f.request(route, 'owner', { providerId: 'fixture', nativeSessionId: 'first' }); await until(() => host.effects.attach === 1);
+  expect((await f.request(route, 'owner', { providerId: 'fixture', nativeSessionId: 'first', takeOver: 'changed' })).status).toBe(409);
+  expect((await f.request(route, 'owner', { providerId: 'fixture', nativeSessionId: 'unrelated' })).status).toBe(429); expect(host.effects.attach).toBe(1);
+  release(); expect((await first).status).toBe(200);
+}, 15000);
+
+test('source recovery does not recreate a missing shared quota receipt', async () => {
+  const f = await fixture(state => sourceState(state, true), false, true);
+  const host = await sourceController(f, message => message.path === '/remote/create' ? { status: 503, body: { error: 'Unknown native outcome' } } : {});
+  const request = () => f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest);
+  expect((await request()).status).toBe(503);
+  await f.replaceSaved(state => { state.tenants[0]!.broker.sharing!.reservations = []; });
+  await f.restart(); await host.connect(); const before = (await f.saved()).tenants[0]!.broker;
+  expect((await request()).status).toBe(409); expect((await f.saved()).tenants[0]!.broker).toEqual(before); expect(host.effects.create).toBe(1); expect(host.effects.readback).toBe(0);
+}, 10000);
+
+test('changed shared request conflicts while its first admission is still unpublished', async () => {
+  const f = await fixture(state => sourceState(state, true), false, true); const host = await sourceController(f);
+  const hold = f.hold(state => state.tenants[0]!.broker.associations!.admissions.length === 1);
+  const first = f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest); await hold.entered;
+  const changed = f.request('v1/remote/hosts/mapped-host/create', 'viewer', { ...sourceRequest, cwd: '/changed' });
+  // Both requests have their own real HTTP connection while persistence holds the first response.
+  const response = await changed;
+  expect(response?.status).toBe(409); expect(host.effects.create).toBe(0);
+  hold.release(); expect((await first).status).toBe(200);
+}, 10000);
+
+test('a changed reserved Host receipt cannot authorize relation overlay effects', async () => {
+  const f = await fixture(state => {
+    state.version = 9; const broker = state.tenants[0]!.broker; broker.associations!.freezes.splice(1);
+    broker.bindings = ['A', 'S'].map(nativeSessionId => ({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId, agentId: nativeSessionId,
+      ...(nativeSessionId === 'S' ? { sourceRelation: { id: 'side', kind: 'side' as const, sourceNativeSessionId: 'A', nativeSourceRef: ref('A'), createdAt: '2026-10-10T00:00:00.000Z' } } : {}) }));
+  }, false, true);
+  let receipt: any, loseApply = true, invalid = false, applyCalls = 0;
+  await sourceController(f, (_message, input) => {
+    if (input.action === 'describe') return { body: { role: f.row().projection.role, lineage: [ref('A'), ref('B')], associationRevision: 7, relationUpdates: 1, sourceParticipants: [{ readerRef: ref('S') }] } };
+    if (input.action === 'relation_reserve') receipt = { reservation: input.reservation, phase: 'reserved', associationRevision: 7 };
+    if (input.action === 'relation_apply') { applyCalls++; if (loseApply) { loseApply = false; return { status: 503, body: { error: 'Unknown apply' } }; } }
+    return { body: { receipt: receipt ? { ...receipt, associationRevision: invalid ? 8 : 7 } : null } };
+  });
+  const request = { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'S', id: 'side', sourceNativeSessionId: 'A', linked: false, expectedRevision: 0, expectedRoleRevision: 2, operationId: 'relation-edit' };
+  expect((await f.request('v1/session-relations', 'owner', request, 'PATCH')).status).not.toBe(200); expect(applyCalls).toBe(1);
+  const before = (await f.saved()).tenants[0]!.broker.associations; invalid = true;
+  expect((await f.request('v1/session-relations/reconcile', 'owner', { hostId: 'mapped-host', operationId: 'relation-edit' })).status).not.toBe(200);
+  expect(applyCalls).toBe(1); expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before);
+}, 10000);
+
+for (const excess of [0, 1]) test(`fresh source consumer observes the actual-codec exact limit plus ${excess} byte`, async () => {
+  const f = await fixture(state => {
+    sourceState(state); state.tenants[0]!.broker.associations!.freezes.push({ hostId: 'mapped-host', receipt: { version: 2, token: 'other', maxProjectionBytes: 65536,
+      authority: { version: 1, ...state.config, namespace: state.tenants[0]!.namespace, ownerSubject: 'owner' }, controllerId: 'installation',
+      request: { operationId: 'other', roleId: 'other', expectedRevision: 1, from: ref('other') }, associationRevision: 0, lineage: [ref('other')], relations: [] } });
+  }, false, true);
+  const host = await sourceController(f); await f.request('v1/remote/hosts');
+  const costs = { measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, f.auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const proposed = await f.saved(); seedSourceAdmission(proposed); proposed.tenants[0]!.broker.associations!.revision++;
+  const receipt = proposed.tenants[0]!.broker.associations!.freezes[0]!.receipt;
+  if (receipt.version !== 2) throw new Error('Expected bounded fixture');
+  for (let iteration = 0; iteration < 4; iteration++) receipt.maxProjectionBytes += 8_388_608 + excess - deriveSuccessionCapacity(proposed, costs).featureCharge;
+  expect(deriveSuccessionCapacity(proposed, costs).featureCharge).toBe(8_388_608 + excess);
+  await f.replaceSaved(state => { state.tenants[0]!.broker.associations!.freezes[0]!.receipt = receipt; });
+  await f.restart(); await host.connect(); await f.request('v1/remote/hosts'); const writes = f.writes();
+  const response = await f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest);
+  expect(response.status).toBe(excess ? 409 : 200); expect(host.effects.create).toBe(excess ? 0 : 1);
+  if (excess) expect(f.writes()).toBe(writes);
+}, 10000);
+
+test('a saved creation with an unresolved admission explicitly defers partial-record reconciliation', async () => {
+  const f = await fixture(state => sourceState(state), false, true), host = await sourceController(f);
+  expect((await f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest)).status).toBe(200);
+  await f.replaceSaved(state => seedSourceAdmission(state)); await f.restart(); await host.connect();
+  const before = (await f.saved()).tenants[0]!.broker;
+  expect((await f.request('v1/remote/hosts/mapped-host/create', 'owner', sourceRequest)).status).toBe(409);
+  expect((await f.saved()).tenants[0]!.broker).toEqual(before); expect(host.effects.create).toBe(1);
+}, 10000);
+
+test('a replaced Host connection retains source evidence and exact recovery never repeats create', async () => {
+  const f = await fixture(state => sourceState(state, true), false, true);
+  let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; }); closers.push(async () => release());
+  const host = await sourceController(f, async message => { if (message.path === '/remote/create') await waiting; return {}; });
+  const request = () => f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest);
+  const first = request(); await until(() => host.effects.create === 1);
+  const before = (await f.saved()).tenants[0]!.broker;
+  await host.connect(); expect((await first).status).toBe(503); release();
+  const unresolved = (await f.saved()).tenants[0]!.broker;
+  expect(unresolved.associations).toEqual(before.associations); expect(unresolved.sharing).toEqual(before.sharing);
+  expect(unresolved.bindings).toEqual(before.bindings); expect(unresolved.creations).toEqual(before.creations);
+  expect((await request()).status).toBe(200); expect(host.effects).toEqual({ create: 1, attach: 1, readback: 1 });
+}, 10000);
+
+test('a missing source result is not safe rejection and preserves the exact reopened quota claim', async () => {
+  const f = await fixture(state => sourceState(state, true), false, true);
+  let missing = true;
+  const host = await sourceController(f, (message, input) => {
+    if (message.path === '/remote/create') return { status: 503, body: { error: 'Unknown native outcome' } };
+    if (input.action === 'source-result' && missing) return { status: 404, body: { code: 'source_result_not_found', error: 'No result witness is available' } };
+    return {};
+  });
+  const request = () => f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest);
+  expect((await request()).status).toBe(503); await f.restart(); await host.connect();
+  const before = (await f.saved()).tenants[0]!.broker;
+  expect((await request()).status).not.toBe(200);
+  expect((await f.saved()).tenants[0]!.broker).toEqual(before); expect(host.effects).toEqual({ create: 1, attach: 0, readback: 1 });
+  missing = false; expect((await request()).status).toBe(200); expect(host.effects).toEqual({ create: 1, attach: 1, readback: 2 });
+}, 10000);
+
+for (const concurrent of [false, true]) test(`exact owner attach confirms ${concurrent ? 'reconnected concurrent' : 'restored'} runtime state without a second dispatch`, async () => {
+  const f = await fixture(state => {
+    sourceState(state); const broker = state.tenants[0]!.broker;
+    Object.assign(broker.bindings[0]!, { creatorSubject: 'owner', sourceRelation: { id: 'retained-side', kind: 'side', sourceNativeSessionId: 'previous', nativeSourceRef: ref('previous'), createdAt: '2026-10-10T00:00:00.000Z' } });
+    broker.bindings.unshift({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'before', agentId: 'before-agent' });
+    broker.bindings.push({ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'after', agentId: 'after-agent' });
+  }, false, true);
+  let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; }); closers.push(async () => release());
+  let checking = !concurrent; const inputs: any[] = [];
+  const host = await sourceController(f, async (message, input) => {
+    if (message.path !== '/remote/attach' || !checking) return {};
+    inputs.push(input);
+    if (inputs.length > 1) return { status: 503, body: { error: 'Unexpected second attach' } };
+    await waiting; return {};
+  });
+  const request = () => f.request('v1/remote/hosts/mapped-host/attach', 'owner', { providerId: 'fixture', nativeSessionId: 'A', takeOver: 'fixture-owner' });
+  if (concurrent) { expect((await request()).status).toBe(200); await host.connect(); checking = true; }
+  await f.request('v1/remote/hosts'); const before = (await f.saved()).tenants[0]!.broker, writes = f.writes();
+  const first = request(); await until(() => inputs.length === 1);
+  const second = concurrent ? request() : undefined;
+  if (second) await new Promise(resolve => setTimeout(resolve, 20));
+  release(); expect((await first).status).toBe(200); if (second) expect((await second).status).toBe(200);
+  expect(inputs).toEqual([{ providerId: 'fixture', nativeSessionId: 'A', takeOver: 'fixture-owner' }]);
+  expect(f.writes()).toBe(writes); expect((await f.saved()).tenants[0]!.broker).toEqual(before);
+}, 10000);
+
+for (const source of [true, false]) test(`queued shared ${source ? 'source admission' : 'ordinary reservation'} revocation refuses native dispatch and retains consistent evidence`, async () => {
+  const f = await fixture(state => sourceState(state, true), false, true, true), host = await sourceController(f);
+  let admitted: HostedRelayState['tenants'][number]['broker'] | undefined;
+  const held = f.hold(state => {
+    const broker = state.tenants[0]!.broker;
+    if (!broker.sharing!.reservations.length) return false;
+    admitted = structuredClone(broker); return true;
+  });
+  const request = source ? sourceRequest : { providerId: 'fixture', operationId: 'ordinary-shared' };
+  const pending = f.request('v1/remote/hosts/mapped-host/create', 'viewer', request); await held.entered;
+  const revoking = f.request('fixture/revoke-share', 'owner', { targetSubject: 'viewer' }); await until(() => f.queuedControls() === 1);
+  held.release(); expect((await revoking).status).toBe(200); expect((await pending).status).toBe(403);
+  expect(host.effects).toEqual({ create: 0, attach: 0, readback: 0 });
+  const saved = (await f.saved()).tenants[0]!.broker;
+  expect(saved.bindings).toEqual(admitted!.bindings); expect(saved.creations).toEqual([]);
+  expect(saved.associations).toEqual(admitted!.associations); expect(saved.associations!.admissions).toHaveLength(source ? 1 : 0); expect(saved.associations!.revision).toBe(source ? 1 : 0);
+  expect(saved.sharing!.reservations).toEqual(admitted!.sharing!.reservations); expect(saved.sharing!.reservations[0]!.agentId).toBeUndefined(); expect(saved.sharing!.grants[0]!.revoked).toBe(true);
+  const writes = f.writes(); expect((await f.request('v1/remote/hosts/mapped-host/create', 'viewer', request)).status).toBe(403);
+  expect(f.writes()).toBe(writes); expect((await f.saved()).tenants[0]!.broker).toEqual(saved);
+}, 10000);
+
+test('shared source recovery rechecks access after readback before native attach', async () => {
+  const f = await fixture(state => sourceState(state, true), false, true, true);
+  let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; }); closers.push(async () => release());
+  const host = await sourceController(f, async (message, input) => {
+    if (message.path === '/remote/create') return { status: 503, body: { error: 'Unknown native outcome' } };
+    if (input.action === 'source-result') await waiting;
+    return {};
+  });
+  const request = () => f.request('v1/remote/hosts/mapped-host/create', 'viewer', sourceRequest);
+  expect((await request()).status).toBe(503); const retry = request(); await until(() => host.effects.readback === 1);
+  expect((await f.request('fixture/revoke-share', 'owner', { targetSubject: 'viewer' })).status).toBe(200);
+  const revoked = (await f.saved()).tenants[0]!.broker; release(); expect((await retry).status).toBe(403);
+  expect(host.effects).toEqual({ create: 1, attach: 0, readback: 1 }); expect((await f.saved()).tenants[0]!.broker).toEqual(revoked);
 }, 10000);

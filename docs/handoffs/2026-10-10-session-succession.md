@@ -3,6 +3,36 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Atomic source completion checkpoint (2026-10-11)
+
+Task 9C2 passed independent spec and quality review after one scoped fix round.
+The existing Broker/outer Relay mutation now saves the complete source binding,
+creation key/fingerprint/result, applicable shared quota completion, admission
+removal and terminal revision together. Exact unknown recovery uses the saved
+source-result and attach; it never repeats native creation. Relation replay
+spends only its remaining phase/revision, and ordinary requests cannot consume
+durable source claims or another in-flight operation's reserved capacity.
+
+The review fixes recheck current caller/source access immediately before each
+native effect, and confirm a successful attach's runtime generation even when
+its durable record is unchanged. The latter preserves the no-write behavior
+without sending a redundant recovery attach. The queued-revocation regression
+proves the exported Broker consumer boundary through a real HTTP/WebSocket
+fixture; it does not claim to reproduce Gateway's separate control-proof queue.
+
+Root freshly passed 117 Hosted and 47 Cloudflare tests plus both typechecks on
+the revised source. The five new regressions are included in those totals.
+The source/relation SQL tests cover transaction rollback, held sync and rejected
+sync/reopen through actual Node and isolated workerd consumers. Unknown sync
+durability is not described as rollback. The unchanged capacity-only tests retain
+their earlier 14-test verification; no native fixture was run in this slice.
+
+Next is Task 9C3: complete terminal/Favorites consumption, recovery invitation,
+registration/rotation and full-budget revocation. Then continue 9D Host grant
+barriers, 9E local Worker measurements and product integration. Default SQL
+effects, native suppliers and production capability remain disabled. No merge,
+push, deployment, installation or user-service change is authorized here.
+
 ## Relay accounting checkpoint (2026-10-11)
 
 Task9C1 passed independent source-spec and quality review with no blocking
@@ -33,9 +63,8 @@ checks. Review suggestion T9C1-M1 remains on the whole-branch list: independentl
 measure payload bytes in the all-record escaped-tuple quote test rather than
 derive them from the quote helper's framing. No incorrect current quote was found.
 
-Next is9C2: save source binding, full creation identity, applicable quota result,
-admission removal and terminal revision together, and enforce pre-effect claims.
-Then9C3 completes terminal/Favorites/recovery consumers, followed by9D/9E and
+The checkpoint above completes9C2's atomic source/relation consumers and
+pre-effect claims.9C3 completes terminal/Favorites/recovery consumers, followed by9D/9E and
 product integration. Default SQL effects, native suppliers and production
 capability remain disabled. The9C0 execution incident below remains unresolved
 as an independent cleanup claim; no native fixture was run for9C1.

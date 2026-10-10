@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { retainedHostIdentities } from './host-recovery.js';
 import { MAX_PAIRING_HISTORY } from './pairing-keys.js';
 import type { HostedRelayState } from './state.js';
+import type { BrokerAssociationState } from './succession-associations.js';
 
 /** Internal encoding boundary. This is neither physical storage quota nor effect permission. */
 export interface SuccessionRecordCost {
@@ -39,6 +40,11 @@ function sum(...values: number[]): number {
     total += value;
   }
   return total;
+}
+/** Remaining durable transitions, shared by final accounting and pre-effect consumers. */
+export function remainingAssociationRevisions(state: BrokerAssociationState): number {
+  return sum(state.freezes.filter(row => row.released === undefined).length, state.admissions.length,
+    ...state.relationChanges.map(row => ({ reserved: 3, metadata_committed: 2, overlay_applied: 1, committed: 0 })[row.phase]));
 }
 class SuccessionCapacityError extends Error {
   readonly code = 'succession_projection_capacity_exceeded';
@@ -155,10 +161,8 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
     }
     if (identities.size && broker.revokedHosts === undefined) brokerHeader(field('revokedHosts', 2));
     if (associations) {
-      const pending = associations.freezes.filter(row => row.released === undefined);
       slots.bindingSlots = slots.creationSlots = associations.admissions.length;
-      slots.remainingAssociationRevisions = sum(pending.length, associations.admissions.length,
-        ...associations.relationChanges.map(row => ({ reserved: 3, metadata_committed: 2, overlay_applied: 1, committed: 0 })[row.phase]));
+      slots.remainingAssociationRevisions = remainingAssociationRevisions(associations);
       if (associations.revision > MAX - slots.remainingAssociationRevisions) violations.push('Association revision headroom is exhausted.');
       if (broker.bindings.length + slots.bindingSlots > 4096 || broker.creations.length + slots.creationSlots > 4096) violations.push('Source completion slots are exhausted.');
       const roles = new Map<string, number>();

@@ -447,8 +447,14 @@ no production capability is enabled by these scripted fixtures.
   passed, with 147 fresh scoped tests, actual prior-reader validation and affected
   build/typechecks. The quote-test independence suggestion remains on the final
   review list. This slice does not enable effectful SQL succession.
-- [ ] Complete atomic source/relation consumers and pre-effect contention (9C2),
-  then terminal/Favorites/recovery consumption and fault acceptance (9C3).
+- [x] Complete atomic source/relation consumers and pre-effect contention (9C2).
+  Independent review approved the slice after fixing current-access revalidation
+  across queued work and runtime confirmation for no-write attach. Root freshly
+  passed 117 Hosted and 47 Cloudflare tests plus both typechecks on the final
+  source, including five new transport regressions. Default production gates
+  remain closed; the direct Broker revoke test does not claim the same Gateway
+  control-proof schedule.
+- [ ] Complete terminal/Favorites/recovery consumption and fault acceptance (9C3).
 - [ ] Review role/context durable-file write consistency and record the actual
   process-crash versus power-loss guarantees without unsupported claims.
 

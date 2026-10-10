@@ -340,3 +340,67 @@ test('configured accounting rolls back a late SQL fault before format and runtim
   f.db.exec('DROP TRIGGER fail_accounting');
   expect(reopen(f.storage).initial.version).toBe(9);
 }, 10000);
+
+for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`atomic source completion preserves the Broker and SQL boundary on ${failure}`, async () => {
+  const { sourceCompletionState, sourceCompletionBroker } = await import('./source-completion-fixture.js');
+  const f = fixture(true); const initial = sourceCompletionState(auth); await f.store.commit(initial);
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding);
+  let entered!: () => void, release!: () => void; const held = new Promise<void>(resolve => { entered = resolve; });
+  let unresolved: HostedRelayState | undefined, physicalBefore: string | undefined;
+  const peer = await sourceCompletionBroker(relay, auth, () => {
+    unresolved = structuredClone(relay.read()); physicalBefore = f.snapshot();
+    if (failure === 'rollback') f.db.exec("CREATE TRIGGER fail_source BEFORE DELETE ON relay_snapshot_manifests WHEN OLD.kind = 'admission' BEGIN SELECT RAISE(ABORT, 'source rollback'); END");
+    else f.storage.sync = async () => { entered(); if (failure === 'unknown-sync') throw new Error('unknown source sync'); await new Promise<void>(resolve => { release = resolve; }); };
+  });
+  try {
+    let replied = false; const pending = peer.create().then(response => { replied = true; return response; });
+    if (failure === 'hold') {
+      await held; expect(replied).toBe(false); expect(peer.broker.snapshot()).toEqual(unresolved!.tenants[0]!.broker); expect(relay.read()).toEqual(unresolved);
+      const local = reopen(f.storage).initial.tenants[0]!.broker;
+      expect(local.bindings).toHaveLength(2); expect(local.creations).toHaveLength(1); expect(local.sharing!.reservations[0]!.agentId).toBe('reader-agent'); expect(local.associations!.admissions).toHaveLength(0);
+      release(); expect((await pending)?.status).toBe(200);
+    } else {
+      expect((await pending)?.status).toBe(503); expect(peer.broker.snapshot()).toEqual(unresolved!.tenants[0]!.broker); expect(relay.read()).toEqual(unresolved);
+      const local = reopen(f.storage).initial.tenants[0]!.broker;
+      if (failure === 'rollback') { expect(f.snapshot()).toBe(physicalBefore); expect(local).toEqual(unresolved!.tenants[0]!.broker); f.db.exec('DROP TRIGGER fail_source'); }
+      else { expect(local.bindings).toHaveLength(2); expect(local.creations).toHaveLength(1); expect(local.associations!.admissions).toHaveLength(0); expect(local.sharing!.reservations[0]!.agentId).toBe('reader-agent'); }
+    }
+    expect(peer.counts().creates).toBe(1);
+    peer.broker.close(); await relay.close(); f.storage.sync = async () => {};
+    const restored = reopen(f.storage), restarted = createRelayState(auth, restored, () => {}, () => {}, encoding);
+    const recovered = await sourceCompletionBroker(restarted, auth);
+    try { expect((await recovered.create())?.status).toBe(200); expect(recovered.counts().creates).toBe(0); expect(recovered.counts().readbacks).toBe(failure === 'rollback' ? 1 : 0); }
+    finally { recovered.broker.close(); await restarted.close(); }
+  } finally { release?.(); peer.broker.close(); await relay.close(); }
+}, 10000);
+
+for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`exact relation completion keeps its last durable phase on ${failure}`, async () => {
+  const { relationCompletionState, sourceCompletionBroker } = await import('./source-completion-fixture.js');
+  const f = fixture(true), initial = relationCompletionState(auth); await f.store.commit(initial);
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding);
+  let enter!: () => void, release!: () => void; const held = new Promise<void>(resolve => { enter = resolve; });
+  let before: HostedRelayState | undefined, physicalBefore: string | undefined;
+  const peer = await sourceCompletionBroker(relay, auth, () => {
+    before = structuredClone(relay.read()); physicalBefore = f.snapshot();
+    if (failure === 'rollback') f.db.exec("CREATE TRIGGER fail_relation BEFORE UPDATE ON relay_snapshot_manifests WHEN NEW.kind = 'relationChange' BEGIN SELECT RAISE(ABORT, 'relation rollback'); END");
+    else f.storage.sync = async () => { enter(); if (failure === 'unknown-sync') throw new Error('unknown relation sync'); await new Promise<void>(resolve => { release = resolve; }); };
+  });
+  try {
+    let replied = false; const pending = peer.reconcile().then(() => { replied = true; return undefined; }, error => error);
+    if (failure === 'hold') {
+      await held; expect(replied).toBe(false); expect(peer.broker.snapshot()).toEqual(before!.tenants[0]!.broker); expect(relay.read()).toEqual(before);
+      expect(reopen(f.storage).initial.tenants[0]!.broker.associations!.relationChanges[0]!.phase).toBe('committed'); release(); expect(await pending).toBeUndefined();
+    } else {
+      expect(await pending).toBeInstanceOf(Error); expect(replied).toBe(false); expect(peer.broker.snapshot()).toEqual(before!.tenants[0]!.broker); expect(relay.read()).toEqual(before);
+      if (failure === 'rollback') { expect(f.snapshot()).toBe(physicalBefore); f.db.exec('DROP TRIGGER fail_relation'); }
+    }
+    const restored = reopen(f.storage).initial;
+    expect(restored.tenants[0]!.broker.associations!.relationChanges[0]!.phase).toBe(failure === 'rollback' ? 'overlay_applied' : 'committed');
+    peer.broker.close(); await relay.close(); f.storage.sync = async () => {};
+    const restarted = createRelayState(auth, reopen(f.storage), () => {}, () => {}, encoding), recovered = await sourceCompletionBroker(restarted, auth);
+    try { expect((await recovered.reconcile()).operation.phase).toBe('committed'); expect(recovered.broker.snapshot().associations!.revision).toBe(11); }
+    finally { recovered.broker.close(); await restarted.close(); }
+  } finally { release?.(); peer.broker.close(); await relay.close(); }
+}, 10000);

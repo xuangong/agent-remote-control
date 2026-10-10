@@ -38,7 +38,7 @@ export interface HandoffAdmissionState {
 export interface SessionWireAgent {
   handoffAdmissionState?(): HandoffAdmissionState;
   readonly agentId: string;
-  runOperation?<T>(work: () => Promise<T>, beforeDispatch?: () => void): Promise<T>;
+  runOperation?<T>(work: () => Promise<T>, beforeDispatch?: () => void, settingBeforeDispatch?: () => void): Promise<T>;
   validateOperation?(kind: SessionOperationKind): void;
   snapshot(): AgentSnapshot;
   timelineCursor?(): TimelineCursor;

@@ -86,9 +86,25 @@ the same predicate. Prepared TPM intents remain visible but are not yet native
 work. Read-only inspection, handoff cancel/reconcile, unrelated sessions and
 security revocation remain available during a reservation.
 
-This checkpoint covers wired session operations, complete stop-route target sets
-and enrolled association admission. Settings intent lifetime, remaining directory
-and association writes, and native ownership are subsequent implementation slices;
+Accepted settings reserve asynchronous work and a reusable future native-effect
+slot before acceptance. Every queued/deferred apply restores its original Host
+and Manager operation contexts and rechecks current admission/capability/value.
+The Host proxy owns the actual effect: void, deferred and definite SDK rejection
+settle that call; pending, generic errors and an unfinished promise retain it.
+UI confirmation, timeout, replacement or Manager close cannot prove settlement
+of an uncorrelated native write. Close cancels undispatched intent work only.
+
+Ordinary receipt expiration does not cancel a live accepted setting. Its original
+unpinned slot may continue after expiry without recreating the receipt or borrowing
+a same-key replacement. Released/active/closed reservations and newly enabled
+targets still fail closed. Live setting work remains part of Host admission.
+Wire authorization is checked before acceptance; a later page disconnect or
+control-lease replacement does not cancel accepted work. Share revocation prevents
+new requests and closes streams, without retroactively undoing accepted intents.
+
+This checkpoint covers wired session operations, complete stop-route target sets,
+enrolled association admission and setting intent/effect lifetime. Remaining
+directory and association writes, and native ownership are subsequent slices;
 the shared mechanism alone is not complete Host exclusion or provider readiness.
 
 ## Native evidence checkpoint

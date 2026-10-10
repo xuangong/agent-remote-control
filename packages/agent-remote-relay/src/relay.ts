@@ -129,6 +129,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         config: request.payload.config,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
+        settingIntent: this.operationLifecycle?.settingIntent,
         ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
       });
       await manager.ready;
@@ -214,6 +215,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         handle: request.payload.persistence,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
+        settingIntent: this.operationLifecycle?.settingIntent,
         ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
       });
       await manager.ready;

@@ -26,9 +26,23 @@ the reports, scoped fix review and source manifest; Root logs are
 `.tmp/root-task8b1-{build,tests,typecheck}.log` and
 `.tmp/root-task8b1-fix1-{tests,typecheck}.log`.
 
-Next is Task8B2A: retain each accepted setting intent and its native effects in
-the same operation entry, preserving both asynchronous contexts. Task8B2B then
-covers directory provenance, remaining association writes and native ownership.
+Task8B2A and its first fix round also passed independent spec/quality review.
+Accepted setting intents reserve their work and future native slot in the same
+operation entry. Each later apply restores both asynchronous contexts and
+revalidates current Host admission, Manager capability and value. UI confirmation,
+timeout, replacement and close cannot settle an uncorrelated pending native effect.
+Ordinary expired receipts still allow their accepted work to continue using its
+original slot; this never borrows a newer entry or opts all settings into pinning.
+Full wire authorization precedes acceptance; page lease changes do not cancel
+accepted settings. Host/Manager close cancels only undispatched intent work.
+
+Root freshly verified 153 tests before review and 60 affected tests after I1's
+fix, plus Relay build and both package typechecks. Source/report/patch hashes and
+the four-file fix diff were verified. Logs are
+`.tmp/root-task8b2a-{build,relay-tests,host-tests,runtime-tests,typecheck}.log`
+and `.tmp/root-task8b2a-fix1-*.log`; the plan workspace retains both reviews.
+
+Next is Task8B2B: directory provenance, remaining association writes and native ownership.
 Ordinary immediate takeover may still interrupt working; only succession requires
 idle admission. Native evidence integration, deployed SQL and product composition
 remain open. No whole-Host exclusion or production capability is claimed yet.
@@ -63,8 +77,8 @@ evidence and review live in the plan workspace. There was one create and one
 input, U appeared once, and reconciliation issued zero model requests.
 No callback-enabled production profile or complete readiness was certified.
 
-The common admission slice is now reviewed as recorded above. Continue with
-8B2A's settings, then 8B2B's directory/provenance and ownership wiring.
+The common admission and setting slices are now reviewed as recorded above.
+Continue with 8B2B's directory/provenance and ownership wiring.
 Native readiness/evidence integration,
 complete SQL persistence and client composition still block release. No merge,
 push, deployment, package publication, global install or user-service changes

@@ -376,8 +376,10 @@ independent review and Root's fresh verification. It proves raw native feasibili
 not callback-enabled provider readiness. Task8B1 common operation/reservation is
 reviewed and verified, including its four review fixes. Root ran 280 tests in
 15 files before review and 174 tests in eight files after the fixes; affected
-build/typechecks passed. Next: 8B2A setting intent/effect lifetime, then 8B2B
-directory/provenance/ownership wiring. The plan workspace contains their exact
+build/typechecks passed. Task8B2A setting intent/effect lifetime is also reviewed,
+including the ordinary receipt-expiry fix. Root freshly ran 153 tests before
+review and 60 affected tests after the fix; build/typechecks passed. Next: 8B2B
+directory/provenance/ownership wiring. The plan workspace contains its exact
 briefs. None enables production or claims complete Host admission.
 
 - [x] Add entry-bound synchronous admission, bounded opt-in mutation retention,
@@ -385,7 +387,7 @@ briefs. None enables production or claims complete Host admission.
   operation cache and succession boundary; preserve exact retry identity.
 - [x] Keep TPM accepted queued/unspecified intents unsettled in catalog/readiness,
   with prepared intents visible but nonblocking.
-- [ ] Retain setting intent/effect lifetime and restore each intent's Host and
+- [x] Retain setting intent/effect lifetime and restore each intent's Host and
   manager operation contexts; UI timeout is not native-effect settlement.
 - [ ] Complete directory/provenance, association and native-owner admission.
 

@@ -23,11 +23,18 @@ export interface NativeEffectHandle {
   /** The call ended without proving native queue/effect disposition. */
   unresolved(): void;
 }
+export interface NativeEffectReservation {
+  /** Promote the reserved slot only immediately before an actual native call. */
+  start(): NativeEffectHandle;
+  /** Release unused capacity without discarding a pending or unknown native call. */
+  release(): void;
+}
 export interface MutationEntry {
   readonly key: string;
   readonly targets: readonly string[];
   startNativeEffect(target: string): NativeEffectHandle;
   retainAsyncWork(target: string): () => void;
+  reserveNativeEffect(target: string): NativeEffectReservation;
 }
 export interface OperationWork<T> {
   readonly mutationTargets?: readonly string[];
@@ -75,8 +82,9 @@ interface MutationState {
   readonly targets: readonly string[];
   readonly metadataBytes: number;
   readonly reservation: number;
-  readonly handles: Set<{ target: string; kind: 'native' | 'async'; state: 'pending' | 'unknown'; pinned: boolean }>;
+  readonly handles: Set<{ target: string; kind: 'native' | 'async' | 'reserved'; state: 'pending' | 'unknown'; pinned: boolean }>;
   resultBytes: number;
+  receiptExpired?: true;
 }
 interface InFlightEntry extends EntryBase {
   readonly state: 'in_flight';
@@ -111,6 +119,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     const cutoff = validNow(now) - ttlMs;
     for (const [key, entry] of entries) {
       if (entry.state === 'in_flight' || pinned(entry) || entry.settledAt > cutoff) continue;
+      entry.mutation.receiptExpired = true;
       entries.delete(key);
       retainedBytes -= entry.bytes;
     }
@@ -250,7 +259,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     retainedBytes += bytes - entry.bytes; entry.bytes = bytes;
   }
   function mutationEntry(key: string, mutation: MutationState): MutationEntry {
-    function retain(target: string, kind: 'native' | 'async') {
+    function retain(target: string, kind: 'native' | 'async' | 'reserved') {
       const entry = entries.get(key);
       if (closing || !entry || entry.mutation !== mutation) throw new AgentOperationRejectedError('operation_cache_closed', 'Mutation evidence is no longer available.');
       if (!mutation.targets.includes(target)) throw new AgentOperationRejectedError('invalid_operation_target', 'Mutation target was not admitted.');
@@ -265,12 +274,43 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       }
       account(key);
       return {
+        handle,
         settled() { if (entries.get(key)?.mutation !== mutation) return; mutation.handles.delete(handle); account(key); },
         unresolved() { handle.state = 'unknown'; },
       };
     }
-    return { key, targets: mutation.targets, startNativeEffect: target => retain(target, 'native'),
-      retainAsyncWork(target) { const handle = retain(target, 'async'); return () => handle.settled(); } };
+    return { key, targets: mutation.targets,
+      startNativeEffect(target) { const handle = retain(target, 'native'); return { settled: handle.settled, unresolved: handle.unresolved }; },
+      retainAsyncWork(target) { const handle = retain(target, 'async'); return () => handle.settled(); },
+      reserveNativeEffect(target) {
+        const slot = retain(target, 'reserved');
+        let released = false;
+        let active: NativeEffectHandle | undefined;
+        return {
+          start() {
+            const retained = entries.get(key)?.mutation === mutation;
+            // Ordinary receipt expiry does not cancel accepted work or authorize new pinning.
+            const ordinaryExpired = mutation.receiptExpired && !slot.handle.pinned && !enabledTargets.has(target);
+            if (released || active || closing || (!retained && !ordinaryExpired)) {
+              throw new AgentOperationRejectedError('mutation_reservation_unavailable', 'The native effect reservation is unavailable.');
+            }
+            slot.handle.kind = 'native';
+            const effect: NativeEffectHandle = {
+              settled() {
+                if (active !== effect) return;
+                active = undefined;
+                if (released) slot.settled();
+                else { slot.handle.kind = 'reserved'; slot.handle.state = 'pending'; }
+              },
+              unresolved() { if (active === effect) slot.unresolved(); },
+            };
+            active = effect;
+            return effect;
+          },
+          release() { if (released) return; released = true; if (!active) slot.settled(); },
+        };
+      },
+    };
   }
 
   return {

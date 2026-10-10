@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { OperationCacheError, type OperationCache, type MutationEntry } from './operation-cache.js';
 import type { SessionWireAgent, SessionWireOperation, SessionWireOperationExecutor } from './session-wire.js';
+import type { SessionSettingIntentLifecycle } from './session-setting-changes.js';
 
 /** Trusted runtime facts and resource ownership; settlement rules remain in the shared cache. */
 export interface OperationLifecycle {
+  /** Establish intent ownership before acceptance, including calls without a wire operation. */
+  settingIntent?(agent: SessionWireAgent, accept: (lifecycle?: SessionSettingIntentLifecycle) => Promise<void>): Promise<void>;
   target?(agent: SessionWireAgent): string;
   admit?(agent: SessionWireAgent): void;
   mutationTargets?(agent: SessionWireAgent): readonly string[];
@@ -34,15 +37,18 @@ export function createOperationExecutor(
     const target = lifecycle.target?.(agent) ?? JSON.stringify([
       snapshot.providerId, snapshot.runtimeInfo.sessionId ? 'native' : 'ephemeral', snapshot.runtimeInfo.sessionId ?? ephemeralTarget,
     ]);
-    const beforeDispatch = () => {
-      try { lifecycle.beforeDispatch?.(agent, operation); work.beforeDispatch?.(); }
+    const checkAdmission = (check: () => void) => {
+      try { check(); }
       catch (error) {
         if (error instanceof AgentOperationRejectedError) throw error;
         const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'operation_rejected';
         throw new AgentOperationRejectedError(code, error instanceof Error ? error.message : 'Host admission rejected the operation.');
       }
     };
-    const dispatch = () => agent.runOperation ? agent.runOperation(work.dispatch, beforeDispatch)
+    const beforeDispatch = () => checkAdmission(() => { lifecycle.beforeDispatch?.(agent, operation); work.beforeDispatch?.(); });
+    // Accepted setting work outlives its connection lease, but not Host admission.
+    const settingBeforeDispatch = () => checkAdmission(() => lifecycle.beforeDispatch?.(agent, operation));
+    const dispatch = () => agent.runOperation ? agent.runOperation(work.dispatch, beforeDispatch, settingBeforeDispatch)
       : Promise.resolve().then(() => { beforeDispatch(); return work.dispatch(); });
     try {
       return await cache.execute({

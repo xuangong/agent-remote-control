@@ -2,12 +2,18 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { AgentOperationRejectedError, type AgentSession, type AgentInputAcceptance, type AgentInputPart, type AgentMessageOptions } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, type NativeSessionRef, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import type { SessionWireOperation, OperationCache, MutationEntry } from '@orchardworks/agent-remote-relay';
+import type { SessionWireOperation, OperationCache, MutationEntry, NativeEffectReservation, SessionSettingIntentLifecycle } from '@orchardworks/agent-remote-relay';
 import { SessionSuccessionContextStore, SessionSuccessionInputDispatcher } from './session-succession-context.js';
 
 const mutations = new Set(['sendMessage', 'sendMessageContent', 'steer', 'cancel', 'respondToInteraction', 'setPlanning', 'setSessionSetting', 'executeCommand']);
-interface AdmittedOperation { operationId: string; operation: SessionWireOperation; entry?: MutationEntry }
+interface AdmittedOperation {
+  operationId: string;
+  operation: SessionWireOperation;
+  entry?: MutationEntry;
+  settingEffect?: { target: string; reservation: NativeEffectReservation };
+}
 interface RoleDestination { roleId: string; roleRevision: number }
+type SettingMutationResult = Awaited<ReturnType<NonNullable<AgentSession['setSessionSetting']>>>;
 
 /** Host-owned native dispatch boundary shared by browser, HTTP and TPM operations. */
 export class SessionSuccessionBoundary {
@@ -105,6 +111,33 @@ export class SessionSuccessionBoundary {
       run: (entry, run) => this.run(operation, 'host:internal', run, entry), dispatch: work,
     });
   }
+  /** Capture one entry and target before an intent can publish or schedule work. */
+  settingIntent(target: NativeSessionRef, accept: (lifecycle?: SessionSettingIntentLifecycle) => Promise<void>): Promise<void> {
+    const address = structuredClone(target);
+    return this.nativeMutation(address, async () => {
+      const context = this.context.getStore();
+      if (!context?.entry) return accept();
+      const key = nativeSessionRefKey(address);
+      const releaseWork = context.entry.retainAsyncWork(key);
+      let reservation: NativeEffectReservation;
+      try { reservation = context.entry.reserveNativeEffect(key); }
+      catch (error) { releaseWork(); throw error; }
+      let ended = false;
+      const release = () => { if (ended) return; ended = true; releaseWork(); reservation.release(); };
+      const captured = { ...context, settingEffect: { target: key, reservation } };
+      try {
+        await accept({
+          run: work => this.context.run(captured, () => {
+            if (ended) throw new AgentOperationRejectedError('setting_intent_ended', 'The setting intent is no longer live.');
+            return work();
+          }),
+          // Runtime value readback confirms UI intent, not an uncorrelated native queue.
+          confirmed: release,
+          terminated: release,
+        });
+      } catch (error) { release(); throw error; }
+    });
+  }
   private async nativeEffect<T>(target: NativeSessionRef, input: boolean, work: () => Promise<T>): Promise<T> {
     this.validate(target);
     const effect = this.currentEntry()?.startNativeEffect(nativeSessionRefKey(target));
@@ -112,6 +145,20 @@ export class SessionSuccessionBoundary {
       const result = await work();
       const disposition = input ? (result as AgentInputAcceptance | undefined)?.disposition : undefined;
       if (!input || disposition === 'started' || disposition === 'handled') effect?.settled(); else effect?.unresolved();
+      return result;
+    } catch (error) {
+      if (error instanceof AgentOperationRejectedError) effect?.settled(); else effect?.unresolved();
+      throw error;
+    }
+  }
+  private async settingEffect(target: NativeSessionRef, work: () => Promise<SettingMutationResult>): Promise<SettingMutationResult> {
+    this.validate(target);
+    const key = nativeSessionRefKey(target), reserved = this.context.getStore()?.settingEffect;
+    if (reserved && reserved.target !== key) throw new AgentOperationRejectedError('invalid_operation_target', 'Setting target differs from its accepted intent.');
+    const effect = reserved ? reserved.reservation.start() : this.currentEntry()?.startNativeEffect(key);
+    try {
+      const result = await work();
+      if (result === undefined || result.status === 'deferred') effect?.settled(); else effect?.unresolved();
       return result;
     } catch (error) {
       if (error instanceof AgentOperationRejectedError) effect?.settled(); else effect?.unresolved();
@@ -144,6 +191,7 @@ export class SessionSuccessionBoundary {
             throw new AgentOperationRejectedError('succession_context_pending', 'Send a message to deliver the pending handoff context before executing commands.');
           }
           boundary.validate(address);
+          if (property === 'setSessionSetting') return boundary.settingEffect(address, () => native.setSessionSetting!(args[0] as string, args[1] as string));
           return await boundary.nativeEffect(address, property === 'steer', async () => Reflect.apply(value, native, args));
       });
     } });

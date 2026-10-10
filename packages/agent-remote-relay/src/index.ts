@@ -25,5 +25,6 @@ export * from './resources/input-image-store.js';
 
 export * from './operation-cache.js';
 export * from './operation-settlement.js';
+export type { SessionSettingIntentLifecycle } from './session-setting-changes.js';
 
 export * from './session-bindings.js';

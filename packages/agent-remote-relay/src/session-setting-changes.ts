@@ -6,6 +6,13 @@ const SETTING_DEADLINE_MS = 30_000;
 const READBACK_INTERVAL_MS = 1_000;
 const READBACK_DEADLINE_MS = 5_000;
 
+/** Intent ownership is independent of native effect interpretation. */
+export interface SessionSettingIntentLifecycle {
+  run<T>(work: () => Promise<T>): Promise<T>;
+  confirmed(): void;
+  terminated(): void;
+}
+
 interface Intent {
   change: AgentSessionSettingChange;
   phase: 'queued' | 'applying' | 'pending' | 'deferred' | 'settled';
@@ -13,6 +20,7 @@ interface Intent {
   observedDifferentValue?: boolean;
   applied?: boolean;
   timer: ReturnType<typeof setTimeout>;
+  lifecycle?: SessionSettingIntentLifecycle;
 }
 
 /** Owns accepted intents, never native option interpretation or native state. */
@@ -34,10 +42,11 @@ export class SessionSettingChanges {
     clock: () => Date;
   }) { this.runtime = options.runtime; }
 
-  accept(setting: AgentSessionSetting, targetValue: string): void {
+  accept(setting: AgentSessionSetting, targetValue: string, lifecycle?: SessionSettingIntentLifecycle): void {
+    if (this.closed) throw new Error('Setting intents are closed.');
     const settingId = setting.id;
     const previous = this.intents.get(settingId);
-    if (previous) clearTimeout(previous.timer);
+    if (previous) { clearTimeout(previous.timer); previous.lifecycle?.terminated(); }
     const requestedAt = this.options.clock();
     const change: AgentSessionSettingChange = {
       settingId, category: setting.category, label: setting.label, requestId: randomUUID(), targetValue,
@@ -45,10 +54,11 @@ export class SessionSettingChanges {
       status: 'pending', requestedAt: requestedAt.toISOString(),
       deadlineAt: new Date(requestedAt.getTime() + SETTING_DEADLINE_MS).toISOString(),
     };
-    const intent: Intent = { change, phase: 'queued', timer: setTimeout(() => this.expire(intent), SETTING_DEADLINE_MS) };
+    const intent: Intent = { change, lifecycle, phase: 'queued', timer: setTimeout(() => this.expire(intent), SETTING_DEADLINE_MS) };
     intent.timer.unref?.();
     this.intents.set(settingId, intent);
-    this.publish();
+    try { this.publish(); }
+    catch (error) { clearTimeout(intent.timer); this.intents.delete(settingId); lifecycle?.terminated(); throw error; }
     void this.drain();
     this.scheduleReadback();
   }
@@ -82,6 +92,7 @@ export class SessionSettingChanges {
       || this.runtime.settings?.find(setting => setting.id === intent.change.settingId)?.value !== intent.change.targetValue) return false;
     clearTimeout(intent.timer);
     this.intents.delete(intent.change.settingId);
+    intent.lifecycle?.confirmed();
     return true;
   }
 
@@ -89,7 +100,7 @@ export class SessionSettingChanges {
     this.closed = true;
     if (this.poll) clearTimeout(this.poll);
     this.cancelReadback?.();
-    for (const intent of this.intents.values()) clearTimeout(intent.timer);
+    for (const intent of this.intents.values()) { clearTimeout(intent.timer); intent.lifecycle?.terminated(); }
   }
 
   private current(intent: Intent): boolean { return !this.closed && this.intents.get(intent.change.settingId) === intent; }
@@ -110,7 +121,8 @@ export class SessionSettingChanges {
     const fingerprint = JSON.stringify(this.runtime);
     const nativeRevision = this.nativeRevision;
     try {
-      const result = await this.options.apply(intent.change.settingId, intent.change.targetValue);
+      const apply = () => this.options.apply(intent.change.settingId, intent.change.targetValue);
+      const result = await (intent.lifecycle ? intent.lifecycle.run(apply) : apply());
       if (this.current(intent) && intent.change.status === 'pending') {
         intent.phase = result?.status === 'deferred' ? 'deferred' : 'pending';
         intent.applied = result === undefined;
@@ -122,6 +134,7 @@ export class SessionSettingChanges {
       if (this.confirm(intent)) this.publish();
       if (!this.closed) void this.readback();
     } catch (error) {
+      intent.lifecycle?.terminated();
       if (this.current(intent) && intent.change.status === 'pending') {
         clearTimeout(intent.timer);
         intent.phase = 'settled';
@@ -142,6 +155,7 @@ export class SessionSettingChanges {
     intent.change.status = 'timed_out';
     intent.phase = 'settled';
     intent.change.message = 'The setting change timed out. Showing the last confirmed value.';
+    intent.lifecycle?.terminated();
     this.publish();
     void this.readback();
   }

@@ -36,7 +36,8 @@ import { ResourceIngestor } from './resources/resource-ingestor.js';
 import { InMemoryResourceStore, type ResourceStore } from './resources/resource-store.js';
 import { projectTimelinePage, type TimelinePageRequest } from './timeline-projector.js';
 import { TimelineStore } from './timeline-store.js';
-import { SessionSettingChanges } from './session-setting-changes.js';
+import { SessionSettingChanges, type SessionSettingIntentLifecycle } from './session-setting-changes.js';
+import type { OperationLifecycle } from './operation-settlement.js';
 
 export interface AgentManagerAttachOptions {
   agentId: string;
@@ -46,6 +47,7 @@ export interface AgentManagerAttachOptions {
   clock?: () => Date;
   resourceStore?: ResourceStore;
   inputImageStore?: InputImageStore;
+  settingIntent?: OperationLifecycle['settingIntent'];
 }
 
 export interface AgentManagerCreateOptions {
@@ -56,6 +58,7 @@ export interface AgentManagerCreateOptions {
   clock?: () => Date;
   resourceStore?: ResourceStore;
   inputImageStore?: InputImageStore;
+  settingIntent?: OperationLifecycle['settingIntent'];
 }
 
 export interface AgentManagerResumeOptions {
@@ -66,6 +69,7 @@ export interface AgentManagerResumeOptions {
   clock?: () => Date;
   resourceStore?: ResourceStore;
   inputImageStore?: InputImageStore;
+  settingIntent?: OperationLifecycle['settingIntent'];
 }
 
 export type AgentManagerListener = (event: AgentManagerEvent) => void;
@@ -132,6 +136,7 @@ export class AgentManager {
     private readonly clock: () => Date,
     private readonly resourceIngestor: ResourceIngestor,
     private readonly inputImageStore?: InputImageStore,
+    private readonly settingIntent?: OperationLifecycle['settingIntent'],
   ) {
     this.timeline = new TimelineStore(epoch);
     this.localResourceReader = runtimeInfo.cwd
@@ -162,8 +167,12 @@ export class AgentManager {
     this.settingChanges = new SessionSettingChanges({
       runtime: runtimeInfo, clock,
       apply: async (id, value) => {
+        if (this.session.capabilities.sessionSettings !== true || !this.session.setSessionSetting) {
+          throw new UnsupportedAgentCapabilityError('set_session_setting');
+        }
         this.validateOperation('set_session_setting');
         validateSessionSetting(this.state.payload.runtimeInfo.settings, id, value);
+        this.operationContext.getStore()?.beforeDispatch?.();
         return this.session.setSessionSetting!(id, value);
       },
       refresh: () => this.refreshRuntimeInfo(true),
@@ -192,6 +201,7 @@ export class AgentManager {
       options.clock ?? (() => new Date()),
       new ResourceIngestor({ store: options.resourceStore ?? new InMemoryResourceStore() }),
       options.inputImageStore,
+      options.settingIntent,
     );
   }
 
@@ -224,6 +234,7 @@ export class AgentManager {
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.resourceStore === undefined ? {} : { resourceStore: options.resourceStore }),
         ...(options.inputImageStore === undefined ? {} : { inputImageStore: options.inputImageStore }),
+        ...(options.settingIntent === undefined ? {} : { settingIntent: options.settingIntent }),
       });
       await manager.ready;
       return manager;
@@ -320,11 +331,11 @@ export class AgentManager {
     return true;
   }
 
-  private readonly operationContext = new AsyncLocalStorage<{ beforeDispatch?: () => void }>();
+  private readonly operationContext = new AsyncLocalStorage<{ beforeDispatch?: () => void; settingBeforeDispatch?: () => void }>();
 
   /** Keep admission attached to the operation across queues and asynchronous preparation. */
-  runOperation<T>(work: () => Promise<T>, beforeDispatch?: () => void): Promise<T> {
-    return this.operationContext.run({ beforeDispatch }, work);
+  runOperation<T>(work: () => Promise<T>, beforeDispatch?: () => void, settingBeforeDispatch?: () => void): Promise<T> {
+    return this.operationContext.run({ beforeDispatch, settingBeforeDispatch }, work);
   }
 
   private async prepareOperation<T>(prepare: (dispatch: <R>(work: () => Promise<R>) => Promise<R>) => Promise<T>): Promise<T> {
@@ -430,15 +441,23 @@ export class AgentManager {
   }
 
   async setSessionSetting(id: string, value: string): Promise<void> {
-    return this.prepareOperation(async dispatch => {
+    const context = this.operationContext.getStore();
+    const continuation = { ...context, beforeDispatch: context?.settingBeforeDispatch ?? context?.beforeDispatch };
+    const accept = (lifecycle?: SessionSettingIntentLifecycle) => this.prepareOperation(async dispatch => {
       if (this.session.capabilities.sessionSettings !== true || !this.session.setSessionSetting) {
         throw new UnsupportedAgentCapabilityError('set_session_setting');
       }
       this.validateOperation('set_session_setting');
       const setting = validateSessionSetting(this.state.payload.runtimeInfo.settings, id, value);
+      const intent: SessionSettingIntentLifecycle = {
+        run: work => this.operationContext.run(continuation, () => lifecycle ? lifecycle.run(work) : work()),
+        confirmed: () => lifecycle?.confirmed(),
+        terminated: () => lifecycle?.terminated(),
+      };
       // The receipt acknowledges the accepted intent; the snapshot carries its eventual outcome.
-      await dispatch(async () => this.settingChanges.accept(setting, value));
+      await dispatch(async () => this.settingChanges.accept(setting, value, intent));
     });
+    return this.settingIntent ? this.settingIntent(this, accept) : accept();
   }
 
   async listCommands(): Promise<AgentCommand[]> {

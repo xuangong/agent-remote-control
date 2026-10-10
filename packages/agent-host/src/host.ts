@@ -327,6 +327,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }, operationCache, assertHandoffState) : undefined;
   succession?.coordinator.setAdmission(successionBoundary!);
   const relay = createAgentRemoteRelay({ providers: relayAdapters, operationCache, operationLifecycle: {
+    settingIntent: (agent, accept) => successionBoundary ? successionBoundary.settingIntent(nativeRef(bindingFor(agent)), accept) : accept(),
     target: agent => { const binding = bindingFor(agent); return JSON.stringify([binding.providerId, binding.nativeSessionId]); },
     admit: () => { if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.'); },
     beforeDispatch: agent => { if (succession) succession.coordinator.assertAdmission(nativeRef(bindingFor(agent))); },

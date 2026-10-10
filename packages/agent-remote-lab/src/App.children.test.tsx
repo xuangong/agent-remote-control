@@ -547,3 +547,50 @@ it.each([false, true])('keeps the main session title when a child letter uses it
   expect(f.container.querySelector(desktop ? '.lab-side-title-text' : '.lab-mobile-session-title')?.textContent).toBe('Main project conversation');
   expect(destination.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
 });
+
+
+it.each([false, true])('toggles the current session Ask entry from View without creating a session (desktop=%s)', async desktop => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const f = await setup(false, { live: true, desktop });
+  const view = f.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!;
+  await act(async () => view.click());
+  const control = () => Array.from(f.container.querySelectorAll('label')).find(label => label.textContent === 'Ask view')?.querySelector<HTMLInputElement>('input');
+  expect(control()).toBeDefined();
+  expect(control()!.checked).toBe(false);
+  expect(f.container.querySelector('[aria-label="Ask about this session"]')).toBeNull();
+  const before = f.connections();
+  await act(async () => control()!.click());
+  expect(control()!.checked).toBe(true);
+  expect(f.container.querySelector('[aria-label="Ask about this session"]')).not.toBeNull();
+  expect(f.container.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
+  expect(f.attachments).toEqual([]);
+  expect(f.connections()).toBe(before);
+  await act(async () => control()!.click());
+  expect(control()!.checked).toBe(false);
+  expect(f.container.querySelector('[aria-label="Ask about this session"]')).toBeNull();
+  expect(f.attachments).toEqual([]);
+});
+
+
+it('keeps the View Ask toggle scoped to the selected session and restores its preference', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const f = await setup(false, { live: true, desktop: true });
+  const toggleView = () => act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+  const control = () => f.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!;
+  await toggleView();
+  await act(async () => control().click());
+  await toggleView();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-child-session-id="native-child"]')!.click());
+  await toggleView();
+  expect(control().checked).toBe(false);
+  expect(f.container.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
+  expect(f.container.querySelector('.lab-side-conversation [aria-label="Ask about this session"]')).toBeNull();
+  await act(async () => control().click());
+  expect(f.container.querySelector('.lab-side-conversation [aria-label="Ask about this session"]')).not.toBeNull();
+  await act(async () => control().click());
+  expect(f.container.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
+  await unmount(f.container);
+  const restored = await setup(false, { live: true, desktop: true });
+  await act(async () => restored.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+  expect(restored.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!.checked).toBe(true);
+});

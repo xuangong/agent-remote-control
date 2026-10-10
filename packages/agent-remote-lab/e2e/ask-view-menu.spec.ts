@@ -1,0 +1,34 @@
+import { expect, test } from '@playwright/test';
+import { showNewSession } from './session-navigation';
+
+test('View controls Ask visibility and reflects the session command', async ({ page, isMobile }, testInfo) => {
+  if (!isMobile) await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto('/');
+  if (isMobile) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
+  const view = page.getByRole('button', { name: 'View options', exact: true });
+  const toggle = page.getByRole('checkbox', { name: 'Ask view', exact: true });
+  await view.click();
+  await expect(toggle).toBeDisabled();
+  await view.click();
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const owner = page.locator('.lab-primary-conversation');
+  const input = owner.getByTestId('prompt-input');
+  await expect(input).toBeEnabled();
+  await view.click();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await expect(owner.getByRole('button', { name: 'Ask about this session', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('ask-view-menu.png') });
+  await view.click();
+  await input.fill('/ask');
+  await input.press('Enter');
+  await expect(owner.getByRole('button', { name: 'Ask about this session', exact: true })).toHaveCount(0);
+  await view.click();
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await toggle.uncheck();
+  await expect(owner.getByRole('button', { name: 'Ask about this session', exact: true })).toHaveCount(0);
+});

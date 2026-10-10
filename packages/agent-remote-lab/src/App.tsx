@@ -1560,7 +1560,12 @@ function AppContent({
         {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : null}
     </nav> : null}
-    <ViewOptions attentionControls={<>{userScoped ? attention.controls : null}{tpmView.controls}</>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sessionViewTarget}
+    <ViewOptions attentionControls={<>
+      <label title="Enable Ask for the selected session"><span>Ask view</span><input data-view-control="ask" type="checkbox"
+        checked={addressSession ? ask.isEnabled(addressSession) : false} disabled={!addressSession}
+        onChange={() => { if (addressSession) ask.toggle(addressSession); }} /></label>
+      {userScoped ? attention.controls : null}{tpmView.controls}
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
